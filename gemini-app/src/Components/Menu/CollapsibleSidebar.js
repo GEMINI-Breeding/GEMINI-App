@@ -3,7 +3,7 @@ import { IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListIte
 import MenuIcon from '@mui/icons-material/Menu';
 import DataSelectionMenu from './DataSelectionMenu';
 
-export default function CollapsibleSidebar({ onTilePathChange }) {
+export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange }) {
   const [open, setOpen] = useState(false);
   const drawerWidth = 350;
 
@@ -53,19 +53,25 @@ export default function CollapsibleSidebar({ onTilePathChange }) {
           }
         }}
       >
-        <div>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <IconButton 
             onClick={handleDrawerToggle}
           >
             <MenuIcon fontSize='large'/>
           </IconButton>
-        </div>
+          {open && (
+            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+              <img src="gemini-logo.png" alt="Logo" style={{ width: '200px', height: 'auto' }} />  
+            </Box>
+          )}
+        </Box>
         <Divider />
         <List>
           <ListItem>
             <ListItemText sx={{ px: 2, py: 1 }}>
             <DataSelectionMenu 
               onTilePathChange={onTilePathChange} 
+              onGeoJsonPathChange={onGeoJsonPathChange}
             />
             </ListItemText>
           </ListItem>

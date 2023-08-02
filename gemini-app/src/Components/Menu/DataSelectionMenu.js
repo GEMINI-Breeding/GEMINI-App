@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
-const DataSelectionMenu = ({ onTilePathChange }) => {
+const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange }) => {
   const [locationOptions, setLocationOptions] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [populationOptions, setPopulationOptions] = useState([]);
@@ -57,7 +57,7 @@ const DataSelectionMenu = ({ onTilePathChange }) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();
         })
-        .then(data => setSensorOptions(data))
+        .then(data => setSensorOptions(data.filter((item) => item !== 'Results')))
         .catch((error) => console.error('Error:', error));
     }
   }, [selectedLocation, selectedPopulation, selectedDate]);
@@ -65,9 +65,10 @@ const DataSelectionMenu = ({ onTilePathChange }) => {
   useEffect(() => {
     if (selectedSensor) {
       const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/${selectedSensor}/${selectedDate}-P4-RGB-Pyramid.tif`;
+      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WebMerc.geojson`;
       onTilePathChange(newTilePath);
+      onGeoJsonPathChange(newGeoJsonPath)
     }
-    console.log('executed!')
   }, [ selectedSensor ]);
 
   return (
