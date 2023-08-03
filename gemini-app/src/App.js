@@ -1,6 +1,6 @@
 // App.js
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DeckGL from '@deck.gl/react';
 import { Map as MapGL } from 'react-map-gl';
 import { BitmapLayer, GeoJsonLayer } from '@deck.gl/layers';
@@ -9,9 +9,10 @@ import { FlyToInterpolator } from '@deck.gl/core';
 import { scaleLinear } from 'd3-scale';
 
 import CollapsibleSidebar from './Components/Menu/CollapsibleSidebar';
-import TraitsColorMap from './Components/Map/ColorMap';
+import useTraitsColorMap from './Components/Map/ColorMap';
 import GeoJsonTooltip from './Components/Map/ToolTip';
 import useExtentFromBounds from './Components/Map/MapHooks';
+import ColorMapLegend from './Components/Map/ColorMapLegend';
 
 // Initial tile server URL and path
 const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
@@ -30,15 +31,21 @@ function App() {
   const [selectedTilePath, setSelectedTilePath] = useState('');
   const [selectedTraitsGeoJsonPath, setSelectedTraitsGeoJsonPath] = useState('');
   const [hoverInfo, setHoverInfo] = useState(null);
+  const [selectedMetric, setSelectedMetric] = useState(null);
+  const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
 
-  const colorScale = TraitsColorMap({ traitsGeoJsonPath: selectedTraitsGeoJsonPath });
+  const selectedMetricRef = useRef(selectedMetric);
+
+  const { colorScale, lowerPercentileValue, upperPercentileValue } = useTraitsColorMap(selectedTraitsGeoJsonPath, selectedMetric, setIsLoadingColorScale);
+
+  useEffect(() => {
+    selectedMetricRef.current = selectedMetric;
+  }, [selectedMetric]);
 
   const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
   const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
   const extentBounds = useExtentFromBounds(boundsUrl);
-  console.log('extentBounds', extentBounds)
   
-
   useEffect(() => {
     if (extentBounds) {
       const [minLon, minLat, maxLon, maxLat] = extentBounds;
@@ -57,7 +64,7 @@ function App() {
       let zoomLng = Math.floor(Math.log(viewportWidth * 360 / mapLngDelta) / Math.log(2));
       let zoomLat = Math.floor(Math.log(viewportHeight * 360 / mapLatDelta) / Math.log(2));
   
-      const zoom = Math.min(zoomLng, zoomLat) - 9;
+      const zoom = Math.min(zoomLng, zoomLat) - 9.5;
       console.log('zoom', zoom)
   
       setViewState(prevViewState => ({
@@ -92,15 +99,24 @@ function App() {
   });
 
 
-  const traitsGeoJsonLayer = new GeoJsonLayer({
-    id: 'traits-geojson-layer',
+  const traitsGeoJsonLayer = React.useMemo(() => new GeoJsonLayer({
+    id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
     data: selectedTraitsGeoJsonPath,
     filled: true,
-    getFillColor: d => colorScale ? colorScale(d.properties.Height_95p_meters) : [160, 160, 180, 200],
+    getFillColor: d => {
+      if (colorScale) {
+        const value = d.properties[selectedMetricRef.current];
+        const color = colorScale(value);
+        return color;
+      } else {
+        return [160, 160, 180, 200];
+      }
+    },
     stroked: false,
     pickable: true,
     onHover: info => setHoverInfo(info),
-  });  
+  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
+  
 
   return (
     <div className="App">
@@ -121,12 +137,26 @@ function App() {
 
       </DeckGL>
 
-      <GeoJsonTooltip hoverInfo={hoverInfo} />
+      <GeoJsonTooltip 
+        hoverInfo={hoverInfo} 
+        selectedMetric={selectedMetric}
+      />
 
       <CollapsibleSidebar 
         onTilePathChange={setSelectedTilePath} 
         onGeoJsonPathChange={setSelectedTraitsGeoJsonPath}
+        selectedMetric={selectedMetric}
+        setSelectedMetric={setSelectedMetric}
       />
+
+      {colorScale && 
+        <ColorMapLegend 
+          colorScale={colorScale}
+          lowerPercentileValue={lowerPercentileValue}
+          upperPercentileValue={upperPercentileValue}
+          selectedMetric={selectedMetric}
+        />
+      }
 
     </div>
   );

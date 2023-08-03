@@ -3,7 +3,7 @@ import { IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListIte
 import MenuIcon from '@mui/icons-material/Menu';
 import DataSelectionMenu from './DataSelectionMenu';
 
-export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange }) {
+export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) {
   const [open, setOpen] = useState(false);
   const drawerWidth = 350;
 
@@ -72,6 +72,8 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
             <DataSelectionMenu 
               onTilePathChange={onTilePathChange} 
               onGeoJsonPathChange={onGeoJsonPathChange}
+              selectedMetric={selectedMetric}
+              setSelectedMetric={setSelectedMetric}
             />
             </ListItemText>
           </ListItem>

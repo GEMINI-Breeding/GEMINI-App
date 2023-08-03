@@ -1,0 +1,92 @@
+.outer-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+  }
+  
+  .colormap-container {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%; /* Adjust to smaller than 100% to prevent overflow on small screens */
+    max-width: 300px;
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 7px;
+    z-index: 1000;
+    margin-bottom: 10px;
+    padding: 5px; /* Add padding to prevent direct touching of the elements to the container edges */
+    box-sizing: border-box; /* Include padding and border in element's total width and height */
+  }
+  
+  .colormap-legend {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .colormap-title {
+    font-size: 16px;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 8px;
+    margin-top: 2px;
+  }
+  
+  .colormap-gradient-container {
+    height: 20px;
+    width: 90%;
+    background-color: white;
+    border-radius: 3px;
+    position: relative; /* Set position relative to correctly position the labels inside this container */
+  }
+  
+  .colormap-gradient {
+    width: 100%;
+    height: 100%;
+    border-radius: 3px;
+    z-index: 1001;
+  }
+  
+  .colormap-labels {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 5%; /* Optional: Add some padding to the sides if needed */
+  }
+  
+  .colormap-label {
+    font-size: 14px;
+    text-align: center; /* Center the text within its own space */
+  }
+
+  .selected-metric {
+    text-align: center;
+    font-size: 0.8em;
+    padding: 0px 0;
+  }  
+  
+  @media only screen and (max-width: 600px) {
+  
+    .colormap-gradient-container {
+      height: 20px;
+    }
+  
+    .colormap-label {
+      font-size: 12px; /* Reduce font size for mobile devices */
+    }
+  
+    .colormap-title {
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+  
+    .colormap-labels {
+      padding: 0 2%; /* Optional: Add some padding to the sides if needed */
+    }
+  }
+  

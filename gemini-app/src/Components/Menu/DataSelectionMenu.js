@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
-const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange }) => {
+const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
   const [locationOptions, setLocationOptions] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [populationOptions, setPopulationOptions] = useState([]);
@@ -10,8 +10,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange }) => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [sensorOptions, setSensorOptions] = useState([]);
   const [selectedSensor, setSelectedSensor] = useState(null);
-  // const [genotypeOptions, setGenotypeOptions] = useState([]);
-  // const [selectedGenotype, setSelectedGenotype] = useState(null);
+  const [metricOptions, setMetricOptions] = useState([]);
 
   useEffect(() => {
     fetch('http://127.0.0.1:5000/flask_app/list_dirs/Processed/')
@@ -71,6 +70,24 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange }) => {
     }
   }, [ selectedSensor ]);
 
+  useEffect(() => {
+    if (selectedSensor == 'Drone') {
+      setMetricOptions([
+        'Height_95p_meters',
+        'Vegetation_Fraction',
+        'Avg_Temp_C'
+      ])
+      setSelectedMetric('Height_95p_meters')
+    }
+  }, [selectedSensor])
+
+  useEffect(() => {
+    if (selectedMetric) {
+      console.log('Metric has changed to: ', selectedMetric);
+      // perform some action here based on the new value of selectedMetric
+    }
+  }, [selectedMetric]);  
+
   return (
     <>
       <Autocomplete
@@ -119,6 +136,20 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange }) => {
             setSelectedSensor(newValue);
           }}
           renderInput={(params) => <TextField {...params} label="Sensing Platform" />}
+          sx={{ mb: 2 }}
+        />
+      ) : null}
+
+      {selectedSensor !== null ? (
+        <Autocomplete
+          id="metric-combo-box"
+          options={metricOptions}
+          value={selectedMetric}
+          onChange={(event, newValue) => {
+            setSelectedMetric(newValue);
+            console.log('new metric is: ', newValue)
+          }}
+          renderInput={(params) => <TextField {...params} label="Trait Metric" />}
           sx={{ mb: 2 }}
         />
       ) : null}

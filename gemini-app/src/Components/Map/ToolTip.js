@@ -1,6 +1,6 @@
 import React from 'react';
 
-const GeoJsonTooltip = ({ hoverInfo }) => {
+const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
   return (
     hoverInfo && hoverInfo.object && (
       <div 
@@ -25,7 +25,15 @@ const GeoJsonTooltip = ({ hoverInfo }) => {
           <span style={{ marginRight: '5px' }}><b>Plot:</b> {hoverInfo.object.properties.Plot}</span>
         </div>
         <hr style={{borderTop: '1px solid #aaa', marginBottom: '5px'}} /> 
-        <div><b>Height 95 pctl (m):</b> {hoverInfo.object.properties.Height_95p_meters.toFixed(2)}</div> 
+        <div>
+          <b>{selectedMetric}:</b> 
+          {
+            hoverInfo.object.properties[selectedMetric] !== null 
+            ? hoverInfo.object.properties[selectedMetric].toFixed(2) 
+            : 'No Data'
+          }
+        </div> 
+
       </div>
     )
   );
