@@ -116,38 +116,59 @@ function App() {
     pickable: true,
     onHover: info => setHoverInfo(info),
   }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
+
+  const sidebar = CollapsibleSidebar({
+    onTilePathChange: setSelectedTilePath,
+    onGeoJsonPathChange: setSelectedTraitsGeoJsonPath,
+    selectedMetric: selectedMetric,
+    setSelectedMetric: setSelectedMetric
+  });
+  
+  // Choose what to render based on the `currentView` state
+  const contentView = (() => {
+    switch (sidebar.currentView) {
+      case 0:
+        return (
+          <DeckGL
+            viewState={viewState}
+            controller={{
+                scrollZoom: {speed: 1.0, smooth: true}
+            }}
+            layers={[orthoTileLayer, traitsGeoJsonLayer]}
+            onViewStateChange={({ viewState }) => setViewState(viewState)}
+          >
+            <MapGL
+              mapStyle="mapbox://styles/mapbox/satellite-v9"
+              mapboxAccessToken={"pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"}
+            />
+          </DeckGL>
+        );
+      case 1:
+        return <div>Placeholder for view 1</div>;
+      default:
+        return null;
+    }
+  })();
   
 
   return (
     <div className="App">
 
-      <DeckGL
-        viewState={viewState}
-        controller={{
-            scrollZoom: {speed: 1.0, smooth: true}
-        }}
-        layers={[orthoTileLayer, traitsGeoJsonLayer]}
-        onViewStateChange={({ viewState }) => setViewState(viewState)}
-      >
+      {contentView}
 
-        <MapGL
-          mapStyle="mapbox://styles/mapbox/satellite-v9"
-          mapboxAccessToken={"pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"}
-        />
-
-      </DeckGL>
+      {sidebar.jsx}
 
       <GeoJsonTooltip 
         hoverInfo={hoverInfo} 
         selectedMetric={selectedMetric}
       />
 
-      <CollapsibleSidebar 
+      {/* <CollapsibleSidebar 
         onTilePathChange={setSelectedTilePath} 
         onGeoJsonPathChange={setSelectedTraitsGeoJsonPath}
         selectedMetric={selectedMetric}
         setSelectedMetric={setSelectedMetric}
-      />
+      /> */}
 
       {colorScale && 
         <ColorMapLegend 

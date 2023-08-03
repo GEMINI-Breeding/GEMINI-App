@@ -80,7 +80,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         'Vegetation_Fraction',
         'Avg_Temp_C'
       ])
-      // setSelectedMetric('Height_95p_meters')
     }
   }, [selectedSensor])
 

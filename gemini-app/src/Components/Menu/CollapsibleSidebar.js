@@ -1,51 +1,51 @@
 import React, { useState } from 'react';
-import { IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText, Button } from '@mui/material';
+import { IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import DataSelectionMenu from './DataSelectionMenu';
+import PhotoSizeSelectLargeIcon from '@mui/icons-material/PhotoSizeSelectLarge';
+import FilterAltIcon from '@mui/icons-material/FilterAlt';
 
 export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) {
-  const [open, setOpen] = useState(false);
+  const [currentView, setCurrentView] = useState(-1);
   const drawerWidth = 350;
+  const smallDrawerWidth = 50;
 
-  const handleDrawerToggle = () => {
-    setOpen(prevOpen => !prevOpen);
-  };
-
-  return (
-    <Box sx={{ display: 'flex' }}>
-      <Drawer 
-        variant="persistent" 
-        open={true}
+  return {
+    jsx: (
+      <Box sx={{ display: 'flex' }}>
+      <Drawer
+        variant="permanent"
         sx={{
-          width: 50,
+          width: smallDrawerWidth,
           flexShrink: 0,
           "& .MuiDrawer-paper": {
-            width: 50,  // This sets the width of the always open Drawer
-            transition: (theme) => theme.transitions.create('width', {
-              easing: theme.transitions.easing.sharp,
-              duration: theme.transitions.duration.leavingScreen,
-            }),
+            width: smallDrawerWidth,
           },
         }}
       >
-        <IconButton
-          color="inherit"
-          aria-label="open drawer"
-          onClick={handleDrawerToggle}
-        >
-          <MenuIcon fontSize='large'/>
-        </IconButton>
+        <List>
+          <ListItem button onClick={() => setCurrentView(0)}>
+            <ListItemIcon>
+              <FilterAltIcon />
+            </ListItemIcon>
+          </ListItem>
+          <ListItem button onClick={() => setCurrentView(1)}>
+            <ListItemIcon>
+              <PhotoSizeSelectLargeIcon />
+            </ListItemIcon>
+          </ListItem>
+        </List>
       </Drawer>
-
+      
       <Drawer 
         variant="persistent" 
         anchor="left" 
-        open={open}
+        open={currentView !== -1}
         sx={{ 
-          width: open ? drawerWidth : 0, 
+          width: currentView !== -1 ? drawerWidth : 0, 
           flexShrink: 0,
           "& .MuiDrawer-paper": {
-            width: open ? drawerWidth : 0,  // This sets the width of the expandable Drawer
+            width: currentView !== -1 ? drawerWidth : 0,  
             transition: (theme) => theme.transitions.create('width', {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.enteringScreen,
@@ -53,32 +53,36 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
           }
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton 
-            onClick={handleDrawerToggle}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+          <IconButton
+            color="inherit"
+            aria-label="close drawer"
+            onClick={() => setCurrentView(-1)}
           >
-            <MenuIcon fontSize='large'/>
+            <MenuIcon fontSize='medium'/>
           </IconButton>
-          {open && (
-            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-              <img src="gemini-logo.png" alt="Logo" style={{ width: '200px', height: 'auto' }} />  
-            </Box>
-          )}
         </Box>
         <Divider />
         <List>
           <ListItem>
             <ListItemText sx={{ px: 2, py: 1 }}>
-            <DataSelectionMenu 
-              onTilePathChange={onTilePathChange} 
-              onGeoJsonPathChange={onGeoJsonPathChange}
-              selectedMetric={selectedMetric}
-              setSelectedMetric={setSelectedMetric}
-            />
+              {currentView === 0 && (
+                <DataSelectionMenu 
+                  onTilePathChange={onTilePathChange} 
+                  onGeoJsonPathChange={onGeoJsonPathChange}
+                  selectedMetric={selectedMetric}
+                  setSelectedMetric={setSelectedMetric}
+                />
+              )}
+              {currentView === 1 && (
+                <div>Second View Placeholder</div>
+              )}
             </ListItemText>
           </ListItem>
         </List>
       </Drawer>
     </Box>
-  );
+    ),
+    currentView,
+  };
 }
