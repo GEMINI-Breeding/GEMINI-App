@@ -66,9 +66,12 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
       const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/${selectedSensor}/${selectedDate}-P4-RGB-Pyramid.tif`;
       const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WebMerc.geojson`;
       onTilePathChange(newTilePath);
-      onGeoJsonPathChange(newGeoJsonPath)
+      onGeoJsonPathChange(newGeoJsonPath);
     }
-  }, [ selectedSensor ]);
+    if (selectedLocation == null){
+      onGeoJsonPathChange(null)
+    }
+  }, [ selectedSensor, selectedLocation ]);
 
   useEffect(() => {
     if (selectedSensor == 'Drone') {
@@ -96,6 +99,10 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         value={selectedLocation}
         onChange={(event, newValue) => {
           setSelectedLocation(newValue);
+          setSelectedPopulation(null);
+          setSelectedDate(null);
+          setSelectedSensor(null);
+          setSelectedMetric(null);
         }}
         renderInput={(params) => <TextField {...params} label="Location" />}
         sx={{ mb: 2 }}
@@ -108,6 +115,9 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             value={selectedPopulation}
             onChange={(event, newValue) => {
               setSelectedPopulation(newValue);
+              setSelectedDate(null);
+              setSelectedSensor(null);
+              setSelectedMetric(null);
             }}
             renderInput={(params) => <TextField {...params} label="Population" />}
             sx={{ mb: 2 }}
@@ -121,6 +131,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
           value={selectedDate}
           onChange={(event, newValue) => {
             setSelectedDate(newValue);
+            setSelectedSensor(null);
+            setSelectedMetric(null);
           }}
           renderInput={(params) => <TextField {...params} label="Date" />}
           sx={{ mb: 2 }}
@@ -134,6 +146,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
           value={selectedSensor}
           onChange={(event, newValue) => {
             setSelectedSensor(newValue);
+            setSelectedMetric(null);
           }}
           renderInput={(params) => <TextField {...params} label="Sensing Platform" />}
           sx={{ mb: 2 }}
