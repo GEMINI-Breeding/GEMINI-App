@@ -68,10 +68,10 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
       onTilePathChange(newTilePath);
       onGeoJsonPathChange(newGeoJsonPath);
     }
-    if (selectedLocation == null){
+    if (selectedLocation == null || selectedSensor == null || selectedMetric == null){
       onGeoJsonPathChange(null)
     }
-  }, [ selectedSensor, selectedLocation ]);
+  }, [ selectedMetric, selectedSensor, selectedLocation ]);
 
   useEffect(() => {
     if (selectedSensor == 'Drone') {
@@ -80,7 +80,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         'Vegetation_Fraction',
         'Avg_Temp_C'
       ])
-      setSelectedMetric('Height_95p_meters')
+      // setSelectedMetric('Height_95p_meters')
     }
   }, [selectedSensor])
 
