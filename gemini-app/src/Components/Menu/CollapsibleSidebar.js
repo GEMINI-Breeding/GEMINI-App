@@ -1,88 +1,95 @@
-import React, { useState } from 'react';
-import { IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
-import MenuIcon from '@mui/icons-material/Menu';
+import React from 'react';
+import { AppBar, IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText, Toolbar, useTheme, ThemeProvider, createTheme } from '@mui/material';
 import DataSelectionMenu from './DataSelectionMenu';
 import PhotoSizeSelectLargeIcon from '@mui/icons-material/PhotoSizeSelectLarge';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
 
-export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) {
-  const [currentView, setCurrentView] = useState(-1);
+export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric, currentView, setCurrentView }) {
   const drawerWidth = 350;
   const smallDrawerWidth = 50;
 
-  return {
-    jsx: (
-      <Box sx={{ display: 'flex' }}>
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: smallDrawerWidth,
-          flexShrink: 0,
-          "& .MuiDrawer-paper": {
-            width: smallDrawerWidth,
-          },
-        }}
-      >
-        <List>
-          <ListItem button onClick={() => setCurrentView(0)}>
-            <ListItemIcon>
-              <FilterAltIcon />
-            </ListItemIcon>
-          </ListItem>
-          <ListItem button onClick={() => setCurrentView(1)}>
-            <ListItemIcon>
-              <PhotoSizeSelectLargeIcon />
-            </ListItemIcon>
-          </ListItem>
-        </List>
-      </Drawer>
-      
+  const darkTheme = createTheme({
+    palette: {
+      mode: 'dark',
+      primary: {
+        main: '#282c34',
+      }
+    },
+  });
+
+  const handleDrawerToggle = (index) => {
+    if (currentView === index) {
+      setCurrentView(null);
+    } else {
+      setCurrentView(index);
+    }
+  };
+
+  console.log("Rendering sidebar with currentView =", currentView);
+
+  return (
+    <ThemeProvider theme={darkTheme}>
+      <Box sx={{ display: 'flex', flexDirection: 'row' }}>
+
+      <Box sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            position: 'fixed',
+            height: '100vh',
+            backgroundColor: '#272726',
+            width: `${smallDrawerWidth}px`,
+            zIndex: (theme) => theme.zIndex.drawer + 1,
+          }}>
+          <IconButton edge="start" color="white" aria-label="filter" onClick={() => handleDrawerToggle(0)}>
+              <FilterAltIcon color="white"/>
+          </IconButton>
+          <IconButton edge="start" color="white" aria-label="photo" onClick={() => handleDrawerToggle(1)}>
+              <PhotoSizeSelectLargeIcon color="white"/>
+          </IconButton>
+
+      </Box>
+
       <Drawer 
         variant="persistent" 
         anchor="left" 
-        open={currentView !== -1}
+        open={currentView !== null}
         sx={{ 
-          width: currentView !== -1 ? drawerWidth : 0, 
+          width: currentView !== null ? `${drawerWidth}px` : 0,
           flexShrink: 0,
+          marginLeft: `${smallDrawerWidth}px`,
           "& .MuiDrawer-paper": {
-            width: currentView !== -1 ? drawerWidth : 0,  
+            marginLeft: `${smallDrawerWidth}px`,
+            width: currentView !== null ? `${drawerWidth}px` : 0,  
             transition: (theme) => theme.transitions.create('width', {
-              easing: theme.transitions.easing.sharp,
-              duration: theme.transitions.duration.enteringScreen,
-            }),
+                easing: theme.transitions.easing.sharp,
+                duration: currentView !== null ? theme.transitions.duration.enteringScreen : theme.transitions.duration.leavingScreen,
+              }),
+            boxSizing: 'border-box',
+            backgroundColor: '#4a4848'
           }
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
-          <IconButton
-            color="inherit"
-            aria-label="close drawer"
-            onClick={() => setCurrentView(-1)}
-          >
-            <MenuIcon fontSize='medium'/>
-          </IconButton>
-        </Box>
         <Divider />
         <List>
           <ListItem>
             <ListItemText sx={{ px: 2, py: 1 }}>
-              {currentView === 0 && (
+              {currentView === 0 ? (
                 <DataSelectionMenu 
                   onTilePathChange={onTilePathChange} 
                   onGeoJsonPathChange={onGeoJsonPathChange}
                   selectedMetric={selectedMetric}
                   setSelectedMetric={setSelectedMetric}
                 />
-              )}
-              {currentView === 1 && (
+              ) : (
                 <div>Second View Placeholder</div>
               )}
             </ListItemText>
           </ListItem>
         </List>
       </Drawer>
-    </Box>
-    ),
-    currentView,
-  };
+
+      </Box>
+    </ThemeProvider>
+  );
 }

@@ -33,6 +33,7 @@ function App() {
   const [hoverInfo, setHoverInfo] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
+  const [currentView, setCurrentView] = useState(null);
 
   const selectedMetricRef = useRef(selectedMetric);
 
@@ -44,6 +45,7 @@ function App() {
 
   const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
   const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
+  console.log('selectedTilePath', selectedTilePath)
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
@@ -117,68 +119,80 @@ function App() {
     onHover: info => setHoverInfo(info),
   }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
 
-  const sidebar = CollapsibleSidebar({
-    onTilePathChange: setSelectedTilePath,
-    onGeoJsonPathChange: setSelectedTraitsGeoJsonPath,
-    selectedMetric: selectedMetric,
-    setSelectedMetric: setSelectedMetric
-  });
+  const sidebar = <CollapsibleSidebar 
+                  onTilePathChange={setSelectedTilePath} 
+                  onGeoJsonPathChange={setSelectedTraitsGeoJsonPath} 
+                  selectedMetric={selectedMetric} 
+                  setSelectedMetric={setSelectedMetric}
+                  currentView={currentView}
+                  setCurrentView={setCurrentView} />;
   
   // Choose what to render based on the `currentView` state
   const contentView = (() => {
-    switch (sidebar.currentView) {
+    switch (currentView) {
       case 0:
         return (
-          <DeckGL
-            viewState={viewState}
-            controller={{
-                scrollZoom: {speed: 1.0, smooth: true}
-            }}
-            layers={[orthoTileLayer, traitsGeoJsonLayer]}
-            onViewStateChange={({ viewState }) => setViewState(viewState)}
-          >
-            <MapGL
-              mapStyle="mapbox://styles/mapbox/satellite-v9"
-              mapboxAccessToken={"pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"}
+          <React.Fragment>
+            <DeckGL
+              viewState={viewState}
+              controller={{
+                  scrollZoom: {speed: 1.0, smooth: true}
+              }}
+              layers={[orthoTileLayer, traitsGeoJsonLayer]}
+              onViewStateChange={({ viewState }) => setViewState(viewState)}
+            >
+              <MapGL
+                mapStyle="mapbox://styles/mapbox/satellite-v9"
+                mapboxAccessToken={"pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"}
+              />
+            </DeckGL>
+            <GeoJsonTooltip 
+              hoverInfo={hoverInfo} 
+              selectedMetric={selectedMetric}
             />
-          </DeckGL>
+            {colorScale && 
+              <ColorMapLegend 
+                colorScale={colorScale}
+                lowerPercentileValue={lowerPercentileValue}
+                upperPercentileValue={upperPercentileValue}
+                selectedMetric={selectedMetric}
+              />
+            }
+          </React.Fragment>
         );
       case 1:
-        return <div>Placeholder for view 1</div>;
+        return (
+          <div style={{ 
+            position: 'absolute', 
+            top: '50%', 
+            left: '50%', 
+            transform: 'translate(-50%, -50%)', 
+            color: 'black', 
+            backgroundColor: 'white', 
+            padding: '20px', 
+            zIndex: '1000',
+            fontSize: '24px'
+        }}>
+          Placeholder for view 1
+        </div>
+        );
       default:
         return null;
     }
   })();
+
   
 
   return (
     <div className="App">
+      <div className="sidebar">
+        {sidebar}
+      </div>
 
-      {contentView}
-
-      {sidebar.jsx}
-
-      <GeoJsonTooltip 
-        hoverInfo={hoverInfo} 
-        selectedMetric={selectedMetric}
-      />
-
-      {/* <CollapsibleSidebar 
-        onTilePathChange={setSelectedTilePath} 
-        onGeoJsonPathChange={setSelectedTraitsGeoJsonPath}
-        selectedMetric={selectedMetric}
-        setSelectedMetric={setSelectedMetric}
-      /> */}
-
-      {colorScale && 
-        <ColorMapLegend 
-          colorScale={colorScale}
-          lowerPercentileValue={lowerPercentileValue}
-          upperPercentileValue={upperPercentileValue}
-          selectedMetric={selectedMetric}
-        />
-      }
-
+      <div className="content">
+        {console.log('App Component is Rendering')}
+        {contentView}
+      </div>
     </div>
   );
 }

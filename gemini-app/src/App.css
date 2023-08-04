@@ -1,5 +1,17 @@
 .App {
   text-align: center;
+  display: flex;
+}
+
+.App .content {
+  flex: 1;  /* add this */
+}
+
+.App .sidebar {
+  width: 20%;  /* add this */
+  background-color: #f0f0f0;  /* add this */
+  border-right: 1px solid #ccc;  /* add this */
+  overflow-y: auto;  /* add this */
 }
 
 .App-logo {
