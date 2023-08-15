@@ -1,10 +1,11 @@
 import React from 'react';
 import { AppBar, IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText, Toolbar, useTheme, ThemeProvider, createTheme } from '@mui/material';
 import DataSelectionMenu from './DataSelectionMenu';
-import PhotoSizeSelectLargeIcon from '@mui/icons-material/PhotoSizeSelectLarge';
-import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import GCPPickerSelectionMenu from './GCPPickerSelectionMenu';
+import PictureInPictureIcon from '@mui/icons-material/PictureInPicture';
+import MapIcon from '@mui/icons-material/Map';
 
-export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric, currentView, setCurrentView }) {
+export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric, currentView, setCurrentView, onCsvChange, onImageFolderChange, onRadiusChange }) {
   const drawerWidth = 350;
   const smallDrawerWidth = 50;
 
@@ -41,11 +42,11 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
             width: `${smallDrawerWidth}px`,
             zIndex: (theme) => theme.zIndex.drawer + 1,
           }}>
-          <IconButton edge="start" color="white" aria-label="filter" onClick={() => handleDrawerToggle(0)}>
-              <FilterAltIcon color="white"/>
+          <IconButton edge="start" color="white" aria-label="Map" onClick={() => handleDrawerToggle(0)}>
+              <MapIcon color="white"/>
           </IconButton>
           <IconButton edge="start" color="white" aria-label="photo" onClick={() => handleDrawerToggle(1)}>
-              <PhotoSizeSelectLargeIcon color="white"/>
+              <PictureInPictureIcon color="white"/>
           </IconButton>
 
       </Box>
@@ -82,7 +83,11 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
                   setSelectedMetric={setSelectedMetric}
                 />
               ) : (
-                <div>Second View Placeholder</div>
+                <GCPPickerSelectionMenu 
+                  onCsvChange={onCsvChange} 
+                  onImageFolderChange={onImageFolderChange}
+                  onRadiusChange={onRadiusChange}
+                />
               )}
             </ListItemText>
           </ListItem>

@@ -34,6 +34,9 @@ function App() {
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
   const [currentView, setCurrentView] = useState(null);
+  const [selectedCsv, setSelectedCsv] = useState(null);
+  const [selectedImageFolder, setSelectedImageFolder] = useState(null);
+  const [radiusMeters, setRadiusMeters] = useState(null);
 
   const selectedMetricRef = useRef(selectedMetric);
 
@@ -100,7 +103,6 @@ function App() {
     }
   });
 
-
   const traitsGeoJsonLayer = React.useMemo(() => new GeoJsonLayer({
     id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
     data: selectedTraitsGeoJsonPath,
@@ -114,7 +116,7 @@ function App() {
         return [160, 160, 180, 200];
       }
     },
-    stroked: false,
+    stroked: false, 
     pickable: true,
     onHover: info => setHoverInfo(info),
   }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
@@ -125,8 +127,12 @@ function App() {
                   selectedMetric={selectedMetric} 
                   setSelectedMetric={setSelectedMetric}
                   currentView={currentView}
-                  setCurrentView={setCurrentView} />;
-  
+                  setCurrentView={setCurrentView}
+                  onCsvChange={setSelectedCsv}
+                  onImageFolderChange={setSelectedImageFolder}
+                  onRadiusChange={setRadiusMeters}
+                   />;
+
   // Choose what to render based on the `currentView` state
   const contentView = (() => {
     switch (currentView) {
