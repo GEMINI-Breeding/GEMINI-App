@@ -81,7 +81,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   useEffect(() => {
     if (selectedSensor) {
       const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/${selectedSensor}/${selectedDate}-P4-RGB-Pyramid.tif`;
-      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WebMerc.geojson`;
+      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WGS84.geojson`;
       onTilePathChange(newTilePath);
       onGeoJsonPathChange(newGeoJsonPath);
     }

@@ -50,6 +50,9 @@ export const DataProvider = ({ children }) => {
     const [selectedSensor, setSelectedSensor] = useState(null);
     const [metricOptions, setMetricOptions] = useState([]);
 
+    // CollapsibleSideBar State
+    const [isSidebarCollapsed, setSidebarCollapsed] = useState(true);
+
     // ColorMap State
     const [colorScale, setColorScale] = useState(null);
     const [lowerPercentileValue, setLowerPercentileValue] = useState(null);
@@ -89,6 +92,9 @@ export const DataProvider = ({ children }) => {
         selectedSensor,
         metricOptions,
 
+        // CollapsibleSideBarState
+        isSidebarCollapsed,
+
         // ColorMap State
         colorScale,
         lowerPercentileValue,
@@ -127,6 +133,9 @@ export const DataProvider = ({ children }) => {
         setSensorOptions,
         setSelectedSensor,
         setMetricOptions,
+
+        // CollapsibleSideBar State
+        setSidebarCollapsed,
 
         // ColorMap State
         setColorScale,

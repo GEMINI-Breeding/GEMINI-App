@@ -26,7 +26,7 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
         </div>
         <hr style={{borderTop: '1px solid #aaa', marginBottom: '5px'}} /> 
         <div>
-          <b>{selectedMetric}:</b> 
+          <b>{selectedMetric}: </b> 
           {
             hoverInfo.object.properties[selectedMetric] !== null 
             ? hoverInfo.object.properties[selectedMetric].toFixed(2) 
