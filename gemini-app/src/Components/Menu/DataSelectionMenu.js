@@ -1,16 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
+import { useDataState, useDataSetters } from '../../DataContext';
+
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
-  const [locationOptions, setLocationOptions] = useState([]);
-  const [selectedLocation, setSelectedLocation] = useState(null);
-  const [populationOptions, setPopulationOptions] = useState([]);
-  const [selectedPopulation, setSelectedPopulation] = useState(null);
-  const [dateOptions, setDateOptions] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [sensorOptions, setSensorOptions] = useState([]);
-  const [selectedSensor, setSelectedSensor] = useState(null);
-  const [metricOptions, setMetricOptions] = useState([]);
+
+  const {
+    locationOptions,
+    selectedLocation,
+    populationOptions,
+    selectedPopulation,
+    dateOptions,
+    selectedDate,
+    sensorOptions,
+    selectedSensor,
+    metricOptions
+  } = useDataState();
+
+  const {
+    setLocationOptions,
+    setSelectedLocation,
+    setPopulationOptions,
+    setSelectedPopulation,
+    setDateOptions,
+    setSelectedDate,
+    setSensorOptions,
+    setSelectedSensor,
+    setMetricOptions
+  } = useDataSetters();
 
   useEffect(() => {
     fetch('http://127.0.0.1:5000/flask_app/list_dirs/Processed/')

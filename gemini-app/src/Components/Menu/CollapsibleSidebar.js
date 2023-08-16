@@ -73,10 +73,11 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
       >
         <Divider />
         <List>
-          <ListItem>
+          <ListItem key="data-selection-menu">
             <ListItemText sx={{ px: 2, py: 1 }}>
               {currentView === 0 ? (
                 <DataSelectionMenu 
+                  style={{ display: currentView === 0 ? "block" : "none" }}
                   onTilePathChange={onTilePathChange} 
                   onGeoJsonPathChange={onGeoJsonPathChange}
                   selectedMetric={selectedMetric}
@@ -84,6 +85,7 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
                 />
               ) : (
                 <GCPPickerSelectionMenu 
+                  style={{ display: currentView === 1 ? "block" : "none" }}
                   onCsvChange={onCsvChange} 
                   onImageFolderChange={onImageFolderChange}
                   onRadiusChange={onRadiusChange}

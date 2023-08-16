@@ -8,6 +8,7 @@ import { TileLayer } from '@deck.gl/geo-layers';
 import { FlyToInterpolator } from '@deck.gl/core';
 import { scaleLinear } from 'd3-scale';
 
+import { DataProvider, useDataSetters, useDataState } from './DataContext';
 import CollapsibleSidebar from './Components/Menu/CollapsibleSidebar';
 import useTraitsColorMap from './Components/Map/ColorMap';
 import GeoJsonTooltip from './Components/Map/ToolTip';
@@ -18,25 +19,34 @@ import ColorMapLegend from './Components/Map/ColorMapLegend';
 const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
 const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
 
-const initialViewState = {
-  longitude: -121.781381,
-  latitude: 38.535257,
-  zoom: 17,
-  pitch: 0,
-  bearing: 0,
-};
-
 function App() {
-  const [viewState, setViewState] = useState(initialViewState);
-  const [selectedTilePath, setSelectedTilePath] = useState('');
-  const [selectedTraitsGeoJsonPath, setSelectedTraitsGeoJsonPath] = useState('');
-  const [hoverInfo, setHoverInfo] = useState(null);
-  const [selectedMetric, setSelectedMetric] = useState(null);
-  const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
-  const [currentView, setCurrentView] = useState(null);
-  const [selectedCsv, setSelectedCsv] = useState(null);
-  const [selectedImageFolder, setSelectedImageFolder] = useState(null);
-  const [radiusMeters, setRadiusMeters] = useState(null);
+
+  // App state management; see DataContext.js
+  const {
+    viewState,
+    selectedTilePath,
+    selectedTraitsGeoJsonPath,
+    hoverInfo,
+    selectedMetric,
+    isLoadingColorScale,
+    currentView,
+    selectedCsv,
+    selectedImageFolder,
+    radiusMeters,
+  } = useDataState();
+
+  const {
+    setViewState,
+    setSelectedTilePath,
+    setSelectedTraitsGeoJsonPath,
+    setHoverInfo,
+    setSelectedMetric,
+    setIsLoadingColorScale,
+    setCurrentView,
+    setSelectedCsv,
+    setSelectedImageFolder,
+    setRadiusMeters
+  } = useDataSetters();
 
   const selectedMetricRef = useRef(selectedMetric);
 
@@ -48,7 +58,6 @@ function App() {
 
   const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
   const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
-  console.log('selectedTilePath', selectedTilePath)
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
@@ -70,7 +79,6 @@ function App() {
       let zoomLat = Math.floor(Math.log(viewportHeight * 360 / mapLatDelta) / Math.log(2));
   
       const zoom = Math.min(zoomLng, zoomLat) - 9.5;
-      console.log('zoom', zoom)
   
       setViewState(prevViewState => ({
         ...prevViewState,
@@ -103,7 +111,8 @@ function App() {
     }
   });
 
-  const traitsGeoJsonLayer = React.useMemo(() => new GeoJsonLayer({
+  const traitsGeoJsonLayer = React.useMemo(() => 
+  new GeoJsonLayer({
     id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
     data: selectedTraitsGeoJsonPath,
     filled: true,
@@ -119,7 +128,7 @@ function App() {
     stroked: false, 
     pickable: true,
     onHover: info => setHoverInfo(info),
-  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
+  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState]);
 
   const sidebar = <CollapsibleSidebar 
                   onTilePathChange={setSelectedTilePath} 
