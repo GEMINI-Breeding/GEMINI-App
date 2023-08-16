@@ -2,10 +2,22 @@ import { useState, useEffect } from 'react';
 import { scaleLinear } from 'd3-scale';
 import * as d3Array from 'd3-array';
 
+import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
+
 function useTraitsColorMap(traitsGeoJsonPath, selectedMetric, setIsLoadingColorScale) {
-  const [colorScale, setColorScale] = useState(null);
-  const [lowerPercentileValue, setLowerPercentileValue] = useState(null);
-  const [upperPercentileValue, setUpperPercentileValue] = useState(null);
+
+  // ColorMap state management; see DataContext.js
+  const {
+    colorScale,
+    lowerPercentileValue,
+    upperPercentileValue
+  } = useDataState();
+
+  const {
+    setColorScale,
+    setLowerPercentileValue,
+    setUpperPercentileValue
+  } = useDataSetters();
 
   useEffect(() => {
     if (traitsGeoJsonPath !== '' && selectedMetric) {

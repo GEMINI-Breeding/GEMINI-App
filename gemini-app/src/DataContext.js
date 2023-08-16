@@ -38,9 +38,6 @@ export const DataProvider = ({ children }) => {
     const [selectedMetric, setSelectedMetric] = useState(null);
     const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
     const [currentView, setCurrentView] = useState(null);
-    const [selectedCsv, setSelectedCsv] = useState(null);
-    const [selectedImageFolder, setSelectedImageFolder] = useState(null);
-    const [radiusMeters, setRadiusMeters] = useState(null);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -53,11 +50,23 @@ export const DataProvider = ({ children }) => {
     const [selectedSensor, setSelectedSensor] = useState(null);
     const [metricOptions, setMetricOptions] = useState([]);
 
+    // ColorMap State
+    const [colorScale, setColorScale] = useState(null);
+    const [lowerPercentileValue, setLowerPercentileValue] = useState(null);
+    const [upperPercentileValue, setUpperPercentileValue] = useState(null);
+
+    // GCPPickerSelectionMenu State
+    const [csvOptions, setCsvOptions] = useState([]);
+    const [selectedCsv, setSelectedCsv] = useState(null);
+    const [imageFolderOptions, setImageFolderOptions] = useState([]);
+    const [selectedImageFolder, setSelectedImageFolder] = useState(null);
+    const [radiusMeters, setRadiusMeters] = useState(null);
+
   return (
 
     <DataStateContext.Provider value={{ 
 
-        // App state
+        // App State
         viewState,
         selectedTilePath,
         selectedTraitsGeoJsonPath,
@@ -69,7 +78,7 @@ export const DataProvider = ({ children }) => {
         selectedImageFolder,
         radiusMeters,
 
-        // DataSelectionMenu state
+        // DataSelectionMenu State
         locationOptions, 
         selectedLocation,
         populationOptions,
@@ -78,7 +87,19 @@ export const DataProvider = ({ children }) => {
         selectedDate,
         sensorOptions,
         selectedSensor,
-        metricOptions
+        metricOptions,
+
+        // ColorMap State
+        colorScale,
+        lowerPercentileValue,
+        upperPercentileValue,
+
+        // GCPPickerSelectionMenu State
+        csvOptions,
+        selectedCsv,
+        imageFolderOptions,
+        selectedImageFolder,
+        radiusMeters
 
         }}>
 
@@ -105,7 +126,19 @@ export const DataProvider = ({ children }) => {
         setSelectedDate,
         setSensorOptions,
         setSelectedSensor,
-        setMetricOptions
+        setMetricOptions,
+
+        // ColorMap State
+        setColorScale,
+        setLowerPercentileValue,
+        setUpperPercentileValue,
+
+        // GCPPickerSelectionMenu State
+        setCsvOptions,
+        setSelectedCsv,
+        setImageFolderOptions,
+        setSelectedImageFolder,
+        setRadiusMeters
 
         }}>
 

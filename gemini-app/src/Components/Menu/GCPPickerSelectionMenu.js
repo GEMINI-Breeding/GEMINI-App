@@ -1,12 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Autocomplete, TextField, Button } from '@mui/material';
 
+import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
+
 const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChange }) => {
-  const [csvOptions, setCsvOptions] = useState([]);
-  const [selectedCsv, setSelectedCsv] = useState(null);
-  const [imageFolderOptions, setImageFolderOptions] = useState([]);
-  const [selectedImageFolder, setSelectedImageFolder] = useState(null);
-  const [radiusMeters, setRadiusMeters] = useState(null);
+
+    // GCPPickerSelectionMenu state management; see DataContext.js
+    const {
+      csvOptions,
+      selectedCsv,
+      imageFolderOptions,
+      selectedImageFolder,
+      radiusMeters
+    } = useDataState();
+  
+    const {
+      setCsvOptions,
+      setSelectedCsv,
+      setImageFolderOptions,
+      setSelectedImageFolder,
+      setRadiusMeters
+    } = useDataSetters();
 
   const handleProcessImages = () => {
     const data = {

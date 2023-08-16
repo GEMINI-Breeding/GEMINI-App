@@ -61,6 +61,7 @@ function App() {
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
+    console.log('extentBounds changed')
     if (extentBounds) {
       const [minLon, minLat, maxLon, maxLat] = extentBounds;
       const longitude = (minLon + maxLon) / 2;

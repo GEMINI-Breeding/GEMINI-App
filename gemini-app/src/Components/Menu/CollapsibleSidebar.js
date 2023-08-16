@@ -26,8 +26,6 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
     }
   };
 
-  console.log("Rendering sidebar with currentView =", currentView);
-
   return (
     <ThemeProvider theme={darkTheme}>
       <Box sx={{ display: 'flex', flexDirection: 'row' }}>
