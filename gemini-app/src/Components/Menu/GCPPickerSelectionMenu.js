@@ -45,11 +45,15 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     } = useDataSetters();
 
   const handleProcessImages = () => {
+
     const data = {
       location: selectedLocation,
       population: selectedPopulation,
-      date: selectedDate
+      date: selectedDate,
+      radius_meters: radiusMeters,
     };
+
+    console.log('data', data);
   
     fetch('http://127.0.0.1:5000/flask_app/process_images', {
       method: 'POST',

@@ -66,7 +66,7 @@ export const DataProvider = ({ children }) => {
     const [selectedCsv, setSelectedCsv] = useState(null);
     const [imageFolderOptions, setImageFolderOptions] = useState([]);
     const [selectedImageFolder, setSelectedImageFolder] = useState(null);
-    const [radiusMeters, setRadiusMeters] = useState(null);
+    const [radiusMeters, setRadiusMeters] = useState(5);
 
   return (
 
