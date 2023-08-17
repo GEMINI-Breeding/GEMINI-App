@@ -34,6 +34,7 @@ export const DataProvider = ({ children }) => {
     const [viewState, setViewState] = useState(initialViewState);
     const [selectedTilePath, setSelectedTilePath] = useState('');
     const [selectedTraitsGeoJsonPath, setSelectedTraitsGeoJsonPath] = useState('');
+    const [geojsonData, setGeojsonData] = useState(null);
     const [hoverInfo, setHoverInfo] = useState(null);
     const [selectedMetric, setSelectedMetric] = useState(null);
     const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
@@ -44,6 +45,8 @@ export const DataProvider = ({ children }) => {
     const [selectedLocation, setSelectedLocation] = useState(null);
     const [populationOptions, setPopulationOptions] = useState([]);
     const [selectedPopulation, setSelectedPopulation] = useState(null);
+    const [genotypeOptions, setGenotypeOptions] = useState([]);
+    const [selectedGenotypes, setSelectedGenotypes] = useState(null);
     const [dateOptions, setDateOptions] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
     const [sensorOptions, setSensorOptions] = useState([]);
@@ -51,7 +54,7 @@ export const DataProvider = ({ children }) => {
     const [metricOptions, setMetricOptions] = useState([]);
 
     // CollapsibleSideBar State
-    const [isSidebarCollapsed, setSidebarCollapsed] = useState(true);
+    const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     // ColorMap State
     const [colorScale, setColorScale] = useState(null);
@@ -86,6 +89,8 @@ export const DataProvider = ({ children }) => {
         selectedLocation,
         populationOptions,
         selectedPopulation,
+        genotypeOptions,
+        selectedGenotypes,
         dateOptions,
         selectedDate,
         sensorOptions,
@@ -128,6 +133,8 @@ export const DataProvider = ({ children }) => {
         setSelectedLocation,
         setPopulationOptions,
         setSelectedPopulation,
+        setGenotypeOptions,
+        setSelectedGenotypes,
         setDateOptions,
         setSelectedDate,
         setSensorOptions,

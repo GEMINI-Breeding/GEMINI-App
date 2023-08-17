@@ -59,6 +59,8 @@ export default function CollapsibleSidebar({ onTilePathChange, onGeoJsonPathChan
                   onCsvChange={onCsvChange} 
                   onImageFolderChange={onImageFolderChange} 
                   onRadiusChange={onRadiusChange} 
+                  selectedMetric={selectedMetric}
+                  setSelectedMetric={setSelectedMetric}
                 />;
 
       // Add more cases as needed for more views

@@ -10,11 +10,14 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     selectedLocation,
     populationOptions,
     selectedPopulation,
+    genotypeOptions,
+    selectedGenotypes,
     dateOptions,
     selectedDate,
     sensorOptions,
     selectedSensor,
-    metricOptions
+    metricOptions,
+    selectedTraitsGeoJsonPath
   } = useDataState();
 
   const {
@@ -22,11 +25,14 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     setSelectedLocation,
     setPopulationOptions,
     setSelectedPopulation,
+    setGenotypeOptions,
+    setSelectedGenotypes,
     setDateOptions,
     setSelectedDate,
     setSensorOptions,
     setSelectedSensor,
-    setMetricOptions
+    setMetricOptions,
+    setSelectedTraitsGeoJsonPath
   } = useDataSetters();
 
   useEffect(() => {
@@ -80,10 +86,25 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
 
   useEffect(() => {
     if (selectedSensor) {
-      const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/${selectedSensor}/${selectedDate}-P4-RGB-Pyramid.tif`;
-      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WGS84.geojson`;
+      const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone/${selectedDate}-P4-RGB-Pyramid.tif`;
+      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-${selectedSensor}-Traits-WGS84.geojson`;
       onTilePathChange(newTilePath);
       onGeoJsonPathChange(newGeoJsonPath);
+
+      fetch(newGeoJsonPath)
+          .then(response => response.json())
+          .then(data => {
+            if(data) {
+              const traitOutputLabels = data.features
+              .map(f => f.properties.Label)
+
+              const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
+              uniqueTraitOutputLabels.unshift('All Genotypes')
+              console.log('uniqueTraitOutputLabels', uniqueTraitOutputLabels)
+              setGenotypeOptions(uniqueTraitOutputLabels);
+              setSelectedGenotypes([uniqueTraitOutputLabels[0]])
+            }
+          }).catch((error) => console.error('newGeoJsonPath not loaded:', error));
     }
     if (selectedLocation == null || selectedSensor == null || selectedMetric == null){
       onGeoJsonPathChange(null)
@@ -98,14 +119,16 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         'Avg_Temp_C'
       ])
     }
-  }, [selectedSensor])
-
-  useEffect(() => {
-    if (selectedMetric) {
-      console.log('Metric has changed to: ', selectedMetric);
-      // perform some action here based on the new value of selectedMetric
+    else if (selectedSensor == 'Rover') {
+      setMetricOptions([
+        'Average Height (cm)',
+        'Average Leaf Area (cm2)',
+        'Average Fruit Count',
+        'Average Leaf Count',
+        'Average Flower Count'
+      ])
     }
-  }, [selectedMetric]);  
+  }, [selectedSensor])
 
   return (
     <>
@@ -131,6 +154,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             value={selectedPopulation}
             onChange={(event, newValue) => {
               setSelectedPopulation(newValue);
+              setSelectedGenotypes(null);
               setSelectedDate(null);
               setSelectedSensor(null);
               setSelectedMetric(null);
@@ -176,13 +200,39 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
           value={selectedMetric}
           onChange={(event, newValue) => {
             setSelectedMetric(newValue);
-            console.log('new metric is: ', newValue)
           }}
           renderInput={(params) => <TextField {...params} label="Trait Metric" />}
           sx={{ mb: 2 }}
         />
       ) : null}
-    </>
+
+      { selectedMetric !== null ? (
+          <Autocomplete
+            multiple
+            id="genotype-combo-box"
+            options={genotypeOptions}
+            value={selectedGenotypes}
+            onChange={(event, newValue) => {
+              if (newValue.includes("All Genotypes") && newValue.length > 1) {
+                newValue = newValue.filter(val => val !== "All Genotypes");
+              }
+              
+              if (newValue.length === 0 || (newValue.length === 1 && newValue[0] !== "All Genotypes")) {
+                if (!genotypeOptions.includes("All Genotypes")) {
+                  setGenotypeOptions(prevOptions => ["All Genotypes", ...prevOptions]);
+                }
+              } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
+                setGenotypeOptions(prevOptions => prevOptions.filter(val => val !== "All Genotypes"));
+              }
+              
+              setSelectedGenotypes(newValue);
+            }}
+            renderInput={(params) => <TextField {...params} label="Genotype" />}
+            sx={{ mb: 2 }}
+          />
+        
+        ) : null}
+    </> 
   );
 };
 

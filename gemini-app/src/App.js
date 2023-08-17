@@ -33,6 +33,8 @@ function App() {
     selectedCsv,
     selectedImageFolder,
     radiusMeters,
+    geojsonData,
+    selectedGenotypes
   } = useDataState();
 
   const {
@@ -45,7 +47,9 @@ function App() {
     setCurrentView,
     setSelectedCsv,
     setSelectedImageFolder,
-    setRadiusMeters
+    setRadiusMeters,
+    setGeojsonData,
+    setSelectedGenotypes
   } = useDataSetters();
 
   const selectedMetricRef = useRef(selectedMetric);
@@ -112,10 +116,34 @@ function App() {
     }
   });
 
+  // This should be moved out to a separate data component (I think)
+  useEffect(() => {
+    if (selectedTraitsGeoJsonPath) {
+      fetch(selectedTraitsGeoJsonPath)
+        .then(response => response.json())
+        .then(data => setGeojsonData(data))
+        .catch(error => console.error('Error fetching geojson:', error));
+    }
+  }, [selectedTraitsGeoJsonPath]);
+
+  // 
+  const filteredGeoJsonData = React.useMemo(() => {
+    if (geojsonData && selectedGenotypes) {
+      const filteredFeatures = geojsonData.features.filter(
+        feature => selectedGenotypes.includes(feature.properties.Label)
+      );
+      return {
+        ...geojsonData,
+        features: filteredFeatures
+      };
+    }
+    return geojsonData;
+  }, [geojsonData, selectedGenotypes]);
+
   const traitsGeoJsonLayer = React.useMemo(() => 
   new GeoJsonLayer({
     id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
-    data: selectedTraitsGeoJsonPath,
+    data: filteredGeoJsonData,
     filled: true,
     getFillColor: d => {
       if (colorScale) {

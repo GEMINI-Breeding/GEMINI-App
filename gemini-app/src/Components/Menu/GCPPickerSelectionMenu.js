@@ -3,10 +3,21 @@ import { Autocomplete, TextField, Button } from '@mui/material';
 
 import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
 
-const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChange }) => {
+const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChange, selectedMetric, setSelectedMetric }) => {
 
     // GCPPickerSelectionMenu state management; see DataContext.js
     const {
+      locationOptions,
+      selectedLocation,
+      populationOptions,
+      selectedPopulation,
+      genotypeOptions,
+      selectedGenotypes,
+      dateOptions,
+      selectedDate,
+      sensorOptions,
+      selectedSensor,
+      metricOptions,
       csvOptions,
       selectedCsv,
       imageFolderOptions,
@@ -15,6 +26,17 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     } = useDataState();
   
     const {
+      setLocationOptions,
+      setSelectedLocation,
+      setPopulationOptions,
+      setSelectedPopulation,
+      setGenotypeOptions,
+      setSelectedGenotypes,
+      setDateOptions,
+      setSelectedDate,
+      setSensorOptions,
+      setSelectedSensor,
+      setMetricOptions,
       setCsvOptions,
       setSelectedCsv,
       setImageFolderOptions,
@@ -24,9 +46,9 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
   const handleProcessImages = () => {
     const data = {
-      image_folder: selectedImageFolder,
-      predefined_locations_csv: selectedCsv,
-      radius_meters: radiusMeters
+      location: selectedLocation,
+      population: selectedPopulation,
+      date: selectedDate
     };
   
     fetch('http://127.0.0.1:5000/flask_app/process_images', {
@@ -39,10 +61,10 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     .then(response => response.json())
     .then(data => {
       // Do something with the data, e.g., print it to the console
-      console.log(data);
+      console.log('here is my data', data);
     })
     .catch((error) => {
-      console.error('Error:', error);
+      console.error('Error is here:', error);
     });
   }
 
@@ -83,31 +105,51 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   return (
     <>
       <Autocomplete
-        id="csv-combo-box"
-        options={csvOptions}
-        value={selectedCsv}
-        onChange={(event, newValue) => setSelectedCsv(newValue)}
-        renderInput={(params) => <TextField {...params} label="CSV File" />}
+        id="location-combo-box"
+        options={locationOptions}
+        value={selectedLocation}
+        onChange={(event, newValue) => {
+          setSelectedLocation(newValue);
+          setSelectedPopulation(null);
+          setSelectedDate(null);
+          setSelectedSensor(null);
+          setSelectedMetric(null);
+        }}
+        renderInput={(params) => <TextField {...params} label="Location" />}
         sx={{ mb: 2 }}
       />
 
-      <Autocomplete
-        id="image-folder-combo-box"
-        options={imageFolderOptions}
-        value={selectedImageFolder}
-        onChange={(event, newValue) => setSelectedImageFolder(newValue)}
-        renderInput={(params) => <TextField {...params} label="Image Folder" />}
-        sx={{ mb: 2 }}
-      />
+      {selectedLocation !== null ? (
+          <Autocomplete
+            id="population-combo-box"
+            options={populationOptions}
+            value={selectedPopulation}
+            onChange={(event, newValue) => {
+              setSelectedPopulation(newValue);
+              setSelectedGenotypes(null);
+              setSelectedDate(null);
+              setSelectedSensor(null);
+              setSelectedMetric(null);
+            }}
+            renderInput={(params) => <TextField {...params} label="Population" />}
+            sx={{ mb: 2 }}
+          />
+        ) : null}
 
-      <TextField 
-        id="radius-meters-input"
-        label="Radius Meters"
-        type="number"
-        value={radiusMeters}
-        onChange={(event) => setRadiusMeters(event.target.value)}
-        sx={{ mb: 2 }}
-      />
+      {selectedPopulation !== null ? (
+        <Autocomplete
+          id="date-combo-box"
+          options={dateOptions}
+          value={selectedDate}
+          onChange={(event, newValue) => {
+            setSelectedDate(newValue);
+            setSelectedSensor(null);
+            setSelectedMetric(null);
+          }}
+          renderInput={(params) => <TextField {...params} label="Date" />}
+          sx={{ mb: 2 }}
+        />
+      ) : null}
 
       <Button 
         variant="contained"
