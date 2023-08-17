@@ -46,7 +46,7 @@ export const DataProvider = ({ children }) => {
     const [populationOptions, setPopulationOptions] = useState([]);
     const [selectedPopulation, setSelectedPopulation] = useState(null);
     const [genotypeOptions, setGenotypeOptions] = useState([]);
-    const [selectedGenotypes, setSelectedGenotypes] = useState(null);
+    const [selectedGenotypes, setSelectedGenotypes] = useState([]);
     const [dateOptions, setDateOptions] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
     const [sensorOptions, setSensorOptions] = useState([]);
@@ -83,6 +83,7 @@ export const DataProvider = ({ children }) => {
         selectedCsv,
         selectedImageFolder,
         radiusMeters,
+        geojsonData,
 
         // DataSelectionMenu State
         locationOptions, 
@@ -96,6 +97,7 @@ export const DataProvider = ({ children }) => {
         sensorOptions,
         selectedSensor,
         metricOptions,
+        geojsonData,
 
         // CollapsibleSideBarState
         isSidebarCollapsed,
@@ -127,6 +129,7 @@ export const DataProvider = ({ children }) => {
         setSelectedCsv,
         setSelectedImageFolder,
         setRadiusMeters,
+        setGeojsonData,
 
         // DataSelectionMenu state
         setLocationOptions, 

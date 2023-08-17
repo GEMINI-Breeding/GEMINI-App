@@ -102,7 +102,9 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
               uniqueTraitOutputLabels.unshift('All Genotypes')
               console.log('uniqueTraitOutputLabels', uniqueTraitOutputLabels)
               setGenotypeOptions(uniqueTraitOutputLabels);
-              setSelectedGenotypes([uniqueTraitOutputLabels[0]])
+              if(selectedGenotypes == null) {
+                setSelectedGenotypes(['All Genotypes'])
+              }
             }
           }).catch((error) => console.error('newGeoJsonPath not loaded:', error));
     }
@@ -207,31 +209,40 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
       ) : null}
 
       { selectedMetric !== null ? (
-          <Autocomplete
-            multiple
-            id="genotype-combo-box"
-            options={genotypeOptions}
-            value={selectedGenotypes}
-            onChange={(event, newValue) => {
-              if (newValue.includes("All Genotypes") && newValue.length > 1) {
+        <Autocomplete
+          multiple
+          id="genotype-combo-box"
+          options={genotypeOptions}
+          value={selectedGenotypes}
+          onChange={(event, newValue) => {
+            
+            // If "All Genotypes" is selected along with other options
+            if (newValue.includes("All Genotypes") && newValue.length > 1) {
+              if (selectedGenotypes.includes("All Genotypes")) {
+                // This means that "All Genotypes" was already selected, so we remove other selections
                 newValue = newValue.filter(val => val !== "All Genotypes");
+              } else {
+                // This means "All Genotypes" was freshly selected, so we only keep it and remove others
+                newValue = ["All Genotypes"];
               }
-              
-              if (newValue.length === 0 || (newValue.length === 1 && newValue[0] !== "All Genotypes")) {
-                if (!genotypeOptions.includes("All Genotypes")) {
-                  setGenotypeOptions(prevOptions => ["All Genotypes", ...prevOptions]);
-                }
-              } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
-                setGenotypeOptions(prevOptions => prevOptions.filter(val => val !== "All Genotypes"));
+            }
+            
+            if (newValue.length === 0 || (newValue.length === 1 && newValue[0] !== "All Genotypes")) {
+              if (!genotypeOptions.includes("All Genotypes")) {
+                setGenotypeOptions(prevOptions => ["All Genotypes", ...prevOptions]);
               }
-              
-              setSelectedGenotypes(newValue);
-            }}
-            renderInput={(params) => <TextField {...params} label="Genotype" />}
-            sx={{ mb: 2 }}
-          />
-        
-        ) : null}
+            } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
+              setGenotypeOptions(prevOptions => prevOptions.filter(val => val !== "All Genotypes"));
+            }
+            
+            setSelectedGenotypes(newValue);
+          }}
+          renderInput={(params) => <TextField {...params} label="Genotype" />}
+          sx={{ mb: 2 }}
+        />
+      ) : null}
+
+
     </> 
   );
 };

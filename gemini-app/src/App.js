@@ -129,9 +129,15 @@ function App() {
   // 
   const filteredGeoJsonData = React.useMemo(() => {
     if (geojsonData && selectedGenotypes) {
+      // Return original data if "All Genotypes" is selected
+      if (selectedGenotypes.includes("All Genotypes")) {
+        return geojsonData;
+      }
+  
       const filteredFeatures = geojsonData.features.filter(
         feature => selectedGenotypes.includes(feature.properties.Label)
       );
+      
       return {
         ...geojsonData,
         features: filteredFeatures
@@ -139,6 +145,7 @@ function App() {
     }
     return geojsonData;
   }, [geojsonData, selectedGenotypes]);
+  
 
   const traitsGeoJsonLayer = React.useMemo(() => 
   new GeoJsonLayer({
@@ -157,7 +164,7 @@ function App() {
     stroked: false, 
     pickable: true,
     onHover: info => setHoverInfo(info),
-  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState]);
+  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState, selectedGenotypes]);
 
   const sidebar = <CollapsibleSidebar 
                   onTilePathChange={setSelectedTilePath} 
