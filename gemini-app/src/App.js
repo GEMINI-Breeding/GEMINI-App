@@ -15,9 +15,11 @@ import GeoJsonTooltip from './Components/Map/ToolTip';
 import useExtentFromBounds from './Components/Map/MapHooks';
 import ColorMapLegend from './Components/Map/ColorMapLegend';
 
+import ImageViewer from './Components/GCP/ImageViewer';
+
 // Initial tile server URL and path
-const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
-const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
+const TILE_URL_TEMPLATE = 'http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
+const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}';
 
 function App() {
 
@@ -60,8 +62,8 @@ function App() {
     selectedMetricRef.current = selectedMetric;
   }, [selectedMetric]);
 
-  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
-  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
+  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5001${selectedTilePath}`));
+  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5001${selectedTilePath}`));
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
@@ -212,21 +214,7 @@ function App() {
           </React.Fragment>
         );
       case 1:
-        return (
-          <div style={{ 
-            position: 'absolute', 
-            top: '50%', 
-            left: '50%', 
-            transform: 'translate(-50%, -50%)', 
-            color: 'black', 
-            backgroundColor: 'white', 
-            padding: '20px', 
-            zIndex: '1000',
-            fontSize: '24px'
-        }}>
-          Placeholder for Prep View
-        </div>
-        );
+        return <ImageViewer />;
       case 2:
         return (
           <div style={{ 

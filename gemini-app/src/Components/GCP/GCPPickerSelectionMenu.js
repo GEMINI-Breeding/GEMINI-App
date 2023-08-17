@@ -41,7 +41,9 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       setSelectedCsv,
       setImageFolderOptions,
       setSelectedImageFolder,
-      setRadiusMeters
+      setRadiusMeters,
+      setImageList,
+      setCurrentView,
     } = useDataSetters();
 
   const handleProcessImages = () => {
@@ -55,7 +57,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
     console.log('data', data);
   
-    fetch('http://127.0.0.1:5000/flask_app/process_images', {
+    fetch('http://127.0.0.1:5001/flask_app/process_images', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -66,6 +68,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     .then(data => {
       // Do something with the data, e.g., print it to the console
       console.log('here is my data', data);
+      setImageList(data.selected_images);
     })
     .catch((error) => {
       console.error('Error is here:', error);
@@ -74,7 +77,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
   useEffect(() => {
     // fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/GCP/')
-    fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
+    fetch('http://127.0.0.1:5001/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
         return response.json();
@@ -85,7 +88,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
   useEffect(() => {
     // fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/Images/')
-    fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
+    fetch('http://127.0.0.1:5001/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
         return response.json();
