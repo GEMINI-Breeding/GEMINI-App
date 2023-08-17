@@ -1,6 +1,7 @@
-import React, { useContext } from 'react';
+import React from 'react';
 import { useDataState, useDataSetters } from '../../DataContext';
 import Button from '@mui/material/Button';
+import PointPicker from './PointPicker';
 
 const API_ENDPOINT = 'http://127.0.0.1:5001/flask_app/files';
 
@@ -40,10 +41,10 @@ const ImageViewer = () => {
     }
 
     return (
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign: 'center', position: 'relative', width: '100%' }}>
             {imageList.length > 0 ? (
                 <>
-                    <img src={API_ENDPOINT + imageList[imageIndex].image_path} alt="current" style={{ width: '100%', height: 'auto' }} />
+                    <PointPicker src={API_ENDPOINT + imageList[imageIndex].image_path} />
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '20px' }}>
                         <Button variant='contained' onClick={handlePrevious}>Previous</Button>
                         <Button variant='contained' onClick={handleNext}>Next</Button>
