@@ -87,12 +87,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   useEffect(() => {
     if (selectedSensor) {
       const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone/${selectedDate}-P4-RGB-Pyramid.tif`;
-<<<<<<< HEAD
       const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-${selectedSensor}-Traits-WGS84.geojson`;
       const newGTGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/GroundTruth-Traits-WGS84.geojson`;
-=======
-      const newGeoJsonPath = `http://127.0.0.1:5001/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-${selectedSensor}-Traits-WGS84.geojson`;
->>>>>>> gcp-picker-mason-alex
       onTilePathChange(newTilePath);
       onGeoJsonPathChange(newGeoJsonPath);
 
