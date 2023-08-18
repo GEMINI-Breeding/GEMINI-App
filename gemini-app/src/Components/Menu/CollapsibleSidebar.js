@@ -1,7 +1,7 @@
 import React from 'react';
 import { AppBar, IconButton, Drawer, Box, Divider, List, ListItem, ListItemIcon, ListItemText, Toolbar, useTheme, ThemeProvider, createTheme, Typography, Button } from '@mui/material';
 import DataSelectionMenu from './DataSelectionMenu';
-import GCPPickerSelectionMenu from './GCPPickerSelectionMenu';
+import GCPPickerSelectionMenu from '../GCP/GCPPickerSelectionMenu';
 import Menu from '@mui/icons-material/Menu';
 import PictureInPictureIcon from '@mui/icons-material/PictureInPicture';
 import MapIcon from '@mui/icons-material/Map';

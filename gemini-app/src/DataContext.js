@@ -66,7 +66,13 @@ export const DataProvider = ({ children }) => {
     const [selectedCsv, setSelectedCsv] = useState(null);
     const [imageFolderOptions, setImageFolderOptions] = useState([]);
     const [selectedImageFolder, setSelectedImageFolder] = useState(null);
-    const [radiusMeters, setRadiusMeters] = useState(null);
+    const [radiusMeters, setRadiusMeters] = useState(5);
+
+    // ImageViewer State
+    const [imageIndex, setImageIndex] = useState(0);
+    const [imageList, setImageList] = useState([]);
+    const [imageViewerLoading, setImageViewerLoading] = useState(false);
+    const [imageViewerError, setImageViewerError] = useState(null);
 
   return (
 
@@ -112,7 +118,13 @@ export const DataProvider = ({ children }) => {
         selectedCsv,
         imageFolderOptions,
         selectedImageFolder,
-        radiusMeters
+        radiusMeters,
+
+        // ImageViewer State
+        imageIndex,
+        imageList,
+        imageViewerLoading,
+        imageViewerError
 
         }}>
 
@@ -157,7 +169,13 @@ export const DataProvider = ({ children }) => {
         setSelectedCsv,
         setImageFolderOptions,
         setSelectedImageFolder,
-        setRadiusMeters
+        setRadiusMeters,
+
+        // ImageViewer State
+        setImageIndex,
+        setImageList,
+        setImageViewerLoading,
+        setImageViewerError
 
         }}>
 
