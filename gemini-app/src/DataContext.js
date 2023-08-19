@@ -73,6 +73,12 @@ export const DataProvider = ({ children }) => {
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
     const [imageViewerError, setImageViewerError] = useState(null);
+    const [locationOptionsGCP, setLocationOptionsGCP] = useState([]);
+    const [selectedLocationGCP, setSelectedLocationGCP] = useState(null);
+    const [populationOptionsGCP, setPopulationOptionsGCP] = useState([]);
+    const [selectedPopulationGCP, setSelectedPopulationGCP] = useState(null);
+    const [dateOptionsGCP, setDateOptionsGCP] = useState([]);
+    const [selectedDateGCP, setSelectedDateGCP] = useState(null);
 
   return (
 
@@ -119,6 +125,11 @@ export const DataProvider = ({ children }) => {
         imageFolderOptions,
         selectedImageFolder,
         radiusMeters,
+        selectedLocationGCP, 
+        populationOptionsGCP,
+        selectedPopulationGCP,
+        dateOptionsGCP,
+        selectedDateGCP,
 
         // ImageViewer State
         imageIndex,
@@ -170,6 +181,12 @@ export const DataProvider = ({ children }) => {
         setImageFolderOptions,
         setSelectedImageFolder,
         setRadiusMeters,
+        setLocationOptionsGCP,
+        setSelectedLocationGCP,
+        setPopulationOptionsGCP,
+        setSelectedPopulationGCP,
+        setDateOptionsGCP,
+        setSelectedDateGCP,
 
         // ImageViewer State
         setImageIndex,

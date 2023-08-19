@@ -7,51 +7,34 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
     // GCPPickerSelectionMenu state management; see DataContext.js
     const {
-      locationOptions,
-      selectedLocation,
-      populationOptions,
-      selectedPopulation,
-      genotypeOptions,
-      selectedGenotypes,
-      dateOptions,
-      selectedDate,
-      sensorOptions,
-      selectedSensor,
-      metricOptions,
-      csvOptions,
+      locationOptionsGCP,
+      selectedLocationGCP,
+      populationOptionsGCP,
+      selectedPopulationGCP,
+      dateOptionsGCP,
+      selectedDateGCP,
       selectedCsv,
-      imageFolderOptions,
       selectedImageFolder,
       radiusMeters
     } = useDataState();
   
     const {
-      setLocationOptions,
-      setSelectedLocation,
-      setPopulationOptions,
-      setSelectedPopulation,
-      setGenotypeOptions,
-      setSelectedGenotypes,
-      setDateOptions,
-      setSelectedDate,
-      setSensorOptions,
-      setSelectedSensor,
-      setMetricOptions,
+      setLocationOptionsGCP,
+      setSelectedLocationGCP,
+      setPopulationOptionsGCP,
+      setSelectedPopulationGCP,
+      setSelectedDateGCP,
       setCsvOptions,
-      setSelectedCsv,
       setImageFolderOptions,
-      setSelectedImageFolder,
-      setRadiusMeters,
       setImageList,
-      setCurrentView,
     } = useDataSetters();
 
   const handleProcessImages = () => {
 
     const data = {
-      location: selectedLocation,
-      population: selectedPopulation,
-      date: selectedDate,
+      location: selectedLocationGCP,
+      population: selectedPopulationGCP,
+      date: selectedDateGCP,
       radius_meters: radiusMeters,
     };
 
@@ -76,7 +59,42 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   }
 
   useEffect(() => {
-    // fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/GCP/')
+    fetch('http://127.0.0.1:5001/flask_app/list_dirs/Processed/')
+      .then((response) => {
+        if (!response.ok) { throw new Error('Network response was not ok') }
+        return response.json();
+      })
+      .then(data => setLocationOptionsGCP(data))
+      .catch((error) => console.error('Error:', error));
+  }, []);
+
+  useEffect(() => {
+    if (selectedLocationGCP) {
+      // fetch the populations based on the selected location
+      fetch(`http://127.0.0.1:5001/flask_app/list_dirs/Processed/${selectedLocationGCP}`)
+        .then((response) => {
+          if (!response.ok) { throw new Error('Network response was not ok') }
+          return response.json();
+        })
+        .then(data => setPopulationOptionsGCP(data))
+        .catch((error) => console.error('Error:', error));
+    }
+  }, [selectedLocationGCP]);
+
+  useEffect(() => {
+    if (selectedDateGCP) {
+      // fetch the dates based on the selected population
+      fetch(`http://127.0.0.1:5001/flask_app/list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateGCP}`)
+        .then((response) => {
+          if (!response.ok) { throw new Error('Network response was not ok') }
+          return response.json();
+        })
+        .catch((error) => console.error('Error:', error));
+    }
+  }, [selectedLocationGCP, selectedPopulationGCP, selectedDateGCP]);
+
+
+  useEffect(() => {
     fetch('http://127.0.0.1:5001/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
@@ -87,7 +105,6 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   }, []);
 
   useEffect(() => {
-    // fetch('http://127.0.0.1:5000/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/Images/')
     fetch('http://127.0.0.1:5001/flask_app/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/')
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
@@ -113,45 +130,38 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     <>
       <Autocomplete
         id="location-combo-box"
-        options={locationOptions}
-        value={selectedLocation}
+        options={locationOptionsGCP}
+        value={selectedLocationGCP}
         onChange={(event, newValue) => {
-          setSelectedLocation(newValue);
-          setSelectedPopulation(null);
-          setSelectedDate(null);
-          setSelectedSensor(null);
-          setSelectedMetric(null);
+          setSelectedLocationGCP(newValue);
+          setSelectedPopulationGCP(null);
+          setSelectedDateGCP(null);
         }}
         renderInput={(params) => <TextField {...params} label="Location" />}
         sx={{ mb: 2 }}
       />
 
-      {selectedLocation !== null ? (
+      {selectedLocationGCP !== null ? (
           <Autocomplete
             id="population-combo-box"
-            options={populationOptions}
-            value={selectedPopulation}
+            options={populationOptionsGCP}
+            value={selectedPopulationGCP}
             onChange={(event, newValue) => {
-              setSelectedPopulation(newValue);
-              setSelectedGenotypes(null);
-              setSelectedDate(null);
-              setSelectedSensor(null);
-              setSelectedMetric(null);
+              setSelectedPopulationGCP(newValue);
+              setSelectedDateGCP(null);
             }}
             renderInput={(params) => <TextField {...params} label="Population" />}
             sx={{ mb: 2 }}
           />
         ) : null}
 
-      {selectedPopulation !== null ? (
+      {selectedPopulationGCP !== null ? (
         <Autocomplete
           id="date-combo-box"
-          options={dateOptions}
-          value={selectedDate}
+          options={dateOptionsGCP}
+          value={selectedDateGCP}
           onChange={(event, newValue) => {
-            setSelectedDate(newValue);
-            setSelectedSensor(null);
-            setSelectedMetric(null);
+            setSelectedDateGCP(newValue);
           }}
           renderInput={(params) => <TextField {...params} label="Date" />}
           sx={{ mb: 2 }}
