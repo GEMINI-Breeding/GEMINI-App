@@ -131,6 +131,7 @@ export const DataProvider = ({ children }) => {
         imageFolderOptions,
         selectedImageFolder,
         radiusMeters,
+        locationOptionsGCP,
         selectedLocationGCP, 
         populationOptionsGCP,
         selectedPopulationGCP,

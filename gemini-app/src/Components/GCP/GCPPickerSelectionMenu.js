@@ -13,8 +13,6 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       selectedPopulationGCP,
       dateOptionsGCP,
       selectedDateGCP,
-      selectedCsv,
-      selectedImageFolder,
       radiusMeters,
       flaskUrl,
       gcpPath,
@@ -26,9 +24,8 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       setSelectedLocationGCP,
       setPopulationOptionsGCP,
       setSelectedPopulationGCP,
+      setDateOptionsGCP,
       setSelectedDateGCP,
-      setCsvOptions,
-      setImageFolderOptions,
       setImageList,
       setGcpPath,
       setSidebarCollapsed,
@@ -113,19 +110,23 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   }
 
   useEffect(() => {
-    fetch('${flaskUrl}/flask_app/list_dirs/Processed/')
+    fetch(`${flaskUrl}list_dirs/Processed/`)
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
         return response.json();
       })
-      .then(data => setLocationOptionsGCP(data))
+      .then(data => {
+        setLocationOptionsGCP(data)
+        console.log('data', data)
+        console.log('locationOptionsGCP', locationOptionsGCP)
+      })
       .catch((error) => console.error('Error:', error));
   }, []);
 
   useEffect(() => {
     if (selectedLocationGCP) {
       // fetch the populations based on the selected location
-      fetch(`${flaskUrl}/flask_app/list_dirs/Processed/${selectedLocationGCP}`)
+      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}`)
         .then((response) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();
@@ -135,10 +136,24 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     }
   }, [selectedLocationGCP]);
 
+
+  useEffect(() => {
+    if (selectedPopulationGCP) {
+      // fetch the populations based on the selected location
+      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
+        .then((response) => {
+          if (!response.ok) { throw new Error('Network response was not ok') }
+          return response.json();
+        })
+        .then(data => setDateOptionsGCP(data))
+        .catch((error) => console.error('Error:', error));
+    }
+  }, [selectedLocationGCP, selectedPopulationGCP]);
+
   useEffect(() => {
     if (selectedDateGCP) {
       // fetch the dates based on the selected population
-      fetch(`${flaskUrl}/list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateGCP}`)
+      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateGCP}`)
         .then((response) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();
@@ -147,38 +162,6 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     }
   }, [selectedLocationGCP, selectedPopulationGCP, selectedDateGCP]);
 
-
-  useEffect(() => {
-    fetch(`${flaskUrl}/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/`)
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => setCsvOptions(data))
-      .catch((error) => console.error('Error:', error));
-  }, []);
-
-  useEffect(() => {
-    fetch(`${flaskUrl}/list_dirs/Raw/Davis/Legumes/2022-07-25/Drone/`)
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => setImageFolderOptions(data))
-      .catch((error) => console.error('Error:', error));
-  }, []);
-
-  useEffect(() => {
-    onCsvChange(selectedCsv);
-  }, [selectedCsv]);
-
-  useEffect(() => {
-    onImageFolderChange(selectedImageFolder);
-  }, [selectedImageFolder]);
-
-  useEffect(() => {
-    onRadiusChange(radiusMeters);
-  }, [radiusMeters]);
 
   return (
     <>
