@@ -36,7 +36,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   } = useDataSetters();
 
   useEffect(() => {
-    fetch('http://127.0.0.1:5001/flask_app/list_dirs/Processed/')
+    fetch('http://127.0.0.1:5000/flask_app/list_dirs/Processed/')
       .then((response) => {
         if (!response.ok) { throw new Error('Network response was not ok') }
         return response.json();
@@ -48,7 +48,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   useEffect(() => {
     if (selectedLocation) {
       // fetch the populations based on the selected location
-      fetch(`http://127.0.0.1:5001/flask_app/list_dirs/Processed/${selectedLocation}`)
+      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}`)
         .then((response) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();
@@ -61,7 +61,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   useEffect(() => {
     if (selectedPopulation) {
       // fetch the dates based on the selected population
-      fetch(`http://127.0.0.1:5001/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}`)
+      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}`)
         .then((response) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();
@@ -74,7 +74,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   useEffect(() => {
     if (selectedDate) {
       // fetch the dates based on the selected population
-      fetch(`http://127.0.0.1:5001/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
+      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
         .then((response) => {
           if (!response.ok) { throw new Error('Network response was not ok') }
           return response.json();

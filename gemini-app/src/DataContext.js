@@ -67,6 +67,7 @@ export const DataProvider = ({ children }) => {
     const [imageFolderOptions, setImageFolderOptions] = useState([]);
     const [selectedImageFolder, setSelectedImageFolder] = useState(null);
     const [radiusMeters, setRadiusMeters] = useState(5);
+    const [gcpPath, setGcpPath] = useState(null);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -79,6 +80,11 @@ export const DataProvider = ({ children }) => {
     const [selectedPopulationGCP, setSelectedPopulationGCP] = useState(null);
     const [dateOptionsGCP, setDateOptionsGCP] = useState([]);
     const [selectedDateGCP, setSelectedDateGCP] = useState(null);
+    const [sliderMarks, setSliderMarks] = useState([]);
+
+    // Backend
+    const [flaskUrl, setFlaskUrl] = useState('http://127.0.0.1:5000/flask_app/');
+    const [tileServerUrl, setTileServerUrl] = useState('http://127.0.0.1:8090/');
 
   return (
 
@@ -130,12 +136,18 @@ export const DataProvider = ({ children }) => {
         selectedPopulationGCP,
         dateOptionsGCP,
         selectedDateGCP,
+        gcpPath,
 
         // ImageViewer State
         imageIndex,
         imageList,
         imageViewerLoading,
-        imageViewerError
+        imageViewerError,
+        sliderMarks,
+
+        // Backend
+        flaskUrl,
+        tileServerUrl
 
         }}>
 
@@ -187,12 +199,18 @@ export const DataProvider = ({ children }) => {
         setSelectedPopulationGCP,
         setDateOptionsGCP,
         setSelectedDateGCP,
+        setGcpPath,
 
         // ImageViewer State
         setImageIndex,
         setImageList,
         setImageViewerLoading,
-        setImageViewerError
+        setImageViewerError,
+        setSliderMarks,
+
+        // Backend
+        setFlaskUrl,
+        setTileServerUrl
 
         }}>
 

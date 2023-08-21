@@ -18,8 +18,8 @@ import ColorMapLegend from './Components/Map/ColorMapLegend';
 import ImageViewer from './Components/GCP/ImageViewer';
 
 // Initial tile server URL and path
-const TILE_URL_TEMPLATE = 'http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
-const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}';
+const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
+const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
 
 function App() {
 
@@ -36,7 +36,9 @@ function App() {
     selectedImageFolder,
     radiusMeters,
     geojsonData,
-    selectedGenotypes
+    selectedGenotypes,
+    flaskUrl,
+    tileServerUrl,
   } = useDataState();
 
   const {
@@ -62,8 +64,8 @@ function App() {
     selectedMetricRef.current = selectedMetric;
   }, [selectedMetric]);
 
-  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5001${selectedTilePath}`));
-  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5001${selectedTilePath}`));
+  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`));
+  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`));
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
