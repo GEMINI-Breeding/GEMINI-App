@@ -116,21 +116,34 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
   }, [ selectedMetric, selectedSensor, selectedLocation ]);
 
   useEffect(() => {
-    if (selectedSensor == 'Drone') {
-      setMetricOptions([
-        'Height_95p_meters',
-        'Vegetation_Fraction',
-        'Avg_Temp_C'
-      ])
-    }
-    else if (selectedSensor == 'Rover') {
-      setMetricOptions([
-        'Average Height (cm)',
-        'Average Leaf Area (cm2)',
-        'Average Fruit Count',
-        'Average Leaf Count',
-        'Average Flower Count'
-      ])
+    // If sensor is drone or rover, then we need to query the traits endpoint
+    if (selectedSensor == 'Drone' || selectedSensor == 'Rover') {
+
+      // Generate data for the query traits endpoint
+      const data = {
+        location: selectedLocation,
+        population: selectedPopulation,
+        date: selectedDate,
+        sensor: selectedSensor
+      }
+
+      // Send the data to the query traits endpoint
+      fetch(`${flaskUrl}query_traits`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+      })
+      .then((response) => {
+        if (!response.ok) { throw new Error('Network response was not ok') }
+        return response.json();
+      })
+      .then(data => {
+        console.log('data', data)
+        setMetricOptions(data)
+      })
+      .catch((error) => console.error('Error:', error));
     }
   }, [selectedSensor])
 
