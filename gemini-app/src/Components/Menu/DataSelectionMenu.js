@@ -113,8 +113,25 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     // Fetch sensors if no sensor is selected
     else if (selectedLocation && selectedPopulation && selectedDate && !selectedSensor) {
       fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
-        .then(data => setSensorOptions(data.filter((item) => item !== 'Results')))
-        .catch((error) => console.error('Error:', error));
+      .then(data => {        
+        // Check if 'Drone' folder exists
+        if (data.includes("Drone")) {
+          // Fetch contents of the 'Drone' folder
+          fetchData(`${flaskUrl}list_files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone`)
+            .then(droneData => {
+              console.log('Contents of Drone folder:', droneData);
+              // If the 'Drone' folder contains a file ending in 'Pyramid.tif', then add 'Drone' to the sensor options
+              if (droneData.filter((item) => item.endsWith('Pyramid.tif')).length > 0) {
+                setSensorOptions(data.filter((item) => item !== 'Results'));
+              }
+              else {
+                setSensorOptions(data.filter((item) => item !== 'Drone' && item !== 'Results'));
+              }
+            })
+            .catch((error) => console.error('Error fetching contents of Drone folder:', error));
+        }
+      })
+      .catch((error) => console.error('Error:', error));
     }
   
     // Fetch dates if no date is selected

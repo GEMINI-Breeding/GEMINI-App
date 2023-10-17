@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Autocomplete, TextField, Button } from '@mui/material';
 
 import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
@@ -109,59 +109,60 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   }
   }
 
-  useEffect(() => {
-    fetch(`${flaskUrl}list_dirs/Processed/`)
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => {
-        setLocationOptionsGCP(data)
-        console.log('data', data)
-        console.log('locationOptionsGCP', locationOptionsGCP)
-      })
-      .catch((error) => console.error('Error:', error));
-  }, []);
+  const fetchData = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+    return await response.json();
+  };
 
+  const prevLocationGCPRef = useRef(null);
+  const prevPopulationGCPRef = useRef(null);
+  const prevDateGCPRef = useRef(null);
+  
   useEffect(() => {
-    if (selectedLocationGCP) {
-      // fetch the populations based on the selected location
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setPopulationOptionsGCP(data))
+
+    // Check if location has changed
+    if (selectedLocationGCP !== prevLocationGCPRef.current) {
+      setSelectedPopulationGCP(null);
+      setSelectedDateGCP(null);
+    }
+  
+    // Check if population has changed
+    if (selectedPopulationGCP !== prevPopulationGCPRef.current) {
+      setSelectedDateGCP(null);
+    }
+  
+    // Fetch date options if no date is selected but other criteria are
+    if (selectedLocationGCP && selectedPopulationGCP && !selectedDateGCP) {
+      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
+        .then(setDateOptionsGCP)
         .catch((error) => console.error('Error:', error));
     }
-  }, [selectedLocationGCP]);
-
-
-  useEffect(() => {
-    if (selectedPopulationGCP) {
-      // fetch the populations based on the selected location
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setDateOptionsGCP(data))
+  
+    // Fetch populations if no population is selected but location is
+    if (selectedLocationGCP && !selectedPopulationGCP) {
+      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}`)
+        .then(setPopulationOptionsGCP)
         .catch((error) => console.error('Error:', error));
     }
-  }, [selectedLocationGCP, selectedPopulationGCP]);
-
-  useEffect(() => {
-    if (selectedDateGCP) {
-      // fetch the dates based on the selected population
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
+  
+    // Fetch location options if no location is selected
+    if (!selectedLocationGCP) {
+      fetchData(`${flaskUrl}list_dirs/Processed/`)
+        .then(data => {
+          setLocationOptionsGCP(data);
         })
         .catch((error) => console.error('Error:', error));
     }
+  
+    // Update ref values at the end
+    prevLocationGCPRef.current = selectedLocationGCP;
+    prevPopulationGCPRef.current = selectedPopulationGCP;
+    prevDateGCPRef.current = selectedDateGCP;
+  
   }, [selectedLocationGCP, selectedPopulationGCP, selectedDateGCP]);
-
 
   return (
     <>
