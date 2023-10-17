@@ -88,7 +88,14 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
       // Fetch genotypes from the new GeoJSON path
       fetchData(newGeoJsonPath)
         .then(data => {
+          // Get all unique plot labels
           const traitOutputLabels = data.features.map(f => f.properties.Label);
+          // Get all property names
+          const metricColumns = Object.keys(data.features[0].properties);
+          // Filter property names based on an exclusion list
+          const excludedColumns = ['Tier','Bed','Plot','Label','Group','geometry'];
+          const metricOptions = metricColumns.filter(col => !excludedColumns.includes(col));
+          setMetricOptions(metricOptions);
           const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
           uniqueTraitOutputLabels.unshift('All Genotypes');
           setGenotypeOptions(uniqueTraitOutputLabels);
@@ -101,32 +108,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
           setNowDroneProcessing(true);
         });
   
-      // Query traits endpoint for specific sensors
-      if (selectedSensor === 'Drone' || selectedSensor === 'Rover') {
-        const data = {
-          location: selectedLocation,
-          population: selectedPopulation,
-          date: selectedDate,
-          sensor: selectedSensor
-        };
-    
-        fetch(`${flaskUrl}query_traits`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(data)
-        })
-        .then(response => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => {
-          console.log('data', data);
-          setMetricOptions(data);
-        })
-        .catch(error => console.error('Error:', error));
-      }
     }
   
     // Fetch sensors if no sensor is selected
