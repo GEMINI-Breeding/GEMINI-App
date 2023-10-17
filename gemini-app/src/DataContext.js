@@ -30,6 +30,9 @@ export const DataProvider = ({ children }) => {
         bearing: 0,
       };
 
+    const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
+    const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
+
     // App State
     const [viewState, setViewState] = useState(initialViewState);
     const [selectedTilePath, setSelectedTilePath] = useState('');
@@ -39,6 +42,8 @@ export const DataProvider = ({ children }) => {
     const [selectedMetric, setSelectedMetric] = useState(null);
     const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
     const [currentView, setCurrentView] = useState(null);
+    const [tileUrl, setTileUrl] = useState(TILE_URL_TEMPLATE);
+    const [boundsUrl, setBoundsUrl] = useState(BOUNDS_URL_TEMPLATE);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -103,6 +108,8 @@ export const DataProvider = ({ children }) => {
         selectedImageFolder,
         radiusMeters,
         geojsonData,
+        tileUrl,
+        boundsUrl,
 
         // DataSelectionMenu State
         locationOptions, 
@@ -168,6 +175,8 @@ export const DataProvider = ({ children }) => {
         setSelectedImageFolder,
         setRadiusMeters,
         setGeojsonData,
+        setTileUrl,
+        setBoundsUrl,
 
         // DataSelectionMenu state
         setLocationOptions, 

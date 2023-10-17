@@ -17,11 +17,10 @@ import ColorMapLegend from './Components/Map/ColorMapLegend';
 
 import ImageViewer from './Components/GCP/ImageViewer';
 
-// Initial tile server URL and path
-const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
-const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
-
 function App() {
+
+  const INITIAL_TILE_URL = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
+  const INITIAL_BOUNDS_URL = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
 
   // App state management; see DataContext.js
   const {
@@ -39,6 +38,8 @@ function App() {
     selectedGenotypes,
     flaskUrl,
     tileServerUrl,
+    tileUrl,
+    boundsUrl
   } = useDataState();
 
   const {
@@ -53,7 +54,9 @@ function App() {
     setSelectedImageFolder,
     setRadiusMeters,
     setGeojsonData,
-    setSelectedGenotypes
+    setSelectedGenotypes,
+    setTileUrl,
+    setBoundsUrl
   } = useDataSetters();
 
   const selectedMetricRef = useRef(selectedMetric);
@@ -64,8 +67,17 @@ function App() {
     selectedMetricRef.current = selectedMetric;
   }, [selectedMetric]);
 
-  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`));
-  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`));
+  useEffect(() => {
+    if (selectedTilePath) {
+      setTileUrl(INITIAL_TILE_URL.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`)));
+      setBoundsUrl(INITIAL_BOUNDS_URL.replace('${FILE_PATH}', encodeURIComponent(`${flaskUrl}${selectedTilePath}`)));
+    } else {
+      // Reset to initial state
+      setTileUrl(INITIAL_TILE_URL);
+      setBoundsUrl(INITIAL_BOUNDS_URL);
+    }
+  }, [selectedTilePath]);
+
   const extentBounds = useExtentFromBounds(boundsUrl);
   
   useEffect(() => {
@@ -101,7 +113,7 @@ function App() {
   }, [extentBounds]);
   
 
-  const orthoTileLayer = new TileLayer({
+  const orthoTileLayer = tileUrl.includes("FILE_PATH") ? null : new TileLayer({
     id: 'geotiff-tile-layer',
     minZoom: 15,
     maxZoom: 22,
@@ -111,7 +123,7 @@ function App() {
       const {
         bbox: { west, south, east, north }
       } = props.tile;
-
+  
       return new BitmapLayer(props, {
         data: null,
         image: props.data,
@@ -119,6 +131,7 @@ function App() {
       });
     }
   });
+  
 
   // This should be moved out to a separate data component (I think)
   useEffect(() => {
@@ -151,24 +164,29 @@ function App() {
   }, [geojsonData, selectedGenotypes]);
   
 
-  const traitsGeoJsonLayer = React.useMemo(() => 
-  new GeoJsonLayer({
-    id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
-    data: filteredGeoJsonData,
-    filled: true,
-    getFillColor: d => {
-      if (colorScale) {
-        const value = d.properties[selectedMetricRef.current];
-        const color = colorScale(value);
-        return color;
-      } else {
-        return [160, 160, 180, 200];
-      }
-    },
-    stroked: false, 
-    pickable: true,
-    onHover: info => setHoverInfo(info),
-  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState, selectedGenotypes]);
+  const traitsGeoJsonLayer = React.useMemo(() => {
+    if (selectedTraitsGeoJsonPath) { // Check if selectedTraitsGeoJsonPath exists
+      return new GeoJsonLayer({
+        id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
+        data: filteredGeoJsonData,
+        filled: true,
+        getFillColor: d => {
+          if (colorScale) {
+            const value = d.properties[selectedMetricRef.current];
+            const color = colorScale(value);
+            return color;
+          } else {
+            return [160, 160, 180, 200];
+          }
+        },
+        stroked: false,
+        pickable: true,
+        onHover: info => setHoverInfo(info),
+      });
+    }
+    return null;  // Return null or any default value when selectedTraitsGeoJsonPath doesn't exist
+  }, [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState, selectedGenotypes]);
+  
 
   const sidebar = <CollapsibleSidebar 
                   onTilePathChange={setSelectedTilePath} 

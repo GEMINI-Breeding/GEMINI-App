@@ -37,7 +37,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "front": "PORT=3002 react-scripts start",
-    "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-Data 5002",
+    "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-Data 5050",
     "gemini": "concurrently \"npm run front\"  \"npm run server\""
   },
   "eslintConfig": {
