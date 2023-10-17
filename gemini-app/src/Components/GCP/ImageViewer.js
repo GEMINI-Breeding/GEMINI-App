@@ -77,11 +77,16 @@ const ImageViewer = () => {
                     }}
                 />
             )}
+            {imageList.length > 0 && (
             <div style={{ gridColumn: '2', display: 'block', height: '50px', justifySelf: 'center', gap: '20px' }}>
                 <Button variant='contained' onClick={handlePrevious}>Previous</Button>
                 &nbsp;&nbsp;&nbsp;
-                <Button variant='contained' onClick={handleNext}>Next</Button>
-            </div>
+                {imageIndex === imageList.length - 1 ? (
+                <Button variant='contained' color="warning">Generate Orthophoto</Button>
+                ) : (
+                    <Button variant='contained' onClick={handleNext}>Next</Button>
+                )}
+            </div>)}
         </div>
     );
 };
