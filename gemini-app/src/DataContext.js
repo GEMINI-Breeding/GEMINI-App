@@ -52,6 +52,7 @@ export const DataProvider = ({ children }) => {
     const [sensorOptions, setSensorOptions] = useState([]);
     const [selectedSensor, setSelectedSensor] = useState(null);
     const [metricOptions, setMetricOptions] = useState([]);
+    const [nowDroneProcessing, setNowDroneProcessing] = useState();
 
     // CollapsibleSideBar State
     const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -116,6 +117,7 @@ export const DataProvider = ({ children }) => {
         selectedSensor,
         metricOptions,
         geojsonData,
+        nowDroneProcessing,
 
         // CollapsibleSideBarState
         isSidebarCollapsed,
@@ -179,6 +181,7 @@ export const DataProvider = ({ children }) => {
         setSensorOptions,
         setSelectedSensor,
         setMetricOptions,
+        setNowDroneProcessing,
 
         // CollapsibleSideBar State
         setSidebarCollapsed,

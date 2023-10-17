@@ -247,7 +247,7 @@ function App() {
       </div>
 
       <div className="content">
-        {console.log('App Component is Rendering')}
+        {/* {console.log('App Component is Rendering')} */}
         {contentView}
       </div>
     </div>

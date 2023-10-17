@@ -18,7 +18,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     selectedSensor,
     metricOptions,
     flaskUrl,
-    selectedTraitsGeoJsonPath
+    selectedTraitsGeoJsonPath,
+    nowDroneProcessing
   } = useDataState();
 
   const {
@@ -33,7 +34,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     setSensorOptions,
     setSelectedSensor,
     setMetricOptions,
-    setSelectedTraitsGeoJsonPath
+    setSelectedTraitsGeoJsonPath,
+    setNowDroneProcessing
   } = useDataSetters();
 
   useEffect(() => {
@@ -108,12 +110,46 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                 setSelectedGenotypes(['All Genotypes'])
               }
             }
-          }).catch((error) => console.error('newGeoJsonPath not loaded:', error));
+          }).catch((error) => {
+            console.error('newGeoJsonPath not loaded:', error)
+            // Set processing flag
+            setNowDroneProcessing(true);
+          });
     }
+
+
     if (selectedLocation == null || selectedSensor == null || selectedMetric == null){
       onGeoJsonPathChange(null)
     }
   }, [ selectedMetric, selectedSensor, selectedLocation ]);
+
+  useEffect(() => {
+    // Post request to process drone tiff file
+    // Run only if nowDroneProcessing is true
+    if (nowDroneProcessing) {
+      // Add loading spinner
+
+      const fetch_url = `${flaskUrl}process_drone_tiff/${selectedLocation}/${selectedPopulation}/${selectedDate}`
+      console.log(`Processing drone tiff file...${fetch_url}`)
+
+      // Process drone tiff file
+      fetch(fetch_url)
+        .then((response) => {
+          if (!response.ok) { throw new Error('Network response was not ok') }
+          return response.json();
+        })
+        .then(data => {
+          console.log("Drone tiff file processed!")
+          setNowDroneProcessing(false)
+        })
+        .catch((error) => console.error('Error:', error));
+      
+        
+        // Remove loading spinner
+
+    }
+
+  }, [nowDroneProcessing]);
 
   useEffect(() => {
     if (selectedSensor == 'Drone') {

@@ -19,6 +19,7 @@
     "@testing-library/user-event": "^13.5.0",
     "@turf/turf": "^6.5.0",
     "@urbica/react-map-gl": "^1.16.2",
+    "concurrently": "^8.2.1",
     "create-react-app": "^5.0.1",
     "deck.gl": "^8.9.22",
     "geotiff": "^2.0.7",
@@ -34,7 +35,10 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "front": "PORT=3002 react-scripts start",
+    "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-Data 5002",
+    "gemini": "concurrently \"npm run front\"  \"npm run server\""
   },
   "eslintConfig": {
     "extends": [
