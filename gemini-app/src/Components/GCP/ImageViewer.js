@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useDataState, useDataSetters } from '../../DataContext';
 import Button from '@mui/material/Button';
 import Slider from '@mui/material/Slider';
 import PointPicker from './PointPicker';
+import OrthoModal from './OrthoModal';
 
 const ImageViewer = () => {
     const {
@@ -19,9 +20,10 @@ const ImageViewer = () => {
         setImageList,
         setImageViewerLoading,
         setImageViewerError,
+        setOrthoModalOpen
     } = useDataSetters();
 
-    const API_ENDPOINT = `${flaskUrl}files`;    
+    const API_ENDPOINT = `${flaskUrl}files`;
 
     const handlePrevious = () => {
         if (imageIndex > 0) {
@@ -82,11 +84,12 @@ const ImageViewer = () => {
                 <Button variant='contained' onClick={handlePrevious}>Previous</Button>
                 &nbsp;&nbsp;&nbsp;
                 {imageIndex === imageList.length - 1 ? (
-                <Button variant='contained' color="warning">Generate Orthophoto</Button>
+                <Button variant='contained' color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
                 ) : (
                     <Button variant='contained' onClick={handleNext}>Next</Button>
                 )}
             </div>)}
+            <OrthoModal />
         </div>
     );
 };

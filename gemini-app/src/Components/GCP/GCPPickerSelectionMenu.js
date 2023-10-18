@@ -29,6 +29,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       setImageList,
       setGcpPath,
       setSidebarCollapsed,
+      setTotalImages,
     } = useDataSetters();
 
     function mergeLists(imageList, existingData) {
@@ -75,6 +76,9 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     })
     .then(response => response.json())
     .then(data => {
+      if (data.num_total) {
+        setTotalImages(data.num_total);
+      }
       // Before setting the image list, initialize (or fetch existing) file content
       fetch(`${flaskUrl}initialize_file`, {
           method: 'POST',
@@ -136,21 +140,23 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
   
     // Fetch date options if no date is selected but other criteria are
     if (selectedLocationGCP && selectedPopulationGCP && !selectedDateGCP) {
-      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
-        .then(setDateOptionsGCP)
+      fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}/${selectedPopulationGCP}`)
+        .then(data => {
+          setDateOptionsGCP(data);
+        })
         .catch((error) => console.error('Error:', error));
     }
   
     // Fetch populations if no population is selected but location is
     if (selectedLocationGCP && !selectedPopulationGCP) {
-      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}`)
+      fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}`)
         .then(setPopulationOptionsGCP)
         .catch((error) => console.error('Error:', error));
     }
   
     // Fetch location options if no location is selected
     if (!selectedLocationGCP) {
-      fetchData(`${flaskUrl}list_dirs/Processed/`)
+      fetchData(`${flaskUrl}list_dirs/Raw/`)
         .then(data => {
           setLocationOptionsGCP(data);
         })

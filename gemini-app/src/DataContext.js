@@ -87,6 +87,14 @@ export const DataProvider = ({ children }) => {
     const [dateOptionsGCP, setDateOptionsGCP] = useState([]);
     const [selectedDateGCP, setSelectedDateGCP] = useState(null);
     const [sliderMarks, setSliderMarks] = useState([]);
+    const [totalImages, setTotalImages] = useState(0);
+
+    // Ortho Generation State
+    const [orthoSetting, setOrthoSetting] = useState('High');
+    const [orthoCustomValue, setOrthoCustomValue] = useState('');
+    const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
+    const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
+    const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
     // Backend
     const [flaskUrl, setFlaskUrl] = useState('http://127.0.0.1:5050/flask_app/');
@@ -154,6 +162,14 @@ export const DataProvider = ({ children }) => {
         imageViewerLoading,
         imageViewerError,
         sliderMarks,
+        totalImages,
+
+        // Ortho Generation State
+        orthoSetting,
+        orthoCustomValue,
+        isOrthoModalOpen,
+        isOrthoProcessing,
+        orthoServerStatus,
 
         // Backend
         flaskUrl,
@@ -220,6 +236,14 @@ export const DataProvider = ({ children }) => {
         setImageViewerLoading,
         setImageViewerError,
         setSliderMarks,
+        setTotalImages,
+
+        // Ortho Generation State
+        setOrthoSetting,
+        setOrthoCustomValue,
+        setOrthoModalOpen,
+        setIsOrthoProcessing,
+        setOrthoServerStatus,
 
         // Backend
         setFlaskUrl,
