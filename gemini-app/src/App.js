@@ -16,6 +16,7 @@ import useExtentFromBounds from './Components/Map/MapHooks';
 import ColorMapLegend from './Components/Map/ColorMapLegend';
 
 import ImageViewer from './Components/GCP/ImageViewer';
+import TabbedPrepUI from './Components/GCP/TabbedPrepUI';
 
 function App() {
 
@@ -234,7 +235,7 @@ function App() {
           </React.Fragment>
         );
       case 1:
-        return <ImageViewer />;
+        return <TabbedPrepUI />;
       case 2:
         return (
           <div style={{ 

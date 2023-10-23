@@ -84,7 +84,7 @@ const OrthoModal = () => {
                         onClick={() => {}}
                     >
                         {isOrthoProcessing ? "Processing" : "Process Images"}
-                        {isOrthoProcessing && <CircularProgress size={24} style={{ marginLeft: '10px' }} />}
+                        {isOrthoProcessing && <CircularProgress size={24} style={{ marginLeft: '14px' }} />}
                     </Button>
                 </Grid>
                 {orthoServerStatus && <Typography variant="body2" style={{ marginTop: '10px', color: 'black' }}>{orthoServerStatus}</Typography>}

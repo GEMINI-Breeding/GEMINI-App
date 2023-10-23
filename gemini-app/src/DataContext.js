@@ -74,6 +74,7 @@ export const DataProvider = ({ children }) => {
     const [selectedImageFolder, setSelectedImageFolder] = useState(null);
     const [radiusMeters, setRadiusMeters] = useState(5);
     const [gcpPath, setGcpPath] = useState(null);
+    const [isPrepInitiated, setIsPrepInitiated] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -88,6 +89,7 @@ export const DataProvider = ({ children }) => {
     const [selectedDateGCP, setSelectedDateGCP] = useState(null);
     const [sliderMarks, setSliderMarks] = useState([]);
     const [totalImages, setTotalImages] = useState(0);
+    const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState('High');
@@ -155,6 +157,7 @@ export const DataProvider = ({ children }) => {
         dateOptionsGCP,
         selectedDateGCP,
         gcpPath,
+        isPrepInitiated,
 
         // ImageViewer State
         imageIndex,
@@ -163,6 +166,7 @@ export const DataProvider = ({ children }) => {
         imageViewerError,
         sliderMarks,
         totalImages,
+        isImageViewerOpen,
 
         // Ortho Generation State
         orthoSetting,
@@ -229,6 +233,7 @@ export const DataProvider = ({ children }) => {
         setDateOptionsGCP,
         setSelectedDateGCP,
         setGcpPath,
+        setIsPrepInitiated,
 
         // ImageViewer State
         setImageIndex,
@@ -237,6 +242,7 @@ export const DataProvider = ({ children }) => {
         setImageViewerError,
         setSliderMarks,
         setTotalImages,
+        setIsImageViewerOpen,
 
         // Ortho Generation State
         setOrthoSetting,
