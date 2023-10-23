@@ -30,6 +30,7 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       setGcpPath,
       setSidebarCollapsed,
       setTotalImages,
+      setIsPrepInitiated,
     } = useDataSetters();
 
     function mergeLists(imageList, existingData) {
@@ -107,11 +108,21 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       });
   })
 
+
+
   // If the sidebar is not collapsed, collapse it
   if (!isSidebarCollapsed) {
     setSidebarCollapsed(true);
   }
   }
+
+  const initiatePrep = () => {
+    setIsPrepInitiated(true);
+    // If the sidebar is not collapsed, collapse it
+    if (!isSidebarCollapsed) {
+      setSidebarCollapsed(true);
+    }
+  };
 
   const fetchData = async (url) => {
     const response = await fetch(url);
@@ -123,31 +134,15 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
 
   const prevLocationGCPRef = useRef(null);
   const prevPopulationGCPRef = useRef(null);
-  const prevDateGCPRef = useRef(null);
   
   useEffect(() => {
 
     // Check if location has changed
     if (selectedLocationGCP !== prevLocationGCPRef.current) {
       setSelectedPopulationGCP(null);
-      setSelectedDateGCP(null);
     }
   
-    // Check if population has changed
-    if (selectedPopulationGCP !== prevPopulationGCPRef.current) {
-      setSelectedDateGCP(null);
-    }
-  
-    // Fetch date options if no date is selected but other criteria are
-    if (selectedLocationGCP && selectedPopulationGCP && !selectedDateGCP) {
-      fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}/${selectedPopulationGCP}`)
-        .then(data => {
-          setDateOptionsGCP(data);
-        })
-        .catch((error) => console.error('Error:', error));
-    }
-  
-    // Fetch populations if no population is selected but location is
+    // Fetch population options if no population is selected but location is
     if (selectedLocationGCP && !selectedPopulationGCP) {
       fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}`)
         .then(setPopulationOptionsGCP)
@@ -166,9 +161,8 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     // Update ref values at the end
     prevLocationGCPRef.current = selectedLocationGCP;
     prevPopulationGCPRef.current = selectedPopulationGCP;
-    prevDateGCPRef.current = selectedDateGCP;
   
-  }, [selectedLocationGCP, selectedPopulationGCP, selectedDateGCP]);
+  }, [selectedLocationGCP, selectedPopulationGCP]);
 
   return (
     <>
@@ -199,25 +193,12 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
           />
         ) : null}
 
-      {selectedPopulationGCP !== null ? (
-        <Autocomplete
-          id="date-combo-box"
-          options={dateOptionsGCP}
-          value={selectedDateGCP}
-          onChange={(event, newValue) => {
-            setSelectedDateGCP(newValue);
-          }}
-          renderInput={(params) => <TextField {...params} label="Date" />}
-          sx={{ mb: 2 }}
-        />
-      ) : null}
-
       <Button 
         variant="contained"
         color="primary"
-        onClick={handleProcessImages}
+        onClick={initiatePrep}
       >
-        Run GCP Selection
+        Begin Data Preparation
       </Button>
 
     </>
