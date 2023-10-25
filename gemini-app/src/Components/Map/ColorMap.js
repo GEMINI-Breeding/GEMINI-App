@@ -40,13 +40,23 @@ function useTraitsColorMap(traitsGeoJsonPath, selectedMetric, setIsLoadingColorS
 
             setLowerPercentileValue(lowerPercentileValue);
             setUpperPercentileValue(upperPercentileValue);
+            
+            let scaleRange = [];
+            if (selectedMetric === 'Avg_Temp_C') {
+              scaleRange = [
+                [0, 0, 255],  // blue for min value
+                [255, 0, 0]   // red for max value
+              ]
+            }else{
+              scaleRange = [
+                [255, 0, 0], // red for min value
+                [0, 0, 255]  // blue for max value
+              ]
+            }
 
             const scale = scaleLinear()
               .domain([lowerPercentileValue, upperPercentileValue])
-              .range([
-                [255, 0, 0], // red for min value
-                [0, 0, 255]  // blue for max value
-              ]);
+              .range(scaleRange);
 
             setColorScale(prevScale => {
               return scale;
