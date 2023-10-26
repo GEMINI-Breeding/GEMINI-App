@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Autocomplete, TextField, Button } from '@mui/material';
 
 import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
@@ -29,6 +29,8 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       setImageList,
       setGcpPath,
       setSidebarCollapsed,
+      setTotalImages,
+      setIsPrepInitiated,
     } = useDataSetters();
 
     function mergeLists(imageList, existingData) {
@@ -75,6 +77,9 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
     })
     .then(response => response.json())
     .then(data => {
+      if (data.num_total) {
+        setTotalImages(data.num_total);
+      }
       // Before setting the image list, initialize (or fetch existing) file content
       fetch(`${flaskUrl}initialize_file`, {
           method: 'POST',
@@ -103,65 +108,61 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
       });
   })
 
+
+
   // If the sidebar is not collapsed, collapse it
   if (!isSidebarCollapsed) {
     setSidebarCollapsed(true);
   }
   }
 
-  useEffect(() => {
-    fetch(`${flaskUrl}list_dirs/Processed/`)
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => {
-        setLocationOptionsGCP(data)
-        console.log('data', data)
-        console.log('locationOptionsGCP', locationOptionsGCP)
-      })
-      .catch((error) => console.error('Error:', error));
-  }, []);
+  const initiatePrep = () => {
+    setIsPrepInitiated(true);
+    // If the sidebar is not collapsed, collapse it
+    if (!isSidebarCollapsed) {
+      setSidebarCollapsed(true);
+    }
+  };
 
+  const fetchData = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+    return await response.json();
+  };
+
+  const prevLocationGCPRef = useRef(null);
+  const prevPopulationGCPRef = useRef(null);
+  
   useEffect(() => {
-    if (selectedLocationGCP) {
-      // fetch the populations based on the selected location
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setPopulationOptionsGCP(data))
+
+    // Check if location has changed
+    if (selectedLocationGCP !== prevLocationGCPRef.current) {
+      setSelectedPopulationGCP(null);
+    }
+  
+    // Fetch population options if no population is selected but location is
+    if (selectedLocationGCP && !selectedPopulationGCP) {
+      fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}`)
+        .then(setPopulationOptionsGCP)
         .catch((error) => console.error('Error:', error));
     }
-  }, [selectedLocationGCP]);
-
-
-  useEffect(() => {
-    if (selectedPopulationGCP) {
-      // fetch the populations based on the selected location
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
+  
+    // Fetch location options if no location is selected
+    if (!selectedLocationGCP) {
+      fetchData(`${flaskUrl}list_dirs/Raw/`)
+        .then(data => {
+          setLocationOptionsGCP(data);
         })
-        .then(data => setDateOptionsGCP(data))
         .catch((error) => console.error('Error:', error));
     }
+  
+    // Update ref values at the end
+    prevLocationGCPRef.current = selectedLocationGCP;
+    prevPopulationGCPRef.current = selectedPopulationGCP;
+  
   }, [selectedLocationGCP, selectedPopulationGCP]);
-
-  useEffect(() => {
-    if (selectedDateGCP) {
-      // fetch the dates based on the selected population
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateGCP}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .catch((error) => console.error('Error:', error));
-    }
-  }, [selectedLocationGCP, selectedPopulationGCP, selectedDateGCP]);
-
 
   return (
     <>
@@ -192,25 +193,12 @@ const GCPPickerSelectionMenu = ({ onCsvChange, onImageFolderChange, onRadiusChan
           />
         ) : null}
 
-      {selectedPopulationGCP !== null ? (
-        <Autocomplete
-          id="date-combo-box"
-          options={dateOptionsGCP}
-          value={selectedDateGCP}
-          onChange={(event, newValue) => {
-            setSelectedDateGCP(newValue);
-          }}
-          renderInput={(params) => <TextField {...params} label="Date" />}
-          sx={{ mb: 2 }}
-        />
-      ) : null}
-
       <Button 
         variant="contained"
         color="primary"
-        onClick={handleProcessImages}
+        onClick={initiatePrep}
       >
-        Run GCP Selection
+        Begin Data Preparation
       </Button>
 
     </>

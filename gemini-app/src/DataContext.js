@@ -30,6 +30,9 @@ export const DataProvider = ({ children }) => {
         bearing: 0,
       };
 
+    const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
+    const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
+
     // App State
     const [viewState, setViewState] = useState(initialViewState);
     const [selectedTilePath, setSelectedTilePath] = useState('');
@@ -39,6 +42,8 @@ export const DataProvider = ({ children }) => {
     const [selectedMetric, setSelectedMetric] = useState(null);
     const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
     const [currentView, setCurrentView] = useState(null);
+    const [tileUrl, setTileUrl] = useState(TILE_URL_TEMPLATE);
+    const [boundsUrl, setBoundsUrl] = useState(BOUNDS_URL_TEMPLATE);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -69,6 +74,7 @@ export const DataProvider = ({ children }) => {
     const [selectedImageFolder, setSelectedImageFolder] = useState(null);
     const [radiusMeters, setRadiusMeters] = useState(5);
     const [gcpPath, setGcpPath] = useState(null);
+    const [isPrepInitiated, setIsPrepInitiated] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -82,6 +88,15 @@ export const DataProvider = ({ children }) => {
     const [dateOptionsGCP, setDateOptionsGCP] = useState([]);
     const [selectedDateGCP, setSelectedDateGCP] = useState(null);
     const [sliderMarks, setSliderMarks] = useState([]);
+    const [totalImages, setTotalImages] = useState(0);
+    const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+
+    // Ortho Generation State
+    const [orthoSetting, setOrthoSetting] = useState('High');
+    const [orthoCustomValue, setOrthoCustomValue] = useState('');
+    const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
+    const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
+    const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
     // Backend
     const [flaskUrl, setFlaskUrl] = useState('http://127.0.0.1:5000/flask_app/');
@@ -103,6 +118,8 @@ export const DataProvider = ({ children }) => {
         selectedImageFolder,
         radiusMeters,
         geojsonData,
+        tileUrl,
+        boundsUrl,
 
         // DataSelectionMenu State
         locationOptions, 
@@ -140,6 +157,7 @@ export const DataProvider = ({ children }) => {
         dateOptionsGCP,
         selectedDateGCP,
         gcpPath,
+        isPrepInitiated,
 
         // ImageViewer State
         imageIndex,
@@ -147,6 +165,15 @@ export const DataProvider = ({ children }) => {
         imageViewerLoading,
         imageViewerError,
         sliderMarks,
+        totalImages,
+        isImageViewerOpen,
+
+        // Ortho Generation State
+        orthoSetting,
+        orthoCustomValue,
+        isOrthoModalOpen,
+        isOrthoProcessing,
+        orthoServerStatus,
 
         // Backend
         flaskUrl,
@@ -168,6 +195,8 @@ export const DataProvider = ({ children }) => {
         setSelectedImageFolder,
         setRadiusMeters,
         setGeojsonData,
+        setTileUrl,
+        setBoundsUrl,
 
         // DataSelectionMenu state
         setLocationOptions, 
@@ -204,6 +233,7 @@ export const DataProvider = ({ children }) => {
         setDateOptionsGCP,
         setSelectedDateGCP,
         setGcpPath,
+        setIsPrepInitiated,
 
         // ImageViewer State
         setImageIndex,
@@ -211,6 +241,15 @@ export const DataProvider = ({ children }) => {
         setImageViewerLoading,
         setImageViewerError,
         setSliderMarks,
+        setTotalImages,
+        setIsImageViewerOpen,
+
+        // Ortho Generation State
+        setOrthoSetting,
+        setOrthoCustomValue,
+        setOrthoModalOpen,
+        setIsOrthoProcessing,
+        setOrthoServerStatus,
 
         // Backend
         setFlaskUrl,

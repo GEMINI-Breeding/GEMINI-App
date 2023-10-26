@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
 import { useDataState, useDataSetters } from '../../DataContext';
@@ -38,137 +38,146 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     setNowDroneProcessing
   } = useDataSetters();
 
+  const fetchData = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+    return await response.json();
+  };
+  
   useEffect(() => {
-    fetch(`${flaskUrl}list_dirs/Processed/`)
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => setLocationOptions(data))
+    // Fetch locations initially
+    fetchData(`${flaskUrl}list_dirs/Processed/`)
+      .then(setLocationOptions)
       .catch((error) => console.error('Error:', error));
   }, []);
-
+  
+  const prevLocationRef = useRef(null);
+  const prevPopulationRef = useRef(null);
+  const prevDateRef = useRef(null);
+  
   useEffect(() => {
-    if (selectedLocation) {
-      // fetch the populations based on the selected location
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocation}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setPopulationOptions(data))
-        .catch((error) => console.error('Error:', error));
+  
+    // Check if location has changed
+    if (selectedLocation !== prevLocationRef.current) {
+      setSelectedPopulation(null);
+      setSelectedDate(null);
+      setSelectedSensor(null);
     }
-  }, [selectedLocation]);
-
-  useEffect(() => {
-    if (selectedPopulation) {
-      // fetch the dates based on the selected population
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocation}/${selectedPopulation}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setDateOptions(data))
-        .catch((error) => console.error('Error:', error));
+  
+    // Check if population has changed
+    if (selectedPopulation !== prevPopulationRef.current) {
+      setSelectedDate(null);
+      setSelectedSensor(null);
     }
-  }, [selectedLocation, selectedPopulation]);
-
-  useEffect(() => {
-    if (selectedDate) {
-      // fetch the dates based on the selected population
-      fetch(`${flaskUrl}list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setSensorOptions(data.filter((item) => item !== 'Results')))
-        .catch((error) => console.error('Error:', error));
+  
+    // Check if date has changed
+    if (selectedDate !== prevDateRef.current) {
+      setSelectedSensor(null);
     }
-  }, [selectedLocation, selectedPopulation, selectedDate]);
-
-  useEffect(() => {
-    if (selectedSensor) {
+  
+    // Logic for when a sensor is selected
+    if (selectedLocation && selectedPopulation && selectedDate && selectedSensor) {
       const newTilePath = `files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone/${selectedDate}-P4-RGB-Pyramid.tif`;
       const newGeoJsonPath = `${flaskUrl}files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-${selectedSensor}-Traits-WGS84.geojson`;
-      const newGTGeoJsonPath = `${flaskUrl}files/Processed/${selectedLocation}/${selectedPopulation}/GroundTruth-Traits-WGS84.geojson`;
+      
       onTilePathChange(newTilePath);
       onGeoJsonPathChange(newGeoJsonPath);
-
-      fetch(newGeoJsonPath)
-          .then(response => response.json())
-          .then(data => {
-            if(data) {
-              const traitOutputLabels = data.features
-              .map(f => f.properties.Label)
-
-              const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
-              uniqueTraitOutputLabels.unshift('All Genotypes')
-              console.log('uniqueTraitOutputLabels', uniqueTraitOutputLabels)
-              setGenotypeOptions(uniqueTraitOutputLabels);
-              if(selectedGenotypes == null) {
-                setSelectedGenotypes(['All Genotypes'])
-              }
-            }
-          }).catch((error) => {
-            console.error('newGeoJsonPath not loaded:', error)
-            // Set processing flag
-            setNowDroneProcessing(true);
-          });
-    }
-
-
-    if (selectedLocation == null || selectedSensor == null || selectedMetric == null){
-      onGeoJsonPathChange(null)
-    }
-  }, [ selectedMetric, selectedSensor, selectedLocation ]);
-
-  useEffect(() => {
-    // Post request to process drone tiff file
-    // Run only if nowDroneProcessing is true
-    if (nowDroneProcessing) {
-      // Add loading spinner
-
-      const fetch_url = `${flaskUrl}process_drone_tiff/${selectedLocation}/${selectedPopulation}/${selectedDate}`
-      console.log(`Processing drone tiff file...${fetch_url}`)
-
-      // Process drone tiff file
-      fetch(fetch_url)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
+    
+      // Fetch genotypes from the new GeoJSON path
+      fetchData(newGeoJsonPath)
         .then(data => {
-          console.log("Drone tiff file processed!")
-          setNowDroneProcessing(false)
+          // Get all unique plot labels
+          const traitOutputLabels = data.features.map(f => f.properties.Label);
+          // Get all property names
+          const metricColumns = Object.keys(data.features[0].properties);
+          // Filter property names based on an exclusion list
+          const excludedColumns = ['Tier','Bed','Plot','Label','Group','geometry'];
+          const metricOptions = metricColumns.filter(col => !excludedColumns.includes(col));
+          setMetricOptions(metricOptions);
+          const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
+          uniqueTraitOutputLabels.unshift('All Genotypes');
+          setGenotypeOptions(uniqueTraitOutputLabels);
+          if (selectedGenotypes == null) {
+            setSelectedGenotypes(['All Genotypes']);
+          }
         })
+        .catch(error => {
+          console.error('newGeoJsonPath not loaded:', error);
+          setNowDroneProcessing(true);
+        });
+  
+    }
+  
+    // Fetch sensors if no sensor is selected
+    else if (selectedLocation && selectedPopulation && selectedDate && !selectedSensor) {
+      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
+      .then(data => {        
+        // Check if 'Drone' folder exists
+        if (data.includes("Drone")) {
+          // Fetch contents of the 'Drone' folder
+          fetchData(`${flaskUrl}list_files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone`)
+            .then(droneData => {
+              console.log('Contents of Drone folder:', droneData);
+              // If the 'Drone' folder contains a file ending in 'Pyramid.tif', then add 'Drone' to the sensor options
+              if (droneData.filter((item) => item.endsWith('Pyramid.tif')).length > 0) {
+                setSensorOptions(data.filter((item) => item !== 'Results'));
+              }
+              else {
+                setSensorOptions(data.filter((item) => item !== 'Drone' && item !== 'Results'));
+              }
+            })
+            .catch((error) => console.error('Error fetching contents of Drone folder:', error));
+        }
+      })
+      .catch((error) => console.error('Error:', error));
+    }
+  
+    // Fetch dates if no date is selected
+    else if (selectedLocation && selectedPopulation && !selectedDate) {
+      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocation}/${selectedPopulation}`)
+        .then(setDateOptions)
         .catch((error) => console.error('Error:', error));
-      
-        
-        // Remove loading spinner
-
+    }
+  
+    // Fetch populations if no population is selected
+    else if (selectedLocation && !selectedPopulation) {
+      fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocation}`)
+        .then(setPopulationOptions)
+        .catch((error) => console.error('Error:', error));
+    }
+  
+    // Check if any key selection criteria is missing and reset the path if necessary
+    if (!selectedLocation || !selectedSensor || !selectedMetric) {
+      onGeoJsonPathChange(null);
     }
 
-  }, [nowDroneProcessing]);
-
+    if (!selectedLocation || !selectedPopulation || !selectedDate || !selectedSensor) {
+      onTilePathChange(null);
+    }
+  
+    // Update ref values at the end
+    prevLocationRef.current = selectedLocation;
+    prevPopulationRef.current = selectedPopulation;
+    prevDateRef.current = selectedDate;
+  
+  }, [selectedLocation, selectedPopulation, selectedDate, selectedSensor, selectedMetric, selectedGenotypes]);
+  
+  
   useEffect(() => {
-    if (selectedSensor == 'Drone') {
-      setMetricOptions([
-        'Height_95p_meters',
-        'Vegetation_Fraction',
-        'Avg_Temp_C'
-      ])
+    // Process drone tiff file if needed
+    if (nowDroneProcessing) {
+      const fetchUrl = `${flaskUrl}process_drone_tiff/${selectedLocation}/${selectedPopulation}/${selectedDate}`;
+      fetchData(fetchUrl)
+        .then(() => {
+          console.log("Drone tiff file processed!");
+          setNowDroneProcessing(false);
+        })
+        .catch(error => console.error('Error:', error));
     }
-    else if (selectedSensor == 'Rover') {
-      setMetricOptions([
-        'Average Height (cm)',
-        'Average Leaf Area (cm2)',
-        'Average Fruit Count',
-        'Average Leaf Count',
-        'Average Flower Count'
-      ])
-    }
-  }, [selectedSensor])
+  }, [nowDroneProcessing]);
+  
 
   return (
     <>
