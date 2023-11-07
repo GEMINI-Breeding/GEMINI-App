@@ -17,7 +17,7 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
         flaskUrl,
     } = useDataState();
 
-    const { setPrepGcpFilePath, setPrepDroneImagePath, setPrepOrthoImagePath } = useDataSetters();
+    const { setPrepGcpFilePath, setPrepDroneImagePath, setPrepOrthoImagePath, setSelectedDateGCP } = useDataSetters();
 
     const [checklistItems, setChecklistItems] = useState([
         { label: "Reference orthophoto", path: "", setter: setPrepOrthoImagePath, isChecked: false },
@@ -88,6 +88,7 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
                             if (subDirs.includes("Drone")) {
                                 const newPath = `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}/Drone`;
                                 setPrepDroneImagePath(newPath);
+                                setSelectedDateGCP(dir);
                                 console.log("Drone path found, setting to ", newPath);
                                 break;
                             }
