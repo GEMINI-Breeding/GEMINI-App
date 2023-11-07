@@ -5,7 +5,7 @@ import Button from "@mui/material/Button";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import TextField from "@mui/material/TextField";
-import { useDataState, useDataSetters } from "../../../DataContext";
+import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 
 function Checklist({ onProceed, onDroneGcpProceed }) {
     const {
@@ -24,14 +24,6 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
         { label: "GCP locations file", path: "", setter: setPrepGcpFilePath, isChecked: false },
         { label: "Reference drone images", path: "", setter: setPrepDroneImagePath, isChecked: false },
     ]);
-
-    const fetchData = async (url) => {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error("Network response was not ok");
-        }
-        return await response.json();
-    };
 
     useEffect(() => {
         const fetchDataAndUpdatePath = async () => {

@@ -4,6 +4,14 @@ import React, { createContext, useContext, useState } from "react";
 const DataStateContext = createContext();
 const DataSettersContext = createContext();
 
+export const fetchData = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error("Network response was not ok");
+    }
+    return await response.json();
+};
+
 export const useDataState = () => {
     const context = useContext(DataStateContext);
     if (!context) {
