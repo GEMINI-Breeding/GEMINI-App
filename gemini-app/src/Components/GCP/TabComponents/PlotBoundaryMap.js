@@ -3,27 +3,17 @@ import DeckGL from "@deck.gl/react";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState } from "../../../DataContext";
+import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 
 const fc = {
     type: "FeatureCollection",
     features: [],
 };
 
-const drawPolygonMode = new DrawPolygonMode();
-const modifyMode = new ModifyMode();
-const translateMode = new TranslateMode();
-const viewMode = new ViewMode();
-
-const ModeSwitcher = ({ setMode }) => {
-    return (
-        <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1 }}>
-            <button onClick={() => setMode(drawPolygonMode)}>Draw Polygon</button>
-            <button onClick={() => setMode(modifyMode)}>Edit</button>
-            <button onClick={() => setMode(translateMode)}>Translate</button>
-            <button onClick={() => setMode(viewMode)}>View</button>
-        </div>
-    );
-};
+export const drawPolygonMode = new DrawPolygonMode();
+export const modifyMode = new ModifyMode();
+export const translateMode = new TranslateMode();
+export const viewMode = new ViewMode();
 
 function PlotBoundaryMap() {
     const { viewState } = useDataState();
@@ -92,7 +82,7 @@ function PlotBoundaryMap() {
                     mapboxAccessToken="pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
                 />
             </DeckGL>
-            <ModeSwitcher setMode={setMode} />
+            <ModeSwitcher currentMode={mode} setMode={setMode} />
         </div>
     );
 }
