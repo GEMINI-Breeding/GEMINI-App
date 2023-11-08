@@ -76,13 +76,18 @@ function PlotBoundaryPrep() {
             </Grid>
 
             {activeStep === 1 && imageList.length === 0 && isImageViewerOpen && (
-                <Grid item container justifyContent="center" spacing={2}>
-                    <CircularProgress color="primary" size={60} />
-                    <br />
-                    <Typography variant="h6" sx={{ mt: 2 }}>
-                        Loading image data...
-                    </Typography>
-                </Grid>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+                    <div align="center">
+                        <Grid item container justifyContent="center" spacing={2}>
+                            <CircularProgress color="primary" size={60} />
+                        </Grid>
+                        <Grid item container justifyContent="center" spacing={2}>
+                            <Typography variant="h6" sx={{ mt: 2 }}>
+                                Loading image data...
+                            </Typography>
+                        </Grid>
+                    </div>
+                </div>
             )}
 
             {activeStep === 1 && imageList.length > 0 && isImageViewerOpen && (
