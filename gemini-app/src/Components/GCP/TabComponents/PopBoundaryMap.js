@@ -19,9 +19,16 @@ export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
 
 function PopBoundaryMap() {
-    const { viewState, selectedTilePath, flaskUrl, selectedLocationGCP, selectedPopulationGCP, prepOrthoImagePath } =
-        useDataState();
-    const { setViewState } = useDataSetters();
+    const {
+        viewState,
+        selectedTilePath,
+        flaskUrl,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        prepOrthoImagePath,
+        cursorStyle,
+    } = useDataState();
+    const { setViewState, setCursorStyle } = useDataSetters();
 
     const prepOrthoTileLayer = new TileLayer({
         id: "geotiff-tile-layer",
@@ -67,6 +74,22 @@ function PopBoundaryMap() {
     const [featureCollection, setFeatureCollection] = useState(fc);
     const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
     const [mode, setMode] = useState(viewMode);
+
+    // Set cursor style
+    useEffect(() => {
+        if (mode === drawPolygonMode) {
+            setCursorStyle("crosshair");
+        } else if (mode === modifyMode) {
+            setCursorStyle("crosshair");
+        } else if (mode === translateMode) {
+            setCursorStyle("default");
+        } else if (mode === viewMode) {
+            setCursorStyle("grab");
+        } else {
+            setCursorStyle("default");
+        }
+        console.log("Cursor style set to", cursorStyle);
+    }, [mode, setCursorStyle]);
 
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -129,6 +152,7 @@ function PopBoundaryMap() {
                 controller={controller}
                 layers={[prepOrthoTileLayer, layer]}
                 onViewStateChange={({ viewState }) => setViewState(viewState)}
+                getCursor={() => cursorStyle}
             >
                 <Map
                     mapStyle="mapbox://styles/mapbox/satellite-v9"

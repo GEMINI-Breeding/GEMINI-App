@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import { drawPolygonMode, modifyMode, translateMode, viewMode } from "../GCP/TabComponents/PopBoundaryMap";
 import { useDataState } from "../../DataContext";
 import { Button } from "@mui/material";
 
 export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
     const { selectedLocationGCP, selectedPopulationGCP, flaskUrl } = useDataState();
+
+    const [buttonText, setButtonText] = useState("Save Boundaries");
 
     const saveFeatureCollection = async () => {
         let filename;
@@ -31,6 +33,14 @@ export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
         });
         const data = await response.json();
         console.log(data);
+
+        if (response.ok) {
+            setButtonText("Saved!");
+            setTimeout(() => setButtonText("Save Boundaries"), 1500);
+        } else {
+            setButtonText("Save Failed");
+            setTimeout(() => setButtonText("Save Boundaries"), 1500);
+        }
     };
 
     const modes = [
@@ -60,6 +70,7 @@ export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
                 padding: "10px",
                 display: "flex",
                 flexDirection: "column",
+                width: "180px",
             }}
         >
             {modes.map(({ mode, label, info }) => (
@@ -81,7 +92,7 @@ export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
             ))}
             <br />
             <Button variant="contained" color="primary" onClick={() => saveFeatureCollection()}>
-                Save Boundaries
+                {buttonText}
             </Button>
         </div>
     );

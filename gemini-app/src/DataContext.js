@@ -52,6 +52,7 @@ export const DataProvider = ({ children }) => {
     const [currentView, setCurrentView] = useState(null);
     const [tileUrl, setTileUrl] = useState(TILE_URL_TEMPLATE);
     const [boundsUrl, setBoundsUrl] = useState(BOUNDS_URL_TEMPLATE);
+    const [cursorStyle, setCursorStyle] = useState("default");
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -132,6 +133,7 @@ export const DataProvider = ({ children }) => {
                 geojsonData,
                 tileUrl,
                 boundsUrl,
+                cursorStyle,
 
                 // DataSelectionMenu State
                 locationOptions,
@@ -213,6 +215,7 @@ export const DataProvider = ({ children }) => {
                     setGeojsonData,
                     setTileUrl,
                     setBoundsUrl,
+                    setCursorStyle,
 
                     // DataSelectionMenu state
                     setLocationOptions,
