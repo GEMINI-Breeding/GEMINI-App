@@ -38,9 +38,16 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
         selectedPopulationGCP,
         flaskUrl,
         selectedDateGCP,
+        selectedTilePath,
     } = useDataState();
 
-    const { setPrepGcpFilePath, setPrepDroneImagePath, setPrepOrthoImagePath, setSelectedDateGCP } = useDataSetters();
+    const {
+        setPrepGcpFilePath,
+        setPrepDroneImagePath,
+        setPrepOrthoImagePath,
+        setSelectedDateGCP,
+        setSelectedTilePath,
+    } = useDataSetters();
 
     const [isOrthoChecked, setIsOrthoChecked] = useState(false);
     const [isGcpChecked, setIsGcpChecked] = useState(false);
@@ -138,20 +145,30 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
     const allChecked = isOrthoChecked && isGcpChecked && isDroneChecked;
     const droneGcpChecked = isGcpChecked && isDroneChecked && !isOrthoChecked;
 
-    const [isReadyToProceed, setIsReadyToProceed] = useState(false);
+    const [isReadyToProceedDrone, setIsReadyToProceedDrone] = useState(false);
+    const [isReadyToProceedOrtho, setIsReadyToProceedOrtho] = useState(false);
 
     // Effect to run `onDroneGcpProceed` once `selectedDateGCP` is set
     useEffect(() => {
-        if (isReadyToProceed) {
+        if (isReadyToProceedDrone) {
             console.log("Selected date set to ", selectedDateGCP);
             onDroneGcpProceed();
-            setIsReadyToProceed(false); // Reset the trigger
+            setIsReadyToProceedDrone(false); // Reset the trigger
         }
-    }, [isReadyToProceed]);
+    }, [isReadyToProceedDrone]);
+
+    useEffect(() => {
+        if (isReadyToProceedOrtho) {
+            console.log("Selected tile path set to ", selectedTilePath);
+            onProceed();
+            setIsReadyToProceedOrtho(false); // Reset the trigger
+        }
+    }, [isReadyToProceedOrtho]);
 
     const handleProceed = async () => {
         if (allChecked) {
-            onProceed();
+            setSelectedTilePath(prepOrthoImagePath);
+            setIsReadyToProceedOrtho(true);
         } else if (droneGcpChecked) {
             const prepDroneImagePathParts = prepDroneImagePath.split("/");
             const newPathPart =
@@ -160,7 +177,7 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
                     : prepDroneImagePathParts[prepDroneImagePathParts.length - 1];
             setSelectedDateGCP(newPathPart);
 
-            setIsReadyToProceed(true);
+            setIsReadyToProceedDrone(true);
         }
     };
 

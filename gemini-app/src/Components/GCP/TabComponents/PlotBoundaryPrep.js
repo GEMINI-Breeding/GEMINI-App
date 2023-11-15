@@ -4,7 +4,7 @@ import Stepper from "@mui/material/Stepper";
 import Step from "@mui/material/Step";
 import StepLabel from "@mui/material/StepLabel";
 import Grid from "@mui/material/Grid";
-import PlotBoundaryMap from "./PlotBoundaryMap";
+import PopBoundaryMap from "./PopBoundaryMap";
 import Checklist from "./Checklist";
 import { useDataState, useDataSetters } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
@@ -98,13 +98,13 @@ function PlotBoundaryPrep() {
 
             {activeStep === 2 && (
                 <Grid item container justifyContent="center" spacing={2}>
-                    <PlotBoundaryMap />
+                    <PopBoundaryMap />
                 </Grid>
             )}
 
             {activeStep === 3 && (
                 <Grid item container justifyContent="center" spacing={2}>
-                    <PlotBoundaryMap />
+                    <PopBoundaryMap />
                 </Grid>
             )}
         </Grid>

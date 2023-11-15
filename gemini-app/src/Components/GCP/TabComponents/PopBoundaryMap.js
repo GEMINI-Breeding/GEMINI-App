@@ -1,25 +1,72 @@
 import React, { useState, useEffect } from "react";
 import DeckGL from "@deck.gl/react";
+import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers";
+import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState } from "../../../DataContext";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 
-const fc = {
-    type: "FeatureCollection",
-    features: [],
-};
+// const fc = {
+//     type: "FeatureCollection",
+//     crs: { type: "name", properties: { name: "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+//     features: [],
+// };
 
 export const drawPolygonMode = new DrawPolygonMode();
 export const modifyMode = new ModifyMode();
 export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
 
-function PlotBoundaryMap() {
-    const { viewState } = useDataState();
+function PopBoundaryMap() {
+    const { viewState, selectedTilePath, flaskUrl, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+
+    const fc = async () => {
+        const selectedLocationGcp = selectedLocationGCP;
+        const selectedPopulationGcp = selectedPopulationGCP;
+        const filename = "Pop-Boundary-WGS84.geojson";
+
+        try {
+            const response = await fetch(
+                `${flaskUrl}load_geojson?selectedLocationGcp=${selectedLocationGcp}&selectedPopulationGcp=${selectedPopulationGcp}&filename=${filename}`
+            );
+            if (response.ok) {
+                const geojsonData = await response.json();
+                console.log(geojsonData);
+                return geojsonData;
+            } else {
+                console.error("Failed to load data");
+            }
+        } catch (error) {
+            console.error("Error loading data:", error);
+            return null;
+        }
+    };
+
     const [featureCollection, setFeatureCollection] = useState(fc);
     const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
     const [mode, setMode] = useState(viewMode);
+
+    const orthoTileLayer = selectedTilePath.includes("FILE_PATH")
+        ? null
+        : new TileLayer({
+              id: "geotiff-tile-layer",
+              minZoom: 15,
+              maxZoom: 22,
+              tileSize: 256,
+              data: selectedTilePath,
+              renderSubLayers: (props) => {
+                  const {
+                      bbox: { west, south, east, north },
+                  } = props.tile;
+
+                  return new BitmapLayer(props, {
+                      data: null,
+                      image: props.data,
+                      bounds: [west, south, east, north],
+                  });
+              },
+          });
 
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -55,6 +102,7 @@ function PlotBoundaryMap() {
                 setSelectedFeatureIndexes(featureIndexes);
             }
             setFeatureCollection(updatedData);
+            console.log(updatedData);
         },
         onClick: ({ index }) => {
             if (index !== -1) {
@@ -82,9 +130,9 @@ function PlotBoundaryMap() {
                     mapboxAccessToken="pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
                 />
             </DeckGL>
-            <ModeSwitcher currentMode={mode} setMode={setMode} />
+            <ModeSwitcher currentMode={mode} setMode={setMode} fc={featureCollection} task={"pop_boundary"} />
         </div>
     );
 }
 
-export default PlotBoundaryMap;
+export default PopBoundaryMap;
