@@ -28,6 +28,10 @@ export const useDataSetters = () => {
     return context;
 };
 
+export const TILE_URL_TEMPLATE =
+    "http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+export const BOUNDS_URL_TEMPLATE = "http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}";
+
 export const DataProvider = ({ children }) => {
     const initialViewState = {
         longitude: -121.781381,
@@ -36,10 +40,6 @@ export const DataProvider = ({ children }) => {
         pitch: 0,
         bearing: 0,
     };
-
-    const TILE_URL_TEMPLATE =
-        "http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-    const BOUNDS_URL_TEMPLATE = "http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}";
 
     // App State
     const [viewState, setViewState] = useState(initialViewState);

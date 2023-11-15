@@ -4,7 +4,7 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers";
 import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
-import { useDataState } from "../../../DataContext";
+import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataContext";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 
 // const fc = {
@@ -19,7 +19,28 @@ export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
 
 function PopBoundaryMap() {
-    const { viewState, selectedTilePath, flaskUrl, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { viewState, selectedTilePath, flaskUrl, selectedLocationGCP, selectedPopulationGCP, prepOrthoImagePath } =
+        useDataState();
+    const { setViewState } = useDataSetters();
+
+    const prepOrthoTileLayer = new TileLayer({
+        id: "geotiff-tile-layer",
+        minZoom: 15,
+        maxZoom: 22,
+        tileSize: 256,
+        data: TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}files/${prepOrthoImagePath}`)),
+        renderSubLayers: (props) => {
+            const {
+                bbox: { west, south, east, north },
+            } = props.tile;
+
+            return new BitmapLayer(props, {
+                data: null,
+                image: props.data,
+                bounds: [west, south, east, north],
+            });
+        },
+    });
 
     const fc = async () => {
         const selectedLocationGcp = selectedLocationGCP;
@@ -46,27 +67,6 @@ function PopBoundaryMap() {
     const [featureCollection, setFeatureCollection] = useState(fc);
     const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
     const [mode, setMode] = useState(viewMode);
-
-    const orthoTileLayer = selectedTilePath.includes("FILE_PATH")
-        ? null
-        : new TileLayer({
-              id: "geotiff-tile-layer",
-              minZoom: 15,
-              maxZoom: 22,
-              tileSize: 256,
-              data: selectedTilePath,
-              renderSubLayers: (props) => {
-                  const {
-                      bbox: { west, south, east, north },
-                  } = props.tile;
-
-                  return new BitmapLayer(props, {
-                      data: null,
-                      image: props.data,
-                      bounds: [west, south, east, north],
-                  });
-              },
-          });
 
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -124,7 +124,12 @@ function PopBoundaryMap() {
 
     return (
         <div style={{ height: "70vh", width: "70vw", position: "relative" }}>
-            <DeckGL initialViewState={viewState} controller={controller} layers={[layer]}>
+            <DeckGL
+                initialViewState={viewState}
+                controller={controller}
+                layers={[prepOrthoTileLayer, layer]}
+                onViewStateChange={({ viewState }) => setViewState(viewState)}
+            >
                 <Map
                     mapStyle="mapbox://styles/mapbox/satellite-v9"
                     mapboxAccessToken="pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
