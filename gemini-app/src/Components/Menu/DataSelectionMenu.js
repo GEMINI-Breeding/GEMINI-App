@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Autocomplete, TextField } from '@mui/material';
 
 import { useDataState, useDataSetters } from '../../DataContext';
+import AskAnalyzeodal from './AskAnalyzeModal';
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
 
@@ -19,7 +20,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     metricOptions,
     flaskUrl,
     selectedTraitsGeoJsonPath,
-    nowDroneProcessing
+    nowDroneProcessing,
+    isAskAnalyzeModalOpen
   } = useDataState();
 
   const {
@@ -35,7 +37,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     setSelectedSensor,
     setMetricOptions,
     setSelectedTraitsGeoJsonPath,
-    setNowDroneProcessing
+    setNowDroneProcessing,
+    setAskAnalyzeModalOpen
   } = useDataSetters();
 
   const fetchData = async (url) => {
@@ -46,6 +49,11 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     return await response.json();
   };
   
+  const closeModal = () => {
+    setAskAnalyzeModalOpen(false);
+  };
+
+
   useEffect(() => {
     // Fetch locations initially
     fetchData(`${flaskUrl}list_dirs/Processed/`)
@@ -105,7 +113,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         })
         .catch(error => {
           console.error('newGeoJsonPath not loaded:', error);
-          setNowDroneProcessing(true);
+          setAskAnalyzeModalOpen(true);
         });
   
     }
@@ -117,6 +125,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         // Check if 'Drone' folder exists
         if (data.includes("Drone")) {
           // Fetch contents of the 'Drone' folder
+          console.log("Fetch contents of the 'Drone' folder")
           fetchData(`${flaskUrl}list_files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Drone`)
             .then(droneData => {
               console.log('Contents of Drone folder:', droneData);
@@ -173,6 +182,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         .then(() => {
           console.log("Drone tiff file processed!");
           setNowDroneProcessing(false);
+          setAskAnalyzeModalOpen(false);
         })
         .catch(error => console.error('Error:', error));
     }
@@ -287,9 +297,12 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
           renderInput={(params) => <TextField {...params} label="Genotype" />}
           sx={{ mb: 2 }}
         />
-      ) : null}
+      ) : null} 
 
-
+      
+      <AskAnalyzeodal isOpen={isAskAnalyzeModalOpen} onClose={closeModal}>
+      </AskAnalyzeodal>
+      
     </> 
   );
 };
