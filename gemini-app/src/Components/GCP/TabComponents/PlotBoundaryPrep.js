@@ -4,7 +4,7 @@ import Stepper from "@mui/material/Stepper";
 import Step from "@mui/material/Step";
 import StepLabel from "@mui/material/StepLabel";
 import Grid from "@mui/material/Grid";
-import PopBoundaryMap from "./PopBoundaryMap";
+import BoundaryMap from "./BoundaryMap";
 import Checklist from "./Checklist";
 import { useDataState, useDataSetters } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
@@ -12,11 +12,10 @@ import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
 
 function PlotBoundaryPrep() {
-    const { imageList, isImageViewerOpen } = useDataState();
-    const { setIsImageViewerOpen } = useDataSetters();
+    const { imageList, isImageViewerOpen, activeStepBoundaryPrep } = useDataState();
+    const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 
     const handleProcessImages = useHandleProcessImages();
-    const [activeStep, setActiveStep] = useState(0);
     const steps = ["Data", "Orthomosaic", "Population Boundary", "Plot Boundary"]; // Adjust as needed
 
     const largerIconStyle = {
@@ -26,19 +25,19 @@ function PlotBoundaryPrep() {
     };
 
     const handleProceed = () => {
-        setActiveStep(2);
+        setActiveStepBoundaryPrep(2);
     };
 
     const handleDroneGcpProceed = () => {
         handleProcessImages();
         setIsImageViewerOpen(true);
-        setActiveStep(1);
+        setActiveStepBoundaryPrep(1);
     };
 
     const handleReturnClick = (index) => {
         // If the active step is greater than the index, go back to the index
-        if (activeStep > index) {
-            setActiveStep(index);
+        if (activeStepBoundaryPrep > index) {
+            setActiveStepBoundaryPrep(index);
         }
     };
 
@@ -48,14 +47,14 @@ function PlotBoundaryPrep() {
         // If the imageviewer was open and now it's not, go back to step 0
         if (!isImageViewerOpenRef.current && !isImageViewerOpen) {
             isImageViewerOpenRef.current = isImageViewerOpen;
-            setActiveStep(0);
+            setActiveStepBoundaryPrep(0);
         }
     }, [isImageViewerOpen]);
 
     return (
         <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
             <Grid item style={{ width: "100%" }}>
-                <Stepper activeStep={activeStep} style={{ padding: "8px 0", background: "transparent" }}>
+                <Stepper activeStep={activeStepBoundaryPrep} style={{ padding: "8px 0", background: "transparent" }}>
                     {steps.map((label, index) => (
                         <Step key={index} onClick={() => handleReturnClick(index)}>
                             <StepLabel StepIconProps={{ style: largerIconStyle }}>
@@ -67,15 +66,15 @@ function PlotBoundaryPrep() {
             </Grid>
             <Grid item>
                 {
-                    activeStep === 0 && (
+                    activeStepBoundaryPrep === 0 && (
                         <Checklist onProceed={handleProceed} onDroneGcpProceed={handleDroneGcpProceed} />
-                    ) /* activeStep === 0 && <div align='center' >Content for Step 1</div> */
+                    ) /* activeStepBoundaryPrep === 0 && <div align='center' >Content for Step 1</div> */
                 }
-                {activeStep === 2 && <div align="center">Content for Step 3</div>}
-                {activeStep === 3 && <div align="center">Content for Step 4</div>}
+                {activeStepBoundaryPrep === 2 && <div align="center">Content for Step 3</div>}
+                {activeStepBoundaryPrep === 3 && <div align="center">Content for Step 4</div>}
             </Grid>
 
-            {activeStep === 1 && imageList.length === 0 && isImageViewerOpen && (
+            {activeStepBoundaryPrep === 1 && imageList.length === 0 && isImageViewerOpen && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
                     <div align="center">
                         <Grid item container justifyContent="center" spacing={2}>
@@ -90,21 +89,21 @@ function PlotBoundaryPrep() {
                 </div>
             )}
 
-            {activeStep === 1 && imageList.length > 0 && isImageViewerOpen && (
+            {activeStepBoundaryPrep === 1 && imageList.length > 0 && isImageViewerOpen && (
                 <Grid item container justifyContent="center" spacing={2}>
                     <ImageViewer />
                 </Grid>
             )}
 
-            {activeStep === 2 && (
+            {activeStepBoundaryPrep === 2 && (
                 <Grid item container justifyContent="center" spacing={2}>
-                    <PopBoundaryMap />
+                    <BoundaryMap task={"pop_boundary"} />
                 </Grid>
             )}
 
-            {activeStep === 3 && (
+            {activeStepBoundaryPrep === 3 && (
                 <Grid item container justifyContent="center" spacing={2}>
-                    <PopBoundaryMap />
+                    <BoundaryMap task={"plot_boundary"} />
                 </Grid>
             )}
         </Grid>

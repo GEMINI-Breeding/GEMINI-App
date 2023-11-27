@@ -89,6 +89,10 @@ export const DataProvider = ({ children }) => {
     const [prepGcpFilePath, setPrepGcpFilePath] = useState("");
     const [prepDroneImagePath, setPrepDroneImagePath] = useState("");
     const [prepOrthoImagePath, setPrepOrthoImagePath] = useState("");
+    const [activeStepBoundaryPrep, setActiveStepBoundaryPrep] = useState(0);
+    const [selectedTabPrep, setSelectedTabPrep] = useState(0);
+    const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
+    const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -177,6 +181,10 @@ export const DataProvider = ({ children }) => {
                 prepGcpFilePath,
                 prepDroneImagePath,
                 prepOrthoImagePath,
+                activeStepBoundaryPrep,
+                selectedTabPrep,
+                featureCollectionPop,
+                featureCollectionPlot,
 
                 // ImageViewer State
                 imageIndex,
@@ -258,6 +266,10 @@ export const DataProvider = ({ children }) => {
                     setPrepGcpFilePath,
                     setPrepDroneImagePath,
                     setPrepOrthoImagePath,
+                    setActiveStepBoundaryPrep,
+                    setSelectedTabPrep,
+                    setFeatureCollectionPop,
+                    setFeatureCollectionPlot,
 
                     // ImageViewer State
                     setImageIndex,

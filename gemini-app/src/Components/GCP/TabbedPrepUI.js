@@ -21,6 +21,7 @@ function TabbedPrepUI() {
         gcpPath,
         isSidebarCollapsed,
         isPrepInitiated,
+        selectedTabPrep,
     } = useDataState();
 
     const {
@@ -34,12 +35,11 @@ function TabbedPrepUI() {
         setGcpPath,
         setSidebarCollapsed,
         setTotalImages,
+        setSelectedTabPrep,
     } = useDataSetters();
 
-    const [selectedTab, setSelectedTab] = useState(0);
-
     const handleChange = (event, newValue) => {
-        setSelectedTab(newValue);
+        setSelectedTabPrep(newValue);
     };
 
     const titleStyle = {
@@ -52,7 +52,7 @@ function TabbedPrepUI() {
         <Grid container direction="column" style={{ width: "100%", height: "100%" }}>
             {isPrepInitiated && (
                 <Grid item>
-                    <Tabs value={selectedTab} onChange={handleChange} centered variant="fullWidth">
+                    <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
                         <Tab label="Aerial Data Preparation" style={titleStyle} />
                         <Tab label="Ground-based Data Preparation" style={titleStyle} />
@@ -61,9 +61,9 @@ function TabbedPrepUI() {
             )}
             {isPrepInitiated && (
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
-                    {selectedTab === 0 && <PlotBoundaryPrep />}
-                    {selectedTab === 1 && <AerialDataPrep />}
-                    {selectedTab === 2 && <div>Component for Tab 3</div>}
+                    {selectedTabPrep === 0 && <PlotBoundaryPrep />}
+                    {selectedTabPrep === 1 && <AerialDataPrep />}
+                    {selectedTabPrep === 2 && <div>Component for Tab 3</div>}
                 </Grid>
             )}
         </Grid>

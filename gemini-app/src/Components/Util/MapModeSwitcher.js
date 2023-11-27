@@ -1,29 +1,56 @@
-import React, { useState } from "react";
-import { drawPolygonMode, modifyMode, translateMode, viewMode } from "../GCP/TabComponents/PopBoundaryMap";
-import { useDataState } from "../../DataContext";
+import React, { useState, useEffect } from "react";
+import { drawPolygonMode, modifyMode, translateMode, viewMode } from "../GCP/TabComponents/BoundaryMap";
+import { useDataState, useDataSetters } from "../../DataContext";
 import { Button } from "@mui/material";
+import { save } from "@loaders.gl/core";
 
-export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
-    const { selectedLocationGCP, selectedPopulationGCP, flaskUrl } = useDataState();
+export const ModeSwitcher = ({ currentMode, setMode, task }) => {
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        flaskUrl,
+        activeStepBoundaryPrep,
+        featureCollectionPop,
+        featureCollectionPlot,
+    } = useDataState();
+    const { setActiveStepBoundaryPrep, setSelectedTabPrep, setFeatureCollectionPop, setFeatureCollectionPlot } =
+        useDataSetters();
 
     const [buttonText, setButtonText] = useState("Save Boundaries");
+    const [proceedButtonText, setProceedButtonText] = useState("Proceed");
 
-    const saveFeatureCollection = async () => {
+    useEffect(() => {
+        console.log("task", task);
+        console.log("featureCollectionPop", featureCollectionPop);
+        console.log("featureCollectionPlot", featureCollectionPlot);
+    }, [featureCollectionPop, featureCollectionPlot]);
+
+    const saveFeatureCollection = async (fcIn) => {
         let filename;
+        let payload;
+        let fc = fcIn;
+
         if (task === "pop_boundary") {
             filename = "Pop-Boundary-WGS84.geojson";
+            if (fc == null) {
+                fc = featureCollectionPop;
+            }
         } else if (task === "plot_boundary") {
             filename = "Plot-Boundary-WGS84.geojson";
+            if (fc == null) {
+                fc = featureCollectionPlot;
+            }
         } else {
             filename = "WGS84.geojson";
         }
 
-        const payload = {
+        payload = {
             selectedLocationGcp: selectedLocationGCP,
             selectedPopulationGcp: selectedPopulationGCP,
             geojsonData: fc,
             filename: filename,
         };
+
         const response = await fetch(`${flaskUrl}save_geojson`, {
             method: "POST",
             headers: {
@@ -37,9 +64,27 @@ export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
         if (response.ok) {
             setButtonText("Saved!");
             setTimeout(() => setButtonText("Save Boundaries"), 1500);
+            return 0;
         } else {
             setButtonText("Save Failed");
             setTimeout(() => setButtonText("Save Boundaries"), 1500);
+            return 1;
+        }
+    };
+
+    const handleNextStep = () => {
+        console.log("task", task);
+        if (task === "pop_boundary") {
+            if (featureCollectionPop.features.length > 0) {
+                saveFeatureCollection(featureCollectionPop) && setActiveStepBoundaryPrep(activeStepBoundaryPrep + 1);
+            } else {
+                setProceedButtonText("No Boundaries");
+                setTimeout(() => setProceedButtonText("Proceed"), 1500);
+            }
+        } else {
+            if (featureCollectionPlot.features.length > 0) {
+                saveFeatureCollection(featureCollectionPlot) && setSelectedTabPrep(1);
+            }
         }
     };
 
@@ -93,6 +138,11 @@ export const ModeSwitcher = ({ currentMode, setMode, fc, task }) => {
             <br />
             <Button variant="contained" color="primary" onClick={() => saveFeatureCollection()}>
                 {buttonText}
+            </Button>
+
+            <br />
+            <Button variant="contained" color="primary" onClick={() => handleNextStep()}>
+                {proceedButtonText}
             </Button>
         </div>
     );

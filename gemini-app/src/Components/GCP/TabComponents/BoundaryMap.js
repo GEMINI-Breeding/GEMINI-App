@@ -18,7 +18,7 @@ export const modifyMode = new ModifyMode();
 export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
 
-function PopBoundaryMap() {
+function BoundaryMap({ task }) {
     const {
         viewState,
         selectedTilePath,
@@ -27,8 +27,15 @@ function PopBoundaryMap() {
         selectedPopulationGCP,
         prepOrthoImagePath,
         cursorStyle,
+        featureCollectionPop,
+        featureCollectionPlot,
     } = useDataState();
-    const { setViewState, setCursorStyle } = useDataSetters();
+    const { setViewState, setCursorStyle, setFeatureCollectionPop, setFeatureCollectionPlot } = useDataSetters();
+
+    const [featureCollection, setFeatureCollection] =
+        task === "pop_boundary"
+            ? [featureCollectionPop, setFeatureCollectionPop]
+            : [featureCollectionPlot, setFeatureCollectionPlot];
 
     const prepOrthoTileLayer = new TileLayer({
         id: "geotiff-tile-layer",
@@ -49,29 +56,38 @@ function PopBoundaryMap() {
         },
     });
 
-    const fc = async () => {
-        const selectedLocationGcp = selectedLocationGCP;
-        const selectedPopulationGcp = selectedPopulationGCP;
-        const filename = "Pop-Boundary-WGS84.geojson";
+    useEffect(() => {
+        const fcPop = async () => {
+            const selectedLocationGcp = selectedLocationGCP;
+            const selectedPopulationGcp = selectedPopulationGCP;
+            let filename;
 
-        try {
-            const response = await fetch(
-                `${flaskUrl}load_geojson?selectedLocationGcp=${selectedLocationGcp}&selectedPopulationGcp=${selectedPopulationGcp}&filename=${filename}`
-            );
-            if (response.ok) {
-                const geojsonData = await response.json();
-                console.log(geojsonData);
-                return geojsonData;
-            } else {
-                console.error("Failed to load data");
+            if (task === "pop_boundary") {
+                filename = "Pop-Boundary-WGS84.geojson";
+            } else if (task === "plot_boundary") {
+                filename = "Plot-Boundary-WGS84.geojson";
             }
-        } catch (error) {
-            console.error("Error loading data:", error);
-            return null;
-        }
-    };
 
-    const [featureCollection, setFeatureCollection] = useState(fc);
+            try {
+                const response = await fetch(
+                    `${flaskUrl}load_geojson?selectedLocationGcp=${selectedLocationGcp}&selectedPopulationGcp=${selectedPopulationGcp}&filename=${filename}`
+                );
+                if (response.ok) {
+                    const geojsonData = await response.json();
+                    console.log(geojsonData);
+                    setFeatureCollection(geojsonData);
+                } else {
+                    console.error("Failed to load data");
+                }
+            } catch (error) {
+                console.error("Error loading data:", error);
+                return null;
+            }
+        };
+
+        fcPop();
+    }, [selectedLocationGCP, selectedPopulationGCP]);
+
     const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
     const [mode, setMode] = useState(viewMode);
 
@@ -159,9 +175,9 @@ function PopBoundaryMap() {
                     mapboxAccessToken="pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
                 />
             </DeckGL>
-            <ModeSwitcher currentMode={mode} setMode={setMode} fc={featureCollection} task={"pop_boundary"} />
+            <ModeSwitcher currentMode={mode} setMode={setMode} task={task} />
         </div>
     );
 }
 
-export default PopBoundaryMap;
+export default BoundaryMap;
