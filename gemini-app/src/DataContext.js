@@ -39,6 +39,8 @@ export const DataProvider = ({ children }) => {
         zoom: 17,
         pitch: 0,
         bearing: 0,
+        maxZoom: 48,
+        minZoom: 10,
     };
 
     // App State
@@ -93,6 +95,15 @@ export const DataProvider = ({ children }) => {
     const [selectedTabPrep, setSelectedTabPrep] = useState(0);
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
     const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
+    const [polygonProposalOptions, setPolygonProposalOptions] = useState({
+        width: 50,
+        length: 50,
+        rows: 3,
+        columns: 3,
+        verticalSpacing: 10,
+        horizontalSpacing: 10,
+        angle: 0,
+    });
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -185,6 +196,7 @@ export const DataProvider = ({ children }) => {
                 selectedTabPrep,
                 featureCollectionPop,
                 featureCollectionPlot,
+                polygonProposalOptions,
 
                 // ImageViewer State
                 imageIndex,
@@ -270,6 +282,7 @@ export const DataProvider = ({ children }) => {
                     setSelectedTabPrep,
                     setFeatureCollectionPop,
                     setFeatureCollectionPlot,
+                    setPolygonProposalOptions,
 
                     // ImageViewer State
                     setImageIndex,

@@ -39,8 +39,8 @@ function BoundaryMap({ task }) {
 
     const prepOrthoTileLayer = new TileLayer({
         id: "geotiff-tile-layer",
-        minZoom: 15,
-        maxZoom: 22,
+        minZoom: 10,
+        maxZoom: 48,
         tileSize: 256,
         data: TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}files/${prepOrthoImagePath}`)),
         renderSubLayers: (props) => {
@@ -57,6 +57,7 @@ function BoundaryMap({ task }) {
     });
 
     useEffect(() => {
+        console.log("task", task);
         const fcPop = async () => {
             const selectedLocationGcp = selectedLocationGCP;
             const selectedPopulationGcp = selectedPopulationGCP;
@@ -73,15 +74,25 @@ function BoundaryMap({ task }) {
                     `${flaskUrl}load_geojson?selectedLocationGcp=${selectedLocationGcp}&selectedPopulationGcp=${selectedPopulationGcp}&filename=${filename}`
                 );
                 if (response.ok) {
+                    console.log("response", response);
                     const geojsonData = await response.json();
                     console.log(geojsonData);
-                    setFeatureCollection(geojsonData);
+                    geojsonData.features
+                        ? setFeatureCollection(geojsonData)
+                        : setFeatureCollection({ type: "FeatureCollection", features: [] });
                 } else {
                     console.error("Failed to load data");
+                    setFeatureCollection({
+                        type: "FeatureCollection",
+                        features: [],
+                    });
                 }
             } catch (error) {
                 console.error("Error loading data:", error);
-                return null;
+                setFeatureCollection({
+                    type: "FeatureCollection",
+                    features: [],
+                });
             }
         };
 
@@ -133,6 +144,8 @@ function BoundaryMap({ task }) {
 
     const layer = new EditableGeoJsonLayer({
         id: "geojson-layer",
+        minZoom: 10,
+        maxZoom: 48,
         data: featureCollection,
         mode: mode,
         selectedFeatureIndexes: selectedFeatureIndexes,
@@ -169,10 +182,14 @@ function BoundaryMap({ task }) {
                 layers={[prepOrthoTileLayer, layer]}
                 onViewStateChange={({ viewState }) => setViewState(viewState)}
                 getCursor={() => cursorStyle}
+                minZoom={10}
+                maxZoom={48}
             >
                 <Map
                     mapStyle="mapbox://styles/mapbox/satellite-v9"
                     mapboxAccessToken="pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
+                    minZoom={10}
+                    maxZoom={48}
                 />
             </DeckGL>
             <ModeSwitcher currentMode={mode} setMode={setMode} task={task} />

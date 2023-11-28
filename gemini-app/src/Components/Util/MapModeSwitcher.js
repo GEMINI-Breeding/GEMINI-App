@@ -135,15 +135,17 @@ export const ModeSwitcher = ({ currentMode, setMode, task }) => {
                     {label}
                 </label>
             ))}
-            <br />
-            <Button variant="contained" color="primary" onClick={() => saveFeatureCollection()}>
-                {buttonText}
-            </Button>
 
-            <br />
-            <Button variant="contained" color="primary" onClick={() => handleNextStep()}>
-                {proceedButtonText}
-            </Button>
+            <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                <Button fullWidth variant="contained" color="primary" onClick={() => saveFeatureCollection()}>
+                    {buttonText}
+                </Button>
+            </div>
+            <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                <Button fullWidth variant="contained" color="primary" onClick={() => handleNextStep()}>
+                    {proceedButtonText}
+                </Button>
+            </div>
         </div>
     );
 };

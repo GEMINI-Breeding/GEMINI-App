@@ -10,6 +10,7 @@ import { useDataState, useDataSetters } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
+import PlotProposalGenerator from "./PlotProposalGenerator";
 
 function PlotBoundaryPrep() {
     const { imageList, isImageViewerOpen, activeStepBoundaryPrep } = useDataState();
@@ -102,8 +103,13 @@ function PlotBoundaryPrep() {
             )}
 
             {activeStepBoundaryPrep === 3 && (
-                <Grid item container justifyContent="center" spacing={2}>
-                    <BoundaryMap task={"plot_boundary"} />
+                <Grid item container justifyContent={"center"} spacing={2}>
+                    <Grid item xs={12} md={2}>
+                        <PlotProposalGenerator />
+                    </Grid>
+                    <Grid item xs={12} md={10}>
+                        <BoundaryMap task={"plot_boundary"} />
+                    </Grid>
                 </Grid>
             )}
         </Grid>
