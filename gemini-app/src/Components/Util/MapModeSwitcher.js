@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { drawPolygonMode, modifyMode, translateMode, viewMode } from "../GCP/TabComponents/BoundaryMap";
+import { drawPolygonMode, modifyMode, translateMode, viewMode, selectionMode } from "../GCP/TabComponents/BoundaryMap";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { Button } from "@mui/material";
 import { save } from "@loaders.gl/core";
@@ -97,6 +97,7 @@ export const ModeSwitcher = ({ currentMode, setMode, task }) => {
         },
         { mode: modifyMode, label: "Edit", info: "Click on a polygon to select and modify its vertices." },
         { mode: translateMode, label: "Translate", info: "Click and drag to move a polygon." },
+        { mode: selectionMode, label: "Select", info: "Click and drag to select multiple polygons." },
     ];
 
     const handleChange = (mode) => {

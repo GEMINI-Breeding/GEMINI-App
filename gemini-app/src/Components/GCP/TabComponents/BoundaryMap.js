@@ -17,6 +17,7 @@ export const drawPolygonMode = new DrawPolygonMode();
 export const modifyMode = new ModifyMode();
 export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
+export const selectionMode = new TranslateMode();
 
 function BoundaryMap({ task }) {
     const {
@@ -112,6 +113,8 @@ function BoundaryMap({ task }) {
             setCursorStyle("default");
         } else if (mode === viewMode) {
             setCursorStyle("grab");
+        } else if (mode === selectionMode) {
+            setCursorStyle("crosshair");
         } else {
             setCursorStyle("default");
         }
@@ -121,7 +124,7 @@ function BoundaryMap({ task }) {
     useEffect(() => {
         const handleKeyDown = (e) => {
             if ((e.key === "Backspace" || e.key === "Delete") && selectedFeatureIndexes.length) {
-                if (mode === translateMode) {
+                if (mode === translateMode || mode === selectionMode) {
                     e.preventDefault();
                     const newFeatures = featureCollection.features.filter(
                         (_, index) => !selectedFeatureIndexes.includes(index)
@@ -163,11 +166,23 @@ function BoundaryMap({ task }) {
             }
         },
         onHover: ({ object, index }) => {
-            if (mode === translateMode && object) {
+            if (mode === translateMode && object && selectedFeatureIndexes.length < 2) {
                 // When hovering over a feature in translate mode, select it
                 setSelectedFeatureIndexes([index]);
             }
         },
+    });
+
+    const selectionLayer = new SelectionLayer({
+        id: "selection-layer",
+        minZoom: 10,
+        maxZoom: 48,
+        selectionType: "rectangle",
+        onSelect: ({ pickingInfos }) => {
+            const selectedFeatureIndexes = pickingInfos.map((info) => info.index);
+            setSelectedFeatureIndexes(selectedFeatureIndexes);
+        },
+        layerIds: ["geojson-layer"],
     });
 
     const controller = {
@@ -179,7 +194,9 @@ function BoundaryMap({ task }) {
             <DeckGL
                 initialViewState={viewState}
                 controller={controller}
-                layers={[prepOrthoTileLayer, layer]}
+                layers={
+                    mode === selectionMode ? [prepOrthoTileLayer, layer, selectionLayer] : [prepOrthoTileLayer, layer]
+                }
                 onViewStateChange={({ viewState }) => setViewState(viewState)}
                 getCursor={() => cursorStyle}
                 minZoom={10}
