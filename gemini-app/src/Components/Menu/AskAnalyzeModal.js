@@ -33,7 +33,7 @@ const AskAnalyzeodal = () => {
     return (
         <Dialog open={isAskAnalyzeModalOpen} onClose={() => setAskAnalyzeModalOpen(false)} maxWidth='md' fullWidth={false}>
             <DialogTitle style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 'x-large' }}>
-                {selectedDate} {selectedSensor} data is not analazed yet. 
+                {selectedDate} {selectedSensor} is not analyzed yet. 
             </DialogTitle>
             <DialogContent>
                 Would you like to process it now?
