@@ -106,6 +106,9 @@ export const DataProvider = ({ children }) => {
         angle: 0,
     });
 
+    // Rover Prep State
+    const [roverPrepTab, setRoverPrepTab] = useState(0);
+
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
     const [imageList, setImageList] = useState([]);
@@ -200,6 +203,9 @@ export const DataProvider = ({ children }) => {
                 featureCollectionPlot,
                 polygonProposalOptions,
 
+                // Rover Prep State
+                roverPrepTab,
+
                 // ImageViewer State
                 imageIndex,
                 imageList,
@@ -286,6 +292,9 @@ export const DataProvider = ({ children }) => {
                     setFeatureCollectionPop,
                     setFeatureCollectionPlot,
                     setPolygonProposalOptions,
+
+                    // Rover Prep State
+                    setRoverPrepTab,
 
                     // ImageViewer State
                     setImageIndex,
