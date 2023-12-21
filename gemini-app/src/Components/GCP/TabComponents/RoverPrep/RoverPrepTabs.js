@@ -66,9 +66,9 @@ export default function NavTabs() {
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", labels: true, model: true, location: true },
-                { date: "2022-07-25", labels: true, model: false, location: false },
-                { date: "2022-08-01", labels: false, model: false, location: false },
+                { date: "2022-06-20", labels: true, model: false, location: true },
+                { date: "2022-07-25", labels: true, model: true, location: false },
+                { date: "2022-08-01", labels: false, model: true, location: false },
             ],
             columns: columns,
         },
@@ -135,8 +135,8 @@ export default function NavTabs() {
                     <Box sx={{ width: "100%" }}>
                         {roverPrepTab === 0 && (
                             <div>
-                                <NestedSection title={"Amiga"} nestedData={amigaData} />
-                                <NestedSection title={"iPhone"} nestedData={iphoneData} />
+                                <NestedSection title={"Amiga"} nestedData={amigaData} activeTab={roverPrepTab} />
+                                <NestedSection title={"iPhone"} nestedData={iphoneData} activeTab={roverPrepTab} />
                             </div>
                         )}
                         {roverPrepTab === 1 && <div>Content for Tab 2</div>}
