@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
     Accordion,
     AccordionSummary,
@@ -12,7 +12,8 @@ import {
     Select,
     MenuItem,
     InputLabel,
-    FormControl
+    FormControl,
+    LinearProgress
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { fetchData, useDataState } from '../../../../DataContext';
@@ -30,8 +31,36 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
     const [batchSize, setBatchSize] = React.useState(32);
     const [imageSize, setImageSize] = React.useState(640);
 
+    // Check for training
+    const [isTraining, setIsTraining] = React.useState(false);
+    const [progress, setProgress] = React.useState(0);
+    const [currentEpoch, setCurrentEpoch] = React.useState(0);
+
+    useEffect(() => {
+        let interval;
+        if (isTraining) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_training_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        const progressPercentage = (data.epoch / epochs) * 100;
+                        setProgress(progressPercentage);
+                        setCurrentEpoch(data.epoch); // Update current epoch
+                    } else {
+                        console.error("Failed to fetch training progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching training progress", error);
+                }
+            }, 5000); // Poll every 5 seconds
+        }
+        return () => clearInterval(interval);
+    }, [isTraining, flaskUrl, epochs]);
+
     const handleTrainModel = async () => {
         try {
+            setIsTraining(true);
             const payload = {
                 epochs: epochs,
                 batchSize: batchSize,
@@ -66,21 +95,63 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         }
     };
 
+    const handleStopTraining = async () => {
+        try {
+            const response = await fetch('/stop_training', { method: 'POST' });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Training stopped");
+            } else {
+                // Handle error response
+                console.error("Error stopping training");
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+        setIsTraining(false);
+    };
+
     return (
         <Dialog open={open} onClose={onClose}>
             <DialogTitle>Training</DialogTitle>
+            {isTraining && (
+                <Grid container direction="column" alignItems="center" style={{ padding: '10px' }}>
+                    <Typography variant="subtitle1">
+                        Progress: {Math.round(progress)}% ({currentEpoch}/{epochs})
+                    </Typography>
+                    <LinearProgress 
+                        variant="determinate" 
+                        value={progress} 
+                        style={{ width: '80%', height: '10px', borderRadius: '5px' }}
+                    />
+                </Grid>
+            )}
             <Grid container spacing={2} justifyContent="center" style={{ padding: '16px' }}>
-                <Button 
-                    onClick={handleTrainModel}
-                    style={{
-                        backgroundColor: "#1976d2",
-                        color: "white",
-                        borderRadius: "4px",
-                        marginTop: "10px",
-                    }}
-                >
-                    Train Model
-                </Button>
+                {!isTraining ? (
+                        <Button 
+                            onClick={handleTrainModel}
+                            style={{
+                                backgroundColor: "#1976d2",
+                                color: "white",
+                                borderRadius: "4px",
+                                marginTop: "10px",
+                            }}
+                        >
+                            Train Model
+                        </Button>
+                    ) : (
+                        <Button 
+                            onClick={handleStopTraining} 
+                            style={{ 
+                                backgroundColor: "red", 
+                                color: "white",
+                                borderRadius: "4px",
+                                marginTop: "10px",
+                            }}
+                        >
+                            Stop
+                        </Button>
+                    )}
             </Grid>
 
             <AdvancedMenu 
