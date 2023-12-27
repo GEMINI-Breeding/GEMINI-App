@@ -97,7 +97,7 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
 
     const handleStopTraining = async () => {
         try {
-            const response = await fetch('/stop_training', { method: 'POST' });
+            const response = await fetch(`${flaskUrl}stop_training`, { method: 'POST' });
             if (response.ok) {
                 // Handle successful stop
                 console.log("Training stopped");
