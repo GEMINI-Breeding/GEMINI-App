@@ -101,18 +101,25 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
             if (response.ok) {
                 // Handle successful stop
                 console.log("Training stopped");
+                setIsTraining(false);  // Update isTraining to false
             } else {
                 // Handle error response
-                console.error("Error stopping training");
+                const errorData = await response.json();
+                console.error("Error stopping training", errorData);
             }
         } catch (error) {
             console.error("Error:", error);
         }
-        setIsTraining(false);
+    };
+
+    const handleClose = () => {
+        if (!isTraining) {
+            onClose();
+        }
     };
 
     return (
-        <Dialog open={open} onClose={onClose}>
+        <Dialog open={open} onClose={handleClose} disableBackdropClick={isTraining} disableEscapeKeyDown={isTraining} >
             <DialogTitle>Training</DialogTitle>
             {isTraining && (
                 <Grid container direction="column" alignItems="center" style={{ padding: '10px' }}>
