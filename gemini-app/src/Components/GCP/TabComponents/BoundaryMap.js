@@ -6,6 +6,7 @@ import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataContext";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
+import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
 
 // const fc = {
 //     type: "FeatureCollection",
@@ -38,24 +39,35 @@ function BoundaryMap({ task }) {
             ? [featureCollectionPop, setFeatureCollectionPop]
             : [featureCollectionPlot, setFeatureCollectionPlot];
 
-    const prepOrthoTileLayer = new TileLayer({
-        id: "geotiff-tile-layer",
-        minZoom: 10,
-        maxZoom: 48,
-        tileSize: 256,
-        data: TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}files/${prepOrthoImagePath}`)),
-        renderSubLayers: (props) => {
-            const {
-                bbox: { west, south, east, north },
-            } = props.tile;
+    const [prepOrthoTileLayer, setPrepOrthoTileLayer] = useState(null);
 
-            return new BitmapLayer(props, {
-                data: null,
-                image: props.data,
-                bounds: [west, south, east, north],
-            });
-        },
-    });
+    useEffect(() => {
+        console.log("prepOrthoImagePath", prepOrthoImagePath);
+
+        const newPrepOrthoTileLayer = new TileLayer({
+            id: "geotiff-tile-layer",
+            minZoom: 10,
+            maxZoom: 48,
+            tileSize: 256,
+            data: TILE_URL_TEMPLATE.replace(
+                "${FILE_PATH}",
+                encodeURIComponent(`${flaskUrl}files/${prepOrthoImagePath}`)
+            ),
+            renderSubLayers: (props) => {
+                const {
+                    bbox: { west, south, east, north },
+                } = props.tile;
+
+                return new BitmapLayer(props, {
+                    data: null,
+                    image: props.data,
+                    bounds: [west, south, east, north],
+                });
+            },
+        });
+
+        setPrepOrthoTileLayer(newPrepOrthoTileLayer);
+    }, [prepOrthoImagePath]);
 
     useEffect(() => {
         console.log("task", task);
@@ -210,6 +222,7 @@ function BoundaryMap({ task }) {
                 />
             </DeckGL>
             <ModeSwitcher currentMode={mode} setMode={setMode} task={task} />
+            <MapOrthoSwitcher />
         </div>
     );
 }

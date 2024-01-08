@@ -108,6 +108,43 @@ export const DataProvider = ({ children }) => {
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
+    const toggleFlag = (setFunction, device, camera, date, column, trait) => {
+        setFunction((prevData) => {
+            // Clone the previous state to a new object
+            const newData = { ...prevData };
+
+            // Navigate to the correct device and camera data
+            const deviceData = newData[device] || {};
+            const cameraData = deviceData[camera] || { data: [] };
+
+            // Find the correct date entry within the camera data
+            const dateIndex = cameraData.data.findIndex((item) => item.date === date);
+            if (dateIndex === -1) {
+                // Date not found, possibly throw an error or handle as needed
+                return prevData;
+            }
+
+            // Clone the date object to avoid mutating the state
+            const dateEntry = { ...cameraData.data[dateIndex] };
+
+            // Toggle the flag, if a trait is provided, look for it inside traits, otherwise just use column
+            if (trait) {
+                // Ensure there is a traits object
+                dateEntry.traits = dateEntry.traits || {};
+                dateEntry.traits[trait] = dateEntry.traits[trait] || {};
+                dateEntry.traits[trait][column] = !dateEntry.traits[trait][column];
+            } else {
+                dateEntry[column] = !dateEntry[column];
+            }
+
+            // Update the camera data and device data with the new date entry
+            cameraData.data[dateIndex] = dateEntry;
+            deviceData[camera] = cameraData;
+            newData[device] = deviceData;
+
+            return newData;
+        });
+    };
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -295,6 +332,7 @@ export const DataProvider = ({ children }) => {
 
                     // Rover Prep State
                     setRoverPrepTab,
+                    toggleFlag,
 
                     // ImageViewer State
                     setImageIndex,

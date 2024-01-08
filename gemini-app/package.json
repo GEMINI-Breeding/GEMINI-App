@@ -27,6 +27,7 @@
         "mapbox-gl": "^2.15.0",
         "nebula.gl": "^1.0.4",
         "react": "^18.2.0",
+        "react-csv-importer": "^0.8.1",
         "react-dom": "^18.2.0",
         "react-map-gl": "^7.1.6",
         "react-scripts": "^5.0.1",

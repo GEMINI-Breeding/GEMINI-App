@@ -71,8 +71,6 @@ function PlotBoundaryPrep() {
                         <Checklist onProceed={handleProceed} onDroneGcpProceed={handleDroneGcpProceed} />
                     ) /* activeStepBoundaryPrep === 0 && <div align='center' >Content for Step 1</div> */
                 }
-                {activeStepBoundaryPrep === 2 && <div align="center">Content for Step 3</div>}
-                {activeStepBoundaryPrep === 3 && <div align="center">Content for Step 4</div>}
             </Grid>
 
             {activeStepBoundaryPrep === 1 && imageList.length === 0 && isImageViewerOpen && (
