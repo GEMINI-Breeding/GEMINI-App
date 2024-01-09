@@ -17,7 +17,7 @@ import {
 
 const ImportSettingsModal = ({ importedData, onClose, open }) => {
     const { fieldDesignOptions } = useDataState();
-    const { setFieldDesignOptions } = useDataSetters();
+    const { setFieldDesignOptions, setPolygonProposalOptions } = useDataSetters();
 
     const [modalOptions, setModalOptions] = useState(fieldDesignOptions);
     const [unit, setUnit] = useState("meters");
@@ -63,6 +63,7 @@ const ImportSettingsModal = ({ importedData, onClose, open }) => {
             columns: modalOptions.columns,
         };
         setFieldDesignOptions(convertedOptions);
+        setPolygonProposalOptions(convertedOptions);
         onClose();
     };
 

@@ -88,6 +88,7 @@ const DataImporter = () => {
             <Importer
                 dataHandler={async (rows, { startIndex }) => {
                     // Accumulate rows of data
+                    console.log(rows); // Log to check the parsed data
                     setImportedData((currentData) => [...currentData, ...rows]);
                 }}
                 defaultNoHeader={false}
@@ -95,6 +96,7 @@ const DataImporter = () => {
                 onComplete={() => {
                     // Send accumulated data to the server
                     sendDataToServer(importedData);
+                    console.log("Data sent to server:", importedData);
                     setIsModalOpen(true);
                 }}
             >

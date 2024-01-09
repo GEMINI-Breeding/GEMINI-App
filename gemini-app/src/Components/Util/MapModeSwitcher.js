@@ -4,7 +4,7 @@ import { useDataState, useDataSetters } from "../../DataContext";
 import { Button } from "@mui/material";
 import { save } from "@loaders.gl/core";
 
-export const ModeSwitcher = ({ currentMode, setMode, task }) => {
+export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, setSelectedFeatureIndexes }) => {
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
@@ -24,6 +24,11 @@ export const ModeSwitcher = ({ currentMode, setMode, task }) => {
         console.log("featureCollectionPop", featureCollectionPop);
         console.log("featureCollectionPlot", featureCollectionPlot);
     }, [featureCollectionPop, featureCollectionPlot]);
+
+    const selectAllFeatures = () => {
+        const allFeatureIndexes = featureCollection.features.map((_, index) => index);
+        setSelectedFeatureIndexes(allFeatureIndexes);
+    };
 
     const saveFeatureCollection = async (fcIn) => {
         let filename;
@@ -136,6 +141,14 @@ export const ModeSwitcher = ({ currentMode, setMode, task }) => {
                     {label}
                 </label>
             ))}
+
+            {task === "plot_boundary" && (
+                <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                    <Button fullWidth variant="contained" color="primary" onClick={() => selectAllFeatures()}>
+                        Select All
+                    </Button>
+                </div>
+            )}
 
             <div style={{ marginBottom: "5px", marginTop: "5px" }}>
                 <Button fullWidth variant="contained" color="primary" onClick={() => saveFeatureCollection()}>

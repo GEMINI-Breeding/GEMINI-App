@@ -221,7 +221,13 @@ function BoundaryMap({ task }) {
                     maxZoom={48}
                 />
             </DeckGL>
-            <ModeSwitcher currentMode={mode} setMode={setMode} task={task} />
+            <ModeSwitcher
+                currentMode={mode}
+                setMode={setMode}
+                task={task}
+                featureCollection={featureCollection}
+                setSelectedFeatureIndexes={setSelectedFeatureIndexes}
+            />
             <MapOrthoSwitcher />
         </div>
     );
