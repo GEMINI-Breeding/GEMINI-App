@@ -43,6 +43,48 @@ const DataImporter = () => {
 
     return (
         <div>
+            <h2 id="instructions">Instructions</h2>
+            <ol>
+                <li>
+                    <p>Prepare a CSV file with the following columns:</p>
+                    <ul>
+                        <li>
+                            <strong>Year</strong> (optional): The year of the experiment. If not provided, the current
+                            year will be used.
+                        </li>
+                        <li>
+                            <strong>Plot</strong>: The unique plot number associated with each plot.
+                        </li>
+                        <li>
+                            <strong>Accession</strong>: The unique accession number associated with each plant.
+                        </li>
+                        <li>
+                            <strong>Location</strong>: The location of the experiment.
+                        </li>
+                        <li>
+                            <strong>Population</strong>: The population from which the plants were selected.
+                        </li>
+                        <li>
+                            <strong>Row</strong>: The row number of the plot.
+                        </li>
+                        <li>
+                            <strong>Column</strong>: The column number of the plot.
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <p>
+                        Drag the file to the box below to upload it. Use the interface to map the columns to the
+                        required names if necessary.
+                    </p>
+                </li>
+                <li>
+                    <p>
+                        Fill out the remaining information about the field to the best of your ability. You will have a
+                        chance to adjust the parameters in a future step, where the plots will be displayed on a map.
+                    </p>
+                </li>
+            </ol>
             <Importer
                 dataHandler={async (rows, { startIndex }) => {
                     // Accumulate rows of data
