@@ -11,13 +11,14 @@ import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
 import PlotProposalGenerator from "./PlotProposalGenerator";
+import DataImporter from "./DataImporter";
 
 function PlotBoundaryPrep() {
     const { imageList, isImageViewerOpen, activeStepBoundaryPrep } = useDataState();
     const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 
     const handleProcessImages = useHandleProcessImages();
-    const steps = ["Data", "Orthomosaic", "Population Boundary", "Plot Boundary"]; // Adjust as needed
+    const steps = ["Import Data", "Population Boundary", "Plot Boundary"]; // Adjust as needed
 
     const largerIconStyle = {
         fontSize: "3rem", // Adjust for desired size
@@ -68,39 +69,19 @@ function PlotBoundaryPrep() {
             <Grid item>
                 {
                     activeStepBoundaryPrep === 0 && (
-                        <Checklist onProceed={handleProceed} onDroneGcpProceed={handleDroneGcpProceed} />
+                        /* <Checklist onProceed={handleProceed} onDroneGcpProceed={handleDroneGcpProceed} /> */
+                        <DataImporter />
                     ) /* activeStepBoundaryPrep === 0 && <div align='center' >Content for Step 1</div> */
                 }
             </Grid>
 
-            {activeStepBoundaryPrep === 1 && imageList.length === 0 && isImageViewerOpen && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
-                    <div align="center">
-                        <Grid item container justifyContent="center" spacing={2}>
-                            <CircularProgress color="primary" size={60} />
-                        </Grid>
-                        <Grid item container justifyContent="center" spacing={2}>
-                            <Typography variant="h6" sx={{ mt: 2 }}>
-                                Loading image data...
-                            </Typography>
-                        </Grid>
-                    </div>
-                </div>
-            )}
-
-            {activeStepBoundaryPrep === 1 && imageList.length > 0 && isImageViewerOpen && (
-                <Grid item container justifyContent="center" spacing={2}>
-                    <ImageViewer />
-                </Grid>
-            )}
-
-            {activeStepBoundaryPrep === 2 && (
+            {activeStepBoundaryPrep === 1 && (
                 <Grid item container justifyContent="center" spacing={2}>
                     <BoundaryMap task={"pop_boundary"} />
                 </Grid>
             )}
 
-            {activeStepBoundaryPrep === 3 && (
+            {activeStepBoundaryPrep === 2 && (
                 <Grid item container justifyContent={"center"} spacing={2}>
                     <Grid item xs={12} md={2}>
                         <PlotProposalGenerator />

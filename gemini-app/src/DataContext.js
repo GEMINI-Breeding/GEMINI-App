@@ -105,6 +105,15 @@ export const DataProvider = ({ children }) => {
         horizontalSpacing: 10,
         angle: 0,
     });
+    const [fieldDesignOptions, setFieldDesignOptions] = useState({
+        width: 50,
+        length: 50,
+        rows: 3,
+        columns: 3,
+        verticalSpacing: 10,
+        horizontalSpacing: 10,
+        angle: 0,
+    });
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
@@ -239,6 +248,7 @@ export const DataProvider = ({ children }) => {
                 featureCollectionPop,
                 featureCollectionPlot,
                 polygonProposalOptions,
+                fieldDesignOptions,
 
                 // Rover Prep State
                 roverPrepTab,
@@ -329,6 +339,7 @@ export const DataProvider = ({ children }) => {
                     setFeatureCollectionPop,
                     setFeatureCollectionPlot,
                     setPolygonProposalOptions,
+                    setFieldDesignOptions,
 
                     // Rover Prep State
                     setRoverPrepTab,
