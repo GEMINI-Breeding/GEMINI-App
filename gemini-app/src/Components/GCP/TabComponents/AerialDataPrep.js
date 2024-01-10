@@ -11,7 +11,11 @@ import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 
+import useTrackComponent from "../../../useTrackComponent";
+
 function AerialDataPrep() {
+    useTrackComponent("AerialDataPrep");
+
     const {
         selectedLocationGCP,
         selectedPopulationGCP,

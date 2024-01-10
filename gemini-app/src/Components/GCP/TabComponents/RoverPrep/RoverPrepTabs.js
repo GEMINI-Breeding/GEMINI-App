@@ -6,6 +6,8 @@ import Tab from "@mui/material/Tab";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection } from "./CamerasAccordion";
 
+import useTrackComponent from "../../../../useTrackComponent";
+
 // Custom styled component for the Tabs
 const FolderTabs = styled(Tabs)({
     borderBottom: "1px solid #e0e0e0",
@@ -40,6 +42,8 @@ const FolderTab = styled(Tab)({
 });
 
 export default function NavTabs() {
+    useTrackComponent("RoverPrep");
+
     const { roverPrepTab } = useDataState();
     const { setRoverPrepTab } = useDataSetters();
 

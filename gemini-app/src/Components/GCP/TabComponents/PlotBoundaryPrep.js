@@ -13,7 +13,11 @@ import { CircularProgress, Typography } from "@mui/material";
 import PlotProposalGenerator from "./PlotProposalGenerator";
 import DataImporter from "./DataImporter";
 
+import useTrackComponent from "../../../useTrackComponent";
+
 function PlotBoundaryPrep() {
+    useTrackComponent("PlotBoundaryPrep");
+
     const { imageList, isImageViewerOpen, activeStepBoundaryPrep } = useDataState();
     const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 

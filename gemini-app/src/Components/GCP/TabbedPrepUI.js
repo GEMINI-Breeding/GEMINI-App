@@ -9,7 +9,11 @@ import PlotBoundaryPrep from "./TabComponents/PlotBoundaryPrep";
 import AerialDataPrep from "./TabComponents/AerialDataPrep";
 import NavTabs from "./TabComponents/RoverPrep/RoverPrepTabs";
 
+import useTrackComponent from "../../useTrackComponent";
+
 function TabbedPrepUI() {
+    useTrackComponent("TabbedPrepUI");
+
     const {
         locationOptionsGCP,
         selectedLocationGCP,

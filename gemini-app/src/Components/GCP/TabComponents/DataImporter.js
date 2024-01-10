@@ -4,7 +4,11 @@ import "react-csv-importer/dist/index.css";
 import { useDataState, useDataSetters } from "../../../DataContext";
 import ImportSettingsModal from "../../Util/ImportSettingsModal";
 
+import useTrackComponent from "../../../useTrackComponent";
+
 const DataImporter = () => {
+    useTrackComponent("DataImporter");
+
     const { selectedLocationGCP, selectedPopulationGCP, flaskUrl } = useDataState();
     const { setActiveStepBoundaryPrep } = useDataSetters();
 
