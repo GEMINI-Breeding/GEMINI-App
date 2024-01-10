@@ -108,6 +108,14 @@ export const DataProvider = ({ children }) => {
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
+    const [epochs, setEpochs] = useState(100);
+    const [batchSize, setBatchSize] = useState(32);
+    const [imageSize, setImageSize] = useState(640);
+    const [isTraining, setIsTraining] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [currentEpoch, setCurrentEpoch] = useState(0);
+    const [showResults, setShowResults] = useState(false);
+    const [processRunning, setProcessRunning] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -205,6 +213,14 @@ export const DataProvider = ({ children }) => {
 
                 // Rover Prep State
                 roverPrepTab,
+                epochs,
+                batchSize,
+                imageSize,
+                isTraining,
+                progress,
+                currentEpoch,
+                showResults,
+                processRunning,
 
                 // ImageViewer State
                 imageIndex,
@@ -295,6 +311,14 @@ export const DataProvider = ({ children }) => {
 
                     // Rover Prep State
                     setRoverPrepTab,
+                    setEpochs,
+                    setBatchSize,
+                    setImageSize,
+                    setIsTraining,
+                    setProgress,
+                    setCurrentEpoch,
+                    setShowResults,
+                    setProcessRunning,
 
                     // ImageViewer State
                     setImageIndex,

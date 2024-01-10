@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import {
     Accordion,
     AccordionSummary,
@@ -7,16 +7,17 @@ import {
     Grid,
     Button,
     Dialog,
-    DialogContent,
     DialogTitle,
     Select,
     MenuItem,
     InputLabel,
     FormControl,
-    LinearProgress
+    LinearProgress,
+    LinearProgressProps,
+    Box
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { useDataState } from '../../../../DataContext';
+import { useDataSetters, useDataState } from '../../../../DataContext';
 
 function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
 
@@ -24,17 +25,26 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         selectedLocationGCP,
         selectedPopulationGCP,
         flaskUrl,
+        epochs,
+        batchSize,
+        imageSize,
+        isTraining,
+        progress,
+        currentEpoch,
+        showResults,
+        processRunning
     } = useDataState();
 
-    // State variables
-    const [epochs, setEpochs] = useState(100);
-    const [batchSize, setBatchSize] = useState(32);
-    const [imageSize, setImageSize] = useState(640);
-    const [isTraining, setIsTraining] = useState(false);
-    const [progress, setProgress] = useState(0);
-    const [currentEpoch, setCurrentEpoch] = useState(0);
-    const [trainingComplete, setTrainingComplete] = useState(false);
-    const [showResults, setShowResults] = useState(false);
+    const {
+        setEpochs,
+        setBatchSize,
+        setImageSize,
+        setIsTraining,
+        setProgress,
+        setCurrentEpoch,
+        setShowResults,
+        setProcessRunning
+    } = useDataSetters();
 
     useEffect(() => {
         let interval;
@@ -44,8 +54,9 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
                     const response = await fetch(`${flaskUrl}get_training_progress`);
                     if (response.ok) {
                         const data = await response.json();
-                        const progressPercentage = (data.epoch / epochs) * 100;
-                        setProgress(progressPercentage);
+                        console.log('Epoch: ', data.epoch, 'Epochs: ', epochs); // Logging for debugging
+                        const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
+                        setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
                         setCurrentEpoch(data.epoch); // Update current epoch
                     } else {
                         console.error("Failed to fetch training progress");
@@ -61,7 +72,6 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
     useEffect(() => {
         if (currentEpoch >= epochs) {
             setIsTraining(false);
-            setTrainingComplete(true);
             setShowResults(true);
         }
     }, [currentEpoch, epochs]);
@@ -69,6 +79,7 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
     const handleTrainModel = async () => {
         try {
             setIsTraining(true);
+            setProcessRunning(true);
             const payload = {
                 epochs: epochs,
                 batchSize: batchSize,
@@ -126,90 +137,95 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         }
     };
 
-    const handleShowResults = () => {
-        setShowResults(true);
-    };
-
     const handleResultsClose = () => {
         setShowResults(false);
-        setTrainingComplete(false); 
+        setProcessRunning(false);
+        onClose();
     };
 
     return (
         <>
-
-            <Dialog open={open && !trainingComplete} onClose={handleClose} disableBackdropClick={isTraining} disableEscapeKeyDown={isTraining} >
+            <Dialog open={open && !isTraining} onClose={handleClose}>
                 <DialogTitle>Training</DialogTitle>
-                {isTraining && (
-                    <Grid container direction="column" alignItems="center" style={{ padding: '10px' }}>
-                        <Typography variant="subtitle1">
-                            Progress: {Math.round(progress)}% ({currentEpoch}/{epochs})
-                        </Typography>
-                        <LinearProgress 
-                            variant="determinate" 
-                            value={progress} 
-                            style={{ width: '80%', height: '10px', borderRadius: '5px' }}
+                {!isTraining && (
+                    // Render the Train Model button and Advanced Menu
+                    <>
+                        <Button 
+                            onClick={handleTrainModel}
+                            style={{
+                                backgroundColor: "#1976d2",
+                                color: "white",
+                                borderRadius: "4px",
+                                marginTop: "10px",
+                                margin: "0 auto"
+                            }}
+                            > Train Model
+                        </Button>
+                        <AdvancedMenu 
+                            epochs={epochs} setEpochs={setEpochs}
+                            batchSize={batchSize} setBatchSize={setBatchSize}
+                            imageSize={imageSize} setImageSize={setImageSize}
                         />
-                    </Grid>
+                    </>
                 )}
-                <Grid container spacing={2} justifyContent="center" style={{ padding: '16px' }}>
-                    {!isTraining && !trainingComplete ? (
-                            <Button 
-                                onClick={handleTrainModel}
-                                style={{
-                                    backgroundColor: "#1976d2",
-                                    color: "white",
-                                    borderRadius: "4px",
-                                    marginTop: "10px",
-                                }}
-                            >
-                                Train Model
-                            </Button>
-                        ) : trainingComplete ? (
-                            <Button 
-                                onClick={handleShowResults}
-                                style={{
-                                    backgroundColor: "#90ee90",
-                                    color: "white",
-                                    borderRadius: "4px",
-                                    marginTop: "10px",
-                                }}
-                            >
-                                Show Results
-                            </Button>
-                        ) : (
-                            <Button 
-                                onClick={handleStopTraining} 
-                                style={{ 
-                                    backgroundColor: "red", 
-                                    color: "white",
-                                    borderRadius: "4px",
-                                    marginTop: "10px",
-                                }}
-                            >
-                                Stop
-                            </Button>
-                        )}
-                </Grid>
-
-                <AdvancedMenu 
-                    epochs={epochs} setEpochs={setEpochs}
-                    batchSize={batchSize} setBatchSize={setBatchSize}
-                    imageSize={imageSize} setImageSize={setImageSize}
-                />
             </Dialog>
 
-            <Dialog open={showResults} onClose={handleResultsClose}>
-                <DialogTitle>Results</DialogTitle>
-                <DialogContent>
-                    <Typography variant="body1" style={{ margin: '20px' }}>
-                        Your results or content here.
-                    </Typography>
-                    <Button onClick={handleResultsClose} style={{ margin: '10px' }}>Close</Button>
-                </DialogContent>
-            </Dialog>
-
+            {isTraining && (
+                <Box sx={{
+                    position: 'fixed',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    pointerEvents: 'none', // allows clicks to pass through to the underlying content
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 1200 // ensures the overlay is on top
+                }}>
+                    <Box sx={{ pointerEvents: 'auto', width: '90%' }}>
+                        <TrainingProgressBar progress={progress} onStopTraining={handleStopTraining} />
+                    </Box>
+                </Box>
+            )}
         </>
+    );
+}
+
+function TrainingProgressBar({ progress, onStopTraining }) {
+    const validProgress = Number.isFinite(progress) ? progress : 0;
+
+    return (
+        <Box sx={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'start', 
+        backgroundColor: 'white',
+        padding: '10px',
+        border: '1px solid #e0e0e0',
+        boxSizing: 'border-box'
+        }}>
+        <Typography variant="body2" sx={{ marginRight: '10px' }}>
+            Training in Progress...
+        </Typography>
+        <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ width: '100%', mr: 1 }}>
+                <LinearProgress variant="determinate" value={validProgress} />
+            </Box>
+            <Box sx={{ minWidth: 35, mr: 1 }}>
+                <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
+            </Box>
+        </Box>
+        <Button 
+            onClick={onStopTraining}
+            style={{
+            backgroundColor: "red",
+            color: "white",
+            alignSelf: 'center'
+            }}
+        >
+            STOP
+        </Button>
+        </Box>
     );
 }
 

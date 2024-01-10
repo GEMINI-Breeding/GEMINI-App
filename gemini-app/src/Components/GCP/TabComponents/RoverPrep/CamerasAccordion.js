@@ -7,13 +7,10 @@ import {
     ListItem,
     ListItemText,
     Checkbox,
-    TextField,
     Typography,
     Grid,
     Box,
-    Button,
-    Dialog,
-    DialogTitle
+    Button
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { TrainMenu } from './TrainModel';
