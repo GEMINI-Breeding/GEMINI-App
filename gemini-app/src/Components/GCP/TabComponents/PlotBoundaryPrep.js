@@ -25,7 +25,7 @@ function PlotBoundaryPrep() {
     const steps = ["Import Data", "Population Boundary", "Plot Boundary"]; // Adjust as needed
 
     const largerIconStyle = {
-        fontSize: "3rem", // Adjust for desired size
+        fontSize: "2rem", // Adjust for desired size
         fontWeight: "normal",
         textAlign: "center",
     };
@@ -42,9 +42,10 @@ function PlotBoundaryPrep() {
 
     const handleReturnClick = (index) => {
         // If the active step is greater than the index, go back to the index
-        if (activeStepBoundaryPrep > index) {
-            setActiveStepBoundaryPrep(index);
-        }
+        // if (activeStepBoundaryPrep > index) {
+        //     setActiveStepBoundaryPrep(index);
+        // }
+        setActiveStepBoundaryPrep(index);
     };
 
     const isImageViewerOpenRef = useRef(isImageViewerOpen);
@@ -58,7 +59,7 @@ function PlotBoundaryPrep() {
     }, [isImageViewerOpen]);
 
     return (
-        <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
+        <Grid container direction="column" spacing={2} style={{ width: "90%", margin: "0 auto" }}>
             <Grid item style={{ width: "100%" }}>
                 <Stepper activeStep={activeStepBoundaryPrep} style={{ padding: "8px 0", background: "transparent" }}>
                     {steps.map((label, index) => (

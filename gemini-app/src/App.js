@@ -85,13 +85,21 @@ function App() {
 
                 <div className="content">{contentView}</div>
 
-                <div className="help-button" style={{ position: "fixed", top: "10px", right: "10px", zIndex: 1000 }}>
+                <div
+                    className="help-button"
+                    style={{ position: "fixed", bottom: "10px", right: helpPaneOpen ? "300px" : "10px", zIndex: 1000 }}
+                >
                     <IconButton onClick={toggleHelpPane}>
-                        <HelpIcon />
+                        <HelpIcon fontSize="large" />
                     </IconButton>
                 </div>
 
-                <Drawer anchor="right" open={helpPaneOpen} onClose={toggleHelpPane}>
+                <Drawer
+                    anchor="right"
+                    variant="persistent"
+                    open={helpPaneOpen}
+                    sx={{ "& .MuiDrawer-paper": { height: "100vh", overflow: "auto" } }}
+                >
                     <HelpPane />
                 </Drawer>
             </div>
