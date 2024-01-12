@@ -10,7 +10,7 @@ const useTrackComponent = (componentName) => {
         return () => {
             unregisterComponent(componentName);
         };
-    }, [componentName, registerComponent, unregisterComponent]);
+    }, []);
 };
 
 export default useTrackComponent;

@@ -90,10 +90,6 @@ function AerialDataPrep() {
     }, [selectedDateGCP]);
 
     if (imageList.length > 0 && isImageViewerOpen) {
-        console.log("imageList", imageList);
-        console.log("imageList[0].image_path", imageList[0].image_path);
-        console.log(selectedDateGCP, selectedLocationGCP, selectedPopulationGCP);
-
         return (
             <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
                 <ImageViewer />
