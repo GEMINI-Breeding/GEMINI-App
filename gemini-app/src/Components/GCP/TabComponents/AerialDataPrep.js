@@ -11,22 +11,22 @@ import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 
+import useTrackComponent from "../../../useTrackComponent";
+
 function AerialDataPrep() {
+    useTrackComponent("AerialDataPrep");
+
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
         dateOptionsGCP,
         flaskUrl,
-        radiusMeters,
-        isSidebarCollapsed,
         imageList,
         isImageViewerOpen,
     } = useDataState();
 
     const {
-        setSelectedLocationGCP,
-        setSelectedPopulationGCP,
         setSelectedDateGCP,
         setDateOptionsGCP,
         setImageList,
@@ -90,10 +90,6 @@ function AerialDataPrep() {
     }, [selectedDateGCP]);
 
     if (imageList.length > 0 && isImageViewerOpen) {
-        console.log("imageList", imageList);
-        console.log("imageList[0].image_path", imageList[0].image_path);
-        console.log(selectedDateGCP, selectedLocationGCP, selectedPopulationGCP);
-
         return (
             <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
                 <ImageViewer />
@@ -105,6 +101,13 @@ function AerialDataPrep() {
         <Grid container direction="column" alignItems="center" style={{ width: "50%", margin: "0 auto" }}>
             <Typography variant="h4" component="h2" align="center">
                 Aerial Datasets
+            </Typography>
+
+            {/* Instructions */}
+            <Typography variant="body1" component="p" align="left" style={{ marginTop: "20px" }}>
+                Image datasets are organized by sensor type and date. datasets with a checkmark have been processed into
+                an orthomosaic. Click on a dataset to begin the process of ground control point identification. After
+                labeling the final image, you will be able to initialize orthomosaic generation.
             </Typography>
 
             {/* RGB Section */}

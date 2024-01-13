@@ -9,7 +9,11 @@ import PlotBoundaryPrep from "./TabComponents/PlotBoundaryPrep";
 import AerialDataPrep from "./TabComponents/AerialDataPrep";
 import NavTabs from "./TabComponents/RoverPrep/RoverPrepTabs";
 
+import useTrackComponent from "../../useTrackComponent";
+
 function TabbedPrepUI() {
+    useTrackComponent("TabbedPrepUI");
+
     const {
         locationOptionsGCP,
         selectedLocationGCP,
@@ -54,17 +58,19 @@ function TabbedPrepUI() {
             {isPrepInitiated && (
                 <Grid item>
                     <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
+                        <Tab label="Orthomosaic Generation" style={titleStyle} />
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
-                        <Tab label="Aerial Data Preparation" style={titleStyle} />
+                        <Tab label="Aerial Data Processing" style={titleStyle} />
                         <Tab label="Ground-based Data Preparation" style={titleStyle} />
                     </Tabs>
                 </Grid>
             )}
             {isPrepInitiated && (
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
-                    {selectedTabPrep === 0 && <PlotBoundaryPrep />}
-                    {selectedTabPrep === 1 && <AerialDataPrep />}
-                    {selectedTabPrep === 2 && <NavTabs />}
+                    {selectedTabPrep === 0 && <AerialDataPrep />}
+                    {selectedTabPrep === 1 && <PlotBoundaryPrep />}
+                    {selectedTabPrep === 2 && <AerialDataPrep />}
+                    {selectedTabPrep === 3 && <NavTabs />}
                 </Grid>
             )}
         </Grid>

@@ -7,7 +7,11 @@ import OrthoModal from "./OrthoModal";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
 
+import useTrackComponent from "../../useTrackComponent";
+
 const ImageViewer = () => {
+    useTrackComponent("ImageViewer");
+
     const { imageIndex, imageList, imageViewerLoading, imageViewerError, flaskUrl, sliderMarks } = useDataState();
 
     const {

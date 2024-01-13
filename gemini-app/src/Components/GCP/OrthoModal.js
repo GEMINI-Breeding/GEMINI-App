@@ -20,6 +20,10 @@ const OrthoModal = () => {
         sliderMarks,
         isOrthoProcessing,
         orthoServerStatus,
+        flaskUrl,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedDateGCP,
     } = useDataState();
 
     const { setOrthoSetting, setOrthoCustomValue, setOrthoModalOpen, setIsOrthoProcessing, setOrthoServerStatus } =
@@ -28,6 +32,55 @@ const OrthoModal = () => {
     // Process sliderMarks to check the label value for pointX and pointY
     const labeledGcpImages = sliderMarks.filter((mark) => mark.label.props.color !== "rgba(255,255,255,0)");
     const labeledGcpImagesCount = labeledGcpImages.length;
+
+    /*
+    Python args for ODM:
+    data = request.json
+    location = data.get('location')
+    population = data.get('population')
+    date = data.get('date')
+    sensor = data.get('sensor')
+    temp_dir = data.get('temp_dir')
+    reconstruction_quality = data.get('reconstruction_quality')
+    custom_options = data.get('custom_options')
+    */
+
+    const handleGenerateOrtho = () => {
+        setIsOrthoProcessing(true);
+        setOrthoServerStatus("Processing...");
+        const data = {
+            location: selectedLocationGCP,
+            population: selectedPopulationGCP,
+            date: selectedDateGCP,
+            sensor: "Drone",
+            reconstruction_quality: orthoSetting,
+            custom_options: orthoCustomValue ? orthoCustomValue : [],
+        };
+        fetch(`${flaskUrl}run_odm`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error("Error generating ortho");
+                }
+                return response.json();
+            })
+            .then((data) => {
+                console.log("Success:", data);
+                setOrthoServerStatus("Success!");
+            })
+            .catch((error) => {
+                console.error("Error:", error);
+                setOrthoServerStatus("Error generating ortho");
+            })
+            .finally(() => {
+                setIsOrthoProcessing(false);
+            });
+    };
 
     return (
         <Dialog open={isOrthoModalOpen} onClose={() => setOrthoModalOpen(false)} maxWidth="md" fullWidth={true}>
@@ -70,7 +123,12 @@ const OrthoModal = () => {
                 </Grid>
                 <br />
                 <Grid container justifyContent="center" style={{ marginTop: "20px" }}>
-                    <Button variant="contained" color="primary" disabled={isOrthoProcessing} onClick={() => {}}>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        disabled={isOrthoProcessing}
+                        onClick={() => handleGenerateOrtho()}
+                    >
                         {isOrthoProcessing ? "Processing" : "Process Images"}
                         {isOrthoProcessing && <CircularProgress size={24} style={{ marginLeft: "14px" }} />}
                     </Button>

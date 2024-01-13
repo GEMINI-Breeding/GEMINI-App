@@ -202,7 +202,7 @@ function BoundaryMap({ task }) {
     };
 
     return (
-        <div style={{ height: "70vh", width: "70vw", position: "relative" }}>
+        <div style={{ height: "85vh", width: "100vw", position: "relative" }}>
             <DeckGL
                 initialViewState={viewState}
                 controller={controller}
@@ -221,7 +221,13 @@ function BoundaryMap({ task }) {
                     maxZoom={48}
                 />
             </DeckGL>
-            <ModeSwitcher currentMode={mode} setMode={setMode} task={task} />
+            <ModeSwitcher
+                currentMode={mode}
+                setMode={setMode}
+                task={task}
+                featureCollection={featureCollection}
+                setSelectedFeatureIndexes={setSelectedFeatureIndexes}
+            />
             <MapOrthoSwitcher />
         </div>
     );

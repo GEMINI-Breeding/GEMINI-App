@@ -65,7 +65,18 @@ const PointPicker = ({ src }) => {
         // If any image has a point, save the data
         const hasPoint = imageList.some((image) => image.pointX && image.pointY);
         if (hasPoint) {
-            saveData(imageList);
+            //saveData(imageList);
+            const imageListCleaned = imageList
+                .map((image) => {
+                    // If the image contains null values, remove it from the list
+                    if (image.pointX === null || image.pointY === null) {
+                        return null;
+                    } else {
+                        return image;
+                    }
+                })
+                .filter((image) => image !== null);
+            saveData(imageListCleaned);
         }
 
         const marks = imageList.map((img, index) => {
