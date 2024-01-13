@@ -117,43 +117,14 @@ export const DataProvider = ({ children }) => {
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
-    const toggleFlag = (setFunction, device, camera, date, column, trait) => {
-        setFunction((prevData) => {
-            // Clone the previous state to a new object
-            const newData = { ...prevData };
-
-            // Navigate to the correct device and camera data
-            const deviceData = newData[device] || {};
-            const cameraData = deviceData[camera] || { data: [] };
-
-            // Find the correct date entry within the camera data
-            const dateIndex = cameraData.data.findIndex((item) => item.date === date);
-            if (dateIndex === -1) {
-                // Date not found, possibly throw an error or handle as needed
-                return prevData;
-            }
-
-            // Clone the date object to avoid mutating the state
-            const dateEntry = { ...cameraData.data[dateIndex] };
-
-            // Toggle the flag, if a trait is provided, look for it inside traits, otherwise just use column
-            if (trait) {
-                // Ensure there is a traits object
-                dateEntry.traits = dateEntry.traits || {};
-                dateEntry.traits[trait] = dateEntry.traits[trait] || {};
-                dateEntry.traits[trait][column] = !dateEntry.traits[trait][column];
-            } else {
-                dateEntry[column] = !dateEntry[column];
-            }
-
-            // Update the camera data and device data with the new date entry
-            cameraData.data[dateIndex] = dateEntry;
-            deviceData[camera] = cameraData;
-            newData[device] = deviceData;
-
-            return newData;
-        });
-    };
+    const [epochs, setEpochs] = useState(100);
+    const [batchSize, setBatchSize] = useState(32);
+    const [imageSize, setImageSize] = useState(640);
+    const [isTraining, setIsTraining] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [currentEpoch, setCurrentEpoch] = useState(0);
+    const [showResults, setShowResults] = useState(false);
+    const [processRunning, setProcessRunning] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -178,7 +149,7 @@ export const DataProvider = ({ children }) => {
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5003/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8090/");
 
     return (
@@ -252,6 +223,14 @@ export const DataProvider = ({ children }) => {
 
                 // Rover Prep State
                 roverPrepTab,
+                epochs,
+                batchSize,
+                imageSize,
+                isTraining,
+                progress,
+                currentEpoch,
+                showResults,
+                processRunning,
 
                 // ImageViewer State
                 imageIndex,
@@ -343,7 +322,14 @@ export const DataProvider = ({ children }) => {
 
                     // Rover Prep State
                     setRoverPrepTab,
-                    toggleFlag,
+                    setEpochs,
+                    setBatchSize,
+                    setImageSize,
+                    setIsTraining,
+                    setProgress,
+                    setCurrentEpoch,
+                    setShowResults,
+                    setProcessRunning,
 
                     // ImageViewer State
                     setImageIndex,
