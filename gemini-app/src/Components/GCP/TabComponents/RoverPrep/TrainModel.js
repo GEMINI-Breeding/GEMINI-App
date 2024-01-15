@@ -27,11 +27,7 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         epochs,
         batchSize,
         imageSize,
-        isTraining,
-        progress,
-        currentEpoch,
-        showResults,
-        processRunning
+        isTraining
     } = useDataState();
 
     const {
@@ -39,8 +35,6 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         setBatchSize,
         setImageSize,
         setIsTraining,
-        setProgress,
-        setCurrentEpoch,
         setShowResults,
         setProcessRunning
     } = useDataSetters();

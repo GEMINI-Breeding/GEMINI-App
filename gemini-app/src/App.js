@@ -116,27 +116,28 @@ function App() {
             console.error("Error:", error);
         }
     };
-      useEffect(() => {
-      let interval;
-        if (isTraining) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_training_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log('Epoch: ', data.epoch, 'Epochs: ', epochs); // Logging for debugging
-                        const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
-                        setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
-                        setCurrentEpoch(data.epoch); // Update current epoch
-                    } else {
-                        console.error("Failed to fetch training progress");
-                    }
-                } catch (error) {
-                    console.error("Error fetching training progress", error);
-                }
-            }, 5000); // Poll every 5 seconds
-        }
-        return () => clearInterval(interval);
+    
+    useEffect(() => {
+    let interval;
+      if (isTraining) {
+          interval = setInterval(async () => {
+              try {
+                  const response = await fetch(`${flaskUrl}get_training_progress`);
+                  if (response.ok) {
+                      const data = await response.json();
+                      // console.log('Epoch: ', data.epoch, 'Epochs: ', epochs); // Logging for debugging
+                      const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
+                      setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
+                      setCurrentEpoch(data.epoch); // Update current epoch
+                  } else {
+                      console.error("Failed to fetch training progress");
+                  }
+              } catch (error) {
+                  console.error("Error fetching training progress", error);
+              }
+          }, 5000); // Poll every 5 seconds
+      }
+      return () => clearInterval(interval);
     }, [isTraining, flaskUrl, epochs]);
 
     useEffect(() => {
