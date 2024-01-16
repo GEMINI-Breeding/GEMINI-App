@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Accordion,
     AccordionSummary,
@@ -13,11 +13,12 @@ import {
     InputLabel,
     FormControl,
     LinearProgress,
-    LinearProgressProps,
-    Box
+    Box,
+    IconButton
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from '../../../../DataContext';
+import { LineChart } from '@mui/x-charts/LineChart';
 
 function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
 
@@ -28,11 +29,7 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         epochs,
         batchSize,
         imageSize,
-        isTraining,
-        progress,
-        currentEpoch,
-        showResults,
-        processRunning
+        isTraining
     } = useDataState();
 
     const {
@@ -40,41 +37,8 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         setBatchSize,
         setImageSize,
         setIsTraining,
-        setProgress,
-        setCurrentEpoch,
-        setShowResults,
         setProcessRunning
     } = useDataSetters();
-
-    useEffect(() => {
-        let interval;
-        if (isTraining) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_training_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log('Epoch: ', data.epoch, 'Epochs: ', epochs); // Logging for debugging
-                        const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
-                        setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
-                        setCurrentEpoch(data.epoch); // Update current epoch
-                    } else {
-                        console.error("Failed to fetch training progress");
-                    }
-                } catch (error) {
-                    console.error("Error fetching training progress", error);
-                }
-            }, 5000); // Poll every 5 seconds
-        }
-        return () => clearInterval(interval);
-    }, [isTraining, flaskUrl, epochs]);
-
-    useEffect(() => {
-        if (currentEpoch >= epochs) {
-            setIsTraining(false);
-            setShowResults(true);
-        }
-    }, [currentEpoch, epochs]);
 
     const handleTrainModel = async () => {
         try {
@@ -114,33 +78,10 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         }
     };
 
-    const handleStopTraining = async () => {
-        try {
-            const response = await fetch(`${flaskUrl}stop_training`, { method: 'POST' });
-            if (response.ok) {
-                // Handle successful stop
-                console.log("Training stopped");
-                setIsTraining(false);  // Update isTraining to false
-            } else {
-                // Handle error response
-                const errorData = await response.json();
-                console.error("Error stopping training", errorData);
-            }
-        } catch (error) {
-            console.error("Error:", error);
-        }
-    };
-
     const handleClose = () => {
         if (!isTraining) {
             onClose();
         }
-    };
-
-    const handleResultsClose = () => {
-        setShowResults(false);
-        setProcessRunning(false);
-        onClose();
     };
 
     return (
@@ -169,62 +110,81 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
                     </>
                 )}
             </Dialog>
-
-            {isTraining && (
-                <Box sx={{
-                    position: 'fixed',
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    pointerEvents: 'none', // allows clicks to pass through to the underlying content
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 1200 // ensures the overlay is on top
-                }}>
-                    <Box sx={{ pointerEvents: 'auto', width: '90%' }}>
-                        <TrainingProgressBar progress={progress} onStopTraining={handleStopTraining} />
-                    </Box>
-                </Box>
-            )}
         </>
     );
 }
 
-function TrainingProgressBar({ progress, onStopTraining }) {
+function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
+    // const  { chartData } = useDataState();
+    const { 
+        setChartData, 
+        setIsTraining, 
+        setTrainingData, 
+        setCurrentEpoch} = useDataSetters();
+    const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
 
+    const handleExpandClick = () => {
+        setExpanded(!expanded);
+    }
+
+    const handleDone = () => {
+        setIsTraining(false);
+        setCurrentEpoch(0); // Reset epochs
+        setTrainingData(null)
+        setChartData({ x: [ ], y: [ ] }) // Reset chart data
+    }
+
+    const isTrainingComplete = currentEpoch >= epochs;
+
+    useEffect(() => {
+        if (trainingData) {
+            setChartData(prevData => ({
+                x: [...prevData.x, trainingData.epoch],
+                y: [...prevData.y, trainingData.map]
+            }));
+            console.log("Chart data:", chartData);
+        }
+    }, [trainingData]);
+
     return (
-        <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'start', 
-        backgroundColor: 'white',
-        padding: '10px',
-        border: '1px solid #e0e0e0',
-        boxSizing: 'border-box'
-        }}>
-        <Typography variant="body2" sx={{ marginRight: '10px' }}>
-            Training in Progress...
-        </Typography>
-        <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-            <Box sx={{ width: '100%', mr: 1 }}>
-                <LinearProgress variant="determinate" value={validProgress} />
+        <Box sx={{ backgroundColor: 'white', padding: '10px', border: '1px solid #e0e0e0', boxSizing: 'border-box' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'start' }}>
+                <Typography variant="body2" sx={{ marginRight: '10px' }}>
+                    Training in Progress...
+                </Typography>
+                <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+                    <Box sx={{ width: '100%', mr: 1 }}>
+                        <LinearProgress variant="determinate" value={validProgress} />
+                    </Box>
+                    <Box sx={{ minWidth: 35, mr: 1 }}>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
+                    </Box>
+                </Box>
+                <Button 
+                    onClick={isTrainingComplete ? handleDone : onStopTraining}
+                    style={{ backgroundColor: isTrainingComplete ? "green" : "red", color: "white", alignSelf: 'center' }}
+                >
+                    {isTrainingComplete ? "DONE" : "STOP"}
+                </Button>
+                <IconButton onClick={handleExpandClick} sx={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                    <ExpandMoreIcon />
+                </IconButton>
             </Box>
-            <Box sx={{ minWidth: 35, mr: 1 }}>
-                <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
-            </Box>
-        </Box>
-        <Button 
-            onClick={onStopTraining}
-            style={{
-            backgroundColor: "red",
-            color: "white",
-            alignSelf: 'center'
-            }}
-        >
-            STOP
-        </Button>
+            {expanded && (
+                <Box sx={{ marginTop: '10px', width: '100%', height: '300px' }}>
+                    <LineChart 
+                        xAxis={[{ label: 'Epoch', max: epochs, min: 0, data: chartData.x}]}
+                        yAxis={[{ label: 'mAP', max: 1, min: 0}]}
+                        series={[
+                          {
+                            data: chartData.y,
+                            showMark: false
+                          },
+                        ]}
+                    />
+                </Box>
+            )}
         </Box>
     );
 }
@@ -321,4 +281,4 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
     );
 }
 
-export { TrainMenu, AdvancedMenu };
+export { TrainMenu, TrainingProgressBar };
