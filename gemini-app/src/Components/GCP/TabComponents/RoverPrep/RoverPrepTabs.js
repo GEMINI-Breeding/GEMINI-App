@@ -60,49 +60,29 @@ export default function NavTabs() {
     ];
 
     const amigaData = [
-        // IR Camera accordion data
-        {
-            summary: "IR Camera",
-            data: [{ date: "2022-08-01", labels: false, model: false, location: false }],
-            columns: columns,
-        },
         // RGB Camera accordion data
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", labels: true, model: false, location: true },
-                { date: "2022-07-25", labels: true, model: true, location: false },
-                { date: "2022-08-01", labels: false, model: true, location: false },
+                { date: "2022-06-20", labels: true, model: false, location: false },
+                { date: "2022-07-25", labels: true, model: false, location: false },
+                { date: "2022-08-01", labels: true, model: false, location: false },
             ],
             columns: columns,
         },
     ];
 
     const iphoneData = [
-        // IR Camera accordion data
-        {
-            summary: "IR Camera",
-            data: [{ date: "2022-08-01", labels: false, model: false, location: false }],
-            columns: columns,
-        },
         // RGB Camera accordion data
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", labels: true, model: true, location: true },
+                { date: "2022-06-20", labels: true, model: false, location: false },
                 { date: "2022-07-25", labels: true, model: false, location: false },
-                { date: "2022-08-01", labels: false, model: false, location: false },
+                { date: "2022-08-01", labels: true, model: false, location: false },
             ],
             columns: columns,
-        },
-        {
-            summary: "Depth Camera",
-            data: [
-                { date: "2022-06-20", labels: true, model: true, location: true },
-                { date: "2022-08-01", labels: false, model: false, location: false },
-            ],
-            columns: columns,
-        },
+        }
     ];
 
     return (
