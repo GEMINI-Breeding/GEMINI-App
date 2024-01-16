@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Accordion,
     AccordionSummary,
@@ -13,10 +13,12 @@ import {
     InputLabel,
     FormControl,
     LinearProgress,
-    Box
+    Box,
+    IconButton
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from '../../../../DataContext';
+import { LineChart } from '@mui/x-charts/LineChart';
 
 function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
 
@@ -35,7 +37,6 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         setBatchSize,
         setImageSize,
         setIsTraining,
-        setShowResults,
         setProcessRunning
     } = useDataSetters();
 
@@ -83,12 +84,6 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
         }
     };
 
-    const handleResultsClose = () => {
-        setShowResults(false);
-        setProcessRunning(false);
-        onClose();
-    };
-
     return (
         <>
             <Dialog open={open && !isTraining} onClose={handleClose}>
@@ -119,40 +114,77 @@ function TrainMenu({ open, onClose, locateDate, activeTab, sensor }) {
     );
 }
 
-function TrainingProgressBar({ progress, onStopTraining }) {
+function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
+    // const  { chartData } = useDataState();
+    const { 
+        setChartData, 
+        setIsTraining, 
+        setTrainingData, 
+        setCurrentEpoch} = useDataSetters();
+    const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
 
+    const handleExpandClick = () => {
+        setExpanded(!expanded);
+    }
+
+    const handleDone = () => {
+        setIsTraining(false);
+        setCurrentEpoch(0); // Reset epochs
+        setTrainingData(null)
+        setChartData({ x: [ ], y: [ ] }) // Reset chart data
+    }
+
+    const isTrainingComplete = currentEpoch >= epochs;
+
+    useEffect(() => {
+        if (trainingData) {
+            setChartData(prevData => ({
+                x: [...prevData.x, trainingData.epoch],
+                y: [...prevData.y, trainingData.map]
+            }));
+            console.log("Chart data:", chartData);
+        }
+    }, [trainingData]);
+
     return (
-        <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'start', 
-        backgroundColor: 'white',
-        padding: '10px',
-        border: '1px solid #e0e0e0',
-        boxSizing: 'border-box'
-        }}>
-        <Typography variant="body2" sx={{ marginRight: '10px' }}>
-            Training in Progress...
-        </Typography>
-        <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-            <Box sx={{ width: '100%', mr: 1 }}>
-                <LinearProgress variant="determinate" value={validProgress} />
+        <Box sx={{ backgroundColor: 'white', padding: '10px', border: '1px solid #e0e0e0', boxSizing: 'border-box' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'start' }}>
+                <Typography variant="body2" sx={{ marginRight: '10px' }}>
+                    Training in Progress...
+                </Typography>
+                <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+                    <Box sx={{ width: '100%', mr: 1 }}>
+                        <LinearProgress variant="determinate" value={validProgress} />
+                    </Box>
+                    <Box sx={{ minWidth: 35, mr: 1 }}>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
+                    </Box>
+                </Box>
+                <Button 
+                    onClick={isTrainingComplete ? handleDone : onStopTraining}
+                    style={{ backgroundColor: isTrainingComplete ? "green" : "red", color: "white", alignSelf: 'center' }}
+                >
+                    {isTrainingComplete ? "DONE" : "STOP"}
+                </Button>
+                <IconButton onClick={handleExpandClick} sx={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                    <ExpandMoreIcon />
+                </IconButton>
             </Box>
-            <Box sx={{ minWidth: 35, mr: 1 }}>
-                <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
-            </Box>
-        </Box>
-        <Button 
-            onClick={onStopTraining}
-            style={{
-            backgroundColor: "red",
-            color: "white",
-            alignSelf: 'center'
-            }}
-        >
-            STOP
-        </Button>
+            {expanded && (
+                <Box sx={{ marginTop: '10px', width: '100%', height: '300px' }}>
+                    <LineChart 
+                        xAxis={[{ label: 'Epoch', max: epochs, min: 0, data: chartData.x}]}
+                        yAxis={[{ label: 'mAP', max: 1, min: 0}]}
+                        series={[
+                          {
+                            data: chartData.y,
+                            showMark: false
+                          },
+                        ]}
+                    />
+                </Box>
+            )}
         </Box>
     );
 }

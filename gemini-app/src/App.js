@@ -13,7 +13,6 @@ import { ActiveComponentsProvider } from "./ActiveComponentsContext";
 import MapView from "./Components/Map/MapView";
 import HelpPane from "./Components/Help/HelpPane";
 
-// For training
 import { TrainingProgressBar } from './Components/GCP/TabComponents/RoverPrep/TrainModel'; 
 import { Box }  from '@mui/material';
 
@@ -33,7 +32,9 @@ function App() {
       isTraining,
       progress,
       epochs,
-      currentEpoch
+      currentEpoch,
+      trainingData,
+      chartData
     } = useDataState();
 
     const {
@@ -46,7 +47,9 @@ function App() {
       setRadiusMeters,
       setIsTraining,
       setProgress,
-      setCurrentEpoch
+      setCurrentEpoch,
+      setTrainingData,
+      setChartData
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -99,25 +102,28 @@ function App() {
         }
     })();
 
-    // For training
+    // FOR TRAINING START
     const handleStopTraining = async () => {
-        try {
-            const response = await fetch(`${flaskUrl}stop_training`, { method: 'POST' });
-            if (response.ok) {
-                // Handle successful stop
-                console.log("Training stopped");
-                setIsTraining(false);  // Update isTraining to false
-            } else {
-                // Handle error response
-                const errorData = await response.json();
-                console.error("Error stopping training", errorData);
-            }
-        } catch (error) {
-            console.error("Error:", error);
-        }
-    };
-    
-    useEffect(() => {
+      try {
+          const response = await fetch(`${flaskUrl}stop_training`, { method: 'POST' });
+          if (response.ok) {
+              // Handle successful stop
+              console.log("Training stopped");
+              setIsTraining(false);  // Update isTraining to false
+              setCurrentEpoch(0); // Reset epochs
+              setTrainingData(null)
+              setChartData({ x: [ ], y: [ ] }) // Reset chart data
+          } else {
+              // Handle error response
+              const errorData = await response.json();
+              console.error("Error stopping training", errorData);
+          }
+      } catch (error) {
+          console.error("Error:", error);
+      }
+  };
+
+  useEffect(() => {
     let interval;
       if (isTraining) {
           interval = setInterval(async () => {
@@ -125,10 +131,10 @@ function App() {
                   const response = await fetch(`${flaskUrl}get_training_progress`);
                   if (response.ok) {
                       const data = await response.json();
-                      // console.log('Epoch: ', data.epoch, 'Epochs: ', epochs); // Logging for debugging
                       const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
                       setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
                       setCurrentEpoch(data.epoch); // Update current epoch
+                      setTrainingData(data)
                   } else {
                       console.error("Failed to fetch training progress");
                   }
@@ -139,14 +145,7 @@ function App() {
       }
       return () => clearInterval(interval);
     }, [isTraining, flaskUrl, epochs]);
-
-    useEffect(() => {
-        if (currentEpoch >= epochs) {
-            setIsTraining(false);
-            // setShowResults(true);
-        }
-    }, [currentEpoch, epochs]);
-    // For training end
+    // FOR TRAINING END
 
     return (
         <ActiveComponentsProvider>
@@ -187,7 +186,14 @@ function App() {
                         zIndex: 1200 // ensures the overlay is on top
                     }}>
                         <Box sx={{ pointerEvents: 'auto', width: '90%' }}>
-                            <TrainingProgressBar progress={progress} onStopTraining={handleStopTraining} />
+                            <TrainingProgressBar 
+                              progress={progress} 
+                              onStopTraining={handleStopTraining} 
+                              trainingData={trainingData} 
+                              epochs={epochs}
+                              chartData={chartData} 
+                              currentEpoch={currentEpoch}
+                            />
                         </Box>
                     </Box>
                 )}

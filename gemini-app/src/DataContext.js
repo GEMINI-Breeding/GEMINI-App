@@ -125,6 +125,8 @@ export const DataProvider = ({ children }) => {
     const [currentEpoch, setCurrentEpoch] = useState(0);
     const [showResults, setShowResults] = useState(false);
     const [processRunning, setProcessRunning] = useState(false);
+    const [trainingData, setTrainingData] = useState(null);
+    const [chartData, setChartData] = useState({ x: [ ], y: [ ] });
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -231,6 +233,8 @@ export const DataProvider = ({ children }) => {
                 currentEpoch,
                 showResults,
                 processRunning,
+                trainingData,
+                chartData,
 
                 // ImageViewer State
                 imageIndex,
@@ -330,6 +334,8 @@ export const DataProvider = ({ children }) => {
                     setCurrentEpoch,
                     setShowResults,
                     setProcessRunning,
+                    setTrainingData,
+                    setChartData,
 
                     // ImageViewer State
                     setImageIndex,
