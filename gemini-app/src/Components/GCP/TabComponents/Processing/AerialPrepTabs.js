@@ -19,8 +19,8 @@ export default function AerialPrepTabs() {
     const columns = [
         { label: "Date", field: "date" },
         { label: "Orthomosaic", field: "ortho" },
-        { label: "Labels", field: "labels" },
-        { label: "Model", field: "model" },
+        { label: "Traits", field: "traits" },
+        { label: "Process", field: "process" },
     ];
 
     const iphoneData = [
@@ -28,9 +28,9 @@ export default function AerialPrepTabs() {
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", ortho: true, labels: false, model: false },
-                { date: "2022-07-25", ortho: true, labels: false, model: false },
-                { date: "2022-08-01", ortho: true, labels: false, model: false },
+                { date: "2022-06-20", ortho: true, traits: false, process: true },
+                { date: "2022-07-25", ortho: true, traits: false, process: true },
+                { date: "2022-08-01", ortho: true, traits: false, process: true },
             ],
             columns: columns,
         },
@@ -60,9 +60,8 @@ export default function AerialPrepTabs() {
                         scrollButtons="auto"
                         centered // This will center the tabs if the width of the tabs is less than the container
                     >
-                        <FolderTab label="Label Traits" />
+                        <FolderTab label="Aerial Traits" />
                         <FolderTab label="Teach Traits" />
-                        <FolderTab label="Extract Traits" />
                     </FolderTabs>
                 </Box>
                 <Grid item container justifyContent="center">
@@ -77,9 +76,11 @@ export default function AerialPrepTabs() {
                                 />
                             </div>
                         )}
-                        {aerialPrepTab === 1 && <div>Content for Tab 2</div>}
-                        {aerialPrepTab === 2 && <div>Content for Tab 3</div>}
-                        {aerialPrepTab === 3 && <div>Content for Tab 4</div>}
+                        {aerialPrepTab === 1 && (
+                            <div style={{ textAlign: "center", verticalAlign: "middle" }}>
+                                <h4>Trainable aerial data models coming soon!</h4>
+                            </div>
+                        )}
                     </Box>
                 </Grid>
             </Grid>

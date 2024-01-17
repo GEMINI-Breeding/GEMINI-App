@@ -1,4 +1,4 @@
-import React from "react";
+import React, { createContext, useContext, useState } from "react";
 import {
     Accordion,
     AccordionSummary,
@@ -13,46 +13,47 @@ import {
     Button,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { TrainMenu } from "./TrainModel";
 import { styled } from "@mui/material/styles";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 
-function RenderItem({ item, column, handleClickOpen, dateValue, trainModel }) {
-    if (column.label === "Date") {
-        return <ListItemText primary={item[column.field]} />;
-    } else if (column.label === "Model" && trainModel) {
-        return item[column.field] ? (
-            <Checkbox checked disabled />
-        ) : (
+const CameraAccordionContext = createContext();
+
+function RenderItem({ item, column, handleAction, handleClickOpen }) {
+    if (column.actionType) {
+        const actionHandler = handleAction || handleClickOpen;
+        return (
             <Button
-                onClick={() => handleClickOpen(dateValue)} // Pass the date here
+                onClick={() => actionHandler(item, column)}
                 style={{
                     backgroundColor: "#1976d2",
                     color: "white",
                     borderRadius: "4px",
                 }}
             >
-                Start
+                {column.actionLabel || "Action"}
             </Button>
         );
+    } else if (column.label === "Date") {
+        return <ListItemText primary={item[column.field]} />;
     } else {
         return <Checkbox checked={item[column.field]} disabled />;
     }
 }
 
-// This component will be used for the lowest level list that contains the dates and checkboxes
-function CameraDetailsList({ data, columns, activeTab, sensor, trainModel }) {
-    const [open, setOpen] = React.useState(false);
-    const [locateDate, setLocateDate] = React.useState("");
+function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
+    const { activeTab, sensor } = useContext(CameraAccordionContext);
+    const [open, setOpen] = useState(false);
+    const [selectedItem, setSelectedItem] = useState(null);
 
-    const handleClickOpen = (date) => {
+    const handleClickOpen = (item, column) => {
         setOpen(true);
-        setLocateDate(date);
+        setSelectedItem(item);
     };
 
     const handleClose = () => {
         setOpen(false);
+        setSelectedItem(null);
     };
 
     return (
@@ -78,9 +79,8 @@ function CameraDetailsList({ data, columns, activeTab, sensor, trainModel }) {
                                     <RenderItem
                                         item={item}
                                         column={column}
+                                        handleAction={handleAction}
                                         handleClickOpen={handleClickOpen}
-                                        dateValue={item.date} // Assuming 'date' is the property name
-                                        trainModel={trainModel}
                                     />
                                 </Grid>
                             ))}
@@ -88,19 +88,20 @@ function CameraDetailsList({ data, columns, activeTab, sensor, trainModel }) {
                     </ListItem>
                 ))}
             </List>
-            <TrainMenu
-                open={open}
-                onClose={handleClose}
-                locateDate={locateDate}
-                activeTab={activeTab}
-                sensor={sensor}
-            />
+            {CustomComponent && (
+                <CustomComponent
+                    open={open}
+                    onClose={handleClose}
+                    item={selectedItem}
+                    activeTab={activeTab}
+                    sensor={sensor}
+                />
+            )}
         </>
     );
 }
 
-// This component represents the nested or terminal accordions that contain the actual data
-function NestedAccordion({ data, columns, summary, activeTab, sensor, trainModel }) {
+function NestedAccordion({ data, columns, summary, handleAction, CustomComponent }) {
     return (
         <Accordion sx={{ width: "100%" }}>
             <AccordionSummary
@@ -111,7 +112,7 @@ function NestedAccordion({ data, columns, summary, activeTab, sensor, trainModel
                         transform: "rotate(-90deg)",
                     },
                     "& .MuiAccordionSummary-expandIconWrapper": {
-                        marginRight: "auto", // moves the icon to the left
+                        marginRight: "auto",
                     },
                     backgroundColor: "#f5f5f5",
                     "&:hover": {
@@ -125,35 +126,34 @@ function NestedAccordion({ data, columns, summary, activeTab, sensor, trainModel
                 <CameraDetailsList
                     data={data}
                     columns={columns}
-                    activeTab={activeTab}
-                    sensor={sensor}
-                    trainModel={trainModel}
+                    handleAction={handleAction}
+                    CustomComponent={CustomComponent}
                 />
             </AccordionDetails>
         </Accordion>
     );
 }
 
-// This is the top-level accordion that contains nested accordions or lists
-function CamerasAccordion({ nestedAccordions, activeTab, sensor, trainModel }) {
+export function CamerasAccordion({ nestedAccordions, activeTab, sensor, handleAction, CustomComponent }) {
     return (
-        <List>
-            {nestedAccordions.map((nestedItem, index) => (
-                <NestedAccordion
-                    key={index}
-                    summary={nestedItem.summary}
-                    data={nestedItem.data}
-                    columns={nestedItem.columns}
-                    activeTab={activeTab}
-                    sensor={sensor}
-                    trainModel={trainModel}
-                />
-            ))}
-        </List>
+        <CameraAccordionContext.Provider value={{ activeTab, sensor }}>
+            <List>
+                {nestedAccordions.map((nestedItem, index) => (
+                    <NestedAccordion
+                        key={index}
+                        summary={nestedItem.summary}
+                        data={nestedItem.data}
+                        columns={nestedItem.columns}
+                        handleAction={handleAction}
+                        CustomComponent={CustomComponent}
+                    />
+                ))}
+            </List>
+        </CameraAccordionContext.Provider>
     );
 }
 
-export function NestedSection({ title, nestedData, activeTab, trainModel }) {
+export function NestedSection({ title, nestedData, activeTab, handleAction, CustomComponent }) {
     return (
         <Accordion sx={{ width: "100%", my: 2 }}>
             <AccordionSummary
@@ -173,8 +173,8 @@ export function NestedSection({ title, nestedData, activeTab, trainModel }) {
                         <CamerasAccordion
                             nestedAccordions={[nestedItem]}
                             activeTab={activeTab}
-                            sensor={title}
-                            trainModel={trainModel}
+                            handleAction={handleAction}
+                            CustomComponent={CustomComponent}
                         />
                     </Box>
                 ))}

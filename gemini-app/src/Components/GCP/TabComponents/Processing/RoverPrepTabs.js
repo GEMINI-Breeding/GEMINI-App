@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
+import { TrainMenu } from "./TrainModel"; // Import TrainMenu
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -19,9 +20,15 @@ export default function RoverPrepTabs() {
     const columns = [
         { label: "Date", field: "date" },
         { label: "Labels", field: "labels" },
-        { label: "Model", field: "model" },
+        { label: "Model", field: "model", actionType: "train", actionLabel: "Start" }, // Added actionType and actionLabel
         { label: "Locations (Lat/Lon)", field: "location" },
     ];
+
+    // Action handler
+    const handleAction = (item, column) => {
+        console.log("Action triggered for:", item, column);
+        // Define what should happen when the button is clicked
+    };
 
     const amigaData = [
         // RGB Camera accordion data
@@ -71,7 +78,7 @@ export default function RoverPrepTabs() {
                         aria-label="styled tabs example"
                         variant="fullWidth"
                         scrollButtons="auto"
-                        centered // This will center the tabs if the width of the tabs is less than the container
+                        centered
                     >
                         <FolderTab label="Locate Plants" />
                         <FolderTab label="Label Traits" />
@@ -87,13 +94,15 @@ export default function RoverPrepTabs() {
                                     title={"Amiga"}
                                     nestedData={amigaData}
                                     activeTab={roverPrepTab}
-                                    trainModel={true}
+                                    handleAction={null}
+                                    CustomComponent={TrainMenu}
                                 />
                                 <NestedSection
                                     title={"iPhone"}
                                     nestedData={iphoneData}
                                     activeTab={roverPrepTab}
-                                    trainModel={true}
+                                    handleAction={null}
+                                    CustomComponent={TrainMenu}
                                 />
                             </div>
                         )}
