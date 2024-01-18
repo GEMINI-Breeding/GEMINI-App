@@ -28,6 +28,8 @@ export default function RoverPrepTabs() {
     const handleAction = (item, column) => {
         console.log("Action triggered for:", item, column);
         // Define what should happen when the button is clicked
+        // This is not needed if all that should happen is for
+        // the custom component to be rendered
     };
 
     const amigaData = [
