@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
+import AskAnalyzeModal from "./AskAnalyzeModal"; // Import AskAnalyzeModal
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -20,17 +21,22 @@ export default function AerialPrepTabs() {
         { label: "Date", field: "date" },
         { label: "Orthomosaic", field: "ortho" },
         { label: "Traits", field: "traits" },
-        { label: "Process", field: "process" },
+        { label: "Process", field: "process", actionType: "process", actionLabel: "Process" },
     ];
 
+    // Action handler
+    const handleAction = (item, column) => {
+        console.log("Action triggered for:", item, column);
+        // Define what should happen when the button is clicked
+    };
+
     const iphoneData = [
-        // RGB Camera accordion data
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", ortho: true, traits: false, process: true },
-                { date: "2022-07-25", ortho: true, traits: false, process: true },
-                { date: "2022-08-01", ortho: true, traits: false, process: true },
+                { date: "2022-06-20", ortho: true, traits: false, process: false },
+                { date: "2022-07-25", ortho: true, traits: false, process: false },
+                { date: "2022-08-01", ortho: true, traits: false, process: false },
             ],
             columns: columns,
         },
@@ -58,7 +64,7 @@ export default function AerialPrepTabs() {
                         aria-label="styled tabs example"
                         variant="fullWidth"
                         scrollButtons="auto"
-                        centered // This will center the tabs if the width of the tabs is less than the container
+                        centered
                     >
                         <FolderTab label="Aerial Traits" />
                         <FolderTab label="Teach Traits" />
@@ -72,7 +78,8 @@ export default function AerialPrepTabs() {
                                     title={"iPhone"}
                                     nestedData={iphoneData}
                                     activeTab={aerialPrepTab}
-                                    trainModel={false}
+                                    handleAction={null}
+                                    CustomComponent={AskAnalyzeModal}
                                 />
                             </div>
                         )}
