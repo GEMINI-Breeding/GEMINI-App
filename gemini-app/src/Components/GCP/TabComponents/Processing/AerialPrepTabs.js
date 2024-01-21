@@ -34,9 +34,9 @@ export default function AerialPrepTabs() {
         {
             summary: "RGB Camera",
             data: [
-                { date: "2022-06-20", ortho: true, traits: false, process: false },
-                { date: "2022-07-25", ortho: true, traits: false, process: false },
-                { date: "2022-08-01", ortho: true, traits: false, process: false },
+                { date: "2022-06-20", ortho: true, traits: "[]", process: false },
+                { date: "2022-07-25", ortho: true, traits: "[]", process: false },
+                { date: "2022-08-01", ortho: true, traits: "[]", process: false },
             ],
             columns: columns,
         },
