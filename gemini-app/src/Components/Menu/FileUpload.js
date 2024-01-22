@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
     Autocomplete,
     TextField,
@@ -11,6 +11,9 @@ import {
     Paper,
     Typography,
     Grid,
+    FormControlLabel,
+    Switch,
+    LinearProgress,
 } from "@mui/material";
 import { useDropzone } from "react-dropzone";
 import { useFormik } from "formik";
@@ -37,14 +40,16 @@ const FileUploadComponent = () => {
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [selectedDataType, setSelectedDataType] = useState("image");
     const [files, setFiles] = useState([]);
-    const [fileTypeDescription, setFileTypeDescription] = useState("");
+    const [isUploading, setIsUploading] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
+    const cancelUploadRef = useRef(false);
 
     useEffect(() => {
         setIsLoading(true);
         fetch(`${flaskUrl}list_dirs_nested`)
             .then((response) => response.json())
             .then((data) => {
-                console.log("Nested directories:", data);
                 setNestedDirectories(data);
                 setIsLoading(false);
             })
@@ -53,11 +58,14 @@ const FileUploadComponent = () => {
                 setIsLoading(false);
             });
     }, [flaskUrl]);
-
-    useEffect(() => {
-        // Update file type description when selectedDataType changes
-        setFileTypeDescription(getFileTypeDescription(dataTypes[selectedDataType].fileType));
-    }, [selectedDataType]);
+    const checkFilesOnServer = async (fileList, dirPath) => {
+        const response = await fetch(`${flaskUrl}check_files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileList, dirPath }),
+        });
+        return response.json();
+    };
 
     const formik = useFormik({
         initialValues: {
@@ -70,47 +78,46 @@ const FileUploadComponent = () => {
             sensor: "",
         },
         onSubmit: async (values) => {
-            console.log("Form values before submission:", values);
-            const formData = new FormData();
-            files.forEach((file) => {
-                formData.append("files", file);
-            });
+            setIsUploading(true);
+            cancelUploadRef.current = false;
+            setProgress(0);
 
             // Construct directory path based on data type and form values
             let dirPath = "";
             for (const field of dataTypes[selectedDataType].fields) {
                 if (values[field]) {
-                    if (dirPath === "") {
-                        dirPath += `${values[field]}`;
-                    } else {
-                        dirPath += `/${values[field]}`;
-                    }
+                    dirPath += dirPath ? `/${values[field]}` : values[field];
                 }
             }
-
             if (selectedDataType === "image") {
                 dirPath += "/Images";
             }
 
-            console.log("Directory path:", dirPath);
-            formData.append("dirPath", dirPath);
+            // Step 1: Check which files need to be uploaded
+            const fileList = files.map((file) => file.name);
+            const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
 
-            setIsLoading(true);
-            try {
-                const response = await fetch(`${flaskUrl}upload`, {
+            // Step 2: Upload the files
+            for (let i = 0; i < filesToUpload.length; i++) {
+                if (cancelUploadRef.current) {
+                    break;
+                }
+
+                const file = files.find((f) => f.name === filesToUpload[i]);
+                const formData = new FormData();
+                formData.append("files", file);
+                formData.append("dirPath", dirPath);
+
+                await fetch(`${flaskUrl}upload`, {
                     method: "POST",
                     body: formData,
                 });
-                if (response.ok) {
-                    alert("Files uploaded successfully");
-                } else {
-                    alert("Error uploading files");
-                }
-            } catch (error) {
-                alert("Error uploading files");
+
+                setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
             }
-            setIsLoading(false);
-            setSelectedDataType(selectedDataType);
+
+            setIsUploading(false);
+            setFiles([]);
         },
     });
 
@@ -140,23 +147,8 @@ const FileUploadComponent = () => {
             <Autocomplete
                 freeSolo
                 options={options}
-                onChange={(event, value) => {
-                    console.log(`Setting ${label.toLowerCase()}:`, value);
-                    formik.setFieldValue(label.toLowerCase(), value);
-                }}
-                renderInput={(params) => (
-                    <TextField
-                        {...params}
-                        label={label}
-                        variant="outlined"
-                        fullWidth
-                        onBlur={(event) => {
-                            const value = event.target.value;
-                            console.log(`Setting ${label.toLowerCase()} on blur:`, value);
-                            formik.setFieldValue(label.toLowerCase(), value);
-                        }}
-                    />
-                )}
+                onChange={(event, value) => formik.setFieldValue(label.toLowerCase(), value)}
+                renderInput={(params) => <TextField {...params} label={label} variant="outlined" fullWidth />}
                 sx={{ width: "100%", marginTop: "20px" }}
             />
         );
@@ -197,9 +189,20 @@ const FileUploadComponent = () => {
                 </FormControl>
             </Grid>
             <Grid item xs={8}>
+                <FormControlLabel
+                    control={
+                        <Switch
+                            checked={uploadNewFilesOnly}
+                            onChange={(e) => setUploadNewFilesOnly(e.target.checked)}
+                        />
+                    }
+                    label="Only upload new files"
+                />
+            </Grid>
+            <Grid item xs={8}>
                 <form onSubmit={formik.handleSubmit}>
                     {isLoading && <CircularProgress />}
-                    {!isLoading && (
+                    {!isLoading && !isUploading && (
                         <>
                             {dataTypes[selectedDataType].fields.map((field) =>
                                 renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
@@ -219,11 +222,11 @@ const FileUploadComponent = () => {
                                 {files.length > 0 ? (
                                     <div
                                         style={{
-                                            maxHeight: "200px", // Adjust the height as needed
+                                            maxHeight: "200px",
                                             overflowY: "auto",
                                             display: "grid",
-                                            gridTemplateColumns: "repeat(6, 1fr)", // 3 columns
-                                            gap: "10px", // Spacing between items
+                                            gridTemplateColumns: "repeat(3, 1fr)",
+                                            gap: "10px",
                                         }}
                                     >
                                         {files.map((file) => (
@@ -236,7 +239,9 @@ const FileUploadComponent = () => {
                                     <Typography>
                                         {isDragActive
                                             ? "Drop the files here..."
-                                            : `Drag and drop files here, or click to select files (${fileTypeDescription})`}
+                                            : `Drag and drop files here, or click to select files (${getFileTypeDescription(
+                                                  dataTypes[selectedDataType].fileType
+                                              )})`}
                                     </Typography>
                                 )}
                             </Paper>
@@ -244,6 +249,23 @@ const FileUploadComponent = () => {
                                 Upload
                             </Button>
                         </>
+                    )}
+                    {isUploading && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
+                            <Typography>Uploading...</Typography>
+                            <LinearProgress variant="determinate" value={progress} />
+                            <Button
+                                variant="contained"
+                                color="secondary"
+                                sx={{ mt: 2 }}
+                                onClick={() => {
+                                    cancelUploadRef.current = true;
+                                    setIsUploading(false);
+                                }}
+                            >
+                                Cancel Upload
+                            </Button>
+                        </Paper>
                     )}
                 </form>
             </Grid>
