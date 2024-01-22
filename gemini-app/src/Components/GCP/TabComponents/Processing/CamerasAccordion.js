@@ -36,6 +36,8 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
         );
     } else if (column.label === "Date") {
         return <ListItemText primary={item[column.field]} />;
+    } else if (item[column.field] !== true && item[column.field] !== false) {
+        return <ListItemText primary={item[column.field]} />;
     } else {
         return <Checkbox checked={item[column.field]} disabled />;
     }

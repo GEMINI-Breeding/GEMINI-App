@@ -22,8 +22,10 @@ import Menu from "@mui/icons-material/Menu";
 import TableViewIcon from "@mui/icons-material/TableView";
 import MapIcon from "@mui/icons-material/Map";
 import InsightsIcon from "@mui/icons-material/Insights";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 
 import { DataProvider, useDataSetters, useDataState } from "../../DataContext";
+import FileUploadComponent from "./FileUpload";
 
 export default function CollapsibleSidebar({
     onTilePathChange,
@@ -87,6 +89,9 @@ export default function CollapsibleSidebar({
                         setSelectedMetric={setSelectedMetric}
                     />
                 );
+            case 3:
+                // return <FileUploadComponent />;
+                return null;
 
             // Add more cases as needed for more views
             default:
@@ -122,6 +127,34 @@ export default function CollapsibleSidebar({
                         <IconButton color="white" aria-label="collapse-menu" onClick={() => handleMenuToggle()}>
                             <Menu color="white" fontSize="large" />
                         </IconButton>
+                    </Box>
+
+                    <Box
+                        sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            paddingRight: 0,
+                            paddingLeft: 0,
+                            paddingBottom: 1,
+                        }}
+                    >
+                        <IconButton
+                            color="white"
+                            aria-label="upload"
+                            onClick={() => handleDrawerToggle(3)} // Assuming '3' is the index for the upload section
+                            sx={{ backgroundColor: currentView === 3 ? "rgba(255, 255, 255, 0.1)" : "transparent" }}
+                        >
+                            <CloudUploadIcon color={currentView === 3 ? "secondary" : "white"} fontSize="medium" />
+                        </IconButton>
+                        <Typography
+                            variant="body"
+                            color={currentView === 3 ? "secondary" : "white"}
+                            align="center"
+                            sx={{ fontSize: "14px" }}
+                        >
+                            Upload
+                        </Typography>
                     </Box>
 
                     <Box
@@ -213,7 +246,7 @@ export default function CollapsibleSidebar({
                 <Drawer
                     variant="persistent"
                     anchor="left"
-                    open={currentView !== null}
+                    open={currentView !== null && currentView !== 3}
                     sx={{
                         width: !isSidebarCollapsed ? `${drawerWidth}px` : 0,
                         flexShrink: 0,

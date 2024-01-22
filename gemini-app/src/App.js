@@ -15,6 +15,7 @@ import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import { Box } from "@mui/material";
+import FileUploadComponent from "./Components/Menu/FileUpload";
 
 function App() {
     const [helpPaneOpen, setHelpPaneOpen] = useState(false);
@@ -96,6 +97,8 @@ function App() {
                         Placeholder for Stats View
                     </div>
                 );
+            case 3:
+                return <FileUploadComponent />;
             default:
                 return null;
         }
