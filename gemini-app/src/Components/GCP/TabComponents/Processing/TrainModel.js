@@ -39,6 +39,7 @@ function TrainMenu({ open, onClose, item, activeTab, sensor }) {
                 date: item.date,
                 sensor: sensor,
             };
+            console.log("Payload:", payload);
 
             if (activeTab === 0) {
                 payload.trait = "plant";

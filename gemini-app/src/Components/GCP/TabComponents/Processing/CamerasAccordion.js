@@ -175,6 +175,7 @@ export function NestedSection({ title, nestedData, activeTab, handleAction, Cust
                         <CamerasAccordion
                             nestedAccordions={[nestedItem]}
                             activeTab={activeTab}
+                            sensor={title}
                             handleAction={handleAction}
                             CustomComponent={CustomComponent}
                         />
