@@ -18,6 +18,17 @@ import { useDataState } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
 
+const getFileTypeDescription = (fileType) => {
+    const typeMap = {
+        "image/*": "Image files",
+        ".csv": "CSV files",
+        ".txt": "Text files",
+        "*": "All files",
+        // Add more mappings as needed
+    };
+    return typeMap[fileType] || fileType;
+};
+
 const FileUploadComponent = () => {
     useTrackComponent("FileUploadComponent");
 
@@ -26,6 +37,7 @@ const FileUploadComponent = () => {
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [selectedDataType, setSelectedDataType] = useState("image");
     const [files, setFiles] = useState([]);
+    const [fileTypeDescription, setFileTypeDescription] = useState("");
 
     useEffect(() => {
         setIsLoading(true);
@@ -41,6 +53,11 @@ const FileUploadComponent = () => {
                 setIsLoading(false);
             });
     }, [flaskUrl]);
+
+    useEffect(() => {
+        // Update file type description when selectedDataType changes
+        setFileTypeDescription(getFileTypeDescription(dataTypes[selectedDataType].fileType));
+    }, [selectedDataType]);
 
     const formik = useFormik({
         initialValues: {
@@ -189,15 +206,39 @@ const FileUploadComponent = () => {
                             )}
                             <Paper
                                 variant="outlined"
-                                sx={{ p: 6, mt: 2, textAlign: "center", cursor: "pointer" }}
+                                sx={{
+                                    p: 6,
+                                    mt: 2,
+                                    textAlign: "center",
+                                    cursor: "pointer",
+                                    backgroundColor: isDragActive ? "#f0f0f0" : "#fff",
+                                }}
                                 {...getRootProps()}
                             >
                                 <input {...getInputProps()} />
-                                <Typography>
-                                    {isDragActive
-                                        ? "Drop the files here..."
-                                        : "Drag and drop files here, or click to select files"}
-                                </Typography>
+                                {files.length > 0 ? (
+                                    <div
+                                        style={{
+                                            maxHeight: "200px", // Adjust the height as needed
+                                            overflowY: "auto",
+                                            display: "grid",
+                                            gridTemplateColumns: "repeat(6, 1fr)", // 3 columns
+                                            gap: "10px", // Spacing between items
+                                        }}
+                                    >
+                                        {files.map((file) => (
+                                            <div key={file.name} style={{ textAlign: "left" }}>
+                                                {file.name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <Typography>
+                                        {isDragActive
+                                            ? "Drop the files here..."
+                                            : `Drag and drop files here, or click to select files (${fileTypeDescription})`}
+                                    </Typography>
+                                )}
                             </Paper>
                             <Button type="submit" variant="contained" color="primary" sx={{ mt: 2 }}>
                                 Upload
