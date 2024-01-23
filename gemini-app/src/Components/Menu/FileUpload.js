@@ -58,6 +58,7 @@ const FileUploadComponent = () => {
                 setIsLoading(false);
             });
     }, [flaskUrl]);
+
     const checkFilesOnServer = async (fileList, dirPath) => {
         const response = await fetch(`${flaskUrl}check_files`, {
             method: "POST",
@@ -65,6 +66,28 @@ const FileUploadComponent = () => {
             body: JSON.stringify({ fileList, dirPath }),
         });
         return response.json();
+    };
+
+    const uploadFileWithTimeout = async (file, dirPath, timeout = 10000) => {
+        const formData = new FormData();
+        formData.append("files", file);
+        formData.append("dirPath", dirPath);
+
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(`${flaskUrl}upload`, {
+                method: "POST",
+                body: formData,
+                signal: controller.signal,
+            });
+            clearTimeout(id);
+            return response;
+        } catch (error) {
+            clearTimeout(id);
+            throw error;
+        }
     };
 
     const formik = useFormik({
@@ -98,22 +121,28 @@ const FileUploadComponent = () => {
             const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
 
             // Step 2: Upload the files
+            const maxRetries = 3;
             for (let i = 0; i < filesToUpload.length; i++) {
-                if (cancelUploadRef.current) {
-                    break;
+                let retries = 0;
+                while (retries < maxRetries) {
+                    try {
+                        if (cancelUploadRef.current) {
+                            break;
+                        }
+
+                        const file = files.find((f) => f.name === filesToUpload[i]);
+                        await uploadFileWithTimeout(file, dirPath);
+
+                        setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                        break;
+                    } catch (error) {
+                        if (retries === maxRetries - 1) {
+                            alert(`Failed to upload file: ${filesToUpload[i]}`);
+                            break;
+                        }
+                        retries++;
+                    }
                 }
-
-                const file = files.find((f) => f.name === filesToUpload[i]);
-                const formData = new FormData();
-                formData.append("files", file);
-                formData.append("dirPath", dirPath);
-
-                await fetch(`${flaskUrl}upload`, {
-                    method: "POST",
-                    body: formData,
-                });
-
-                setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
             }
 
             setIsUploading(false);
@@ -147,6 +176,7 @@ const FileUploadComponent = () => {
             <Autocomplete
                 freeSolo
                 options={options}
+                value={formik.values[label.toLowerCase()]}
                 onChange={(event, value) => formik.setFieldValue(label.toLowerCase(), value)}
                 renderInput={(params) => <TextField {...params} label={label} variant="outlined" fullWidth />}
                 sx={{ width: "100%", marginTop: "20px" }}
