@@ -20,7 +20,9 @@ import { useFormik } from "formik";
 import { useDataState } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
+import Box from "@mui/material/Box";
 
+// Helper function to map file types to human-readable descriptions
 const getFileTypeDescription = (fileType) => {
     const typeMap = {
         "image/*": "Image files",
@@ -32,9 +34,13 @@ const getFileTypeDescription = (fileType) => {
     return typeMap[fileType] || fileType;
 };
 
+/**
+ * FileUploadComponent - React component for file uploading with form fields.
+ */
 const FileUploadComponent = () => {
     useTrackComponent("FileUploadComponent");
 
+    // State hooks for various component states
     const { flaskUrl } = useDataState();
     const [isLoading, setIsLoading] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
@@ -44,7 +50,9 @@ const FileUploadComponent = () => {
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
+    const [currentInputValues, setCurrentInputValues] = useState({});
 
+    // Effect to fetch nested directories on component mount
     useEffect(() => {
         setIsLoading(true);
         fetch(`${flaskUrl}list_dirs_nested`)
@@ -59,6 +67,7 @@ const FileUploadComponent = () => {
             });
     }, [flaskUrl]);
 
+    // Function to check for existing files on the server
     const checkFilesOnServer = async (fileList, dirPath) => {
         const response = await fetch(`${flaskUrl}check_files`, {
             method: "POST",
@@ -68,11 +77,11 @@ const FileUploadComponent = () => {
         return response.json();
     };
 
+    // Function to upload a file with a timeout
     const uploadFileWithTimeout = async (file, dirPath, timeout = 10000) => {
         const formData = new FormData();
         formData.append("files", file);
         formData.append("dirPath", dirPath);
-
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
 
@@ -90,6 +99,7 @@ const FileUploadComponent = () => {
         }
     };
 
+    // Formik hook for form state management and validation
     const formik = useFormik({
         initialValues: {
             year: "",
@@ -132,7 +142,6 @@ const FileUploadComponent = () => {
 
                         const file = files.find((f) => f.name === filesToUpload[i]);
                         await uploadFileWithTimeout(file, dirPath);
-
                         setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                         break;
                     } catch (error) {
@@ -148,47 +157,101 @@ const FileUploadComponent = () => {
             setIsUploading(false);
             setFiles([]);
         },
+        validate: (values) => {
+            let errors = {};
+            dataTypes[selectedDataType].fields.forEach((field) => {
+                if (!values[field]) {
+                    errors[field] = "This field is required";
+                }
+            });
+            return errors;
+        },
     });
 
+    // Handler for changes in the Autocomplete input
+    const handleAutocompleteInputChange = (fieldName, value) => {
+        setCurrentInputValues({ ...currentInputValues, [fieldName]: value });
+    };
+
+    // Blur handler for Autocomplete fields
+    const handleAutocompleteBlur = (fieldName) => {
+        const value = currentInputValues[fieldName] || "";
+        formik.setFieldValue(fieldName, value);
+        const fieldIndex = dataTypes[selectedDataType].fields.indexOf(fieldName);
+        const dependentFields = dataTypes[selectedDataType].fields.slice(fieldIndex + 1);
+        dependentFields.forEach((dependentField) => {
+            formik.setFieldValue(dependentField, "");
+            setCurrentInputValues((prevValues) => ({ ...prevValues, [dependentField]: "" }));
+        });
+    };
+
+    // Handler for file changes in the dropzone
     const handleFileChange = (fileArray) => {
         setFiles(fileArray);
     };
 
+    // Function to get options for a specific field
     const getOptionsForField = (field) => {
         let options = [];
         let currentLevel = nestedDirectories;
-
         for (const key of dataTypes[selectedDataType].fields) {
             if (key === field) break;
             currentLevel = currentLevel[formik.values[key]] || {};
         }
-
         if (currentLevel) {
             options = Object.keys(currentLevel);
         }
-
         return options;
     };
 
+    // Render function for Autocomplete components
     const renderAutocomplete = (label) => {
-        const options = getOptionsForField(label.toLowerCase());
+        const fieldName = label.toLowerCase();
+        const options = getOptionsForField(fieldName);
+        const error = formik.touched[fieldName] && formik.errors[fieldName];
+
         return (
             <Autocomplete
                 freeSolo
+                id={`autocomplete-${fieldName}`}
                 options={options}
-                value={formik.values[label.toLowerCase()]}
-                onChange={(event, value) => formik.setFieldValue(label.toLowerCase(), value)}
-                renderInput={(params) => <TextField {...params} label={label} variant="outlined" fullWidth />}
+                value={formik.values[fieldName]}
+                inputValue={currentInputValues[fieldName] || ""}
+                onInputChange={(event, value) => handleAutocompleteInputChange(fieldName, value)}
+                onBlur={() => handleAutocompleteBlur(fieldName)}
+                onChange={(event, value) => {
+                    formik.setFieldValue(fieldName, value);
+                }}
+                renderInput={(params) => (
+                    <TextField
+                        {...params}
+                        label={label}
+                        variant="outlined"
+                        fullWidth
+                        error={Boolean(error)}
+                        helperText={error}
+                        onChange={(event) => {
+                            formik.setFieldValue(fieldName, event.target.value);
+                        }}
+                    />
+                )}
                 sx={{ width: "100%", marginTop: "20px" }}
             />
         );
     };
 
+    // Dropzone configuration
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: handleFileChange,
         accept: dataTypes[selectedDataType].fileType,
     });
 
+    // Function to clear the files from the dropzone
+    const clearFiles = () => {
+        setFiles([]);
+    };
+
+    // Component render
     return (
         <Grid
             container
@@ -275,9 +338,14 @@ const FileUploadComponent = () => {
                                     </Typography>
                                 )}
                             </Paper>
-                            <Button type="submit" variant="contained" color="primary" sx={{ mt: 2 }}>
-                                Upload
-                            </Button>
+                            <Box display="flex" justifyContent="space-between" sx={{ mt: 2, width: "100%" }}>
+                                <Button variant="contained" color="primary" type="submit">
+                                    Upload
+                                </Button>
+                                <Button variant="outlined" color="secondary" onClick={clearFiles}>
+                                    Clear Files
+                                </Button>
+                            </Box>
                         </>
                     )}
                     {isUploading && (
