@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { TrainMenu } from "./TrainModel"; // Import TrainMenu
+import LocateMenu from "./LocatePlants"; // Import LocateMenu
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -11,6 +12,11 @@ export default function RoverPrepTabs() {
 
     const { roverPrepTab } = useDataState();
     const { setRoverPrepTab } = useDataSetters();
+
+    const CustomComponent = {
+        "train": TrainMenu,
+        "locate": LocateMenu,
+    };
 
     const handleChange = (event, newValue) => {
         setRoverPrepTab(newValue);
@@ -21,7 +27,7 @@ export default function RoverPrepTabs() {
         { label: "Date", field: "date" },
         { label: "Labels", field: "labels" },
         { label: "Model", field: "model", actionType: "train", actionLabel: "Start" }, // Added actionType and actionLabel
-        { label: "Locations (Lat/Lon)", field: "location" },
+        { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start"},
     ];
 
     // Action handler
@@ -97,14 +103,16 @@ export default function RoverPrepTabs() {
                                     nestedData={amigaData}
                                     activeTab={roverPrepTab}
                                     handleAction={null}
-                                    CustomComponent={TrainMenu}
+                                    // CustomComponent={TrainMenu}
+                                    CustomComponent={CustomComponent}
                                 />
                                 <NestedSection
                                     title={"iPhone"}
                                     nestedData={iphoneData}
                                     activeTab={roverPrepTab}
                                     handleAction={null}
-                                    CustomComponent={TrainMenu}
+                                    // CustomComponent={TrainMenu}
+                                    CustomComponent={CustomComponent}
                                 />
                             </div>
                         )}

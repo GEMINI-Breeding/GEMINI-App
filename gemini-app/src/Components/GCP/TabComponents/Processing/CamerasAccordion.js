@@ -47,10 +47,12 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
     const { activeTab, sensor } = useContext(CameraAccordionContext);
     const [open, setOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
+    const [selectedColumn, setSelectedColumn] = useState(null)
 
     const handleClickOpen = (item, column) => {
         setOpen(true);
         setSelectedItem(item);
+        setSelectedColumn(column.actionType)
     };
 
     const handleClose = () => {
@@ -90,15 +92,27 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
                     </ListItem>
                 ))}
             </List>
-            {CustomComponent && (
-                <CustomComponent
-                    open={open}
-                    onClose={handleClose}
-                    item={selectedItem}
-                    activeTab={activeTab}
-                    sensor={sensor}
-                />
-            )}
+            {
+                CustomComponent && (
+                    typeof CustomComponent === 'function' ? 
+                        (console.log('Rendering function component'), <CustomComponent
+                            open={open}
+                            onClose={handleClose}
+                            item={selectedItem}
+                            activeTab={activeTab}
+                            sensor={sensor}
+                        />) : 
+                    (typeof CustomComponent === 'object' && CustomComponent[selectedColumn]) ?
+                        (console.log('Rendering component from object with key:', selectedColumn), React.createElement(CustomComponent[selectedColumn], {
+                            open: open,
+                            onClose: handleClose,
+                            item: selectedItem,
+                            activeTab: activeTab,
+                            sensor: sensor
+                        }))
+                        : (console.log('No valid component found'), null)
+                )
+            }
         </>
     );
 }
