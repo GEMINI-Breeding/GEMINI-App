@@ -130,6 +130,8 @@ export const DataProvider = ({ children }) => {
     const [processRunning, setProcessRunning] = useState(false);
     const [trainingData, setTrainingData] = useState(null);
     const [chartData, setChartData] = useState({ x: [], y: [] });
+    const [batchSizeLocate, setBatchSizeLocate] = useState(32)
+    const [isLocating, setIsLocating] = useState(false)
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -241,6 +243,8 @@ export const DataProvider = ({ children }) => {
                 processRunning,
                 trainingData,
                 chartData,
+                batchSizeLocate,
+                isLocating,
 
                 // ImageViewer State
                 imageIndex,
@@ -345,6 +349,8 @@ export const DataProvider = ({ children }) => {
                     setProcessRunning,
                     setTrainingData,
                     setChartData,
+                    setBatchSizeLocate,
+                    setIsLocating,
 
                     // ImageViewer State
                     setImageIndex,
