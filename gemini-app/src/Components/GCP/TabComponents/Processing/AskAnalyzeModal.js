@@ -8,15 +8,36 @@ import CircularProgress from "@mui/material/CircularProgress";
 import { useDataState, useDataSetters, fetchData } from "../../../../DataContext";
 
 const AskAnalyzeModal = ({ open, onClose, item }) => {
-    const { flaskUrl, nowDroneProcessing, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const {
+        flaskUrl,
+        nowDroneProcessing,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
+    } = useDataState();
 
     const { setNowDroneProcessing } = useDataSetters();
 
     useEffect(() => {
         if (nowDroneProcessing && item) {
-            const fetchUrl = `${flaskUrl}process_drone_tiff/${selectedLocationGCP}/${selectedPopulationGCP}/${item.date}`;
-            fetchData(fetchUrl)
-                .then(() => {
+            const data = {
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: item.date,
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+            };
+
+            fetch(`${flaskUrl}process_drone_tiff`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(data),
+            })
+                .then((response) => response.json())
+                .then((data) => {
                     console.log("Drone tiff file processed!");
                     setNowDroneProcessing(false);
                     onClose();

@@ -21,8 +21,17 @@ import { useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
 
 function TrainMenu({ open, onClose, item, activeTab, sensor }) {
-    const { selectedLocationGCP, selectedPopulationGCP, flaskUrl, epochs, batchSize, imageSize, isTraining } =
-        useDataState();
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
+        flaskUrl,
+        epochs,
+        batchSize,
+        imageSize,
+        isTraining,
+    } = useDataState();
 
     const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning } = useDataSetters();
 
@@ -36,6 +45,8 @@ function TrainMenu({ open, onClose, item, activeTab, sensor }) {
                 imageSize: imageSize,
                 location: selectedLocationGCP,
                 population: selectedPopulationGCP,
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
                 date: item.date,
                 sensor: sensor,
             };

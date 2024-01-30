@@ -1,8 +1,16 @@
 import { useDataState, useDataSetters } from "../../DataContext";
 
 export function useHandleProcessImages() {
-    const { selectedLocationGCP, selectedPopulationGCP, selectedDateGCP, flaskUrl, radiusMeters, isSidebarCollapsed } =
-        useDataState();
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedDateGCP,
+        flaskUrl,
+        radiusMeters,
+        isSidebarCollapsed,
+        selectedYearGCP,
+        selectedExperimentGCP,
+    } = useDataState();
 
     const { setImageList, setGcpPath, setSidebarCollapsed, setTotalImages } = useDataSetters();
 
@@ -34,11 +42,9 @@ export function useHandleProcessImages() {
             population: selectedPopulationGCP,
             date: selectedDateGCP,
             radius_meters: radiusMeters,
+            year: selectedYearGCP,
+            experiment: selectedExperimentGCP,
         };
-
-        console.log("data", data);
-        console.log("flaskUrl", flaskUrl);
-        console.log(`${flaskUrl}process_images`);
 
         fetch(`${flaskUrl}process_images`, {
             method: "POST",

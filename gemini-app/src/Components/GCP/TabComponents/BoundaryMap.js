@@ -27,6 +27,8 @@ function BoundaryMap({ task }) {
         flaskUrl,
         selectedLocationGCP,
         selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
         prepOrthoImagePath,
         cursorStyle,
         featureCollectionPop,
@@ -83,9 +85,21 @@ function BoundaryMap({ task }) {
             }
 
             try {
-                const response = await fetch(
-                    `${flaskUrl}load_geojson?selectedLocationGcp=${selectedLocationGcp}&selectedPopulationGcp=${selectedPopulationGcp}&filename=${filename}`
-                );
+                const data = {
+                    selectedLocationGcp: selectedLocationGcp,
+                    selectedPopulationGcp: selectedPopulationGcp,
+                    selectedYearGcp: selectedYearGCP,
+                    selectedExperimentGcp: selectedExperimentGCP,
+                    filename: filename,
+                };
+
+                const response = await fetch(`${flaskUrl}load_geojson`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(data),
+                });
                 if (response.ok) {
                     console.log("response", response);
                     const geojsonData = await response.json();
