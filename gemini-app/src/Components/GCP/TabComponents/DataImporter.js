@@ -9,7 +9,8 @@ import useTrackComponent from "../../../useTrackComponent";
 const DataImporter = () => {
     useTrackComponent("DataImporter");
 
-    const { selectedLocationGCP, selectedPopulationGCP, flaskUrl } = useDataState();
+    const { selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl } =
+        useDataState();
     const { setActiveStepBoundaryPrep } = useDataSetters();
 
     const [importedData, setImportedData] = useState([]);
@@ -23,9 +24,11 @@ const DataImporter = () => {
     const sendDataToServer = async (data) => {
         // Prepare the data object to match the Flask endpoint's expectations
         const payload = {
-            selectedLocationGcp: selectedLocationGCP, // Replace with actual value
-            selectedPopulationGcp: selectedPopulationGCP, // Replace with actual value
-            filename: "FieldDesign.csv", // Replace with actual filename or logic to determine it
+            selectedLocationGcp: selectedLocationGCP,
+            selectedPopulationGcp: selectedPopulationGCP,
+            selectedYearGcp: selectedYearGCP,
+            selectedExperimentGcp: selectedExperimentGCP,
+            filename: "FieldDesign.csv",
             csvData: data,
         };
 
