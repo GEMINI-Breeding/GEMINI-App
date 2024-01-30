@@ -23,6 +23,7 @@
         "concurrently": "^8.2.1",
         "create-react-app": "^5.0.1",
         "deck.gl": "^8.9.22",
+        "formik": "^2.4.5",
         "geotiff": "^2.0.7",
         "luma.gl": "^7.3.2",
         "mapbox-gl": "^2.15.0",
@@ -30,6 +31,7 @@
         "react": "^18.2.0",
         "react-csv-importer": "^0.8.1",
         "react-dom": "^18.2.0",
+        "react-dropzone": "^14.2.3",
         "react-map-gl": "^7.1.6",
         "react-scripts": "^5.0.1",
         "web-vitals": "^2.1.4"
@@ -40,7 +42,7 @@
         "test": "react-scripts test",
         "eject": "react-scripts eject",
         "front": "react-scripts start",
-        "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-Data 5050",
+        "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-App-Data 5050",
         "gemini": "concurrently \"npm run front\"  \"npm run server\""
     },
     "eslintConfig": {

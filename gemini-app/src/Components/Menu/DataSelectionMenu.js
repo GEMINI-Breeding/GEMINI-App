@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Autocomplete, TextField } from "@mui/material";
 
-import { useDataState, useDataSetters, fetchData } from "../../DataContext";
-import AskAnalyzeodal from "./AskAnalyzeModal";
+import { useDataState, useDataSetters } from "../../DataContext";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const {
@@ -20,7 +19,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         flaskUrl,
         selectedTraitsGeoJsonPath,
         nowDroneProcessing,
-        isAskAnalyzeModalOpen,
     } = useDataState();
 
     const {
@@ -36,8 +34,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         setSelectedSensor,
         setMetricOptions,
         setSelectedTraitsGeoJsonPath,
-        setNowDroneProcessing,
-        setAskAnalyzeModalOpen,
     } = useDataSetters();
 
     const fetchData = async (url) => {
@@ -46,10 +42,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             throw new Error("Network response was not ok");
         }
         return await response.json();
-    };
-
-    const closeModal = () => {
-        setAskAnalyzeModalOpen(false);
     };
 
     useEffect(() => {
@@ -110,7 +102,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                 })
                 .catch((error) => {
                     console.error("newGeoJsonPath not loaded:", error);
-                    setAskAnalyzeModalOpen(true);
                 });
         }
 
@@ -168,20 +159,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         prevPopulationRef.current = selectedPopulation;
         prevDateRef.current = selectedDate;
     }, [selectedLocation, selectedPopulation, selectedDate, selectedSensor, selectedMetric, selectedGenotypes]);
-
-    useEffect(() => {
-        // Process drone tiff file if needed
-        if (nowDroneProcessing) {
-            const fetchUrl = `${flaskUrl}process_drone_tiff/${selectedLocation}/${selectedPopulation}/${selectedDate}`;
-            fetchData(fetchUrl)
-                .then(() => {
-                    console.log("Drone tiff file processed!");
-                    setNowDroneProcessing(false);
-                    setAskAnalyzeModalOpen(false);
-                })
-                .catch((error) => console.error("Error:", error));
-        }
-    }, [nowDroneProcessing]);
 
     return (
         <>
@@ -291,8 +268,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                     sx={{ mb: 2 }}
                 />
             ) : null}
-
-            <AskAnalyzeodal isOpen={isAskAnalyzeModalOpen} onClose={closeModal}></AskAnalyzeodal>
         </>
     );
 };

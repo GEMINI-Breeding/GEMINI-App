@@ -115,6 +115,9 @@ export const DataProvider = ({ children }) => {
         angle: 0,
     });
 
+    // Aerial Prep State
+    const [aerialPrepTab, setAerialPrepTab] = useState(0);
+
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
     const [epochs, setEpochs] = useState(100);
@@ -126,7 +129,7 @@ export const DataProvider = ({ children }) => {
     const [showResults, setShowResults] = useState(false);
     const [processRunning, setProcessRunning] = useState(false);
     const [trainingData, setTrainingData] = useState(null);
-    const [chartData, setChartData] = useState({ x: [ ], y: [ ] });
+    const [chartData, setChartData] = useState({ x: [], y: [] });
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -222,6 +225,9 @@ export const DataProvider = ({ children }) => {
                 featureCollectionPlot,
                 polygonProposalOptions,
                 fieldDesignOptions,
+
+                // Aerial Prep State
+                aerialPrepTab,
 
                 // Rover Prep State
                 roverPrepTab,
@@ -323,6 +329,9 @@ export const DataProvider = ({ children }) => {
                     setFeatureCollectionPlot,
                     setPolygonProposalOptions,
                     setFieldDesignOptions,
+
+                    // Aerial Prep State
+                    setAerialPrepTab,
 
                     // Rover Prep State
                     setRoverPrepTab,

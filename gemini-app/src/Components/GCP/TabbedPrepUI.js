@@ -7,9 +7,10 @@ import { useDataState, useDataSetters } from "../../DataContext";
 
 import PlotBoundaryPrep from "./TabComponents/PlotBoundaryPrep";
 import AerialDataPrep from "./TabComponents/AerialDataPrep";
-import NavTabs from "./TabComponents/RoverPrep/RoverPrepTabs";
 
 import useTrackComponent from "../../useTrackComponent";
+import RoverPrepTabs from "./TabComponents/Processing/RoverPrepTabs";
+import AerialPrepTabs from "./TabComponents/Processing/AerialPrepTabs";
 
 function TabbedPrepUI() {
     useTrackComponent("TabbedPrepUI");
@@ -69,8 +70,8 @@ function TabbedPrepUI() {
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
                     {selectedTabPrep === 0 && <AerialDataPrep />}
                     {selectedTabPrep === 1 && <PlotBoundaryPrep />}
-                    {selectedTabPrep === 2 && <AerialDataPrep />}
-                    {selectedTabPrep === 3 && <NavTabs />}
+                    {selectedTabPrep === 2 && <AerialPrepTabs />}
+                    {selectedTabPrep === 3 && <RoverPrepTabs />}
                 </Grid>
             )}
         </Grid>

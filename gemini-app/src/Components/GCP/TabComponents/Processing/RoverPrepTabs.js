@@ -1,51 +1,22 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
-import { styled } from "@mui/material/styles";
-import Tabs from "@mui/material/Tabs";
-import Tab from "@mui/material/Tab";
 import { useDataSetters, useDataState } from "../../../../DataContext";
-import { NestedSection } from "./CamerasAccordion";
+import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
+import { TrainMenu } from "./TrainModel"; // Import TrainMenu
+import LocateMenu from "./LocatePlants"; // Import LocateMenu
 
 import useTrackComponent from "../../../../useTrackComponent";
 
-// Custom styled component for the Tabs
-const FolderTabs = styled(Tabs)({
-    borderBottom: "1px solid #e0e0e0",
-    "& .MuiTabs-indicator": {
-        display: "none", // Hide the default indicator
-    },
-    justifyContent: "center", // Center the tabs
-    flexGrow: 1,
-    minWidth: 0,
-});
-
-// Custom styled component for the Tab
-const FolderTab = styled(Tab)({
-    textTransform: "none",
-    fontWeight: "bold",
-    marginRight: "4px", // Space between tabs
-    color: "black",
-    backgroundColor: "#f5f5f5", // Default non-selected background color
-    "&.Mui-selected": {
-        backgroundColor: "#fff", // Selected tab background color
-        borderTop: "3px solid #000", // Mimic the folder divider look
-        borderLeft: "1px solid #e0e0e0",
-        borderRight: "1px solid #e0e0e0",
-        borderBottom: "none", // This ensures the selected tab merges with the content area
-        color: "black",
-    },
-    "&:hover": {
-        backgroundColor: "#fff", // Hover background color
-        opacity: 1,
-    },
-    borderRadius: "8px 8px 0 0", // Round the top corners
-});
-
-export default function NavTabs() {
+export default function RoverPrepTabs() {
     useTrackComponent("RoverPrep");
 
     const { roverPrepTab } = useDataState();
     const { setRoverPrepTab } = useDataSetters();
+
+    const CustomComponent = {
+        train: TrainMenu,
+        locate: LocateMenu,
+    };
 
     const handleChange = (event, newValue) => {
         setRoverPrepTab(newValue);
@@ -55,9 +26,17 @@ export default function NavTabs() {
     const columns = [
         { label: "Date", field: "date" },
         { label: "Labels", field: "labels" },
-        { label: "Model", field: "model" },
-        { label: "Locations (Lat/Lon)", field: "location" },
+        { label: "Model", field: "model", actionType: "train", actionLabel: "Start" }, // Added actionType and actionLabel
+        { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start" },
     ];
+
+    // Action handler
+    const handleAction = (item, column) => {
+        console.log("Action triggered for:", item, column);
+        // Define what should happen when the button is clicked
+        // This is not needed if all that should happen is for
+        // the custom component to be rendered
+    };
 
     const amigaData = [
         // RGB Camera accordion data
@@ -82,7 +61,7 @@ export default function NavTabs() {
                 { date: "2022-08-01", labels: true, model: false, location: false },
             ],
             columns: columns,
-        }
+        },
     ];
 
     return (
@@ -107,7 +86,7 @@ export default function NavTabs() {
                         aria-label="styled tabs example"
                         variant="fullWidth"
                         scrollButtons="auto"
-                        centered // This will center the tabs if the width of the tabs is less than the container
+                        centered
                     >
                         <FolderTab label="Locate Plants" />
                         <FolderTab label="Label Traits" />
@@ -119,8 +98,20 @@ export default function NavTabs() {
                     <Box sx={{ width: "100%" }}>
                         {roverPrepTab === 0 && (
                             <div>
-                                <NestedSection title={"Amiga"} nestedData={amigaData} activeTab={roverPrepTab} />
-                                <NestedSection title={"iPhone"} nestedData={iphoneData} activeTab={roverPrepTab} />
+                                <NestedSection
+                                    title={"Amiga"}
+                                    nestedData={amigaData}
+                                    activeTab={roverPrepTab}
+                                    handleAction={null}
+                                    CustomComponent={CustomComponent}
+                                />
+                                <NestedSection
+                                    title={"iPhone"}
+                                    nestedData={iphoneData}
+                                    activeTab={roverPrepTab}
+                                    handleAction={null}
+                                    CustomComponent={CustomComponent}
+                                />
                             </div>
                         )}
                         {roverPrepTab === 1 && <div>Content for Tab 2</div>}
