@@ -14,8 +14,8 @@ export default function RoverPrepTabs() {
     const { setRoverPrepTab } = useDataSetters();
 
     const CustomComponent = {
-        "train": TrainMenu,
-        "locate": LocateMenu,
+        train: TrainMenu,
+        locate: LocateMenu,
     };
 
     const handleChange = (event, newValue) => {
@@ -27,7 +27,7 @@ export default function RoverPrepTabs() {
         { label: "Date", field: "date" },
         { label: "Labels", field: "labels" },
         { label: "Model", field: "model", actionType: "train", actionLabel: "Start" }, // Added actionType and actionLabel
-        { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start"},
+        { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start" },
     ];
 
     // Action handler
@@ -103,7 +103,6 @@ export default function RoverPrepTabs() {
                                     nestedData={amigaData}
                                     activeTab={roverPrepTab}
                                     handleAction={null}
-                                    // CustomComponent={TrainMenu}
                                     CustomComponent={CustomComponent}
                                 />
                                 <NestedSection
@@ -111,7 +110,6 @@ export default function RoverPrepTabs() {
                                     nestedData={iphoneData}
                                     activeTab={roverPrepTab}
                                     handleAction={null}
-                                    // CustomComponent={TrainMenu}
                                     CustomComponent={CustomComponent}
                                 />
                             </div>
