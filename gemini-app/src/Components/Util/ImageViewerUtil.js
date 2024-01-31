@@ -10,6 +10,8 @@ export function useHandleProcessImages() {
         isSidebarCollapsed,
         selectedYearGCP,
         selectedExperimentGCP,
+        selectedSensorGCP,
+        selectedPlatformGCP,
     } = useDataState();
 
     const { setImageList, setGcpPath, setSidebarCollapsed, setTotalImages } = useDataSetters();
@@ -44,6 +46,8 @@ export function useHandleProcessImages() {
             radius_meters: radiusMeters,
             year: selectedYearGCP,
             experiment: selectedExperimentGCP,
+            sensor: selectedSensorGCP,
+            platform: "Drone",
         };
 
         fetch(`${flaskUrl}process_images`, {

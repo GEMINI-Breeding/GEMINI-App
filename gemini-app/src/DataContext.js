@@ -123,6 +123,8 @@ export const DataProvider = ({ children }) => {
         horizontalSpacing: 10,
         angle: 0,
     });
+    const [selectedSensorGCP, setSelectedSensorGCP] = useState(null);
+    const [selectedPlatformGCP, setSelectedPlatformGCP] = useState(null);
 
     // Aerial Prep State
     const [aerialPrepTab, setAerialPrepTab] = useState(0);
@@ -159,7 +161,7 @@ export const DataProvider = ({ children }) => {
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5003/flask_app/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8090/");
 
     return (
@@ -234,6 +236,8 @@ export const DataProvider = ({ children }) => {
                 featureCollectionPlot,
                 polygonProposalOptions,
                 fieldDesignOptions,
+                selectedSensorGCP,
+                selectedPlatformGCP,
 
                 // Aerial Prep State
                 aerialPrepTab,
@@ -342,6 +346,8 @@ export const DataProvider = ({ children }) => {
                     setFeatureCollectionPlot,
                     setPolygonProposalOptions,
                     setFieldDesignOptions,
+                    setSelectedSensorGCP,
+                    setSelectedPlatformGCP,
 
                     // Aerial Prep State
                     setAerialPrepTab,
