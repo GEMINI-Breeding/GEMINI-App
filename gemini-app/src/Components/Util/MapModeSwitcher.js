@@ -10,6 +10,8 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
         flaskUrl,
         activeStepBoundaryPrep,
         featureCollectionPop,
@@ -59,6 +61,8 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         payload = {
             selectedLocationGcp: selectedLocationGCP,
             selectedPopulationGcp: selectedPopulationGCP,
+            selectedYearGcp: selectedYearGCP,
+            selectedExperimentGcp: selectedExperimentGCP,
             geojsonData: fc,
             filename: filename,
         };

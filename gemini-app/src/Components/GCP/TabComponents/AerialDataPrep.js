@@ -24,6 +24,8 @@ function AerialDataPrep() {
         flaskUrl,
         imageList,
         isImageViewerOpen,
+        selectedYearGCP,
+        selectedExperimentGCP,
     } = useDataState();
 
     const {
@@ -46,32 +48,36 @@ function AerialDataPrep() {
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
                     const dates = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedLocationGCP}/${selectedPopulationGCP}`
+                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
 
-                    const orthoCheckPromises = dates.map(async (date) => {
-                        const files = await fetchData(
-                            `${flaskUrl}list_files/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
-                        );
-                        return files.some((file) => file.endsWith("Pyramid.tif"));
-                    });
-
-                    const isOrthoGenerated = await Promise.all(orthoCheckPromises);
-
-                    const updatedDates = dates.map((date, index) => ({
+                    // Initialize updatedDates with all dates from Raw folder
+                    const updatedDates = dates.map((date) => ({
                         label: date,
-                        completed: isOrthoGenerated[index],
+                        completed: false,
                     }));
+
+                    // Check for corresponding files in the Processed folder
+                    for (let i = 0; i < dates.length; i++) {
+                        try {
+                            const files = await fetchData(
+                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${dates[i]}/Drone`
+                            );
+                            updatedDates[i].completed = files.some((file) => file.endsWith("Pyramid.tif"));
+                        } catch (error) {
+                            console.warn(`Error fetching processed data for date ${dates[i]}:`, error);
+                        }
+                    }
 
                     setDateOptionsGCP(updatedDates);
                 } catch (error) {
-                    console.error("Error:", error);
+                    console.error("Error fetching Raw data:", error);
                 }
             }
         };
 
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
 
     const handleOptionClick = (option) => {
         // Set date to option.label

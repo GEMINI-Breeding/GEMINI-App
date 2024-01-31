@@ -12,6 +12,10 @@ export default function AerialPrepTabs() {
     const { aerialPrepTab } = useDataState();
     const { setAerialPrepTab } = useDataSetters();
 
+    const CustomComponent = {
+        process: AskAnalyzeModal,
+    };
+
     const handleChange = (event, newValue) => {
         setAerialPrepTab(newValue);
     };
@@ -79,7 +83,7 @@ export default function AerialPrepTabs() {
                                     nestedData={iphoneData}
                                     activeTab={aerialPrepTab}
                                     handleAction={null}
-                                    CustomComponent={AskAnalyzeModal}
+                                    CustomComponent={CustomComponent}
                                 />
                             </div>
                         )}

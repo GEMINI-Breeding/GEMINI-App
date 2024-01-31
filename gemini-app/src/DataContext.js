@@ -87,6 +87,15 @@ export const DataProvider = ({ children }) => {
     const [radiusMeters, setRadiusMeters] = useState(5);
     const [gcpPath, setGcpPath] = useState(null);
 
+    const [locationOptionsGCP, setLocationOptionsGCP] = useState([]);
+    const [selectedLocationGCP, setSelectedLocationGCP] = useState(null);
+    const [populationOptionsGCP, setPopulationOptionsGCP] = useState([]);
+    const [selectedPopulationGCP, setSelectedPopulationGCP] = useState(null);
+    const [selectedYearGCP, setSelectedYearGCP] = useState(null);
+    const [yearOptionsGCP, setYearOptionsGCP] = useState([]);
+    const [selectedExperimentGCP, setSelectedExperimentGCP] = useState(null);
+    const [experimentOptionsGCP, setExperimentOptionsGCP] = useState([]);
+
     // Prep State
     const [isPrepInitiated, setIsPrepInitiated] = useState(false);
     const [prepGcpFilePath, setPrepGcpFilePath] = useState("");
@@ -138,10 +147,6 @@ export const DataProvider = ({ children }) => {
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
     const [imageViewerError, setImageViewerError] = useState(null);
-    const [locationOptionsGCP, setLocationOptionsGCP] = useState([]);
-    const [selectedLocationGCP, setSelectedLocationGCP] = useState(null);
-    const [populationOptionsGCP, setPopulationOptionsGCP] = useState([]);
-    const [selectedPopulationGCP, setSelectedPopulationGCP] = useState(null);
     const [dateOptionsGCP, setDateOptionsGCP] = useState([]);
     const [selectedDateGCP, setSelectedDateGCP] = useState(null);
     const [sliderMarks, setSliderMarks] = useState([]);
@@ -214,6 +219,10 @@ export const DataProvider = ({ children }) => {
                 selectedPopulationGCP,
                 dateOptionsGCP,
                 selectedDateGCP,
+                yearOptionsGCP,
+                selectedYearGCP,
+                experimentOptionsGCP,
+                selectedExperimentGCP,
                 gcpPath,
 
                 // Prep State
@@ -320,6 +329,10 @@ export const DataProvider = ({ children }) => {
                     setSelectedPopulationGCP,
                     setDateOptionsGCP,
                     setSelectedDateGCP,
+                    setYearOptionsGCP,
+                    setSelectedYearGCP,
+                    setExperimentOptionsGCP,
+                    setSelectedExperimentGCP,
                     setGcpPath,
 
                     // Prep State
