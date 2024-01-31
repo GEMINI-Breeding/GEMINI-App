@@ -7,7 +7,8 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import Button from "@mui/material/Button";
 
 export const MapOrthoSwitcher = () => {
-    const { flaskUrl, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { flaskUrl, selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP } =
+        useDataState();
     const { setPrepOrthoImagePath } = useDataSetters();
 
     const [mapOrthoDateOptions, setMapOrthoDateOptions] = useState([]);
@@ -23,7 +24,9 @@ export const MapOrthoSwitcher = () => {
         console.log("selectedLocation", selectedLocationGCP);
         console.log("selectedPopulation", selectedPopulationGCP);
 
-        fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`)
+        fetchData(
+            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+        )
             .then((dates) => {
                 return Promise.all(
                     dates.map((date) =>
@@ -41,11 +44,13 @@ export const MapOrthoSwitcher = () => {
     }, []);
 
     const checkDroneFolder = (date) => {
-        return fetchData(`${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`) // Adjust for actual location and population
+        return fetchData(
+            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/RGB`
+        ) // Adjust for actual location and population
             .then((data) => {
                 if (data.includes("Drone")) {
                     return fetchData(
-                        `${flaskUrl}list_files/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
+                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/RGB`
                     )
                         .then((droneData) => droneData.some((item) => item.endsWith("Pyramid.tif")))
                         .catch(() => false);
@@ -60,7 +65,7 @@ export const MapOrthoSwitcher = () => {
         console.log("Selected date:", selectedDate);
         if (selectedDate) {
             setPrepOrthoImagePath(
-                `Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/${selectedDate}-P4-RGB-Pyramid.tif`
+                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/RGB/${selectedDate}-P4-RGB-Pyramid.tif`
             );
         }
     };

@@ -10,7 +10,7 @@ import { useDataState, useDataSetters } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
-import PlotProposalGenerator from "./PlotProposalGenerator";
+import PlotProposalGenerator from "../../../../../../PlotProposalGenerator";
 import DataImporter from "./DataImporter";
 
 import useTrackComponent from "../../../useTrackComponent";
@@ -59,7 +59,7 @@ function PlotBoundaryPrep() {
     }, [isImageViewerOpen]);
 
     return (
-        <Grid container direction="column" spacing={2} style={{ width: "90%", margin: "0 auto" }}>
+        <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
             <Grid item style={{ width: "100%" }}>
                 <Stepper activeStep={activeStepBoundaryPrep} style={{ padding: "8px 0", background: "transparent" }}>
                     {steps.map((label, index) => (
@@ -86,7 +86,7 @@ function PlotBoundaryPrep() {
                 </Grid>
             )}
 
-            {activeStepBoundaryPrep === 2 && (
+            {/* {activeStepBoundaryPrep === 2 && (
                 <Grid item container justifyContent={"center"} spacing={2}>
                     <Grid item xs={12} md={2}>
                         <PlotProposalGenerator />
@@ -94,6 +94,11 @@ function PlotBoundaryPrep() {
                     <Grid item xs={12} md={10}>
                         <BoundaryMap task={"plot_boundary"} />
                     </Grid>
+                </Grid>
+            )} */}
+            {activeStepBoundaryPrep === 2 && (
+                <Grid item container justifyContent="center" spacing={2}>
+                    <BoundaryMap task={"plot_boundary"} />
                 </Grid>
             )}
         </Grid>

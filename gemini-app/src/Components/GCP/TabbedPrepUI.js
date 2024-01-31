@@ -57,7 +57,7 @@ function TabbedPrepUI() {
     return (
         <Grid container direction="column" style={{ width: "100%", height: "100%" }}>
             {isPrepInitiated && (
-                <Grid item>
+                <Grid item alignItems="center" alignSelf="center" style={{ width: "80%" }}>
                     <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
                         <Tab label="Orthomosaic Generation" style={titleStyle} />
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />

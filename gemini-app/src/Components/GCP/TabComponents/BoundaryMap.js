@@ -7,6 +7,7 @@ import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewM
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataContext";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
+import PlotProposalSwitcher from "../../Util/PlotProposalSwitcher";
 
 // const fc = {
 //     type: "FeatureCollection",
@@ -216,7 +217,7 @@ function BoundaryMap({ task }) {
     };
 
     return (
-        <div style={{ height: "85vh", width: "100vw", position: "relative" }}>
+        <div style={{ height: "80vh", width: "85vw", position: "absolute" }}>
             <DeckGL
                 initialViewState={viewState}
                 controller={controller}
@@ -243,6 +244,7 @@ function BoundaryMap({ task }) {
                 setSelectedFeatureIndexes={setSelectedFeatureIndexes}
             />
             <MapOrthoSwitcher />
+            {task === "plot_boundary" && <PlotProposalSwitcher />}
         </div>
     );
 }
