@@ -41,7 +41,7 @@ export default function RoverPrepTabs() {
     const amigaData = [
         // RGB Camera accordion data
         {
-            summary: "RGB Camera",
+            summary: "RGB",
             data: [
                 { date: "2022-06-20", labels: true, model: false, location: false },
                 { date: "2022-07-25", labels: true, model: false, location: false },
@@ -54,7 +54,7 @@ export default function RoverPrepTabs() {
     const iphoneData = [
         // RGB Camera accordion data
         {
-            summary: "RGB Camera",
+            summary: "RGB",
             data: [
                 { date: "2022-06-20", labels: true, model: false, location: false },
                 { date: "2022-07-25", labels: true, model: false, location: false },
@@ -99,9 +99,10 @@ export default function RoverPrepTabs() {
                         {roverPrepTab === 0 && (
                             <div>
                                 <NestedSection
-                                    title={"Amiga"}
+                                    title={"Amiga-Onboard"}
                                     nestedData={amigaData}
                                     activeTab={roverPrepTab}
+                                    sensor={amigaData[0].summary}
                                     handleAction={null}
                                     CustomComponent={CustomComponent}
                                 />
@@ -109,6 +110,7 @@ export default function RoverPrepTabs() {
                                     title={"iPhone"}
                                     nestedData={iphoneData}
                                     activeTab={roverPrepTab}
+                                    sensor={iphoneData[0].summary}
                                     handleAction={null}
                                     CustomComponent={CustomComponent}
                                 />

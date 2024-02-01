@@ -1,11 +1,11 @@
 version: '3.8'
 services:
   service-1:
-    image: gemini_train:v0.3
+    image: gemini_train:v0.4
     user: "${UID:-1000}:${GID:-1000}"
     container_name: train
     volumes:
-      - /home/gemini/data/GEMINI-Data:/app/mnt
+      - /home/gemini/data/GEMINI-App-Data:/app/mnt
     deploy:
       resources:
         reservations:
@@ -21,7 +21,7 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     container_name: locate-extract
     volumes:
-      - /home/gemini/data/GEMINI-Data:/app/mnt
+      - /home/gemini/data/GEMINI-App-Data:/app/mnt
     deploy:
       resources:
         reservations:
