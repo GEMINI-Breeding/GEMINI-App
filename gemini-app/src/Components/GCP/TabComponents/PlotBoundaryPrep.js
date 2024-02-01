@@ -10,7 +10,6 @@ import { useDataState, useDataSetters } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
-import PlotProposalGenerator from "../../../../../../PlotProposalGenerator";
 import DataImporter from "./DataImporter";
 
 import useTrackComponent from "../../../useTrackComponent";

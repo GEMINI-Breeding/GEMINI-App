@@ -45,7 +45,7 @@ export const MapOrthoSwitcher = () => {
 
     const checkDroneFolder = (date) => {
         return fetchData(
-            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/RGB`
+            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
         ) // Adjust for actual location and population
             .then((data) => {
                 if (data.includes("Drone")) {

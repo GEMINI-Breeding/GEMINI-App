@@ -94,6 +94,8 @@ function BoundaryMap({ task }) {
                     filename: filename,
                 };
 
+                console.log("data for load json ", data);
+
                 const response = await fetch(`${flaskUrl}load_geojson`, {
                     method: "POST",
                     headers: {
