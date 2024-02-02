@@ -102,7 +102,15 @@ export default function AerialPrepTabs() {
         };
 
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
+    }, [
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
+        flaskUrl,
+        fetchData,
+        aerialPrepTab,
+    ]);
 
     console.log("sensorData", sensorData);
 
