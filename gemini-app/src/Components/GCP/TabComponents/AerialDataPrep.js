@@ -16,7 +16,7 @@ import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import useTrackComponent from "../../../useTrackComponent";
 
 function AerialDataPrep() {
-    useTrackComponent("AerialDataPrep");
+    useTrackComponent("OrthoPrep");
 
     const {
         selectedLocationGCP,

@@ -8,6 +8,7 @@ import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataCo
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
 import PlotProposalSwitcher from "../../Util/PlotProposalSwitcher";
+import useTrackComponent from "../../../useTrackComponent";
 
 // const fc = {
 //     type: "FeatureCollection",
@@ -22,6 +23,8 @@ export const viewMode = new ViewMode();
 export const selectionMode = new TranslateMode();
 
 function BoundaryMap({ task }) {
+    useTrackComponent("BoundaryMap");
+
     const {
         viewState,
         selectedTilePath,
