@@ -7,6 +7,7 @@ import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CircularProgress from "@mui/material/CircularProgress";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 
 import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
@@ -70,22 +71,48 @@ function AerialDataPrep() {
                             );
 
                             for (const sensor of sensors) {
-                                try {
-                                    const files = await fetchData(
-                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
-                                    );
-                                    const completed = files.some((file) => file.endsWith("Pyramid.tif"));
+                                let completed = 0; // Default to not completed
 
-                                    if (!updatedSensorData[sensor]) {
-                                        updatedSensorData[sensor] = [];
-                                    }
-                                    updatedSensorData[sensor].push({ label: date, completed });
-                                } catch (error) {
-                                    console.warn(
-                                        `Error fetching processed data for date ${date} and sensor ${sensor}:`,
-                                        error
+                                // Check for Images folder
+                                const imageFolders = await fetchData(
+                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                                );
+
+                                if (imageFolders.includes("Images")) {
+                                    const images = await fetchData(
+                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}/Images`
                                     );
+
+                                    if (images.length === 0) {
+                                        // If Images folder is empty
+                                        completed = 2;
+                                    } else {
+                                        try {
+                                            const processedFiles = await fetchData(
+                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                                            );
+
+                                            completed = processedFiles.some((file) => file.endsWith(".tif")) ? 1 : 0;
+                                        } catch (error) {
+                                            // If there's an error fetching processed files, or no .tif files found
+                                            console.warn(
+                                                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
+                                                error
+                                            );
+                                            completed = 0; // There are images, but no processed .tif files
+                                        }
+                                    }
+                                } else {
+                                    // If Images folder is not found
+                                    completed = 2;
                                 }
+
+                                // Initialize sensor array if not already done
+                                if (!updatedSensorData[sensor]) {
+                                    updatedSensorData[sensor] = [];
+                                }
+                                // Add entry with the determined 'completed' status
+                                updatedSensorData[sensor].push({ label: date, completed });
                             }
                         }
                     }
@@ -101,9 +128,11 @@ function AerialDataPrep() {
     }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
 
     const handleOptionClick = (sensor, option) => {
-        setSelectedDateGCP(option.label);
-        setSelectedSensorGCP(sensor);
-        setIsImageViewerOpen(true);
+        if (option.completed !== 2) {
+            setSelectedDateGCP(option.label);
+            setSelectedSensorGCP(sensor);
+            setIsImageViewerOpen(true);
+        }
     };
 
     useEffect(() => {
@@ -160,12 +189,15 @@ function AerialDataPrep() {
                                                 primaryTypographyProps={{ fontSize: "1.25rem" }}
                                             />
                                         </Grid>
-                                        <Grid item>
-                                            {option.completed && (
-                                                <CheckCircleIcon style={{ color: "green", marginLeft: "24px" }} />
-                                            )}{" "}
-                                            {/* Added margin here */}
-                                        </Grid>
+                                        {option.completed == true && (
+                                            <CheckCircleIcon style={{ color: "green", marginLeft: "24px" }} />
+                                        )}
+                                        {option.completed === 2 && (
+                                            <WarningAmberIcon
+                                                titleAccess="No images found for this date and sensor"
+                                                style={{ color: "orange", marginLeft: "24px" }}
+                                            />
+                                        )}
                                     </Grid>
                                 </ListItemButton>
                                 {index !== sensorData[sensor].length - 1 && <Divider />}

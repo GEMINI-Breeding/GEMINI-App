@@ -13,10 +13,10 @@ import {
     Button,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { styled } from "@mui/material/styles";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
-
 const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
@@ -34,12 +34,16 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
                 {column.actionLabel || "Action"}
             </Button>
         );
+    } else if (item[column.field] === 2) {
+        return <WarningAmberIcon />;
     } else if (column.label === "Date") {
         return <ListItemText primary={item[column.field]} />;
-    } else if (item[column.field] !== true && item[column.field] !== false) {
+    } else if (typeof item[column.field] !== "boolean" && typeof item[column.field] !== "number") {
         return <ListItemText primary={item[column.field]} />;
+    } else if (item[column.field] === 1 || item[column.field] === 0) {
+        return <Checkbox checked={Boolean(item[column.field])} disabled />;
     } else {
-        return <Checkbox checked={item[column.field]} disabled />;
+        return <WarningAmberIcon titleAccess="Data not yet processed" />;
     }
 }
 

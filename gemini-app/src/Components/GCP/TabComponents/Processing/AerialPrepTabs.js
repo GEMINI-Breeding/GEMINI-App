@@ -59,14 +59,14 @@ export default function AerialPrepTabs() {
                                 }
 
                                 // Assume the entry is not completed by default
-                                let completed = false;
+                                let completed = 2;
 
                                 // Try to fetch processed files to check if completed
                                 try {
                                     const files = await fetchData(
                                         `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
-                                    completed = files.some((file) => file.endsWith(".tif"));
+                                    completed = Number(files.some((file) => file.endsWith(".tif")));
                                 } catch (error) {
                                     console.warn(
                                         `Processed data not found or error fetching processed data for date ${date}, platform ${platform}, and sensor ${sensor}:`,
