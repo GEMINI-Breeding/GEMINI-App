@@ -20,7 +20,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
 
-function TrainMenu({ open, onClose, item, activeTab, sensor }) {
+function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
@@ -48,12 +48,13 @@ function TrainMenu({ open, onClose, item, activeTab, sensor }) {
                 year: selectedYearGCP,
                 experiment: selectedExperimentGCP,
                 date: item.date,
+                platform: platform,
                 sensor: sensor,
             };
             console.log("Payload:", payload);
 
             if (activeTab === 0) {
-                payload.trait = "plant";
+                payload.trait = "Plant";
             }
 
             const response = await fetch(`${flaskUrl}train_model`, {

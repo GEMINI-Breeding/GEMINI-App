@@ -48,7 +48,7 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
 }
 
 function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
-    const { activeTab, sensor } = useContext(CameraAccordionContext);
+    const { activeTab, sensor, platform } = useContext(CameraAccordionContext);
     const [open, setOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectedColumn, setSelectedColumn] = useState(null);
@@ -102,6 +102,7 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
                     onClose: handleClose,
                     item: selectedItem,
                     activeTab: activeTab,
+                    platform: platform,
                     sensor: sensor,
                 })}
         </>
@@ -141,9 +142,9 @@ function NestedAccordion({ data, columns, summary, handleAction, CustomComponent
     );
 }
 
-export function CamerasAccordion({ nestedAccordions, activeTab, sensor, handleAction, CustomComponent }) {
+export function CamerasAccordion({ nestedAccordions, activeTab, platform, sensor, handleAction, CustomComponent }) {
     return (
-        <CameraAccordionContext.Provider value={{ activeTab, sensor }}>
+        <CameraAccordionContext.Provider value={{ activeTab, sensor, platform }}>
             <List>
                 {nestedAccordions.map((nestedItem, index) => (
                     <NestedAccordion
@@ -160,7 +161,7 @@ export function CamerasAccordion({ nestedAccordions, activeTab, sensor, handleAc
     );
 }
 
-export function NestedSection({ title, nestedData, activeTab, handleAction, CustomComponent }) {
+export function NestedSection({ title, nestedData, activeTab, sensor, handleAction, CustomComponent }) {
     return (
         <Accordion sx={{ width: "100%", my: 2 }}>
             <AccordionSummary
@@ -180,7 +181,8 @@ export function NestedSection({ title, nestedData, activeTab, handleAction, Cust
                         <CamerasAccordion
                             nestedAccordions={[nestedItem]}
                             activeTab={activeTab}
-                            sensor={title}
+                            platform={title}
+                            sensor={sensor}
                             handleAction={handleAction}
                             CustomComponent={CustomComponent}
                         />

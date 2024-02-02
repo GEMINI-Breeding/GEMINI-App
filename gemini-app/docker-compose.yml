@@ -1,11 +1,11 @@
 version: '3.8'
 services:
-  my-service:
-    image: gemini_train:v0.3
+  service-1:
+    image: gemini_train:v0.4
     user: "${UID:-1000}:${GID:-1000}"
     container_name: train
     volumes:
-      - /home/gemini/data/GEMINI-Data:/app/mnt
+      - /home/gemini/data/GEMINI-App-Data:/app/mnt
     deploy:
       resources:
         reservations:
@@ -15,8 +15,19 @@ services:
             capabilities: [gpu]
     ipc: host  # Set ipc mode to host
     command: ["tail", "-f", "/dev/null"]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  service-2:
+    image: gemini_opcuda_86:v1.1
+    user: "${UID:-1000}:${GID:-1000}"
+    container_name: locate-extract
+    volumes:
+      - /home/gemini/data/GEMINI-App-Data:/app/mnt
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all  # Use all available GPUs
+            capabilities: [gpu]
+    ipc: host  # Set ipc mode to host
+    command: ["tail", "-f", "/dev/null"]
