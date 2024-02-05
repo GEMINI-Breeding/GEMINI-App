@@ -143,7 +143,7 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
                 x: [...prevData.x, trainingData.epoch],
                 y: [...prevData.y, trainingData.map],
             }));
-            console.log("Chart data:", chartData);
+            // console.log("Chart data:", chartData);
         }
     }, [trainingData]);
 
@@ -232,7 +232,7 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
                                 <MenuItem value={50}>50</MenuItem>
                                 <MenuItem value={100}>100</MenuItem>
                                 <MenuItem value={150}>150</MenuItem>
-                                <MenuItem value={1}>1</MenuItem>
+                                <MenuItem value={200}>200</MenuItem>
                             </Select>
                         </FormControl>
                     </Grid>

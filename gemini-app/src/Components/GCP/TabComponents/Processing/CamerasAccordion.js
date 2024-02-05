@@ -161,7 +161,7 @@ export function CamerasAccordion({ nestedAccordions, activeTab, platform, sensor
     );
 }
 
-export function NestedSection({ title, nestedData, activeTab, sensor, handleAction, CustomComponent }) {
+export function NestedSection({ title, nestedData, activeTab, handleAction, CustomComponent }) {
     return (
         <Accordion sx={{ width: "100%", my: 2 }}>
             <AccordionSummary
@@ -182,7 +182,7 @@ export function NestedSection({ title, nestedData, activeTab, sensor, handleActi
                             nestedAccordions={[nestedItem]}
                             activeTab={activeTab}
                             platform={title}
-                            sensor={sensor}
+                            sensor={nestedItem.summary}
                             handleAction={handleAction}
                             CustomComponent={CustomComponent}
                         />

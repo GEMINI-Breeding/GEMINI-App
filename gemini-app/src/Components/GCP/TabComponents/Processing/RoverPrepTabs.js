@@ -124,7 +124,7 @@ export default function RoverPrepTabs() {
         console.log("Action triggered for:", item, column);
     };
 
-    const includedPlatforms = ["Rover"];
+    const includedPlatforms = ["Rover", "Amiga-Onboard"];
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
