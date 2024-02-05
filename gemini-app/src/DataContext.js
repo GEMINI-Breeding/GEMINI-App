@@ -143,6 +143,7 @@ export const DataProvider = ({ children }) => {
     const [chartData, setChartData] = useState({ x: [], y: [] });
     const [batchSizeLocate, setBatchSizeLocate] = useState(32)
     const [isLocating, setIsLocating] = useState(false)
+    const [currentLocateProgress, setCurrentLocateProgress] = useState(0)
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -258,6 +259,7 @@ export const DataProvider = ({ children }) => {
                 chartData,
                 batchSizeLocate,
                 isLocating,
+                currentLocateProgress,
 
                 // ImageViewer State
                 imageIndex,
@@ -370,6 +372,7 @@ export const DataProvider = ({ children }) => {
                     setChartData,
                     setBatchSizeLocate,
                     setIsLocating,
+                    setCurrentLocateProgress,
 
                     // ImageViewer State
                     setImageIndex,

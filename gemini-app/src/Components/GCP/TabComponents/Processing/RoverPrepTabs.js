@@ -3,7 +3,7 @@ import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { TrainMenu } from "./TrainModel"; // Import TrainMenu
-import LocateMenu from "./LocatePlants"; // Import LocateMenu
+import { LocateMenu } from "./LocatePlants"; // Import LocateMenu
 
 import useTrackComponent from "../../../../useTrackComponent";
 

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
     Accordion,
     AccordionSummary,
@@ -13,15 +13,19 @@ import {
     Button,
     Box,
     Typography,
+    LinearProgress,
+    IconButton
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 
-function LocateMenu({ open, onClose, item, sensor }) {
+function LocateMenu({ open, onClose, item, platform, sensor }) {
 
     const { 
         selectedLocationGCP,
-        selectedPopulationGCP, 
+        selectedPopulationGCP,
+        selectedYearGCP,
+        selectedExperimentGCP,
         flaskUrl,
         batchSizeLocate,
         isLocating
@@ -39,8 +43,11 @@ function LocateMenu({ open, onClose, item, sensor }) {
                 batchSize: batchSizeLocate,
                 location: selectedLocationGCP,
                 population: selectedPopulationGCP,
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
                 date: item.date,
                 sensor: sensor,
+                platform: platform
             };
             
             const response = await fetch(`${flaskUrl}locate_plants`, {
@@ -153,4 +160,57 @@ function AdvancedMenu({ batchSizeLocate, setBatchSizeLocate }) {
     );
 }
 
-export default LocateMenu;
+function LocateProgressBar({ currentLocateProgress, onStopLocating }) {
+    const { setCurrentLocateProgress, setIsLocating } = useDataSetters();
+    const [expanded, setExpanded] = useState(false);
+    const validProgress = Number.isFinite(currentLocateProgress) ? currentLocateProgress : 0;
+
+    const handleExpandClick = () => {
+        setExpanded(!expanded);
+    };
+
+    const handleDone = () => {
+        setIsLocating(false);
+        setCurrentLocateProgress(0); // Reset progress
+    };
+
+    const isLocatingComplete = currentLocateProgress >= 100;
+
+    return (
+        <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
+                <Typography variant="body2" sx={{ marginRight: "10px" }}>
+                    Locating in Progress...
+                </Typography>
+                <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
+                    <Box sx={{ width: "100%", mr: 1 }}>
+                        <LinearProgress variant="determinate" value={validProgress} />
+                    </Box>
+                    <Box sx={{ minWidth: 35, mr: 1 }}>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(
+                            validProgress
+                        )}%`}</Typography>
+                    </Box>
+                </Box>
+                <Button
+                    onClick={isLocatingComplete ? handleDone : onStopLocating}
+                    style={{
+                        backgroundColor: isLocatingComplete ? "green" : "red",
+                        color: "white",
+                        alignSelf: "center",
+                    }}
+                >
+                    {isLocatingComplete ? "DONE" : "STOP"}
+                </Button>
+                <IconButton
+                    onClick={handleExpandClick}
+                    sx={{ transform: expanded ? "rotate(0deg)" : "rotate(180deg)" }}
+                >
+                    <ExpandMoreIcon />
+                </IconButton>
+            </Box>
+        </Box>
+    );
+}
+
+export { LocateMenu, LocateProgressBar };

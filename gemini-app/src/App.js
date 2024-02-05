@@ -14,6 +14,7 @@ import MapView from "./Components/Map/MapView";
 import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
+import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
 import { Box } from "@mui/material";
 import FileUploadComponent from "./Components/Menu/FileUpload";
 
@@ -35,6 +36,8 @@ function App() {
         currentEpoch,
         trainingData,
         chartData,
+        isLocating,
+        currentLocateProgress
     } = useDataState();
 
     const {
@@ -50,6 +53,8 @@ function App() {
         setCurrentEpoch,
         setTrainingData,
         setChartData,
+        setCurrentLocateProgress,
+        setIsLocating
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -130,7 +135,7 @@ function App() {
         if (isTraining) {
             interval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${flaskUrl}get_training_progress`);
+                    const response = await fetch(`${flaskUrl}get_progress`);
                     if (response.ok) {
                         const data = await response.json();
                         const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
@@ -148,6 +153,46 @@ function App() {
         return () => clearInterval(interval);
     }, [isTraining, flaskUrl, epochs]);
     // FOR TRAINING END
+
+    // FOR LOCATE START
+    const handleStopLocating = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_locate`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Locating stopped");
+                setIsLocating(false);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping locating", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isLocating) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_locate_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentLocateProgress(data.locate)
+                    } else {
+                        console.error("Failed to fetch locate progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching locate progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isLocating, flaskUrl]);
+    // FOR LOCATE END
 
     return (
         <ActiveComponentsProvider>
@@ -197,6 +242,30 @@ function App() {
                                 epochs={epochs}
                                 chartData={chartData}
                                 currentEpoch={currentEpoch}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
+                {/* locating */}
+                {isLocating && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <LocateProgressBar
+                                currentLocateProgress={currentLocateProgress}
+                                onStopLocating={handleStopLocating}
                             />
                         </Box>
                     </Box>
