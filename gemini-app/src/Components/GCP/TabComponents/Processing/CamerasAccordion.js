@@ -20,28 +20,32 @@ import Tab from "@mui/material/Tab";
 const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
-    if (column.actionType) {
-        const actionHandler = handleAction || handleClickOpen;
-        return (
-            <Button
-                onClick={() => actionHandler(item, column)}
-                style={{
-                    backgroundColor: "#1976d2",
-                    color: "white",
-                    borderRadius: "4px",
-                }}
-            >
-                {column.actionLabel || "Action"}
-            </Button>
-        );
+    const actionHandler = handleAction || handleClickOpen;
+    if (typeof item[column.field] === "boolean") {
+        return <Checkbox checked={item[column.field]} disabled />;
+    } else if (column.actionType) {
+        if (item[column.field] == false) {
+            return (
+                <Button
+                    onClick={() => actionHandler(item, column)}
+                    style={{
+                        background: "#1976d2",
+                        color: "white",
+                        borderRadius: "4px",
+                    }}
+                >
+                    {column.actionLabel || "Action"}
+                </Button>
+            );
+        }
     } else if (item[column.field] === 2) {
-        return <WarningAmberIcon />;
+        return <WarningAmberIcon />; // if value is 2, return warning icon
     } else if (column.label === "Date") {
-        return <ListItemText primary={item[column.field]} />;
+        return <ListItemText primary={item[column.field]} />; // return date if in Date column
     } else if (typeof item[column.field] !== "boolean" && typeof item[column.field] !== "number") {
-        return <ListItemText primary={item[column.field]} />;
+        return <ListItemText primary={item[column.field]} />; // returns string if not number or boolean
     } else if (item[column.field] === 1 || item[column.field] === 0) {
-        return <Checkbox checked={Boolean(item[column.field])} disabled />;
+        return <Checkbox checked={Boolean(item[column.field])} disabled />; // integer to boolean case
     } else {
         return <WarningAmberIcon titleAccess="Data not yet processed" />;
     }

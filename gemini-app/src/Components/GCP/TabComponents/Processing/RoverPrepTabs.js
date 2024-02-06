@@ -62,22 +62,30 @@ export default function RoverPrepTabs() {
                                     updatedData[platform][sensor] = [];
                                 }
 
-                                let labels = 2; // Assume no folder for the sensor initially
-                                let model = true; // Assume model and location are true if sensor is listed
-                                let location = true;
-
                                 try {
-                                    const files = await fetchData(
-                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                    );
+                                    let labels = 2; // Assume no folder for the sensor initially
+                                    // let model = true; // Assume model and location are true if sensor is listed
+                                    let location = true;
 
-                                    if (files.length === 0) {
-                                        // No files found in the folder, implying no XML labels
-                                        labels = 0;
-                                    } else {
-                                        // Check if any of the files end with .xml for labels
-                                        labels = files.some((file) => file.endsWith(".xml")) ? 1 : 0;
+                                    // const files = await fetchData(
+                                    //     `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    // );
+
+                                    const train_files = await fetchData(
+                                        `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                                    );
+                                    
+                                    // check model status
+                                    let model = false;
+                                    const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
+                                        return dates.includes(date);
+                                    });
+                                    const filteredTrainFiles = Object.fromEntries(filteredEntries);
+                                    if (Object.keys(filteredTrainFiles).length >= 1) {
+                                        model = true;
                                     }
+
+                                    updatedData[platform][sensor].push({ date, labels, model, location });
                                 } catch (error) {
                                     console.warn(
                                         `Error fetching processed data for ${date}, ${platform}, ${sensor}:`,
@@ -86,8 +94,6 @@ export default function RoverPrepTabs() {
                                     // If there's an error fetching the data, it could mean there's no folder for the sensor
                                     // In this case, labels should remain 2, model and location remain true
                                 }
-
-                                updatedData[platform][sensor].push({ date, labels, model, location });
                             }
                         }
                     }
@@ -105,7 +111,7 @@ export default function RoverPrepTabs() {
                             columns: columns,
                         })),
                     }));
-
+                    // console.log(processedData)
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);
