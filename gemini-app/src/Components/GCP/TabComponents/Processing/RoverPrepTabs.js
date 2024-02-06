@@ -64,16 +64,18 @@ export default function RoverPrepTabs() {
 
                                 try {
                                     let labels = 2; // Assume no folder for the sensor initially
-                                    // let model = true; // Assume model and location are true if sensor is listed
-                                    let location = true;
 
                                     // const files = await fetchData(
                                     //     `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     // );
 
+                                    // retrieve file data
                                     const train_files = await fetchData(
                                         `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
                                     );
+                                    const locate_files = await fetchData(
+                                        `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
+                                    )
                                     
                                     // check model status
                                     let model = false;
@@ -84,6 +86,9 @@ export default function RoverPrepTabs() {
                                     if (Object.keys(filteredTrainFiles).length >= 1) {
                                         model = true;
                                     }
+
+                                    // check location status
+                                    let location = locate_files.length >= 1
 
                                     updatedData[platform][sensor].push({ date, labels, model, location });
                                 } catch (error) {
@@ -111,7 +116,7 @@ export default function RoverPrepTabs() {
                             columns: columns,
                         })),
                     }));
-                    // console.log(processedData)
+                    console.log(processedData)
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);

@@ -21,9 +21,7 @@ const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
     const actionHandler = handleAction || handleClickOpen;
-    if (typeof item[column.field] === "boolean") {
-        return <Checkbox checked={item[column.field]} disabled />;
-    } else if (column.actionType) {
+    if (column.actionType) {
         if (item[column.field] == false) {
             return (
                 <Button
@@ -36,6 +34,13 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
                 >
                     {column.actionLabel || "Action"}
                 </Button>
+            );
+        } else if (item[column.field] === true) {
+            return (
+                <Checkbox
+                    checked={true}
+                    disabled={true} // Assuming you want it disabled; remove if not
+                />
             );
         }
     } else if (item[column.field] === 2) {
