@@ -24,7 +24,7 @@ function getAndParseFieldDesign(
     selectedLocationGCP,
     selectedPopulationGCP
 ) {
-    const filePath = `${flaskUrl}/files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`;
+    const filePath = `${flaskUrl}files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`;
     return fetch(filePath)
         .then((response) => response.text())
         .then((text) => parseCsv(text))
@@ -35,10 +35,16 @@ function getAndParseFieldDesign(
 }
 
 function mergeCsvDataWithGeoJson(featureCollection, csvData) {
+    console.log("CSV Data", csvData);
+
     featureCollection.features.forEach((feature) => {
         const { row, column } = feature.properties;
 
+        console.log("Feature", feature);
+
         const csvRow = csvData.find((data) => data.row == row && data.col == column);
+
+        console.log("CSV Row", csvRow);
 
         if (csvRow) {
             // Assuming the data from the CSV might need transformation if keys differ
