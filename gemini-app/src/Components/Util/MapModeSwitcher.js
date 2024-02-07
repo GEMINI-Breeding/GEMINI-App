@@ -5,6 +5,8 @@ import { Button } from "@mui/material";
 import { save } from "@loaders.gl/core";
 import SettingsIcon from "@mui/icons-material/Settings";
 import VisibilityIcon from "@mui/icons-material/Visibility";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
 
 export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, setSelectedFeatureIndexes }) => {
     const {
@@ -16,9 +18,15 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         activeStepBoundaryPrep,
         featureCollectionPop,
         featureCollectionPlot,
+        showTooltipGCP,
     } = useDataState();
-    const { setActiveStepBoundaryPrep, setSelectedTabPrep, setFeatureCollectionPop, setFeatureCollectionPlot } =
-        useDataSetters();
+    const {
+        setActiveStepBoundaryPrep,
+        setSelectedTabPrep,
+        setFeatureCollectionPop,
+        setFeatureCollectionPlot,
+        setShowTooltipGCP,
+    } = useDataSetters();
 
     const [buttonText, setButtonText] = useState("Save");
     const [proceedButtonText, setProceedButtonText] = useState("Proceed");
@@ -120,6 +128,11 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         setMode(mode);
     };
 
+    const handleShowTooltip = () => {
+        // Toggle the tooltip state
+        setShowTooltipGCP((currentShowTooltip) => !currentShowTooltip);
+    };
+
     return (
         <div
             style={
@@ -194,6 +207,21 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                             {proceedButtonText}
                         </Button>
                     </div>
+                    {task === "plot_boundary" && (
+                        <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                            <FormControlLabel
+                                control={
+                                    <Switch
+                                        checked={showTooltipGCP}
+                                        onChange={handleShowTooltip}
+                                        name="showTooltipGCP"
+                                        color="primary"
+                                    />
+                                }
+                                label="Tooltips"
+                            />
+                        </div>
+                    )}
                     <Button
                         onClick={toggleMinimize}
                         style={{

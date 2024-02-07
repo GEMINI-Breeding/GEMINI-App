@@ -35,16 +35,12 @@ function getAndParseFieldDesign(
 }
 
 function mergeCsvDataWithGeoJson(featureCollection, csvData) {
-    console.log("CSV Data", csvData);
+    const csvKeys = Object.keys(csvData[0]);
 
     featureCollection.features.forEach((feature) => {
         const { row, column } = feature.properties;
 
-        console.log("Feature", feature);
-
         const csvRow = csvData.find((data) => data.row == row && data.col == column);
-
-        console.log("CSV Row", csvRow);
 
         if (csvRow) {
             // Assuming the data from the CSV might need transformation if keys differ
@@ -52,6 +48,16 @@ function mergeCsvDataWithGeoJson(featureCollection, csvData) {
             for (const key in csvRow) {
                 if (key !== "row" && key !== "col") {
                     feature.properties[key] = csvRow[key];
+                }
+            }
+        } else {
+            for (const key of csvKeys) {
+                if (key !== "row" && key !== "col") {
+                    feature.properties[key] = null;
+                } else if (key === "row") {
+                    feature.properties[key] = row;
+                } else if (key === "col") {
+                    feature.properties[key] = column;
                 }
             }
         }
@@ -86,8 +92,13 @@ function fillPolygonWithRectangles(mainPolygon, options) {
     for (let i = 0; i < rows; i++) {
         for (let j = 0; j < columns; j++) {
             // Calculate the position of each rectangle in degrees
+            // const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
+            // const y = centerY - totalHeightInDegrees / 2 + i * (lengthInDegrees + verticalSpacingInDegrees);
+
+            // Adjusted calculation for `x` to start from the left and shift right by one rectangle's width
             const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
-            const y = centerY - totalHeightInDegrees / 2 + i * (lengthInDegrees + verticalSpacingInDegrees);
+            const y =
+                centerY + totalHeightInDegrees / 2 - i * (lengthInDegrees + verticalSpacingInDegrees) - lengthInDegrees;
 
             // Create rectangle (unrotated for now)
             let rectangle = bboxPolygon([x, y, x + widthInDegrees, y + lengthInDegrees]);

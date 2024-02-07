@@ -106,12 +106,12 @@ export const DataProvider = ({ children }) => {
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
     const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
     const [polygonProposalOptions, setPolygonProposalOptions] = useState({
-        width: 50,
-        length: 50,
-        rows: 3,
-        columns: 3,
-        verticalSpacing: 10,
-        horizontalSpacing: 10,
+        width: 1.5,
+        length: 3,
+        rows: 30,
+        columns: 70,
+        verticalSpacing: 1.5,
+        horizontalSpacing: 0.2,
         angle: 0,
     });
     const [fieldDesignOptions, setFieldDesignOptions] = useState({
@@ -125,6 +125,7 @@ export const DataProvider = ({ children }) => {
     });
     const [selectedSensorGCP, setSelectedSensorGCP] = useState(null);
     const [selectedPlatformGCP, setSelectedPlatformGCP] = useState(null);
+    const [showTooltipGCP, setShowTooltipGCP] = useState(false);
 
     // Aerial Prep State
     const [aerialPrepTab, setAerialPrepTab] = useState(0);
@@ -141,8 +142,8 @@ export const DataProvider = ({ children }) => {
     const [processRunning, setProcessRunning] = useState(false);
     const [trainingData, setTrainingData] = useState(null);
     const [chartData, setChartData] = useState({ x: [], y: [] });
-    const [batchSizeLocate, setBatchSizeLocate] = useState(32)
-    const [isLocating, setIsLocating] = useState(false)
+    const [batchSizeLocate, setBatchSizeLocate] = useState(32);
+    const [isLocating, setIsLocating] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -240,6 +241,7 @@ export const DataProvider = ({ children }) => {
                 fieldDesignOptions,
                 selectedSensorGCP,
                 selectedPlatformGCP,
+                showTooltipGCP,
 
                 // Aerial Prep State
                 aerialPrepTab,
@@ -352,6 +354,7 @@ export const DataProvider = ({ children }) => {
                     setFieldDesignOptions,
                     setSelectedSensorGCP,
                     setSelectedPlatformGCP,
+                    setShowTooltipGCP,
 
                     // Aerial Prep State
                     setAerialPrepTab,

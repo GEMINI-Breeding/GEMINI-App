@@ -5,6 +5,7 @@ import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataContext";
+import GeoJsonTooltip from "../../Map/ToolTip";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
 import PlotProposalSwitcher from "../../Util/PlotProposalSwitcher";
@@ -37,6 +38,7 @@ function BoundaryMap({ task }) {
         cursorStyle,
         featureCollectionPop,
         featureCollectionPlot,
+        showTooltipGCP,
     } = useDataState();
     const { setViewState, setCursorStyle, setFeatureCollectionPop, setFeatureCollectionPlot } = useDataSetters();
 
@@ -46,6 +48,7 @@ function BoundaryMap({ task }) {
             : [featureCollectionPlot, setFeatureCollectionPlot];
 
     const [prepOrthoTileLayer, setPrepOrthoTileLayer] = useState(null);
+    const [hoverInfoGCP, setHoverInfoGCP] = useState(null);
 
     useEffect(() => {
         console.log("prepOrthoImagePath", prepOrthoImagePath);
@@ -197,11 +200,12 @@ function BoundaryMap({ task }) {
                 setSelectedFeatureIndexes([index]);
             }
         },
-        onHover: ({ object, index }) => {
+        onHover: ({ object, index, x, y }) => {
             if (mode === translateMode && object && selectedFeatureIndexes.length < 2) {
                 // When hovering over a feature in translate mode, select it
                 setSelectedFeatureIndexes([index]);
             }
+            setHoverInfoGCP({ object: object, x: x, y: y });
         },
     });
 
@@ -250,6 +254,9 @@ function BoundaryMap({ task }) {
             />
             <MapOrthoSwitcher />
             {task === "plot_boundary" && <PlotProposalSwitcher />}
+            {showTooltipGCP && (
+                <GeoJsonTooltip hoverInfo={hoverInfoGCP} selectedMetric={["row", "column", "plot", "accession"]} />
+            )}
         </div>
     );
 }

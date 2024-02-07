@@ -1,42 +1,66 @@
-import React from 'react';
+import React from "react";
+
+function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
 
 const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
-  return (
-    hoverInfo && hoverInfo.object && (
-      <div 
-        style={{
-          position: 'absolute', 
-          zIndex: 1, 
-          pointerEvents: 'none', 
-          left: hoverInfo.x, 
-          top: hoverInfo.y,
-          backgroundColor: 'rgba(255, 255, 255, 0.8)', // semi-transparent white
-          padding: '10px', // padding around text
-          borderRadius: '5px', // rounded corners
-          border: '1px solid #ccc', // light grey border
-          color: '#333', // dark grey text
-          fontFamily: 'Arial, sans-serif', // optional, to ensure consistent font across browsers
-          lineHeight: '1.6', // optional, to adjust line spacing
-        }}
-      >
-        <div style={{ marginBottom: '5px', display: 'flex', justifyContent: 'space-between'}}>
-          <span style={{ marginRight: '5px' }}><b>Tier:</b> {hoverInfo.object.properties.Tier}</span>
-          <span style={{ marginRight: '5px' }}><b>Bed:</b> {hoverInfo.object.properties.Bed}</span>
-          <span style={{ marginRight: '5px' }}><b>Plot:</b> {hoverInfo.object.properties.Plot}</span>
-        </div>
-        <hr style={{borderTop: '1px solid #aaa', marginBottom: '5px'}} /> 
-        <div>
-          <b>{selectedMetric}: </b> 
-          {
-            hoverInfo.object.properties[selectedMetric] !== null 
-            ? hoverInfo.object.properties[selectedMetric].toFixed(2) 
-            : 'No Data'
-          }
-        </div> 
+    // Helper function to render metrics
+    const renderMetrics = () => {
+        if (Array.isArray(selectedMetric)) {
+            console.log(hoverInfo.object);
+            return selectedMetric.map((metric, index) => (
+                <div key={index} style={{ marginBottom: "5px" }}>
+                    {" "}
+                    {/* Use div instead of span */}
+                    <b>{capitalizeFirstLetter(metric)}:</b>{" "}
+                    {hoverInfo.object.properties[metric] !== null ? hoverInfo.object.properties[metric] : "No Data"}
+                    {"\n"}
+                </div> // Each metric will now appear on a new line
+            ));
+        } else {
+            return (
+                <span style={{ marginRight: "5px" }}>
+                    <b>{selectedMetric}:</b>{" "}
+                    {hoverInfo.object.properties[selectedMetric] !== null
+                        ? hoverInfo.object.properties[selectedMetric].toFixed(2)
+                        : "No Data"}
+                </span>
+            );
+        }
+    };
 
-      </div>
-    )
-  );
-}
+    return (
+        hoverInfo &&
+        hoverInfo.object && (
+            <div
+                style={{
+                    position: "absolute",
+                    zIndex: 1,
+                    pointerEvents: "none",
+                    left: hoverInfo.x,
+                    top: hoverInfo.y,
+                    backgroundColor: "rgba(255, 255, 255, 0.8)",
+                    padding: "10px",
+                    borderRadius: "5px",
+                    border: "1px solid #ccc",
+                    color: "#333",
+                    fontFamily: "Arial, sans-serif",
+                    lineHeight: "1.6",
+                    width: "100px",
+                }}
+            >
+                <div
+                    style={{ marginBottom: "5px", display: "flex", flexWrap: "wrap", justifyContent: "space-between" }}
+                >
+                    {renderMetrics()}
+                </div>
+                {Array.isArray(selectedMetric) ? null : (
+                    <hr style={{ borderTop: "1px solid #aaa", marginBottom: "5px" }} />
+                )}
+            </div>
+        )
+    );
+};
 
 export default GeoJsonTooltip;
