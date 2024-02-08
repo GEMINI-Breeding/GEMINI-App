@@ -28,17 +28,21 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
         selectedExperimentGCP,
         flaskUrl,
         batchSizeLocate,
-        isLocating
+        isLocating,
+        closeMenu
     } = useDataState();
 
     const {
         setBatchSizeLocate,
-        setIsLocating
+        setIsLocating,
+        setProcessRunning,
+        setCloseMenu,
     } = useDataSetters();
 
     const handleLocate = async () => {
         try {
             setIsLocating(true);
+            setProcessRunning(true);
             const payload = {
                 batchSize: batchSizeLocate,
                 location: selectedLocationGCP,
@@ -71,40 +75,60 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
     };
 
     const handleClose = () => {
+        setCloseMenu(false);
         if (!isLocating) {
             onClose();
         }
     };
 
     return (
-        <Dialog 
-            open={open && !isLocating} 
-            onClose={handleClose}
-            maxWidth="sm"
-        >
-            <DialogTitle>Locations</DialogTitle>
-            {!isLocating && (
-                <>
-                    <Button
-                        onClick={handleLocate}
-                        style={{
-                            backgroundColor: "#1976d2",
-                            color: "white",
-                            borderRadius: "4px",
+        <>
+            <Dialog 
+                open={open && !isLocating && !closeMenu} 
+                onClose={handleClose}
+                maxWidth="sm"
+            >
+                <DialogTitle>Locations</DialogTitle>
+                {!isLocating && (
+                    <>
+                        <Button
+                            onClick={handleLocate}
+                            style={{
+                                backgroundColor: "#1976d2",
+                                color: "white",
+                                borderRadius: "4px",
+                                marginTop: "10px",
+                                margin: "0 auto"
+                            }}
+                        >
+                            {" "}
+                            Locate
+                        </Button>
+                        <AdvancedMenu
+                            batchSizeLocate={batchSizeLocate}
+                            setBatchSizeLocate={setBatchSizeLocate}
+                        />
+                    </>
+                )}
+            </Dialog>
+            <Dialog open={closeMenu} onClose={handleClose}>
+                <DialogTitle>Locations Complete</DialogTitle>
+                    <Button 
+                        onClick={handleClose} 
+                        style={{ 
+                            color: "gray", 
+                            borderColor: "gray", 
+                            borderWidth: "1px", 
+                            borderStyle: "solid", 
+                            backgroundColor: "white", 
+                            borderRadius: "4px", 
                             marginTop: "10px",
-                            margin: "0 auto"
-                        }}
-                    >
-                        {" "}
-                        Locate
+                            padding: "5px 10px"
+                        }}>
+                        Close
                     </Button>
-                    <AdvancedMenu
-                        batchSizeLocate={batchSizeLocate}
-                        setBatchSizeLocate={setBatchSizeLocate}
-                    />
-                </>
-            )}
-        </Dialog>
+            </Dialog>
+        </>
     );
 }
 
@@ -161,7 +185,7 @@ function AdvancedMenu({ batchSizeLocate, setBatchSizeLocate }) {
 }
 
 function LocateProgressBar({ currentLocateProgress, onStopLocating }) {
-    const { setCurrentLocateProgress, setIsLocating } = useDataSetters();
+    const { setCurrentLocateProgress, setIsLocating, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentLocateProgress) ? currentLocateProgress : 0;
 
@@ -172,6 +196,8 @@ function LocateProgressBar({ currentLocateProgress, onStopLocating }) {
     const handleDone = () => {
         setIsLocating(false);
         setCurrentLocateProgress(0); // Reset progress
+        setProcessRunning(false);
+        setCloseMenu(false);
     };
 
     const isLocatingComplete = currentLocateProgress >= 100;

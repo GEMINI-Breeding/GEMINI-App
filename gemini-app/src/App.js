@@ -54,7 +54,8 @@ function App() {
         setTrainingData,
         setChartData,
         setCurrentLocateProgress,
-        setIsLocating
+        setIsLocating,
+        setProcessRunning,
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -119,7 +120,8 @@ function App() {
                 setIsTraining(false); // Update isTraining to false
                 setCurrentEpoch(0); // Reset epochs
                 setTrainingData(null);
-                setChartData({ x: [], y: [] }); // Reset chart data
+                setChartData({ x: [0], y: [0] }); // Reset chart data
+                setProcessRunning(false);
             } else {
                 // Handle error response
                 const errorData = await response.json();
@@ -162,6 +164,7 @@ function App() {
                 // Handle successful stop
                 console.log("Locating stopped");
                 setIsLocating(false);
+                setProcessRunning(false);
             } else {
                 // Handle error response
                 const errorData = await response.json();

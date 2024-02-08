@@ -31,9 +31,10 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         batchSize,
         imageSize,
         isTraining,
+        closeMenu
     } = useDataState();
 
-    const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning } = useDataSetters();
+    const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning, setCloseMenu } = useDataSetters();
 
     const handleTrainModel = async () => {
         try {
@@ -78,6 +79,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     const handleClose = () => {
+        setCloseMenu(false)
         if (!isTraining) {
             onClose();
         }
@@ -85,7 +87,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
     return (
         <>
-            <Dialog open={open && !isTraining} onClose={handleClose}>
+            <Dialog open={open && !isTraining && !closeMenu} onClose={handleClose}>
                 <DialogTitle>Training</DialogTitle>
                 {!isTraining && (
                     // Render the Train Model button and Advanced Menu
@@ -114,13 +116,30 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                     </>
                 )}
             </Dialog>
+            <Dialog open={closeMenu} onClose={handleClose}>
+                <DialogTitle>Training Complete</DialogTitle>
+                    <Button 
+                        onClick={handleClose} 
+                        style={{ 
+                            color: "gray", 
+                            borderColor: "gray", 
+                            borderWidth: "1px", 
+                            borderStyle: "solid", 
+                            backgroundColor: "white", 
+                            borderRadius: "4px", 
+                            marginTop: "10px",
+                            padding: "5px 10px"
+                        }}>
+                        Close
+                    </Button>
+            </Dialog>
         </>
     );
 }
 
 function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
     // const  { chartData } = useDataState();
-    const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch } = useDataSetters();
+    const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
 
@@ -132,7 +151,9 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
         setIsTraining(false);
         setCurrentEpoch(0); // Reset epochs
         setTrainingData(null);
-        setChartData({ x: [], y: [] }); // Reset chart data
+        setChartData({ x: [0], y: [0] }); // Reset chart data
+        setProcessRunning(false);
+        setCloseMenu(true);
     };
 
     const isTrainingComplete = currentEpoch >= epochs;
@@ -232,7 +253,7 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
                                 <MenuItem value={50}>50</MenuItem>
                                 <MenuItem value={100}>100</MenuItem>
                                 <MenuItem value={150}>150</MenuItem>
-                                <MenuItem value={200}>200</MenuItem>
+                                <MenuItem value={1}>1</MenuItem>
                             </Select>
                         </FormControl>
                     </Grid>

@@ -17,9 +17,9 @@ export default function RoverPrepTabs() {
         selectedExperimentGCP,
         flaskUrl,
         roverPrepTab,
+        processRunning
     } = useDataState();
     const { setRoverPrepTab } = useDataSetters();
-
     const [sensorData, setSensorData] = useState(null);
 
     const CustomComponent = {
@@ -88,7 +88,12 @@ export default function RoverPrepTabs() {
                                     }
 
                                     // check location status
-                                    let location = locate_files.length >= 1
+                                    let location;
+                                    if (!model) {
+                                        location = 0;
+                                    } else {
+                                        location = locate_files.length >= 1;
+                                    }
 
                                     updatedData[platform][sensor].push({ date, labels, model, location });
                                 } catch (error) {
@@ -116,7 +121,7 @@ export default function RoverPrepTabs() {
                             columns: columns,
                         })),
                     }));
-                    console.log(processedData)
+
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);
@@ -125,7 +130,7 @@ export default function RoverPrepTabs() {
         };
 
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, roverPrepTab]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, roverPrepTab, processRunning]);
 
     const handleChange = (event, newValue) => {
         setRoverPrepTab(newValue);
