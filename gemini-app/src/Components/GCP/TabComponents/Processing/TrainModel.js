@@ -30,11 +30,10 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         epochs,
         batchSize,
         imageSize,
-        isTraining,
-        closeMenu
+        isTraining
     } = useDataState();
 
-    const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning, setCloseMenu } = useDataSetters();
+    const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning } = useDataSetters();
 
     const handleTrainModel = async () => {
         try {
@@ -79,7 +78,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     const handleClose = () => {
-        setCloseMenu(false)
         if (!isTraining) {
             onClose();
         }
@@ -87,7 +85,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
     return (
         <>
-            <Dialog open={open && !isTraining && !closeMenu} onClose={handleClose}>
+            <Dialog open={open && !isTraining} onClose={handleClose}>
                 <DialogTitle>Training</DialogTitle>
                 {!isTraining && (
                     // Render the Train Model button and Advanced Menu
@@ -116,30 +114,13 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                     </>
                 )}
             </Dialog>
-            <Dialog open={closeMenu} onClose={handleClose}>
-                <DialogTitle>Training Complete</DialogTitle>
-                    <Button 
-                        onClick={handleClose} 
-                        style={{ 
-                            color: "gray", 
-                            borderColor: "gray", 
-                            borderWidth: "1px", 
-                            borderStyle: "solid", 
-                            backgroundColor: "white", 
-                            borderRadius: "4px", 
-                            marginTop: "10px",
-                            padding: "5px 10px"
-                        }}>
-                        Close
-                    </Button>
-            </Dialog>
         </>
     );
 }
 
 function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
     // const  { chartData } = useDataState();
-    const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch, setProcessRunning, setCloseMenu } = useDataSetters();
+    const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch, setProcessRunning } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
 
@@ -153,7 +134,6 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
         setTrainingData(null);
         setChartData({ x: [0], y: [0] }); // Reset chart data
         setProcessRunning(false);
-        setCloseMenu(true);
     };
 
     const isTrainingComplete = currentEpoch >= epochs;

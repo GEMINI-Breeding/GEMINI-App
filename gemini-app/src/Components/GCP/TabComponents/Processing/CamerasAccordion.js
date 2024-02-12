@@ -12,6 +12,8 @@ import {
     Box,
     Button,
 } from "@mui/material";
+import CheckboxMarkedIcon from '@mui/icons-material/CheckBox';
+import { blue } from '@mui/material/colors';
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { styled } from "@mui/material/styles";
@@ -42,10 +44,23 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
             );
         } else if (item[column.field] === true) {
             return (
-                <Checkbox
-                    checked={true}
-                    disabled={true} // Assuming you want it disabled; remove if not
-                />
+                <Button
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    startIcon={<CheckboxMarkedIcon style={{ fontSize: '24px', color: blue[600] }} />}
+                    disabled={processRunning}
+                    style={{
+                        color: processRunning ? 'default' : blue[600],
+                        borderColor: 'transparent', // Make border transparent
+                        borderWidth: '0', // Alternatively, you can set border width to 0
+                        backgroundColor: 'white',
+                        borderRadius: '4px',
+                        padding: '5px 10px',
+                        textTransform: 'none',
+                        minWidth: 0,
+                    }}
+                >
+                    {/* Optional: add text or leave empty for icon only */}
+                </Button>
             );
         } else if (item[column.field] === 0) {
             return (
