@@ -164,7 +164,10 @@ export const DataProvider = ({ children }) => {
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
     // Image Query State
-    const [imageDataQuery, setImageDataQuery] = useState(null);
+    const [imageDataQuery, setImageDataQuery] = useState([]);
+    const [selectedDateQuery, setSelectedDateQuery] = useState(null);
+    const [selectedPlatformQuery, setSelectedPlatformQuery] = useState(null);
+    const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
     const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
@@ -282,6 +285,9 @@ export const DataProvider = ({ children }) => {
 
                 // Image Query State
                 imageDataQuery,
+                selectedDateQuery,
+                selectedPlatformQuery,
+                selectedSensorQuery,
 
                 // Backend
                 flaskUrl,
@@ -398,6 +404,9 @@ export const DataProvider = ({ children }) => {
 
                     // Image Query State
                     setImageDataQuery,
+                    setSelectedDateQuery,
+                    setSelectedPlatformQuery,
+                    setSelectedSensorQuery,
 
                     // Backend
                     setFlaskUrl,

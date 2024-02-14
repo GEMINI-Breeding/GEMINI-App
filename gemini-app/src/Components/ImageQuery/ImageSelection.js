@@ -12,16 +12,17 @@ const ImageSelection = () => {
         selectedPopulationGCP,
         flaskUrl,
         imageDataQuery,
+        selectedDateQuery,
+        selectedPlatformQuery,
+        selectedSensorQuery,
     } = useDataState();
-    const { setImageDataQuery } = useDataSetters();
+    const { setImageDataQuery, setSelectedDateQuery, setSelectedPlatformQuery, setSelectedSensorQuery } =
+        useDataSetters();
 
     // State hooks for date, platform, and sensor
     const [dateOptions, setDateOptions] = useState([]);
-    const [selectedDate, setSelectedDate] = useState(null);
     const [platformOptions, setPlatformOptions] = useState([]);
-    const [selectedPlatform, setSelectedPlatform] = useState(null);
     const [sensorOptions, setSensorOptions] = useState([]);
-    const [selectedSensor, setSelectedSensor] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [submitError, setSubmitError] = useState("");
     const [plotOptions, setPlotOptions] = useState([]);
@@ -29,11 +30,70 @@ const ImageSelection = () => {
     const [accessionOptions, setAccessionOptions] = useState([]);
     const [selectedAccessions, setSelectedAccessions] = useState([]);
     const [rowColumnPairs, setRowColumnPairs] = useState("");
+    const [geoJSON, setGeoJSON] = useState(null);
 
-    const geoJSON = {
-        type: "FeatureCollection",
-        features: [],
+    const fetchGeoJSON = async (
+        selectedYearGCP,
+        selectedExperimentGCP,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        flaskUrl
+    ) => {
+        const data = {
+            selectedLocationGcp: selectedLocationGCP,
+            selectedPopulationGcp: selectedPopulationGCP,
+            selectedYearGcp: selectedYearGCP,
+            selectedExperimentGcp: selectedExperimentGCP,
+            filename: "Plot-Boundary-WGS84.geojson",
+        };
+
+        console.log("data for load json ", data);
+
+        const response = await fetch(`${flaskUrl}load_geojson`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        });
+        if (response.ok) {
+            console.log("response", response);
+            const geojsonData = await response.json();
+            console.log(geojsonData);
+            geojsonData.features ? setGeoJSON(geojsonData) : setGeoJSON({ type: "FeatureCollection", features: [] });
+        } else {
+            console.error("Failed to load data");
+            setGeoJSON({
+                type: "FeatureCollection",
+                features: [],
+            });
+        }
     };
+
+    useEffect(() => {
+        const extractPlotsAndAccessions = (geoJSON) => {
+            const plots = [];
+            const accessions = [];
+
+            geoJSON.features.forEach((feature) => {
+                const { Plot, Label } = feature.properties;
+                if (Plot && !plots.includes(Plot)) {
+                    plots.push(Plot);
+                }
+                if (Label && !accessions.includes(Label)) {
+                    accessions.push(Label);
+                }
+            });
+
+            setPlotOptions(plots);
+            setAccessionOptions(accessions);
+        };
+
+        if (geoJSON) {
+            console.log(geoJSON);
+            extractPlotsAndAccessions(geoJSON);
+        }
+    }, [geoJSON]);
 
     const filterGeoJSON = (geoJSON, queryMethod, queryValues) => {
         switch (queryMethod) {
@@ -96,11 +156,15 @@ const ImageSelection = () => {
             selectedExperimentGCP,
             selectedLocationGCP,
             selectedPopulationGCP,
-            selectedDate,
+            selectedDateQuery,
+            selectedSensorQuery,
         };
+
+        console.log("Payload:", payload);
+
         try {
             // Call Flask endpoint with the payload
-            const response = await fetch(`${flaskUrl}/get_filtered_images`, {
+            const response = await fetch(`${flaskUrl}query_images`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -114,6 +178,7 @@ const ImageSelection = () => {
 
             const imData = await response.json();
             setImageDataQuery(imData);
+            console.log(imData);
             // Use imageData (filtered image names) as needed
         } catch (error) {
             console.error("Error retrieving image data:", error);
@@ -127,7 +192,7 @@ const ImageSelection = () => {
     useEffect(() => {
         const fetchDates = async () => {
             setIsLoading(true);
-            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
             try {
                 const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
                 setDateOptions(response);
@@ -139,18 +204,19 @@ const ImageSelection = () => {
 
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
             fetchDates();
+            fetchGeoJSON(selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl);
         }
     }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     // Fetch platforms based on the newly included selectedDate
     useEffect(() => {
         const fetchPlatforms = async () => {
-            if (!selectedDate) {
+            if (!selectedDateQuery) {
                 setPlatformOptions([]);
                 return;
             }
             setIsLoading(true);
-            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
+            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}`;
             try {
                 const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
                 setPlatformOptions(response);
@@ -161,17 +227,17 @@ const ImageSelection = () => {
         };
 
         fetchPlatforms();
-    }, [selectedDate]);
+    }, [selectedDateQuery]);
 
     // Fetch sensors based on selected platform and date
     useEffect(() => {
         const fetchSensors = async () => {
-            if (!selectedPlatform) {
+            if (!selectedPlatformQuery) {
                 setSensorOptions([]);
                 return;
             }
             setIsLoading(true);
-            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${selectedPlatform}`;
+            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}`;
             try {
                 const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
                 setSensorOptions(response);
@@ -182,7 +248,7 @@ const ImageSelection = () => {
         };
 
         fetchSensors();
-    }, [selectedPlatform, selectedDate]);
+    }, [selectedPlatformQuery, selectedDateQuery]);
 
     return (
         <Grid container spacing={2}>
@@ -192,11 +258,11 @@ const ImageSelection = () => {
                 {/* Date selection */}
                 <Autocomplete
                     options={dateOptions}
-                    value={selectedDate}
+                    value={selectedDateQuery}
                     onChange={(event, newValue) => {
-                        setSelectedDate(newValue);
-                        setSelectedPlatform(null); // Reset platform when date changes
-                        setSelectedSensor(null); // Reset sensor when date changes
+                        setSelectedDateQuery(newValue);
+                        setSelectedPlatformQuery(null); // Reset platform when date changes
+                        setSelectedSensorQuery(null); // Reset sensor when date changes
                     }}
                     renderInput={(params) => (
                         <TextField {...params} label="Date" placeholder="Select Date" margin="normal" />
@@ -206,65 +272,65 @@ const ImageSelection = () => {
                 {/* Platform selection */}
                 <Autocomplete
                     options={platformOptions}
-                    value={selectedPlatform}
+                    value={selectedPlatformQuery}
                     onChange={(event, newValue) => {
-                        setSelectedPlatform(newValue);
-                        setSelectedSensor(null); // Reset sensor selection when platform changes
+                        setSelectedPlatformQuery(newValue);
+                        setSelectedSensorQuery(null); // Reset sensor selection when platform changes
                     }}
                     renderInput={(params) => (
                         <TextField {...params} label="Platform" placeholder="Select Platform" margin="normal" />
                     )}
-                    disabled={isLoading || !selectedDate}
+                    disabled={isLoading || !selectedDateQuery}
                 />
                 {/* Sensor selection */}
                 <Autocomplete
                     options={sensorOptions}
-                    value={selectedSensor}
+                    value={selectedSensorQuery}
                     onChange={(event, newValue) => {
-                        setSelectedSensor(newValue);
+                        setSelectedSensorQuery(newValue);
                     }}
                     renderInput={(params) => (
                         <TextField {...params} label="Sensor" placeholder="Select Sensor" margin="normal" />
                     )}
-                    disabled={isLoading || !selectedPlatform}
+                    disabled={isLoading || !selectedPlatformQuery}
                 />
                 {/* Additional selection components and submission button would go here */}
+                <Autocomplete
+                    multiple
+                    options={plotOptions}
+                    value={selectedPlots}
+                    onChange={(event, newValue) => {
+                        setSelectedPlots(newValue);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Plot Numbers" />}
+                    disabled={selectedAccessions.length > 0 || rowColumnPairs.trim() !== ""}
+                />
+                {/* Autocomplete for accessions */}
+                <Autocomplete
+                    multiple
+                    options={accessionOptions}
+                    value={selectedAccessions}
+                    onChange={(event, newValue) => {
+                        setSelectedAccessions(newValue);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Accessions" />}
+                    disabled={selectedPlots.length > 0 || rowColumnPairs.trim() !== ""}
+                />
+                {/* Multi-line text entry for row,column pairs */}
+                <TextField
+                    label="Row,Column Pairs"
+                    multiline
+                    rows={4}
+                    value={rowColumnPairs}
+                    onChange={(e) => setRowColumnPairs(e.target.value)}
+                    disabled={selectedPlots.length > 0 || selectedAccessions.length > 0}
+                    fullWidth
+                />
+                {/* Submit button */}
+                <Button onClick={handleSubmit} variant="contained" color="primary" style={{ marginTop: "10px" }}>
+                    Submit
+                </Button>
             </Grid>
-            <Autocomplete
-                multiple
-                options={plotOptions}
-                value={selectedPlots}
-                onChange={(event, newValue) => {
-                    setSelectedPlots(newValue);
-                }}
-                renderInput={(params) => <TextField {...params} label="Plot Numbers" />}
-                disabled={selectedAccessions.length > 0 || rowColumnPairs.trim() !== ""}
-            />
-            {/* Autocomplete for accessions */}
-            <Autocomplete
-                multiple
-                options={accessionOptions}
-                value={selectedAccessions}
-                onChange={(event, newValue) => {
-                    setSelectedAccessions(newValue);
-                }}
-                renderInput={(params) => <TextField {...params} label="Accessions" />}
-                disabled={selectedPlots.length > 0 || rowColumnPairs.trim() !== ""}
-            />
-            {/* Multi-line text entry for row,column pairs */}
-            <TextField
-                label="Row,Column Pairs"
-                multiline
-                rows={4}
-                value={rowColumnPairs}
-                onChange={(e) => setRowColumnPairs(e.target.value)}
-                disabled={selectedPlots.length > 0 || selectedAccessions.length > 0}
-                fullWidth
-            />
-            {/* Submit button */}
-            <Button onClick={handleSubmit} variant="contained" color="primary" style={{ marginTop: "10px" }}>
-                Submit
-            </Button>
             {/* Error Snackbar */}
             <Snackbar
                 open={submitError !== ""}
