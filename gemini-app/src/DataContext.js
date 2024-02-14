@@ -163,6 +163,9 @@ export const DataProvider = ({ children }) => {
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
 
+    // Image Query State
+    const [imageDataQuery, setImageDataQuery] = useState(null);
+
     // Backend
     const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8090/");
@@ -277,6 +280,9 @@ export const DataProvider = ({ children }) => {
                 isOrthoProcessing,
                 orthoServerStatus,
 
+                // Image Query State
+                imageDataQuery,
+
                 // Backend
                 flaskUrl,
                 tileServerUrl,
@@ -389,6 +395,9 @@ export const DataProvider = ({ children }) => {
                     setOrthoModalOpen,
                     setIsOrthoProcessing,
                     setOrthoServerStatus,
+
+                    // Image Query State
+                    setImageDataQuery,
 
                     // Backend
                     setFlaskUrl,

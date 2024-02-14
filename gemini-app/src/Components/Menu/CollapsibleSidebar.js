@@ -23,6 +23,7 @@ import TableViewIcon from "@mui/icons-material/TableView";
 import MapIcon from "@mui/icons-material/Map";
 import InsightsIcon from "@mui/icons-material/Insights";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import FilterIcon from "@mui/icons-material/Filter";
 
 import { DataProvider, useDataSetters, useDataState } from "../../DataContext";
 import FileUploadComponent from "./FileUpload";
@@ -80,15 +81,9 @@ export default function CollapsibleSidebar({
                     />
                 );
             case 1:
-                return (
-                    <GCPPickerSelectionMenu
-                        onCsvChange={onCsvChange}
-                        onImageFolderChange={onImageFolderChange}
-                        onRadiusChange={onRadiusChange}
-                        selectedMetric={selectedMetric}
-                        setSelectedMetric={setSelectedMetric}
-                    />
-                );
+                return <GCPPickerSelectionMenu />;
+            case 4:
+                return <GCPPickerSelectionMenu />;
             case 3:
                 // return <FileUploadComponent />;
                 return null;
@@ -239,6 +234,34 @@ export default function CollapsibleSidebar({
                             sx={{ fontSize: "14px" }}
                         >
                             Map
+                        </Typography>
+                    </Box>
+                    <Box
+                        sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            mb: 0.75,
+                            paddingRight: 0,
+                            paddingLeft: 0,
+                            paddingBottom: 1,
+                        }}
+                    >
+                        <IconButton
+                            color="white"
+                            aria-label="query"
+                            onClick={() => handleDrawerToggle(4)}
+                            sx={{ backgroundColor: currentView === 4 ? "rgba(255, 255, 255, 0.1)" : "transparent" }}
+                        >
+                            <FilterIcon color={currentView === 4 ? "secondary" : "white"} fontSize="medium" />
+                        </IconButton>
+                        <Typography
+                            variant="body"
+                            color={currentView === 4 ? "secondary" : "white"}
+                            align="center"
+                            sx={{ fontSize: "14px" }}
+                        >
+                            Query
                         </Typography>
                     </Box>
                 </Box>
