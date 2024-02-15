@@ -252,7 +252,7 @@ const ImageSelection = () => {
 
     return (
         <Grid container spacing={2}>
-            <Grid item xs={4}>
+            <Grid item xs={10}>
                 <Typography variant="h6">Select Data</Typography>
                 {isLoading && <CircularProgress />}
                 {/* Date selection */}

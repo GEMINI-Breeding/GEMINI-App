@@ -38,7 +38,7 @@ const ImageQueryViewer = () => {
     const photos = useMemo(
         () =>
             imageDataQuery.map((image) => ({
-                src: image.src,
+                src: API_ENDPOINT + "/" + imagePrefix + image,
                 width: 4,
                 height: 3,
             })),
