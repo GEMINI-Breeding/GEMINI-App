@@ -17,6 +17,7 @@ import {
     IconButton,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { DataGrid } from '@mui/x-data-grid';
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
 
@@ -83,6 +84,17 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         }
     };
 
+    // State to hold grid rows data and columns
+    const [rowsData, setRowsData] = useState([]);
+    const columns = [
+        { field: 'id', headerName: 'ID' },
+        { field: 'epochs', headerName: 'Epochs' },
+        { field: 'batch', headerName: 'Batch Size' },
+        { field: 'imgsz', headerName: 'Image Size' },
+        { field: 'map', headerName: 'Performance' }
+    ];
+
+    // For data grid formation
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
             try {
@@ -108,6 +120,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 });
                 if (response.ok) {
                     const data = await response.json();
+                    setRowsData(data)
                     console.log("Response from server:", data);
                 } else {
                     const errorData = await response.json();
@@ -127,19 +140,32 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 {!isTraining && (
                     // Render the Train Model button and Advanced Menu
                     <>
-                        <Button
-                            onClick={handleTrainModel}
-                            style={{
-                                backgroundColor: "#1976d2",
-                                color: "white",
-                                borderRadius: "4px",
-                                marginTop: "10px",
-                                margin: "0 auto",
-                            }}
-                        >
-                            {" "}
-                            Train Model
-                        </Button>
+                        <Box sx={{ padding: '10px' }}>
+                            <DataGrid
+                                rows={rowsData}
+                                columns={columns}
+                                initialState={{
+                                pagination: {
+                                    paginationModel: {
+                                    pageSize: 5,
+                                    },
+                                },
+                                }}
+                                pageSizeOptions={[5]}
+                            />
+                        </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'center',paddingBottom: '10px' }}>
+                            <Button
+                                onClick={handleTrainModel}
+                                style={{
+                                    backgroundColor: "#1976d2",
+                                    color: "white",
+                                    borderRadius: "4px",
+                                }}
+                            >
+                                Train Model
+                            </Button>
+                        </Box>
                         <AdvancedMenu
                             epochs={epochs}
                             setEpochs={setEpochs}
