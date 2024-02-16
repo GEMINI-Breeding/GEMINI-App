@@ -140,20 +140,23 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 {!isTraining && (
                     // Render the Train Model button and Advanced Menu
                     <>
-                        <Box sx={{ padding: '10px' }}>
-                            <DataGrid
-                                rows={rowsData}
-                                columns={columns}
-                                initialState={{
-                                pagination: {
-                                    paginationModel: {
-                                    pageSize: 5,
+                        {rowsData.length > 0 && (
+                            <Box sx={{ padding: '10px' }}>
+                                <DataGrid
+                                    rows={rowsData}
+                                    columns={columns}
+                                    initialState={{
+                                    pagination: {
+                                        paginationModel: {
+                                        pageSize: 5,
+                                        },
                                     },
-                                },
-                                }}
-                                pageSizeOptions={[5]}
-                            />
-                        </Box>
+                                    }}
+                                    pageSizeOptions={[5]}
+                                    disableRowSelectionOnClick
+                                />
+                            </Box>
+                        )}
                         <Box sx={{ display: 'flex', justifyContent: 'center',paddingBottom: '10px' }}>
                             <Button
                                 onClick={handleTrainModel}
