@@ -17,7 +17,7 @@ import {
     IconButton,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { useDataSetters, useDataState } from "../../../../DataContext";
+import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
 
 function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
@@ -82,6 +82,43 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
             onClose();
         }
     };
+
+    useEffect(() => {
+        const fetchDataAndUpdate = async () => {
+            try {
+                // obtain train files
+                const train_files = await fetchData(
+                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                );
+
+                // extract relevant models with respect to the date
+                const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
+                    return dates.includes(item?.date);
+                });
+                const filteredTrainFiles = Object.fromEntries(filteredEntries);
+                // console.log(JSON.stringify(filteredTrainFiles, null, 2));
+
+                // retrieve information of models
+                const response = await fetch(`${flaskUrl}get_model_info`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(filteredTrainFiles),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log("Response from server:", data);
+                } else {
+                    const errorData = await response.json();
+                    console.error("Error details:", errorData);
+                }
+            } catch(error) {
+                console.error("Error fetching model information: ", error)
+            }
+        };
+        fetchDataAndUpdate();
+    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item]);
 
     return (
         <>

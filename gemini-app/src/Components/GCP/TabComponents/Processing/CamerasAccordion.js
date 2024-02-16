@@ -51,12 +51,8 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
                     style={{
                         color: processRunning ? 'default' : blue[600],
                         borderColor: 'transparent', // Make border transparent
-                        borderWidth: '0', // Alternatively, you can set border width to 0
                         backgroundColor: 'white',
-                        borderRadius: '4px',
-                        padding: '5px 10px',
-                        textTransform: 'none',
-                        minWidth: 0,
+                        borderRadius: '4px'
                     }}
                 >
                     {/* Optional: add text or leave empty for icon only */}
