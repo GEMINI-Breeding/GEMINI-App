@@ -100,7 +100,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     // State to hold grid rows data and columns
     const [rowsData, setRowsData] = useState([]);
     const columns = [
-        { field: 'id', headerName: 'ID' },
+        { field: 'id', headerName: 'Model ID' },
         { field: 'epochs', headerName: 'Epochs' },
         { field: 'batch', headerName: 'Batch Size' },
         { field: 'imgsz', headerName: 'Image Size' },
