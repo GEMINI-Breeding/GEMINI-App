@@ -46,16 +46,15 @@ function RenderItem({ item, column, handleAction, handleClickOpen }) {
             return (
                 <Button
                     onClick={() => !processRunning && actionHandler(item, column)}
-                    startIcon={<CheckboxMarkedIcon style={{ fontSize: '24px', color: blue[600] }} />}
+                    startIcon={<CheckboxMarkedIcon style={{ fontSize: '24px', color: processRunning ? 'grey' : blue[600], }} />}
                     disabled={processRunning}
                     style={{
-                        color: processRunning ? 'default' : blue[600],
-                        borderColor: 'transparent', // Make border transparent
+                        color: processRunning ? 'grey' : 'black',
+                        borderColor: 'transparent',
                         backgroundColor: 'white',
                         borderRadius: '4px'
                     }}
                 >
-                    {/* Optional: add text or leave empty for icon only */}
                 </Button>
             );
         } else if (item[column.field] === 0) {

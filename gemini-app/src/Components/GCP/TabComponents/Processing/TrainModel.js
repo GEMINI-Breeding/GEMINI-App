@@ -31,15 +31,28 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         epochs,
         batchSize,
         imageSize,
-        isTraining
+        isTraining,
+        processRunning
     } = useDataState();
 
-    const { setEpochs, setBatchSize, setImageSize, setIsTraining, setProcessRunning } = useDataSetters();
+    const { 
+        setEpochs, 
+        setBatchSize, 
+        setImageSize, 
+        setIsTraining, 
+        setProcessRunning, 
+        setCurrentEpoch, 
+        setTrainingData, 
+        setChartData 
+    } = useDataSetters();
 
     const handleTrainModel = async () => {
         try {
             setIsTraining(true);
             setProcessRunning(true);
+            setCurrentEpoch(0); // Reset epochs
+            setTrainingData(null);
+            setChartData({ x: [], y: [] }); // Reset chart data
             const payload = {
                 epochs: epochs,
                 batchSize: batchSize,
@@ -131,7 +144,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
             }
         };
         fetchDataAndUpdate();
-    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item]);
+    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item, processRunning]);
 
     return (
         <>
@@ -185,7 +198,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 }
 
 function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
-    // const  { chartData } = useDataState();
+    const  { flaskUrl } = useDataState();
     const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch, setProcessRunning } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
@@ -194,12 +207,18 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
         setExpanded(!expanded);
     };
 
-    const handleDone = () => {
-        setIsTraining(false);
-        setCurrentEpoch(0); // Reset epochs
-        setTrainingData(null);
-        setChartData({ x: [0], y: [0] }); // Reset chart data
-        setProcessRunning(false);
+    const handleDone = async () => {
+        try{
+            const response = await fetch(`${flaskUrl}done_training`, { method: "POST" });
+            console.log("Training is done.");
+            setIsTraining(false);
+            setCurrentEpoch(0); // Reset epochs
+            setTrainingData(null);
+            setChartData({ x: [], y: [] }); // Reset chart data
+            setProcessRunning(false);
+        } catch (error) {
+            console.error("Error:", error);
+        }
     };
 
     const isTrainingComplete = currentEpoch >= epochs;
