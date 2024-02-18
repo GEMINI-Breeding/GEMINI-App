@@ -12,33 +12,55 @@ import {
     Box,
     Button,
 } from "@mui/material";
+import CheckboxMarkedIcon from '@mui/icons-material/CheckBox';
+import { blue } from '@mui/material/colors';
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { styled } from "@mui/material/styles";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
+import { useDataState } from "../../../../DataContext";
 const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
     const actionHandler = handleAction || handleClickOpen;
+    const { processRunning } = useDataState();
+
     if (column.actionType) {
-        if (item[column.field] == false) {
+        if (item[column.field] === false) {
+            const buttonStyle = {
+                background: processRunning ? "grey" : "#1976d2",
+                color: "white",
+                borderRadius: "4px",
+            };
             return (
                 <Button
-                    onClick={() => actionHandler(item, column)}
-                    style={{
-                        background: "#1976d2",
-                        color: "white",
-                        borderRadius: "4px",
-                    }}
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    style={buttonStyle}
+                    disabled={processRunning}
                 >
                     {column.actionLabel || "Action"}
                 </Button>
             );
         } else if (item[column.field] === true) {
             return (
+                <Button
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    startIcon={<CheckboxMarkedIcon style={{ fontSize: '24px', color: processRunning ? 'grey' : blue[600], }} />}
+                    disabled={processRunning}
+                    style={{
+                        color: processRunning ? 'grey' : 'black',
+                        borderColor: 'transparent',
+                        backgroundColor: 'white',
+                        borderRadius: '4px'
+                    }}
+                >
+                </Button>
+            );
+        } else if (item[column.field] === 0) {
+            return (
                 <Checkbox
-                    checked={true}
+                    checked={false}
                     disabled={true} // Assuming you want it disabled; remove if not
                 />
             );

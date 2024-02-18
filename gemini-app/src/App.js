@@ -37,7 +37,8 @@ function App() {
         trainingData,
         chartData,
         isLocating,
-        currentLocateProgress
+        currentLocateProgress,
+        processRunning
     } = useDataState();
 
     const {
@@ -54,7 +55,8 @@ function App() {
         setTrainingData,
         setChartData,
         setCurrentLocateProgress,
-        setIsLocating
+        setIsLocating,
+        setProcessRunning,
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -113,22 +115,28 @@ function App() {
     const handleStopTraining = async () => {
         try {
             const response = await fetch(`${flaskUrl}stop_training`, { method: "POST" });
-            if (response.ok) {
-                // Handle successful stop
-                console.log("Training stopped");
-                setIsTraining(false); // Update isTraining to false
-                setCurrentEpoch(0); // Reset epochs
-                setTrainingData(null);
-                setChartData({ x: [], y: [] }); // Reset chart data
-            } else {
-                // Handle error response
-                const errorData = await response.json();
-                console.error("Error stopping training", errorData);
-            }
+            // Handle successful stop
+            console.log("Training stopped");
+            setIsTraining(false); // Update isTraining to false
+            setCurrentEpoch(0); // Reset epochs
+            setTrainingData(null);
+            setChartData({ x: [], y: [] }); // Reset chart data
+            setProcessRunning(false);
         } catch (error) {
             console.error("Error:", error);
         }
     };
+    
+    useEffect(() => {
+        console.log({
+            isTraining: isTraining,
+            currentEpoch: currentEpoch,
+            trainingData: trainingData,
+            chartData: chartData,
+            processRunning: processRunning
+        });
+    }, [isTraining, currentEpoch, trainingData, chartData, processRunning]);
+    
 
     useEffect(() => {
         let interval;
@@ -151,7 +159,7 @@ function App() {
             }, 5000); // Poll every 5 seconds
         }
         return () => clearInterval(interval);
-    }, [isTraining, flaskUrl, epochs]);
+    }, [isTraining]);
     // FOR TRAINING END
 
     // FOR LOCATE START
@@ -162,6 +170,7 @@ function App() {
                 // Handle successful stop
                 console.log("Locating stopped");
                 setIsLocating(false);
+                setProcessRunning(false);
             } else {
                 // Handle error response
                 const errorData = await response.json();
