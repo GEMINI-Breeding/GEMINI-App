@@ -1,9 +1,68 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Box, Button, Slider, TextField, Typography } from "@mui/material";
 import DashboardCustomizeIcon from "@mui/icons-material/DashboardCustomize";
-import VisibilityIcon from "@mui/icons-material/Visibility"; // Use for minimize icon
+import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { centerOfMass, booleanContains, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
+
+function parseCsv(csvText) {
+    const lines = csvText.trim().split("\n");
+    const headers = lines[0].split(",");
+    return lines.slice(1).map((line) => {
+        const values = line.split(",");
+        return headers.reduce((obj, header, index) => {
+            obj[header] = values[index];
+            return obj;
+        }, {});
+    });
+}
+
+function getAndParseFieldDesign(
+    flaskUrl,
+    selectedYearGCP,
+    selectedExperimentGCP,
+    selectedLocationGCP,
+    selectedPopulationGCP
+) {
+    const filePath = `${flaskUrl}files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`;
+    return fetch(filePath)
+        .then((response) => response.text())
+        .then((text) => parseCsv(text))
+        .catch((error) => {
+            console.error("Error fetching or parsing field design:", error);
+            throw error; // Rethrow to handle it further up if necessary
+        });
+}
+
+function mergeCsvDataWithGeoJson(featureCollection, csvData) {
+    const csvKeys = Object.keys(csvData[0]);
+
+    featureCollection.features.forEach((feature) => {
+        const { row, column } = feature.properties;
+
+        const csvRow = csvData.find((data) => data.row == row && data.col == column);
+
+        if (csvRow) {
+            // Assuming the data from the CSV might need transformation if keys differ
+            // Adjust as necessary based on actual CSV and GeoJSON structure
+            for (const key in csvRow) {
+                if (key !== "row" && key !== "col") {
+                    feature.properties[key] = csvRow[key];
+                }
+            }
+        } else {
+            for (const key of csvKeys) {
+                if (key !== "row" && key !== "col") {
+                    feature.properties[key] = null;
+                } else if (key === "row") {
+                    feature.properties[key] = row;
+                } else if (key === "col") {
+                    feature.properties[key] = column;
+                }
+            }
+        }
+    });
+}
 
 function fillPolygonWithRectangles(mainPolygon, options) {
     // Options
@@ -33,11 +92,22 @@ function fillPolygonWithRectangles(mainPolygon, options) {
     for (let i = 0; i < rows; i++) {
         for (let j = 0; j < columns; j++) {
             // Calculate the position of each rectangle in degrees
+            // const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
+            // const y = centerY - totalHeightInDegrees / 2 + i * (lengthInDegrees + verticalSpacingInDegrees);
+
+            // Adjusted calculation for `x` to start from the left and shift right by one rectangle's width
             const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
-            const y = centerY - totalHeightInDegrees / 2 + i * (lengthInDegrees + verticalSpacingInDegrees);
+            const y =
+                centerY + totalHeightInDegrees / 2 - i * (lengthInDegrees + verticalSpacingInDegrees) - lengthInDegrees;
 
             // Create rectangle (unrotated for now)
             let rectangle = bboxPolygon([x, y, x + widthInDegrees, y + lengthInDegrees]);
+
+            // Add row and column information as properties
+            rectangle.properties = {
+                row: i + 1, // Adding 1 to start the count from 1 instead of 0
+                column: j + 1, // Same as above
+            };
 
             // Rotate the rectangle if an angle is specified
             if (angle !== 0) {
@@ -57,13 +127,44 @@ function fillPolygonWithRectangles(mainPolygon, options) {
 }
 
 function PlotProposalSwitcher() {
-    const toggleMinimize = () => setIsMinimized(!isMinimized); // Toggle function for minimizing/maximizing
-    const [isMinimized, setIsMinimized] = useState(true); // Manage minimized/maximized state
-
-    const { featureCollectionPop, featureCollectionPlot, polygonProposalOptions } = useDataState();
-    const { setFeatureCollectionPlot, setPolygonProposalOptions } = useDataSetters();
-
+    const [isMinimized, setIsMinimized] = useState(true);
+    const {
+        featureCollectionPop,
+        featureCollectionPlot,
+        polygonProposalOptions,
+        flaskUrl,
+        selectedYearGCP,
+        selectedExperimentGCP,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+    } = useDataState();
+    const { setFeatureCollectionPlot } = useDataSetters();
     const [options, setOptions] = useState(polygonProposalOptions);
+    const [fieldDesign, setFieldDesign] = useState(null);
+
+    useEffect(() => {
+        getAndParseFieldDesign(
+            flaskUrl,
+            selectedYearGCP,
+            selectedExperimentGCP,
+            selectedLocationGCP,
+            selectedPopulationGCP
+        ).then((data) => {
+            setFieldDesign(data);
+        });
+    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+
+    const applyUpdatedOptions = useCallback(
+        (updatedOptions) => {
+            const mainPolygon = featureCollectionPop.features[0];
+            const newRectangles = fillPolygonWithRectangles(mainPolygon, updatedOptions);
+            if (fieldDesign) {
+                mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
+            }
+            setFeatureCollectionPlot(newRectangles);
+        },
+        [fieldDesign, featureCollectionPop.features, setFeatureCollectionPlot]
+    );
 
     const handleChange = (event) => {
         setOptions({ ...options, [event.target.name]: event.target.value });
@@ -75,15 +176,12 @@ function PlotProposalSwitcher() {
         applyUpdatedOptions(updatedOptions);
     };
 
-    const applyUpdatedOptions = (updatedOptions) => {
-        const mainPolygon = featureCollectionPop.features[0];
-        const newRectangles = fillPolygonWithRectangles(mainPolygon, updatedOptions);
-        setFeatureCollectionPlot(newRectangles);
-    };
-
     const applyOptions = () => {
         applyUpdatedOptions(options);
+        console.log("Feature Collection Plot", featureCollectionPlot);
     };
+
+    const toggleMinimize = () => setIsMinimized(!isMinimized);
 
     return (
         <div

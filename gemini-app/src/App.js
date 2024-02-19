@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from "react";
 import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
 import HelpIcon from "@mui/icons-material/Help";
+import Grid from "@mui/material/Grid";
+import Box from "@mui/material/Box";
 
 import { useDataSetters, useDataState } from "./DataContext";
 import CollapsibleSidebar from "./Components/Menu/CollapsibleSidebar";
@@ -77,6 +79,18 @@ function App() {
         />
     );
 
+    const creditsSection = (title, imgLink) => (
+        <Box
+            sx={{
+                textAlign: "center",
+                p: 2, // padding
+            }}
+        >
+            <h2 style={{ color: "#142a50" }}>{title}</h2>
+            <img src={imgLink} alt={title} style={{ maxWidth: "70%" }} />
+        </Box>
+    );
+
     // Choose what to render based on the `currentView` state
     const contentView = (() => {
         switch (currentView) {
@@ -105,7 +119,84 @@ function App() {
             case 3:
                 return <FileUploadComponent />;
             default:
-                return null;
+                return (
+                    <Grid
+                        container
+                        spacing={2}
+                        direction="column"
+                        justifyContent="center"
+                        alignItems="center"
+                        style={{
+                            minHeight: "100vh",
+                            position: "relative",
+                        }}
+                    >
+                        <Box
+                            sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                backgroundColor: "rgba(255, 255, 255, 0.75)",
+                                zIndex: 1, // Ensures overlay is above the background but below content
+                            }}
+                        ></Box>
+
+                        {/* Ensure content is above the overlay */}
+                        <Box
+                            sx={{
+                                position: "relative",
+                                zIndex: 2,
+                                width: "100%",
+                            }}
+                        >
+                            <Grid item xs={12}>
+                                <Box
+                                    sx={{
+                                        textAlign: "center",
+                                        p: 2,
+                                    }}
+                                >
+                                    <img src="/gemini-logo.png" alt="GEMINI Logo" style={{ maxWidth: "80%" }} />
+                                    <p
+                                        style={{
+                                            fontFamily: "Arial",
+                                            fontSize: "28px",
+                                            fontWeight: "regular",
+                                            color: "#142a50",
+                                        }}
+                                    >
+                                        G×E×M Innovation in Intelligence for climate adaptation
+                                    </p>
+                                </Box>
+                            </Grid>
+                            <Grid container direction="row" justifyContent="center" alignItems="center">
+                                <Grid item xs={6}>
+                                    {creditsSection("Financial Support", "/financial-support.png")}
+                                </Grid>
+                                <Grid item xs={6}>
+                                    {creditsSection("Partners", "/our-partners.png")}
+                                </Grid>
+                            </Grid>
+                        </Box>
+
+                        <Box
+                            sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                backgroundImage: "url('/sorghum-background.jpg')",
+                                backgroundPosition: "center",
+                                backgroundSize: "cover",
+                                backgroundRepeat: "no-repeat",
+                                zIndex: 0,
+                            }}
+                        ></Box>
+                    </Grid>
+                );
         }
     })();
 
