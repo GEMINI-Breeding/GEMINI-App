@@ -92,8 +92,8 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
     const [rowsData, setRowsData] = useState([]);
     const columns = [
         { field: 'id', headerName: 'Locations ID' },
-        { field: 'model', headerName: 'Model ID' },
-        { field: 'count', headerName: 'Stand Count' }
+        { field: 'model', headerName: 'Model ID Used', width: 120 },
+        { field: 'count', headerName: 'Total Stand Count', width: 135 }
     ];
     const handleModelChange = (event) => {
         const selectedID = event.target.value;
@@ -116,17 +116,19 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 });
                 const filteredTrainFiles = Object.fromEntries(filteredEntries);
                 const options = Object.keys(filteredTrainFiles).map((path, index) => {
-                    const match = path.match(/Run (\d+)/);
-                    const id = match ? parseInt(match[1], 10) : index + 1;
-        
+                    // This pattern matches any alphanumeric string (ID) that comes after "Plant-" and before "/weights"
+                    const match = path.match(/Plant-([A-Za-z0-9]+)\/weights/);
+                    const id = match ? match[1] : `unknown-${index}`; // Fallback ID in case there's no match
+                
                     return { id, path };
                 });
-                setModelOptions(options)
+                setModelOptions(options);
 
                 // obtain locate run files
                 const locate_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
                 )
+                console.log(locate_files)
                 const response = await fetch(`${flaskUrl}get_locate_info`, {
                     method: "POST",
                     headers: {
@@ -201,7 +203,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                 </Grid>
                             </Grid>
                         </Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'center',paddingBottom: '10px' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'center', paddingBottom: '10px' }}>
                             <Button
                                 onClick={handleLocate}
                                 style={{
