@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   service-1:
-    image: gemini_train:v0.4
+    image: gemini_train:v0.5
     user: "${UID:-1000}:${GID:-1000}"
     container_name: train
     volumes:
@@ -17,7 +17,7 @@ services:
     command: ["tail", "-f", "/dev/null"]
 
   service-2:
-    image: gemini_opcuda_86:v1.5
+    image: gemini_opcuda_86:v1.61
     user: "${UID:-1000}:${GID:-1000}"
     container_name: locate-extract
     volumes:
