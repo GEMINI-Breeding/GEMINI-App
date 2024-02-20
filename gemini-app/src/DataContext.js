@@ -62,7 +62,7 @@ export const DataProvider = ({ children }) => {
     const [populationOptions, setPopulationOptions] = useState([]);
     const [selectedPopulation, setSelectedPopulation] = useState(null);
     const [genotypeOptions, setGenotypeOptions] = useState([]);
-    const [selectedGenotypes, setSelectedGenotypes] = useState([]);
+    const [selectedGenotypes, setSelectedGenotypes] = useState(["All Genotypes"]);
     const [dateOptions, setDateOptions] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
     const [sensorOptions, setSensorOptions] = useState([]);
@@ -70,6 +70,12 @@ export const DataProvider = ({ children }) => {
     const [metricOptions, setMetricOptions] = useState([]);
     const [nowDroneProcessing, setNowDroneProcessing] = useState();
     const [isAskAnalyzeModalOpen, setAskAnalyzeModalOpen] = useState(false);
+    const [selectedYear, setSelectedYear] = useState(null);
+    const [yearOptions, setYearOptions] = useState([]);
+    const [selectedExperiment, setSelectedExperiment] = useState(null);
+    const [experimentOptions, setExperimentOptions] = useState([]);
+    const [selectedPlatform, setSelectedPlatform] = useState(null);
+    const [platformOptions, setPlatformOptions] = useState([]);
 
     // CollapsibleSideBar State
     const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -207,6 +213,12 @@ export const DataProvider = ({ children }) => {
                 geojsonData,
                 nowDroneProcessing,
                 isAskAnalyzeModalOpen,
+                selectedYear,
+                yearOptions,
+                selectedExperiment,
+                experimentOptions,
+                selectedPlatform,
+                platformOptions,
 
                 // CollapsibleSideBarState
                 isSidebarCollapsed,
@@ -326,6 +338,12 @@ export const DataProvider = ({ children }) => {
                     setMetricOptions,
                     setNowDroneProcessing,
                     setAskAnalyzeModalOpen,
+                    setSelectedYear,
+                    setYearOptions,
+                    setSelectedExperiment,
+                    setExperimentOptions,
+                    setSelectedPlatform,
+                    setPlatformOptions,
 
                     // CollapsibleSideBar State
                     setSidebarCollapsed,
