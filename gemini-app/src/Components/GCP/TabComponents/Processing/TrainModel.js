@@ -156,7 +156,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                     return dates.includes(item?.date);
                 });
                 const filteredTrainFiles = Object.fromEntries(filteredEntries);
-                // console.log(JSON.stringify(filteredTrainFiles, null, 2));
 
                 // retrieve information of models
                 const response = await fetch(`${flaskUrl}get_model_info`, {

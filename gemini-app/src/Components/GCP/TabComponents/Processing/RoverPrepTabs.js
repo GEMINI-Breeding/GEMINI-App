@@ -87,7 +87,11 @@ export default function RoverPrepTabs() {
             case 2: // For "Teach Traits"
                 newColumns = [
                     { label: "Model", field: "model" },
-                    { label: "Label Sets", field: "sets" }
+                    { label: "Label Sets", field: "sets" },
+                    { label: "Performance", field: "map" },
+                    { label: "Batch Size", field: "batch" },
+                    { label: "Epochs", field: "epochs" },
+                    { label: "Image Size", field: "imgsz" },
                 ];
                 break;
             case 3: // For "Extract Traits"
@@ -176,18 +180,33 @@ export default function RoverPrepTabs() {
                                                 `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
                                             );
                                             
-                                            // check model status
+                                            // check model and label sets status
                                             const regex = selectRoverTrait ? `/${selectRoverTrait}-([^\/]+)/` : false;
                                             if (regex) {
-                                                for (const [path, sets] of Object.entries(train_files)) {
+                                                for (const [path, modelInfo] of Object.entries(train_files)) {
                                                     const match = path.match(regex);
                                                     if (match) {
                                                         const modelId = match[1];
-                                                        // Check if an entry with the same model and sets already exists
-                                                        const alreadyExists = updatedData[platform][sensor].some(entry => entry.model === modelId && entry.sets === sets[0]);
-                                                        
-                                                        if (!alreadyExists) {
-                                                            updatedData[platform][sensor].push({ model: modelId, sets: sets[0] });
+                                                        const modelData = {
+                                                            model: String(modelId),
+                                                            sets: modelInfo.dates.map(date => String(date)),
+                                                            batch: String(modelInfo.batch),
+                                                            epochs: String(modelInfo.epochs),
+                                                            imgsz: String(modelInfo.imgsz),
+                                                            map: String(modelInfo.map)
+                                                        };
+                                        
+                                                        // Check if an entry with the same model already exists
+                                                        const existingIndex = updatedData[platform][sensor].findIndex(entry => entry.model === modelId);
+                                                        if (existingIndex === -1) {
+                                                            // If the model ID is not found, add a new entry
+                                                            updatedData[platform][sensor].push(modelData);
+                                                        } else {
+                                                            // Optionally update the existing entry, if necessary
+                                                            updatedData[platform][sensor][existingIndex] = {
+                                                                ...updatedData[platform][sensor][existingIndex],
+                                                                ...modelData
+                                                            };
                                                         }
                                                     }
                                                 }
