@@ -64,14 +64,22 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 population: selectedPopulationGCP,
                 year: selectedYearGCP,
                 experiment: selectedExperimentGCP,
-                date: item.date,
-                platform: platform,
-                sensor: sensor,
+                // date: item.date,
+                // platform: platform,
+                // sensor: sensor,
             };
             console.log("Payload:", payload);
 
             if (activeTab === 0) {
                 payload.trait = "Plant";
+                payload.date = item.date;
+                payload.platform = platform;
+                payload.sensor = sensor;
+            } else if (activeTab === 2) {
+                payload.trait = selectRoverTrait;
+                payload.date = selections.date;
+                payload.platform = selections.platform;
+                payload.sensor = selections.sensor;
             }
 
             const response = await fetch(`${flaskUrl}train_model`, {
@@ -209,7 +217,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                     updatedData[trait][platform][sensor] = [];
                                 }
                                 updatedData[trait][platform][sensor].push({ date });
-                                console.log("updatedData", updatedData)
                             }
                         }
                     }
@@ -221,7 +228,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                         return acc;
                     }, {});
                 setUpdatedDataState(processedData);
-                console.log("updatedDataState", updatedDataState)
             } catch(error) {
                 console.error("Error fetching model information: ", error)
             }
@@ -249,7 +255,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 sensor: sensors.includes(selections.sensor) ? selections.sensor : '',
                 date: dates.includes(selections.date) ? selections.date : ''
             });
-            console.log("selections", selections)
         }
     }, [updatedDataState, selectRoverTrait, selections.platform, selections.sensor]);
 
@@ -303,41 +308,53 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                     <>
                         <Box sx={{ width: '100%', paddingBottom: '10px' }}>
                             <Grid container spacing={2} alignItems="center" justifyContent="center">
-                                <Grid item xs={12} sm={3}>
-                                    <Select
-                                        fullWidth
-                                        value={selections.platform}
-                                        onChange={e => setSelections({ ...selections, platform: e.target.value })}
-                                        disabled={!selections.options.platforms.length}
-                                    >
-                                        {selections.options.platforms.map(platform => (
-                                            <MenuItem key={platform} value={platform}>{platform}</MenuItem>
-                                        ))}
-                                    </Select>
+                                <Grid item xs={12} sm={4}>
+                                    <FormControl fullWidth>
+                                        <InputLabel id="platform-select-label">Platform</InputLabel>
+                                        <Select
+                                            labelId="platform-select-label"
+                                            label="Platform"
+                                            value={selections.platform}
+                                            onChange={e => setSelections({ ...selections, platform: e.target.value })}
+                                            disabled={!selections.options.platforms.length}
+                                        >
+                                            {selections.options.platforms.map(platform => (
+                                                <MenuItem key={platform} value={platform}>{platform}</MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
                                 </Grid>
                                 <Grid item xs={12} sm={3}>
-                                    <Select
-                                        fullWidth
-                                        value={selections.sensor}
-                                        onChange={e => setSelections({ ...selections, sensor: e.target.value })}
-                                        disabled={!selections.platform || !selections.options.sensors.length}
-                                    >
-                                        {selections.options.sensors.map(sensor => (
-                                            <MenuItem key={sensor} value={sensor}>{sensor}</MenuItem>
-                                        ))}
-                                    </Select>
+                                    <FormControl fullWidth>
+                                        <InputLabel id="sensor-select-label">Sensor</InputLabel>
+                                        <Select
+                                            labelId="sensor-select-label"
+                                            label="Sensor"
+                                            value={selections.sensor}
+                                            onChange={e => setSelections({ ...selections, sensor: e.target.value })}
+                                            disabled={!selections.platform || !selections.options.sensors.length}
+                                        >
+                                            {selections.options.sensors.map(sensor => (
+                                                <MenuItem key={sensor} value={sensor}>{sensor}</MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
                                 </Grid>
-                                <Grid item xs={12} sm={3}>
-                                    <Select
-                                        fullWidth
-                                        value={selections.date}
-                                        onChange={e => setSelections({ ...selections, date: e.target.value })}
-                                        disabled={!selections.sensor || !selections.options.dates.length}
-                                    >
-                                        {selections.options.dates.map(date => (
-                                            <MenuItem key={date} value={date}>{date}</MenuItem>
-                                        ))}
-                                    </Select>
+                                <Grid item xs={12} sm={4}>
+                                    <FormControl fullWidth>
+                                        <InputLabel id="date-select-label">Date</InputLabel>
+                                        <Select
+                                            labelId="date-select-label"
+                                            label="Date"
+                                            value={selections.date}
+                                            onChange={e => setSelections({ ...selections, date: e.target.value })}
+                                            disabled={!selections.sensor || !selections.options.dates.length}
+                                        >
+                                            {selections.options.dates.map(date => (
+                                                <MenuItem key={date} value={date}>{date}</MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
                                 </Grid>
                                 <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
                                     <Button

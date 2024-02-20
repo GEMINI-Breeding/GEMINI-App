@@ -86,7 +86,7 @@ export default function RoverPrepTabs() {
                 break;
             case 2: // For "Teach Traits"
                 newColumns = [
-                    { label: "Model", field: "model", actionType: "train", actionLabel: "Start" },
+                    { label: "Model", field: "model" },
                     { label: "Label Sets", field: "sets" }
                 ];
                 break;
@@ -133,8 +133,6 @@ export default function RoverPrepTabs() {
                                     let train_files;
                                     let labels;
                                     let model;
-                                    let filteredEntries;
-                                    let filteredTrainFiles;
                                     switch(roverPrepTab) {
                                         case 0: // For "Locate Plants"
                                             labels = 2; // Assume no folder for the sensor initially
@@ -153,10 +151,10 @@ export default function RoverPrepTabs() {
                                             
                                             // check model status
                                             model = false;
-                                            filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
+                                            const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
                                                 return dates.includes(date);
                                             });
-                                            filteredTrainFiles = Object.fromEntries(filteredEntries);
+                                            const filteredTrainFiles = Object.fromEntries(filteredEntries);
                                             if (Object.keys(filteredTrainFiles).length >= 1) {
                                                 model = true;
                                             }
@@ -174,29 +172,26 @@ export default function RoverPrepTabs() {
                                         case 1: // For "Label Traits"
                                             break;
                                         case 2: // For "Teach Traits"
-                                            // retrieve file data
-                                            // labels = await fetchData(
-                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
-                                            // );
-
-                                            // train_files = await fetchData(
-                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
-                                            // );
+                                            train_files = await fetchData(
+                                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
+                                            );
                                             
-                                            // // check model status
-                                            // model = false;
-                                            // filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
-                                            //     return dates.includes(date);
-                                            // });
-                                            // filteredTrainFiles = Object.fromEntries(filteredEntries);
-                                            // if (Object.keys(filteredTrainFiles).length >= 1) {
-                                            //     model = true;
-                                            // }
-
-                                            // train_files = await fetchData(
-                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
-                                            // );
-                                            // updatedData[platform][sensor].push({ model, sets });
+                                            // check model status
+                                            const regex = selectRoverTrait ? `/${selectRoverTrait}-([^\/]+)/` : false;
+                                            if (regex) {
+                                                for (const [path, sets] of Object.entries(train_files)) {
+                                                    const match = path.match(regex);
+                                                    if (match) {
+                                                        const modelId = match[1];
+                                                        // Check if an entry with the same model and sets already exists
+                                                        const alreadyExists = updatedData[platform][sensor].some(entry => entry.model === modelId && entry.sets === sets[0]);
+                                                        
+                                                        if (!alreadyExists) {
+                                                            updatedData[platform][sensor].push({ model: modelId, sets: sets[0] });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             break;
                                         case 3: // For "Extract Traits"
                                             break;
@@ -313,7 +308,7 @@ export default function RoverPrepTabs() {
                                     <TrainMenu 
                                         open={trainMenuOpen} 
                                         onClose={handleCloseTrainMenu}
-                                        // Include other props as necessary
+                                        activeTab={roverPrepTab}
                                     />
                                 </Box>
                                 {sensorData
