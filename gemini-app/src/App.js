@@ -17,7 +17,6 @@ import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
-import { Box } from "@mui/material";
 import FileUploadComponent from "./Components/Menu/FileUpload";
 
 function App() {

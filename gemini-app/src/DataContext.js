@@ -146,6 +146,7 @@ export const DataProvider = ({ children }) => {
     const [isLocating, setIsLocating] = useState(false);
     const [currentLocateProgress, setCurrentLocateProgress] = useState(0);
     const [closeMenu, setCloseMenu] = useState(false);
+    const [selectRoverTrait, setSelectRoverTrait] = useState('');
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -264,6 +265,7 @@ export const DataProvider = ({ children }) => {
                 isLocating,
                 currentLocateProgress,
                 closeMenu,
+                selectRoverTrait,
 
                 // ImageViewer State
                 imageIndex,
@@ -379,6 +381,7 @@ export const DataProvider = ({ children }) => {
                     setIsLocating,
                     setCurrentLocateProgress,
                     setCloseMenu,
+                    setSelectRoverTrait,
 
                     // ImageViewer State
                     setImageIndex,

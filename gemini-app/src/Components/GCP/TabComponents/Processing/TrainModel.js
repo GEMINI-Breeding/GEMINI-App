@@ -32,7 +32,9 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         batchSize,
         imageSize,
         isTraining,
-        processRunning
+        processRunning,
+        roverPrepTab,
+        selectRoverTrait
     } = useDataState();
 
     const { 
@@ -46,6 +48,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         setChartData 
     } = useDataSetters();
 
+    // for training model
     const handleTrainModel = async () => {
         try {
             setIsTraining(true);
@@ -90,12 +93,36 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
             console.error("There was an error sending the request", error);
         }
     };
-
     const handleClose = () => {
         if (!isTraining) {
             onClose();
+            setSelections({
+                trait: '',
+                platform: '',
+                sensor: '',
+                date: '',
+                options: {
+                    platforms: [],
+                    sensors: [],
+                    dates: []
+                }
+            });
         }
     };
+
+    // for model selection in Teach Traits
+    const [updatedDataState, setUpdatedDataState] = useState({});
+    const [selections, setSelections] = useState({
+        trait: '',
+        platform: '',
+        sensor: '',
+        date: '',
+        options: {
+            platforms: [],
+            sensors: [],
+            dates: []
+        }
+    });
 
     // State to hold grid rows data and columns
     const [rowsData, setRowsData] = useState([]);
@@ -146,11 +173,91 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         fetchDataAndUpdate();
     }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item, processRunning]);
 
+    // For model training in Teach Traits
+    useEffect(() => {
+        const fetchParamsAndUpdate = async () => {
+            try {
+                let updatedData = {};
+                const dates = await fetchData(
+                    `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                );
+                for (const date of dates) {
+                    const platforms = await fetchData(
+                        `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                    );
+                    if (date.includes("Training")) {
+                        continue;
+                    }
+
+                    for (const platform of platforms) {
+                        const sensors = await fetchData(
+                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                        );
+
+                        for (const sensor of sensors) {
+                            const traits = await fetchData(
+                                `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels`
+                            );
+                            for (const trait of traits) {
+                                if (!updatedData[trait]) {
+                                    updatedData[trait] = {};
+                                }
+                                if (!updatedData[trait][platform]) {
+                                    updatedData[trait][platform] = {};
+                                }
+                                if (!updatedData[trait][platform][sensor]) {
+                                    updatedData[trait][platform][sensor] = [];
+                                }
+                                updatedData[trait][platform][sensor].push({ date });
+                                console.log("updatedData", updatedData)
+                            }
+                        }
+                    }
+                }
+                const processedData = Object.keys(updatedData)
+                    .filter(key => key.includes(`${selectRoverTrait} Detection`)) // Only keep keys that match the trait detection
+                    .reduce((acc, key) => {
+                        acc[key] = updatedData[key];
+                        return acc;
+                    }, {});
+                setUpdatedDataState(processedData);
+                console.log("updatedDataState", updatedDataState)
+            } catch(error) {
+                console.error("Error fetching model information: ", error)
+            }
+        };
+        fetchParamsAndUpdate();
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, processRunning, roverPrepTab, selectRoverTrait]);
+
+    useEffect(() => {
+        const traitKey = selectRoverTrait ? `${selectRoverTrait} Detection` : '';
+    
+        // Assuming selectRoverTrait is managed outside and properly reflects the user's selection
+        if (traitKey && updatedDataState[traitKey]) {
+            const platforms = Object.keys(updatedDataState[traitKey] || {});
+            const sensors = selections.platform ? Object.keys(updatedDataState[traitKey][selections.platform] || {}) : [];
+            const dates = selections.platform && selections.sensor ? (updatedDataState[traitKey][selections.platform][selections.sensor] || []).map(item => item.date) : [];
+    
+            setSelections({
+                ...selections,
+                options: {
+                    platforms,
+                    sensors,
+                    dates
+                },
+                platform: platforms.includes(selections.platform) ? selections.platform : '',
+                sensor: sensors.includes(selections.sensor) ? selections.sensor : '',
+                date: dates.includes(selections.date) ? selections.date : ''
+            });
+            console.log("selections", selections)
+        }
+    }, [updatedDataState, selectRoverTrait, selections.platform, selections.sensor]);
+
     return (
         <>
             <Dialog open={open && !isTraining} onClose={handleClose}>
                 <DialogTitle>Training</DialogTitle>
-                {!isTraining && (
+                {!isTraining && roverPrepTab == 0 && (
                     // Render the Train Model button and Advanced Menu
                     <>
                         {rowsData.length > 0 && (
@@ -181,6 +288,70 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                             >
                                 Train Model
                             </Button>
+                        </Box>
+                        <AdvancedMenu
+                            epochs={epochs}
+                            setEpochs={setEpochs}
+                            batchSize={batchSize}
+                            setBatchSize={setBatchSize}
+                            imageSize={imageSize}
+                            setImageSize={setImageSize}
+                        />
+                    </>
+                )}
+                {!isTraining && roverPrepTab == 2 && (
+                    <>
+                        <Box sx={{ width: '100%', paddingBottom: '10px' }}>
+                            <Grid container spacing={2} alignItems="center" justifyContent="center">
+                                <Grid item xs={12} sm={3}>
+                                    <Select
+                                        fullWidth
+                                        value={selections.platform}
+                                        onChange={e => setSelections({ ...selections, platform: e.target.value })}
+                                        disabled={!selections.options.platforms.length}
+                                    >
+                                        {selections.options.platforms.map(platform => (
+                                            <MenuItem key={platform} value={platform}>{platform}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </Grid>
+                                <Grid item xs={12} sm={3}>
+                                    <Select
+                                        fullWidth
+                                        value={selections.sensor}
+                                        onChange={e => setSelections({ ...selections, sensor: e.target.value })}
+                                        disabled={!selections.platform || !selections.options.sensors.length}
+                                    >
+                                        {selections.options.sensors.map(sensor => (
+                                            <MenuItem key={sensor} value={sensor}>{sensor}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </Grid>
+                                <Grid item xs={12} sm={3}>
+                                    <Select
+                                        fullWidth
+                                        value={selections.date}
+                                        onChange={e => setSelections({ ...selections, date: e.target.value })}
+                                        disabled={!selections.sensor || !selections.options.dates.length}
+                                    >
+                                        {selections.options.dates.map(date => (
+                                            <MenuItem key={date} value={date}>{date}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </Grid>
+                                <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
+                                    <Button
+                                        onClick={handleTrainModel}
+                                        style={{
+                                            backgroundColor: "#1976d2",
+                                            color: "white",
+                                            borderRadius: "4px",
+                                        }}
+                                    >
+                                        Train Model
+                                    </Button>
+                                </Grid>
+                            </Grid>
                         </Box>
                         <AdvancedMenu
                             epochs={epochs}

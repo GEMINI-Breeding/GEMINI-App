@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Box, Grid, Typography } from "@mui/material";
+import { Box, Grid, Typography, FormControl, InputLabel, Select, MenuItem, Button } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { TrainMenu } from "./TrainModel"; // Import TrainMenu
@@ -17,22 +17,89 @@ export default function RoverPrepTabs() {
         selectedExperimentGCP,
         flaskUrl,
         roverPrepTab,
-        processRunning
+        processRunning,
+        selectRoverTrait
     } = useDataState();
-    const { setRoverPrepTab } = useDataSetters();
+    const { setRoverPrepTab, setSelectRoverTrait } = useDataSetters();
     const [sensorData, setSensorData] = useState(null);
+    const [columns, setColumns] = useState([]);
 
+    // for trait selection
+    const traitOptions = ['Flower', 'Pod', 'Leaf']
+
+    // included ground-based platforms
+    const includedPlatforms = ["Rover", "Amiga-Onboard", "Phone"];
+
+    // components with action
     const CustomComponent = {
         train: TrainMenu,
         locate: LocateMenu,
     };
 
-    const columns = [
-        { label: "Date", field: "date" },
-        { label: "Labels", field: "labels" },
-        { label: "Model", field: "model", actionType: "train", actionLabel: "Start" },
-        { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start" },
-    ];
+    // handles
+    const handleChange = (event, newValue) => {
+        setRoverPrepTab(newValue);
+    };
+    const handleAction = (item, column) => {
+        console.log("Action triggered for:", item, column);
+    };
+    const handleTraitSelect = (event) => {
+        setSelectRoverTrait(event.target.value);
+    }
+
+    // for any buttons
+    const buttonStyle = {
+        background: processRunning || selectRoverTrait === '' ? "grey" : "#1976d2",
+        color: "white",
+        borderRadius: "4px",
+    };
+
+    // row data for nested section
+    const constructRowData = (item, columns) => {
+        const rowData = {};
+        columns.forEach(column => {
+            rowData[column.field] = item[column.field];
+        });
+        return rowData;
+    };
+
+    // for train menu
+    const [trainMenuOpen, setTrainMenuOpen] = useState(false);
+    const handleOpenTrainMenu = () => { setTrainMenuOpen(true); };
+    const handleCloseTrainMenu = () => { setTrainMenuOpen(false); };
+    
+    // use effects
+    useEffect(() => {
+        let newColumns;
+        switch (roverPrepTab) {
+            case 0: // For "Locate Plants"
+                newColumns = [
+                    { label: "Date", field: "date" },
+                    { label: "Labels", field: "labels" },
+                    { label: "Model", field: "model", actionType: "train", actionLabel: "Start" },
+                    { label: "Locations (Lat/Lon)", field: "location", actionType: "locate", actionLabel: "Start" },
+                ];
+                break;
+            case 1: // For "Label Traits"
+                newColumns = [
+                ];
+                break;
+            case 2: // For "Teach Traits"
+                newColumns = [
+                    { label: "Model", field: "model", actionType: "train", actionLabel: "Start" },
+                    { label: "Label Sets", field: "sets" }
+                ];
+                break;
+            case 3: // For "Extract Traits"
+                newColumns = [
+                    // Define columns for Extract Traits
+                ];
+                break;
+            default:
+                newColumns = [];
+        }
+        setColumns(newColumns);
+    }, [roverPrepTab]);
 
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
@@ -63,39 +130,77 @@ export default function RoverPrepTabs() {
                                 }
 
                                 try {
-                                    let labels = 2; // Assume no folder for the sensor initially
+                                    let train_files;
+                                    let labels;
+                                    let model;
+                                    let filteredEntries;
+                                    let filteredTrainFiles;
+                                    switch(roverPrepTab) {
+                                        case 0: // For "Locate Plants"
+                                            labels = 2; // Assume no folder for the sensor initially
 
-                                    // const files = await fetchData(
-                                    //     `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                    // );
+                                            // const files = await fetchData(
+                                            //     `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            // );
 
-                                    // retrieve file data
-                                    const train_files = await fetchData(
-                                        `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
-                                    );
-                                    const locate_files = await fetchData(
-                                        `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
-                                    )
-                                    
-                                    // check model status
-                                    let model = false;
-                                    const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
-                                        return dates.includes(date);
-                                    });
-                                    const filteredTrainFiles = Object.fromEntries(filteredEntries);
-                                    if (Object.keys(filteredTrainFiles).length >= 1) {
-                                        model = true;
+                                            // retrieve file data
+                                            train_files = await fetchData(
+                                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                                            );
+                                            const locate_files = await fetchData(
+                                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
+                                            )
+                                            
+                                            // check model status
+                                            model = false;
+                                            filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
+                                                return dates.includes(date);
+                                            });
+                                            filteredTrainFiles = Object.fromEntries(filteredEntries);
+                                            if (Object.keys(filteredTrainFiles).length >= 1) {
+                                                model = true;
+                                            }
+
+                                            // check location status
+                                            let location;
+                                            if (!model) {
+                                                location = 0;
+                                            } else {
+                                                location = locate_files.length >= 1;
+                                            }
+
+                                            updatedData[platform][sensor].push({ date, labels, model, location });
+                                            break;
+                                        case 1: // For "Label Traits"
+                                            break;
+                                        case 2: // For "Teach Traits"
+                                            // retrieve file data
+                                            // labels = await fetchData(
+                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
+                                            // );
+
+                                            // train_files = await fetchData(
+                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
+                                            // );
+                                            
+                                            // // check model status
+                                            // model = false;
+                                            // filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
+                                            //     return dates.includes(date);
+                                            // });
+                                            // filteredTrainFiles = Object.fromEntries(filteredEntries);
+                                            // if (Object.keys(filteredTrainFiles).length >= 1) {
+                                            //     model = true;
+                                            // }
+
+                                            // train_files = await fetchData(
+                                            //     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
+                                            // );
+                                            // updatedData[platform][sensor].push({ model, sets });
+                                            break;
+                                        case 3: // For "Extract Traits"
+                                            break;
                                     }
-
-                                    // check location status
-                                    let location;
-                                    if (!model) {
-                                        location = 0;
-                                    } else {
-                                        location = locate_files.length >= 1;
-                                    }
-
-                                    updatedData[platform][sensor].push({ date, labels, model, location });
                                 } catch (error) {
                                     console.warn(
                                         `Error fetching processed data for ${date}, ${platform}, ${sensor}:`,
@@ -112,13 +217,8 @@ export default function RoverPrepTabs() {
                         title: platform,
                         nestedData: Object.keys(updatedData[platform]).map((sensor) => ({
                             summary: sensor,
-                            data: updatedData[platform][sensor].map(({ date, labels, model, location }) => ({
-                                date,
-                                labels,
-                                model,
-                                location,
-                            })),
-                            columns: columns,
+                            data: updatedData[platform][sensor].map(item => constructRowData(item, columns)),
+                            columns: columns, // Use the dynamically defined columns for this tab
                         })),
                     }));
 
@@ -130,17 +230,7 @@ export default function RoverPrepTabs() {
         };
 
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, roverPrepTab, processRunning]);
-
-    const handleChange = (event, newValue) => {
-        setRoverPrepTab(newValue);
-    };
-
-    const handleAction = (item, column) => {
-        console.log("Action triggered for:", item, column);
-    };
-
-    const includedPlatforms = ["Rover", "Amiga-Onboard"];
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, roverPrepTab, processRunning, columns, selectRoverTrait]);
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
@@ -148,6 +238,7 @@ export default function RoverPrepTabs() {
                 Ground Data Preparation
             </Typography>
             <br />
+
             <Grid item style={{ width: "100%" }}>
                 <Box
                     sx={{
@@ -172,8 +263,9 @@ export default function RoverPrepTabs() {
                         <FolderTab label="Extract Traits" />
                     </FolderTabs>
                 </Box>
-                <Grid item container justifyContent="center">
-                    <Box sx={{ width: "100%" }}>
+
+                <Grid item container justifyContent="center" sx={{ marginTop: '0px' }}>
+                    <Box sx={{ width: "100%", padding: '0px', margin: '0px' }}>
                         {roverPrepTab === 0 && sensorData && (
                             <div>
                                 {sensorData
@@ -194,7 +286,55 @@ export default function RoverPrepTabs() {
                                     ))}
                             </div>
                         )}
-                        {roverPrepTab > 0 && <div>Content for other tabs coming soon!</div>}
+                        {roverPrepTab === 2 && sensorData && (
+                            <div>
+                                <Box sx={{ width: '100%', marginBottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingTop: '15px' }}>
+                                    <FormControl sx={{ width: '15%', mr: 2 }}>
+                                        <InputLabel id="demo-simple-select-label">Select Trait</InputLabel>
+                                        <Select
+                                            labelId="demo-simple-select-label"
+                                            id="demo-simple-select"
+                                            value={selectRoverTrait}
+                                            label="Select Trait"
+                                            onChange={handleTraitSelect}
+                                        >
+                                            {traitOptions.map((option) => (
+                                                <MenuItem key={option} value={option}>{option}</MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
+                                    <Button 
+                                        onClick={handleOpenTrainMenu}
+                                        style={buttonStyle}
+                                        disabled={processRunning || selectRoverTrait === ''}
+                                    >
+                                        New Model
+                                    </Button>
+                                    <TrainMenu 
+                                        open={trainMenuOpen} 
+                                        onClose={handleCloseTrainMenu}
+                                        // Include other props as necessary
+                                    />
+                                </Box>
+                                {sensorData
+                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    .map((platformData) => (
+                                        <NestedSection
+                                            key={platformData.title}
+                                            title={platformData.title}
+                                            nestedData={platformData.nestedData.map((sensorData) => ({
+                                                summary: sensorData.summary,
+                                                data: sensorData.data,
+                                                columns: sensorData.columns,
+                                            }))}
+                                            activeTab={roverPrepTab}
+                                            handleAction={null}
+                                            CustomComponent={CustomComponent}
+                                        />
+                                    ))}
+                            </div>
+                        )}
+                        {/* {roverPrepTab > 0 && <div>Content for other tabs coming soon!</div>} */}
                     </Box>
                 </Grid>
             </Grid>
