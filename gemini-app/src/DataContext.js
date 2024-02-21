@@ -147,6 +147,8 @@ export const DataProvider = ({ children }) => {
     const [currentLocateProgress, setCurrentLocateProgress] = useState(0);
     const [closeMenu, setCloseMenu] = useState(false);
     const [selectRoverTrait, setSelectRoverTrait] = useState('');
+    const [isExtracting, setIsExtracting] = useState(false);
+    const [batchSizeExtract, setBatchSizeExtract] = useState(32);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -266,6 +268,8 @@ export const DataProvider = ({ children }) => {
                 currentLocateProgress,
                 closeMenu,
                 selectRoverTrait,
+                isExtracting,
+                batchSizeExtract,
 
                 // ImageViewer State
                 imageIndex,
@@ -382,6 +386,8 @@ export const DataProvider = ({ children }) => {
                     setCurrentLocateProgress,
                     setCloseMenu,
                     setSelectRoverTrait,
+                    setIsExtracting,
+                    setBatchSizeExtract,
 
                     // ImageViewer State
                     setImageIndex,

@@ -128,7 +128,6 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 const locate_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
                 )
-                console.log(locate_files)
                 const response = await fetch(`${flaskUrl}get_locate_info`, {
                     method: "POST",
                     headers: {

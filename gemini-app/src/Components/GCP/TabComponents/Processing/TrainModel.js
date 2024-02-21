@@ -237,7 +237,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     useEffect(() => {
         const traitKey = selectRoverTrait ? `${selectRoverTrait} Detection` : '';
     
-        // Assuming selectRoverTrait is managed outside and properly reflects the user's selection
         if (traitKey && updatedDataState[traitKey]) {
             const platforms = Object.keys(updatedDataState[traitKey] || {});
             const sensors = selections.platform ? Object.keys(updatedDataState[traitKey][selections.platform] || {}) : [];
@@ -306,8 +305,8 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 {!isTraining && roverPrepTab == 2 && (
                     <>
                         <Box sx={{ width: '100%', paddingBottom: '10px' }}>
-                            <Grid container spacing={2} alignItems="center" justifyContent="center">
-                                <Grid item xs={12} sm={4}>
+                            <Grid container spacing={1} alignItems="center" justifyContent="center" style={{ maxWidth: '300px', margin: 'auto' }}>
+                                <Grid item xs={10}>
                                     <FormControl fullWidth>
                                         <InputLabel id="platform-select-label">Platform</InputLabel>
                                         <Select
@@ -323,7 +322,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                         </Select>
                                     </FormControl>
                                 </Grid>
-                                <Grid item xs={12} sm={3}>
+                                <Grid item xs={10}>
                                     <FormControl fullWidth>
                                         <InputLabel id="sensor-select-label">Sensor</InputLabel>
                                         <Select
@@ -339,7 +338,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                         </Select>
                                     </FormControl>
                                 </Grid>
-                                <Grid item xs={12} sm={4}>
+                                <Grid item xs={10}>
                                     <FormControl fullWidth>
                                         <InputLabel id="date-select-label">Date</InputLabel>
                                         <Select

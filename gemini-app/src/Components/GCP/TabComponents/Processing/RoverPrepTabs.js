@@ -4,6 +4,7 @@ import { useDataSetters, useDataState, fetchData } from "../../../../DataContext
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { TrainMenu } from "./TrainModel"; // Import TrainMenu
 import { LocateMenu } from "./LocatePlants"; // Import LocateMenu
+import { ExtractMenu } from "./ExtractTraits"; // Import ExtractMenu
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -67,6 +68,11 @@ export default function RoverPrepTabs() {
     const [trainMenuOpen, setTrainMenuOpen] = useState(false);
     const handleOpenTrainMenu = () => { setTrainMenuOpen(true); };
     const handleCloseTrainMenu = () => { setTrainMenuOpen(false); };
+
+    // for extract menu
+    const [extractMenuOpen, setExtractMenuOpen] = useState(false);
+    const handleOpenExtractMenu = () => { setExtractMenuOpen(true); };
+    const handleCloseExtractMenu = () => { setExtractMenuOpen(false); };
     
     // use effects
     useEffect(() => {
@@ -96,7 +102,9 @@ export default function RoverPrepTabs() {
                 break;
             case 3: // For "Extract Traits"
                 newColumns = [
-                    // Define columns for Extract Traits
+                    { label: "Predictions", field: "predictions"},
+                    { label: "Trait Model", field: "model"},
+                    { label: "Localization Date", field: "locate_date"}
                 ];
                 break;
             default:
@@ -327,6 +335,54 @@ export default function RoverPrepTabs() {
                                     <TrainMenu 
                                         open={trainMenuOpen} 
                                         onClose={handleCloseTrainMenu}
+                                        activeTab={roverPrepTab}
+                                    />
+                                </Box>
+                                {sensorData
+                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    .map((platformData) => (
+                                        <NestedSection
+                                            key={platformData.title}
+                                            title={platformData.title}
+                                            nestedData={platformData.nestedData.map((sensorData) => ({
+                                                summary: sensorData.summary,
+                                                data: sensorData.data,
+                                                columns: sensorData.columns,
+                                            }))}
+                                            activeTab={roverPrepTab}
+                                            handleAction={null}
+                                            CustomComponent={CustomComponent}
+                                        />
+                                    ))}
+                            </div>
+                        )}
+                        {roverPrepTab === 3 && sensorData && (
+                            <div>
+                                <Box sx={{ width: '100%', marginBottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingTop: '15px' }}>
+                                    <FormControl sx={{ width: '15%', mr: 2 }}>
+                                        <InputLabel id="demo-simple-select-label">Select Trait</InputLabel>
+                                        <Select
+                                            labelId="demo-simple-select-label"
+                                            id="demo-simple-select"
+                                            value={selectRoverTrait}
+                                            label="Select Trait"
+                                            onChange={handleTraitSelect}
+                                        >
+                                            {traitOptions.map((option) => (
+                                                <MenuItem key={option} value={option}>{option}</MenuItem>
+                                            ))}
+                                        </Select>
+                                    </FormControl>
+                                    <Button 
+                                        onClick={handleOpenExtractMenu}
+                                        style={buttonStyle}
+                                        disabled={processRunning || selectRoverTrait === ''}
+                                    >
+                                        New Predictions
+                                    </Button>
+                                    <ExtractMenu
+                                        open={extractMenuOpen} 
+                                        onClose={handleCloseExtractMenu}
                                         activeTab={roverPrepTab}
                                     />
                                 </Box>
