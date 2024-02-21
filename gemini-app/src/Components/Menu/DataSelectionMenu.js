@@ -99,7 +99,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     useEffect(() => {
         if (selectedValues["platform"]) {
             let newTilePath;
-            if (selectedValues["sensor"].length === 0) {
+            if (!selectedValues["sensor"]) {
                 newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/RGB/${selectedValues["date"]}-P4-RGB-Pyramid.tif`;
             } else {
                 newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-P4-RGB-Pyramid.tif`;
@@ -170,6 +170,9 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     const autocompleteComponents = fieldsOrder.map((field, index) => {
         const label = field.charAt(0).toUpperCase() + field.slice(1); // Capitalize the first letter
         const options = getOptionsForField(field);
+
+        //////////////////////////////////////////
+        // Fetch geojson data for download
 
         return (
             <Autocomplete
