@@ -149,6 +149,7 @@ export const DataProvider = ({ children }) => {
     const [selectRoverTrait, setSelectRoverTrait] = useState('');
     const [isExtracting, setIsExtracting] = useState(false);
     const [batchSizeExtract, setBatchSizeExtract] = useState(32);
+    const [currentExtractProgress, setCurrentExtractProgress] = useState(0);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -270,6 +271,7 @@ export const DataProvider = ({ children }) => {
                 selectRoverTrait,
                 isExtracting,
                 batchSizeExtract,
+                currentExtractProgress,
 
                 // ImageViewer State
                 imageIndex,
@@ -388,6 +390,7 @@ export const DataProvider = ({ children }) => {
                     setSelectRoverTrait,
                     setIsExtracting,
                     setBatchSizeExtract,
+                    setCurrentExtractProgress,
 
                     // ImageViewer State
                     setImageIndex,

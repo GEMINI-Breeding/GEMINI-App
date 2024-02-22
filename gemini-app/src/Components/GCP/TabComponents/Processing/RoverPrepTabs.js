@@ -102,9 +102,10 @@ export default function RoverPrepTabs() {
                 break;
             case 3: // For "Extract Traits"
                 newColumns = [
-                    { label: "Predictions", field: "predictions"},
-                    { label: "Trait Model", field: "model"},
-                    { label: "Localization Date", field: "locate_date"}
+                    { label: "Predictions", field: "date"},
+                    { label: "Trait Model ID", field: "model"},
+                    { label: "Locations ID", field: "id"},
+                    { label: "Localization Date", field: "locate"}
                 ];
                 break;
             default:
@@ -145,6 +146,7 @@ export default function RoverPrepTabs() {
                                     let train_files;
                                     let labels;
                                     let model;
+                                    let locate;
                                     switch(roverPrepTab) {
                                         case 0: // For "Locate Plants"
                                             labels = 2; // Assume no folder for the sensor initially
@@ -221,6 +223,20 @@ export default function RoverPrepTabs() {
                                             }
                                             break;
                                         case 3: // For "Extract Traits"
+                                            const geojsons = await fetchData(
+                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            );
+                                            const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
+                                            
+                                            if (filteredFiles.length >= 1) {
+                                                const extract_files = await fetchData(
+                                                    `${flaskUrl}check_runs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                                );
+                                                locate = extract_files[selectRoverTrait].locate;
+                                                model = extract_files[selectRoverTrait].model;
+                                                const id = extract_files[selectRoverTrait].id
+                                                updatedData[platform][sensor].push({ date, model, id, locate });
+                                            }
                                             break;
                                     }
                                 } catch (error) {

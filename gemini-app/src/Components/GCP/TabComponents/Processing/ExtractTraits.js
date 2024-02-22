@@ -424,59 +424,59 @@ function AdvancedMenu({ batchSizeExtract, setBatchSizeLocate }) {
     );
 }
 
-// function LocateProgressBar({ currentLocateProgress, onStopLocating }) {
-//     const { setCurrentLocateProgress, setIsLocating, setProcessRunning, setCloseMenu } = useDataSetters();
-//     const [expanded, setExpanded] = useState(false);
-//     const validProgress = Number.isFinite(currentLocateProgress) ? currentLocateProgress : 0;
+function ExtractProgressBar({ currentExtractProgress, onStopExtracting, onDoneExtracting }) {
+    // const { setCurrentExtractProgress, setIsExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
+    const [expanded, setExpanded] = useState(false);
+    const validProgress = Number.isFinite(currentExtractProgress) ? currentExtractProgress : 0;
 
-//     const handleExpandClick = () => {
-//         setExpanded(!expanded);
-//     };
+    const handleExpandClick = () => {
+        setExpanded(!expanded);
+    };
 
-//     const handleDone = () => {
-//         setIsLocating(false);
-//         setCurrentLocateProgress(0); // Reset progress
-//         setProcessRunning(false);
-//         setCloseMenu(false);
-//     };
+    // const handleDone = () => {
+    //     setIsExtracting(false);
+    //     setCurrentExtractProgress(0); // Reset progress
+    //     setProcessRunning(false);
+    //     setCloseMenu(false);
+    // };
 
-//     const isLocatingComplete = currentLocateProgress >= 100;
+    const isExtractingComplete = currentExtractProgress >= 100;
 
-//     return (
-//         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
-//             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
-//                 <Typography variant="body2" sx={{ marginRight: "10px" }}>
-//                     Locating in Progress...
-//                 </Typography>
-//                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
-//                     <Box sx={{ width: "100%", mr: 1 }}>
-//                         <LinearProgress variant="determinate" value={validProgress} />
-//                     </Box>
-//                     <Box sx={{ minWidth: 35, mr: 1 }}>
-//                         <Typography variant="body2" color="text.secondary">{`${Math.round(
-//                             validProgress
-//                         )}%`}</Typography>
-//                     </Box>
-//                 </Box>
-//                 <Button
-//                     onClick={isLocatingComplete ? handleDone : onStopLocating}
-//                     style={{
-//                         backgroundColor: isLocatingComplete ? "green" : "red",
-//                         color: "white",
-//                         alignSelf: "center",
-//                     }}
-//                 >
-//                     {isLocatingComplete ? "DONE" : "STOP"}
-//                 </Button>
-//                 <IconButton
-//                     onClick={handleExpandClick}
-//                     sx={{ transform: expanded ? "rotate(0deg)" : "rotate(180deg)" }}
-//                 >
-//                     <ExpandMoreIcon />
-//                 </IconButton>
-//             </Box>
-//         </Box>
-//     );
-// }
+    return (
+        <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
+                <Typography variant="body2" sx={{ marginRight: "10px" }}>
+                    Locating in Progress...
+                </Typography>
+                <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
+                    <Box sx={{ width: "100%", mr: 1 }}>
+                        <LinearProgress variant="determinate" value={validProgress} />
+                    </Box>
+                    <Box sx={{ minWidth: 35, mr: 1 }}>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(
+                            validProgress
+                        )}%`}</Typography>
+                    </Box>
+                </Box>
+                <Button
+                    onClick={isExtractingComplete ? onDoneExtracting : onStopExtracting}
+                    style={{
+                        backgroundColor: isExtractingComplete ? "green" : "red",
+                        color: "white",
+                        alignSelf: "center",
+                    }}
+                >
+                    {isExtractingComplete ? "DONE" : "STOP"}
+                </Button>
+                <IconButton
+                    onClick={handleExpandClick}
+                    sx={{ transform: expanded ? "rotate(0deg)" : "rotate(180deg)" }}
+                >
+                    <ExpandMoreIcon />
+                </IconButton>
+            </Box>
+        </Box>
+    );
+}
 
-export { ExtractMenu };
+export { ExtractMenu, ExtractProgressBar };
