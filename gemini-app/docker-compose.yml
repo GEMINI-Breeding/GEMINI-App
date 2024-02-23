@@ -17,9 +17,9 @@ services:
     command: ["tail", "-f", "/dev/null"]
 
   service-2:
-    image: gemini_opcuda_86:v2.2
-    user: "${UID:-1000}:${GID:-1000}"
+    image: gemini_opcuda_86:v2.53
     container_name: locate-extract
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - /home/gemini/data/GEMINI-App-Data:/app/mnt
     deploy:
@@ -32,4 +32,10 @@ services:
     ipc: host  # Set ipc mode to host
     stdin_open: true  # Keeps stdin open
     tty: true         # Allocates a pseudo-TTY, making the container's bash session interactive
-    command: /bin/bash
+    command: >
+      /bin/sh -c "
+        . /miniconda/etc/profile.d/conda.sh &&
+        conda activate env &&
+        conda info &&
+        tail -f /dev/null
+      "

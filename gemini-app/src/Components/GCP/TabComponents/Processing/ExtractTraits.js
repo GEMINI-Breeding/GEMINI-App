@@ -280,7 +280,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                 </Grid>
                                 <Grid item xs={10}>
                                     <FormControl fullWidth>
-                                        <InputLabel id="locate-select-label">Locations</InputLabel>
+                                        <InputLabel id="locate-select-label">Locations ID</InputLabel>
                                         <Select
                                             labelId="locate-select-label"
                                             label="Locate"
@@ -304,7 +304,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                 </Grid>
                                 <Grid item xs={10}>
                                     <FormControl fullWidth>
-                                        <InputLabel id="model-select-label">Model</InputLabel>
+                                        <InputLabel id="model-select-label">Model ID</InputLabel>
                                         <Select
                                             labelId="model-select-label"
                                             label="Model"
