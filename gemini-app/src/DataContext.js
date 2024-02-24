@@ -161,6 +161,8 @@ export const DataProvider = ({ children }) => {
     const [sliderMarks, setSliderMarks] = useState([]);
     const [totalImages, setTotalImages] = useState(0);
     const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+    const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState("High");
@@ -287,6 +289,8 @@ export const DataProvider = ({ children }) => {
                 sliderMarks,
                 totalImages,
                 isImageViewerOpen,
+                currentImageIndex,
+                isLightboxOpen,
 
                 // Ortho Generation State
                 orthoSetting,
@@ -412,6 +416,8 @@ export const DataProvider = ({ children }) => {
                     setSliderMarks,
                     setTotalImages,
                     setIsImageViewerOpen,
+                    setCurrentImageIndex,
+                    setIsLightboxOpen,
 
                     // Ortho Generation State
                     setOrthoSetting,

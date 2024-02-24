@@ -43,7 +43,7 @@
         "build": "react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "react-scripts start",
+        "front": "PORT=3001 react-scripts start",
         "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-App-Data 5050",
         "gemini": "concurrently \"npm run front\"  \"npm run server\""
     },

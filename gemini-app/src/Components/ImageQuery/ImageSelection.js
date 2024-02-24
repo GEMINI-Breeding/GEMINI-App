@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Grid, Button, Autocomplete, TextField, Typography, Box, CircularProgress } from "@mui/material";
+import { Grid, Button, Autocomplete, TextField, Typography, Box, CircularProgress, Switch } from "@mui/material";
 import { fetchData, useDataSetters, useDataState } from "../../DataContext";
 import Snackbar from "@mui/material/Snackbar";
+import SplitButton from "../Util/SplitButton";
 
 const ImageSelection = () => {
     // Assuming these are provided by your DataContext or parent component
@@ -31,6 +32,8 @@ const ImageSelection = () => {
     const [selectedAccessions, setSelectedAccessions] = useState([]);
     const [rowColumnPairs, setRowColumnPairs] = useState("");
     const [geoJSON, setGeoJSON] = useState(null);
+
+    const [middleImage, setMiddleImage] = useState(false);
 
     const fetchGeoJSON = async (
         selectedYearGCP,
@@ -113,7 +116,7 @@ const ImageSelection = () => {
         }
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (mode) => {
         setIsLoading(true);
         // Ensure only one selection method is used
         const selections = [selectedPlots.length, selectedAccessions.length, rowColumnPairs.trim() !== ""].filter(
@@ -151,39 +154,69 @@ const ImageSelection = () => {
         }
 
         const payload = {
-            geoJSON: filteredResults, // Assuming this is your filtered GeoJSON object
+            geoJSON: filteredResults,
             selectedYearGCP,
             selectedExperimentGCP,
             selectedLocationGCP,
             selectedPopulationGCP,
+            selectedPlatformQuery,
             selectedDateQuery,
             selectedSensorQuery,
+            middleImage: middleImage,
         };
 
         console.log("Payload:", payload);
 
-        try {
-            // Call Flask endpoint with the payload
-            const response = await fetch(`${flaskUrl}query_images`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
-            });
+        let response;
+        if (mode === "view") {
+            try {
+                // Call Flask endpoint with the payload
+                response = await fetch(`${flaskUrl}query_images`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                });
 
-            if (!response.ok) {
-                throw new Error("Network response was not ok");
+                if (!response.ok) {
+                    throw new Error("Network response was not ok");
+                }
+
+                const imData = await response.json();
+                setImageDataQuery(imData);
+                console.log(imData);
+                // Use imageData (filtered image names) as needed
+            } catch (error) {
+                console.error("Error retrieving image data:", error);
+                setSubmitError("Error retrieving image data. Please try again.");
+                setIsLoading(false);
             }
-
-            const imData = await response.json();
-            setImageDataQuery(imData);
-            console.log(imData);
-            // Use imageData (filtered image names) as needed
-        } catch (error) {
-            console.error("Error retrieving image data:", error);
-            setSubmitError("Error retrieving image data. Please try again.");
-            setIsLoading(false);
+        } else {
+            try {
+                response = await fetch(`${flaskUrl}dload_zipped`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                })
+                    .then((response) => response.blob())
+                    .then((blob) => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.style.display = "none";
+                        a.href = url;
+                        a.download = "images.zip";
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    });
+            } catch (error) {
+                console.error("Error retrieving image data:", error);
+                setSubmitError("Error retrieving image data. Please try again.");
+                setIsLoading(false);
+            }
         }
         setIsLoading(false);
     };
@@ -302,7 +335,7 @@ const ImageSelection = () => {
                     onChange={(event, newValue) => {
                         setSelectedPlots(newValue);
                     }}
-                    renderInput={(params) => <TextField {...params} label="Plot Numbers" />}
+                    renderInput={(params) => <TextField {...params} label="Plot Numbers" margin="normal" />}
                     disabled={selectedAccessions.length > 0 || rowColumnPairs.trim() !== ""}
                 />
                 {/* Autocomplete for accessions */}
@@ -313,9 +346,10 @@ const ImageSelection = () => {
                     onChange={(event, newValue) => {
                         setSelectedAccessions(newValue);
                     }}
-                    renderInput={(params) => <TextField {...params} label="Accessions" />}
+                    renderInput={(params) => <TextField {...params} label="Accessions" margin="normal" />}
                     disabled={selectedPlots.length > 0 || rowColumnPairs.trim() !== ""}
                 />
+                <br />
                 {/* Multi-line text entry for row,column pairs */}
                 <TextField
                     label="Row,Column Pairs"
@@ -326,9 +360,32 @@ const ImageSelection = () => {
                     disabled={selectedPlots.length > 0 || selectedAccessions.length > 0}
                     fullWidth
                 />
+                <br />
+                {/* Middle image switch */}
+                <Box display="flex" alignItems="center">
+                    <Typography variant="body1">Center images of plots only</Typography>
+                    <Switch
+                        checked={middleImage}
+                        onChange={(e) => setMiddleImage(e.target.checked)}
+                        disabled={isLoading}
+                    />
+                </Box>
                 {/* Submit button */}
-                <Button onClick={handleSubmit} variant="contained" color="primary" style={{ marginTop: "10px" }}>
-                    Submit
+                <Button
+                    variant="contained"
+                    onClick={() => handleSubmit("view")}
+                    disabled={isLoading}
+                    style={{ marginRight: "10px" }}
+                >
+                    View Images
+                </Button>
+                <Button
+                    variant="contained"
+                    onClick={() => handleSubmit("download")}
+                    disabled={isLoading}
+                    style={{ marginRight: "10px" }}
+                >
+                    Download
                 </Button>
             </Grid>
             {/* Error Snackbar */}

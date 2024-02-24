@@ -3,7 +3,8 @@ import Gallery from "react-photo-gallery";
 import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
 import { Button } from "@mui/material";
-import { useDataState } from "../../DataContext";
+import { useDataState, useDataSetters } from "../../DataContext";
+import { SelectedImage } from "../Util/ImageViewerUtil";
 
 const ImageQueryViewer = () => {
     const {
@@ -16,11 +17,12 @@ const ImageQueryViewer = () => {
         selectedDateQuery,
         selectedPlatformQuery,
         selectedSensorQuery,
+        currentImageIndex,
+        isLightboxOpen,
     } = useDataState();
-    console.log("imageQueryData", imageDataQuery);
 
-    const [currentImage, setCurrentImage] = useState(0);
-    const [lightboxIsOpen, setLightboxIsOpen] = useState(false);
+    const { setCurrentImageIndex, setIsLightboxOpen } = useDataSetters();
+    console.log("imageQueryData", imageDataQuery);
 
     const API_ENDPOINT = `${flaskUrl}files`;
     const imagePrefix = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}/${selectedSensorQuery}/`;
@@ -29,7 +31,7 @@ const ImageQueryViewer = () => {
     const slides = useMemo(
         () =>
             imageDataQuery.map((image) => ({
-                src: API_ENDPOINT + "/" + imagePrefix + image,
+                src: API_ENDPOINT + "/" + imagePrefix + image.imageName,
                 // Add other properties like 'alt' if available
             })),
         [imageDataQuery]
@@ -38,32 +40,34 @@ const ImageQueryViewer = () => {
     const photos = useMemo(
         () =>
             imageDataQuery.map((image) => ({
-                src: API_ENDPOINT + "/" + imagePrefix + image,
+                src: API_ENDPOINT + "/" + imagePrefix + image.imageName,
                 width: 4,
                 height: 3,
+                label: image.label,
+                imageName: image.imageName,
+                plot: image.plot,
             })),
         [imageDataQuery]
     );
 
-    const openLightbox = (index) => {
-        setCurrentImage(index);
-        setLightboxIsOpen(true);
-    };
-
-    const downloadImages = () => {
-        console.log("Download images functionality to be implemented");
-    };
+    const imageRenderer = ({ index, left, top, key, photo }) => (
+        <SelectedImage selected={false} key={key} margin={"2px"} index={index} photo={photo} left={left} top={top} />
+    );
 
     return (
         <div>
             {imageDataQuery.length > 0 ? (
                 <>
-                    <Gallery photos={photos} onClick={(event, { index }) => openLightbox(index)} />
-                    {lightboxIsOpen && (
+                    <Gallery
+                        photos={photos}
+                        // onClick={(event, { index }) => openLightbox(index)}
+                        renderImage={imageRenderer}
+                    />
+                    {isLightboxOpen && (
                         <Lightbox
-                            open={lightboxIsOpen}
-                            close={() => setLightboxIsOpen(false)}
-                            index={currentImage}
+                            open={isLightboxOpen}
+                            close={() => setIsLightboxOpen(false)}
+                            index={currentImageIndex}
                             slides={slides}
                         />
                     )}
@@ -71,9 +75,6 @@ const ImageQueryViewer = () => {
             ) : (
                 <div>No images to display</div>
             )}
-            <Button variant="contained" color="primary" onClick={downloadImages} style={{ marginTop: "10px" }}>
-                Download Images
-            </Button>
         </div>
     );
 };
