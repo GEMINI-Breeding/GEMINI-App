@@ -150,6 +150,7 @@ export const DataProvider = ({ children }) => {
     const [isExtracting, setIsExtracting] = useState(false);
     const [batchSizeExtract, setBatchSizeExtract] = useState(32);
     const [currentExtractProgress, setCurrentExtractProgress] = useState(0);
+    const [isUploadingLabels, setIsUploadingLabels] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -272,6 +273,7 @@ export const DataProvider = ({ children }) => {
                 isExtracting,
                 batchSizeExtract,
                 currentExtractProgress,
+                isUploadingLabels,
 
                 // ImageViewer State
                 imageIndex,
@@ -391,6 +393,7 @@ export const DataProvider = ({ children }) => {
                     setIsExtracting,
                     setBatchSizeExtract,
                     setCurrentExtractProgress,
+                    setIsUploadingLabels,
 
                     // ImageViewer State
                     setImageIndex,
