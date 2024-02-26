@@ -206,20 +206,24 @@ export default function RoverPrepTabs() {
 
                                             break;
                                         case 1: // For "Label Traits"
-
+                                            const labels_files = false;
                                             files = await fetchData(
                                                 `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             if (Object.keys(files).length) {
                                                 // retrieve labels data
-                                                try {
-                                                    const labels_files = await fetchData(
-                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
-                                                    );
-                                                    labels = labels_files.length >= 1;
-                                                } catch(error) {
-                                                    labels = false;
+                                                if (selectRoverTrait === ''){
+                                                    labels = 0;
+                                                } else {
+                                                    try {
+                                                        labels_files = await fetchData(
+                                                            `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
+                                                        );
+                                                        labels = labels_files.length >= 1;
+                                                    } catch(error) {
+                                                        labels = false;
+                                                    }
                                                 }
 
                                                 updatedData[platform][sensor].push({ date, labels });
@@ -299,7 +303,6 @@ export default function RoverPrepTabs() {
                             columns: columns, // Use the dynamically defined columns for this tab
                         })),
                     }));
-
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);
