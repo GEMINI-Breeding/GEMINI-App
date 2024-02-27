@@ -206,7 +206,6 @@ export default function RoverPrepTabs() {
 
                                             break;
                                         case 1: // For "Label Traits"
-                                            const labels_files = false;
                                             files = await fetchData(
                                                 `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
@@ -216,16 +215,11 @@ export default function RoverPrepTabs() {
                                                 if (selectRoverTrait === ''){
                                                     labels = 0;
                                                 } else {
-                                                    try {
-                                                        labels_files = await fetchData(
-                                                            `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
-                                                        );
-                                                        labels = labels_files.length >= 1;
-                                                    } catch(error) {
-                                                        labels = false;
-                                                    }
+                                                    const labels_files = await fetchData(
+                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
+                                                    );
+                                                    labels = labels_files.length >= 1;
                                                 }
-
                                                 updatedData[platform][sensor].push({ date, labels });
                                             }
                                             break;
