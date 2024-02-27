@@ -89,11 +89,8 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
             if (activeTab === 0) {
                 payload.trait = "Plant";
-            // } else if (activeTab === 2) {
-            //     payload.trait = selectRoverTrait;
-            //     payload.date = selections.date;
-            //     payload.platform = selections.platform;
-            //     payload.sensor = selections.sensor;
+            } else if (activeTab === 1) {
+                 payload.trait = selectRoverTrait;
             }
 
             const response = await fetch(`${flaskUrl}prepare_labels`, {
