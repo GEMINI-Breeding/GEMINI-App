@@ -267,6 +267,7 @@ function App() {
                 console.log("Locating stopped");
                 setIsLocating(false);
                 setProcessRunning(false);
+                setCurrentLocateProgress(0)
             } else {
                 // Handle error response
                 const errorData = await response.json();
@@ -308,6 +309,7 @@ function App() {
                 console.log("Extracting stopped");
                 setIsExtracting(false);
                 setProcessRunning(false);
+                setCurrentExtractProgress(0);
             } else {
                 // Handle error response
                 const errorData = await response.json();
