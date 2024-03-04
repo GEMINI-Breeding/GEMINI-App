@@ -62,7 +62,7 @@ export const DataProvider = ({ children }) => {
     const [populationOptions, setPopulationOptions] = useState([]);
     const [selectedPopulation, setSelectedPopulation] = useState(null);
     const [genotypeOptions, setGenotypeOptions] = useState([]);
-    const [selectedGenotypes, setSelectedGenotypes] = useState([]);
+    const [selectedGenotypes, setSelectedGenotypes] = useState(["All Genotypes"]);
     const [dateOptions, setDateOptions] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
     const [sensorOptions, setSensorOptions] = useState([]);
@@ -70,6 +70,12 @@ export const DataProvider = ({ children }) => {
     const [metricOptions, setMetricOptions] = useState([]);
     const [nowDroneProcessing, setNowDroneProcessing] = useState();
     const [isAskAnalyzeModalOpen, setAskAnalyzeModalOpen] = useState(false);
+    const [selectedYear, setSelectedYear] = useState(null);
+    const [yearOptions, setYearOptions] = useState([]);
+    const [selectedExperiment, setSelectedExperiment] = useState(null);
+    const [experimentOptions, setExperimentOptions] = useState([]);
+    const [selectedPlatform, setSelectedPlatform] = useState(null);
+    const [platformOptions, setPlatformOptions] = useState([]);
 
     // CollapsibleSideBar State
     const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -155,6 +161,8 @@ export const DataProvider = ({ children }) => {
     const [sliderMarks, setSliderMarks] = useState([]);
     const [totalImages, setTotalImages] = useState(0);
     const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+    const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState("High");
@@ -162,6 +170,12 @@ export const DataProvider = ({ children }) => {
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
+
+    // Image Query State
+    const [imageDataQuery, setImageDataQuery] = useState([]);
+    const [selectedDateQuery, setSelectedDateQuery] = useState(null);
+    const [selectedPlatformQuery, setSelectedPlatformQuery] = useState(null);
+    const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
     const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
@@ -201,6 +215,12 @@ export const DataProvider = ({ children }) => {
                 geojsonData,
                 nowDroneProcessing,
                 isAskAnalyzeModalOpen,
+                selectedYear,
+                yearOptions,
+                selectedExperiment,
+                experimentOptions,
+                selectedPlatform,
+                platformOptions,
 
                 // CollapsibleSideBarState
                 isSidebarCollapsed,
@@ -269,6 +289,8 @@ export const DataProvider = ({ children }) => {
                 sliderMarks,
                 totalImages,
                 isImageViewerOpen,
+                currentImageIndex,
+                isLightboxOpen,
 
                 // Ortho Generation State
                 orthoSetting,
@@ -276,6 +298,12 @@ export const DataProvider = ({ children }) => {
                 isOrthoModalOpen,
                 isOrthoProcessing,
                 orthoServerStatus,
+
+                // Image Query State
+                imageDataQuery,
+                selectedDateQuery,
+                selectedPlatformQuery,
+                selectedSensorQuery,
 
                 // Backend
                 flaskUrl,
@@ -314,6 +342,12 @@ export const DataProvider = ({ children }) => {
                     setMetricOptions,
                     setNowDroneProcessing,
                     setAskAnalyzeModalOpen,
+                    setSelectedYear,
+                    setYearOptions,
+                    setSelectedExperiment,
+                    setExperimentOptions,
+                    setSelectedPlatform,
+                    setPlatformOptions,
 
                     // CollapsibleSideBar State
                     setSidebarCollapsed,
@@ -382,6 +416,8 @@ export const DataProvider = ({ children }) => {
                     setSliderMarks,
                     setTotalImages,
                     setIsImageViewerOpen,
+                    setCurrentImageIndex,
+                    setIsLightboxOpen,
 
                     // Ortho Generation State
                     setOrthoSetting,
@@ -389,6 +425,12 @@ export const DataProvider = ({ children }) => {
                     setOrthoModalOpen,
                     setIsOrthoProcessing,
                     setOrthoServerStatus,
+
+                    // Image Query State
+                    setImageDataQuery,
+                    setSelectedDateQuery,
+                    setSelectedPlatformQuery,
+                    setSelectedSensorQuery,
 
                     // Backend
                     setFlaskUrl,

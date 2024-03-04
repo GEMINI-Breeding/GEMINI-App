@@ -33,15 +33,17 @@
         "react-dom": "^18.2.0",
         "react-dropzone": "^14.2.3",
         "react-map-gl": "^7.1.6",
+        "react-photo-gallery": "^8.0.0",
         "react-scripts": "^5.0.1",
-        "web-vitals": "^2.1.4"
+        "web-vitals": "^2.1.4",
+        "yet-another-react-lightbox": "^3.17.0"
     },
     "scripts": {
         "start": "react-scripts start",
         "build": "react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "react-scripts start",
+        "front": "PORT=3001 react-scripts start",
         "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-App-Data 5050",
         "gemini": "concurrently \"npm run front\"  \"npm run server\""
     },

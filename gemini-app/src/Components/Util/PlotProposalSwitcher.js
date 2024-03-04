@@ -115,10 +115,10 @@ function fillPolygonWithRectangles(mainPolygon, options) {
             }
 
             // Check if the rectangle is fully within the main polygon
-            if (booleanContains(mainPolygon, rectangle)) {
-                // Add the valid rectangle to the array
-                validRectangles.push(rectangle);
-            }
+            //if (booleanContains(mainPolygon, rectangle)) {
+            // Add the valid rectangle to the array
+            validRectangles.push(rectangle);
+            //}
         }
     }
 

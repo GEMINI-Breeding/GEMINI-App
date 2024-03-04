@@ -4,6 +4,7 @@ import { Map as MapGL } from "react-map-gl";
 import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers";
 import { TileLayer } from "@deck.gl/geo-layers";
 import { FlyToInterpolator } from "@deck.gl/core";
+import SplitButton from "../Util/SplitButton";
 
 import { useDataSetters, useDataState } from "../../DataContext";
 import useTraitsColorMap from "./ColorMap";
@@ -12,6 +13,42 @@ import useExtentFromBounds from "./MapHooks";
 import ColorMapLegend from "./ColorMapLegend";
 
 import useTrackComponent from "../../useTrackComponent";
+
+function geojsonToCSV(geojson) {
+    // Check if the GeoJSON has features
+    if (!geojson || !geojson.features || !geojson.features.length) {
+        return "";
+    }
+
+    // Extract header (property names)
+    const headers = Object.keys(geojson.features[0].properties);
+    let csvString = headers.join(",") + "\n"; // Create the header row
+
+    // Iterate over features to extract properties and create rows
+    geojson.features.forEach((feature) => {
+        const row = headers
+            .map((header) => {
+                // Ensure value is present, else empty string
+                return feature.properties[header] ? `"${feature.properties[header]}"` : "";
+            })
+            .join(",");
+        csvString += row + "\n";
+    });
+
+    return csvString;
+}
+
+function downloadCSV(csvString, filename = "data.csv") {
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
 
 export default function MapView() {
     useTrackComponent("MapView");
@@ -172,6 +209,21 @@ export default function MapView() {
         return null; // Return null or any default value when selectedTraitsGeoJsonPath doesn't exist
     }, [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale, viewState, selectedGenotypes]);
 
+    const handleDownloadFilteredCSV = () => {
+        const csvString = geojsonToCSV(filteredGeoJsonData);
+        downloadCSV(csvString, "traits.csv");
+    };
+
+    const handleDownloadAllCSV = () => {
+        const csvString = geojsonToCSV(geojsonData);
+        downloadCSV(csvString, "traits.csv");
+    };
+
+    const buttonOptions = [
+        { text: "Download Filtered CSV", action: handleDownloadFilteredCSV },
+        { text: "Download All CSV", action: handleDownloadAllCSV },
+    ];
+
     return (
         <React.Fragment>
             <DeckGL
@@ -198,6 +250,10 @@ export default function MapView() {
                     selectedMetric={selectedMetric}
                 />
             )}
+            <SplitButton
+                buttonOptions={buttonOptions}
+                style={{ position: "relative", bottom: "20px", right: "20px" }}
+            />
         </React.Fragment>
     );
 }

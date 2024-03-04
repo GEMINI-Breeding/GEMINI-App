@@ -3,13 +3,7 @@ import { Autocomplete, TextField, Button } from "@mui/material";
 
 import { fetchData, useDataSetters, useDataState } from "../../DataContext";
 
-const GCPPickerSelectionMenu = ({
-    onCsvChange,
-    onImageFolderChange,
-    onRadiusChange,
-    selectedMetric,
-    setSelectedMetric,
-}) => {
+const GCPPickerSelectionMenu = () => {
     const {
         locationOptionsGCP,
         selectedLocationGCP,

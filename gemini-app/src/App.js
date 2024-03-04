@@ -17,6 +17,7 @@ import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import FileUploadComponent from "./Components/Menu/FileUpload";
+import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
 function App() {
     const [helpPaneOpen, setHelpPaneOpen] = useState(false);
@@ -112,6 +113,8 @@ function App() {
                 );
             case 3:
                 return <FileUploadComponent />;
+            case 4:
+                return <ImageQueryUI />;
             default:
                 return (
                     <Grid
