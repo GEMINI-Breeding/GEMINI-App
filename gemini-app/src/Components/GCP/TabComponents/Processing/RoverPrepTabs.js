@@ -164,7 +164,7 @@ export default function RoverPrepTabs() {
                                                 // retrieve labels data
                                                 try {
                                                     const labels_files = await fetchData(
-                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/Plant Detection`
+                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/Plant Detection/annotations`
                                                     );
                                                     labels = labels_files.length >= 1;
                                                 } catch(error) {

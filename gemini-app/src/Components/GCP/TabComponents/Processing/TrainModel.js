@@ -423,7 +423,7 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
                 <Typography variant="body2" sx={{ marginRight: "10px" }}>
-                    Training in Progress...
+                    {validProgress < 1 ? "Preparing dataset..." : "Training in Progress..."}
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
                     <Box sx={{ width: "100%", mr: 1 }}>
@@ -504,7 +504,7 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
                                 <MenuItem value={50}>50</MenuItem>
                                 <MenuItem value={100}>100</MenuItem>
                                 <MenuItem value={150}>150</MenuItem>
-                                <MenuItem value={1}>1</MenuItem>
+                                <MenuItem value={200}>200</MenuItem>
                             </Select>
                         </FormControl>
                     </Grid>
