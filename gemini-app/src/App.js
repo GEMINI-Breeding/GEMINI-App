@@ -16,6 +16,8 @@ import MapView from "./Components/Map/MapView";
 import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
+import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
+import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
 import FileUploadComponent from "./Components/Menu/FileUpload";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
@@ -37,6 +39,11 @@ function App() {
         currentEpoch,
         trainingData,
         chartData,
+        isLocating,
+        currentLocateProgress,
+        processRunning,
+        isExtracting,
+        currentExtractProgress,
     } = useDataState();
 
     const {
@@ -52,6 +59,12 @@ function App() {
         setCurrentEpoch,
         setTrainingData,
         setChartData,
+        setCurrentLocateProgress,
+        setIsLocating,
+        setProcessRunning,
+        setIsExtracting,
+        setCurrentExtractProgress,
+        setCloseMenu
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -201,29 +214,35 @@ function App() {
     const handleStopTraining = async () => {
         try {
             const response = await fetch(`${flaskUrl}stop_training`, { method: "POST" });
-            if (response.ok) {
-                // Handle successful stop
-                console.log("Training stopped");
-                setIsTraining(false); // Update isTraining to false
-                setCurrentEpoch(0); // Reset epochs
-                setTrainingData(null);
-                setChartData({ x: [], y: [] }); // Reset chart data
-            } else {
-                // Handle error response
-                const errorData = await response.json();
-                console.error("Error stopping training", errorData);
-            }
+            // Handle successful stop
+            console.log("Training stopped");
+            setIsTraining(false); // Update isTraining to false
+            setCurrentEpoch(0); // Reset epochs
+            setTrainingData(null);
+            setChartData({ x: [], y: [] }); // Reset chart data
+            setProcessRunning(false);
         } catch (error) {
             console.error("Error:", error);
         }
     };
+    
+    useEffect(() => {
+        console.log({
+            isTraining: isTraining,
+            currentEpoch: currentEpoch,
+            trainingData: trainingData,
+            chartData: chartData,
+            processRunning: processRunning
+        });
+    }, [isTraining, currentEpoch, trainingData, chartData, processRunning]);
+    
 
     useEffect(() => {
         let interval;
         if (isTraining) {
             interval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${flaskUrl}get_training_progress`);
+                    const response = await fetch(`${flaskUrl}get_progress`);
                     if (response.ok) {
                         const data = await response.json();
                         const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
@@ -239,8 +258,111 @@ function App() {
             }, 5000); // Poll every 5 seconds
         }
         return () => clearInterval(interval);
-    }, [isTraining, flaskUrl, epochs]);
+    }, [isTraining]);
     // FOR TRAINING END
+
+    // FOR LOCATE START
+    const handleStopLocating = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_locate`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Locating stopped");
+                setIsLocating(false);
+                setProcessRunning(false);
+                setCurrentLocateProgress(0)
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping locating", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isLocating) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_locate_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentLocateProgress(data.locate)
+                    } else {
+                        console.error("Failed to fetch locate progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching locate progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isLocating, flaskUrl]);
+    // FOR LOCATE END
+
+    // FOR EXTRACT START
+    const handleStopExtracting = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_extract`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Extracting stopped");
+                setIsExtracting(false);
+                setProcessRunning(false);
+                setCurrentExtractProgress(0);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping extracting", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    const handleDoneExtracting = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}done_extract`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Extracting finished");
+                setIsExtracting(false);
+                setProcessRunning(false);
+                setCurrentExtractProgress(0);
+                setCloseMenu(false);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error finishing extraction", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isExtracting) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_extract_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentExtractProgress(data.extract)
+                    } else {
+                        console.error("Failed to fetch locate progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching locate progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isExtracting, flaskUrl]);
+    // FOR EXTRACT END
 
     return (
         <ActiveComponentsProvider>
@@ -290,6 +412,55 @@ function App() {
                                 epochs={epochs}
                                 chartData={chartData}
                                 currentEpoch={currentEpoch}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
+                {/* locating */}
+                {isLocating && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <LocateProgressBar
+                                currentLocateProgress={currentLocateProgress}
+                                onStopLocating={handleStopLocating}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
+                {/* extracting */}
+                {isExtracting && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <ExtractProgressBar
+                                currentExtractProgress={currentExtractProgress}
+                                onStopExtracting={handleStopExtracting}
+                                onDoneExtracting={handleDoneExtracting}
                             />
                         </Box>
                     </Box>

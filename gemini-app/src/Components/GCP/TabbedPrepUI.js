@@ -62,7 +62,7 @@ function TabbedPrepUI() {
                         <Tab label="Orthomosaic Generation" style={titleStyle} />
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
                         <Tab label="Aerial Data Processing" style={titleStyle} />
-                        <Tab label="Ground-based Data Preparation" style={titleStyle} />
+                        <Tab label="Ground-based Data Processing" style={titleStyle} />
                     </Tabs>
                 </Grid>
             )}

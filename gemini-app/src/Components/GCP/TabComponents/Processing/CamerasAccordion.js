@@ -12,36 +12,67 @@ import {
     Box,
     Button,
 } from "@mui/material";
+import CheckboxMarkedIcon from '@mui/icons-material/CheckBox';
+import { blue } from '@mui/material/colors';
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { styled } from "@mui/material/styles";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
+import { useDataState } from "../../../../DataContext";
 const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
+    const actionHandler = handleAction || handleClickOpen;
+    const { processRunning } = useDataState();
+
     if (column.actionType) {
-        const actionHandler = handleAction || handleClickOpen;
-        return (
-            <Button
-                onClick={() => actionHandler(item, column)}
-                style={{
-                    backgroundColor: "#1976d2",
-                    color: "white",
-                    borderRadius: "4px",
-                }}
-            >
-                {column.actionLabel || "Action"}
-            </Button>
-        );
+        if (item[column.field] === false) {
+            const buttonStyle = {
+                background: processRunning ? "grey" : "#1976d2",
+                color: "white",
+                borderRadius: "4px",
+            };
+            return (
+                <Button
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    style={buttonStyle}
+                    disabled={processRunning}
+                >
+                    {column.actionLabel || "Action"}
+                </Button>
+            );
+        } else if (item[column.field] === true) {
+            return (
+                <Button
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    startIcon={<CheckboxMarkedIcon style={{ fontSize: '24px', color: processRunning ? 'grey' : blue[600], }} />}
+                    disabled={processRunning}
+                    style={{
+                        color: processRunning ? 'grey' : 'black',
+                        borderColor: 'transparent',
+                        backgroundColor: 'white',
+                        borderRadius: '4px'
+                    }}
+                >
+                </Button>
+            );
+        } else if (item[column.field] === 0) {
+            return (
+                <Checkbox
+                    checked={false}
+                    disabled={true} // Assuming you want it disabled; remove if not
+                />
+            );
+        }
     } else if (item[column.field] === 2) {
-        return <WarningAmberIcon />;
+        return <WarningAmberIcon />; // if value is 2, return warning icon
     } else if (column.label === "Date") {
-        return <ListItemText primary={item[column.field]} />;
+        return <ListItemText primary={item[column.field]} />; // return date if in Date column
     } else if (typeof item[column.field] !== "boolean" && typeof item[column.field] !== "number") {
-        return <ListItemText primary={item[column.field]} />;
+        return <ListItemText primary={item[column.field]} />; // returns string if not number or boolean
     } else if (item[column.field] === 1 || item[column.field] === 0) {
-        return <Checkbox checked={Boolean(item[column.field])} disabled />;
+        return <Checkbox checked={Boolean(item[column.field])} disabled />; // integer to boolean case
     } else {
         return <WarningAmberIcon titleAccess="Data not yet processed" />;
     }
@@ -161,7 +192,7 @@ export function CamerasAccordion({ nestedAccordions, activeTab, platform, sensor
     );
 }
 
-export function NestedSection({ title, nestedData, activeTab, sensor, handleAction, CustomComponent }) {
+export function NestedSection({ title, nestedData, activeTab, handleAction, CustomComponent }) {
     return (
         <Accordion sx={{ width: "100%", my: 2 }}>
             <AccordionSummary
@@ -182,7 +213,7 @@ export function NestedSection({ title, nestedData, activeTab, sensor, handleActi
                             nestedAccordions={[nestedItem]}
                             activeTab={activeTab}
                             platform={title}
-                            sensor={sensor}
+                            sensor={nestedItem.summary}
                             handleAction={handleAction}
                             CustomComponent={CustomComponent}
                         />

@@ -55,6 +55,7 @@ export const DataProvider = ({ children }) => {
     const [tileUrl, setTileUrl] = useState(TILE_URL_TEMPLATE);
     const [boundsUrl, setBoundsUrl] = useState(BOUNDS_URL_TEMPLATE);
     const [cursorStyle, setCursorStyle] = useState("default");
+    const [processRunning, setProcessRunning] = useState(false);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -145,11 +146,17 @@ export const DataProvider = ({ children }) => {
     const [progress, setProgress] = useState(0);
     const [currentEpoch, setCurrentEpoch] = useState(0);
     const [showResults, setShowResults] = useState(false);
-    const [processRunning, setProcessRunning] = useState(false);
     const [trainingData, setTrainingData] = useState(null);
-    const [chartData, setChartData] = useState({ x: [], y: [] });
-    const [batchSizeLocate, setBatchSizeLocate] = useState(32);
+    const [chartData, setChartData] = useState({ x: [0], y: [0] });
+    const [batchSizeLocate, setBatchSizeLocate] = useState(32)
     const [isLocating, setIsLocating] = useState(false);
+    const [currentLocateProgress, setCurrentLocateProgress] = useState(0);
+    const [closeMenu, setCloseMenu] = useState(false);
+    const [selectRoverTrait, setSelectRoverTrait] = useState('');
+    const [isExtracting, setIsExtracting] = useState(false);
+    const [batchSizeExtract, setBatchSizeExtract] = useState(32);
+    const [currentExtractProgress, setCurrentExtractProgress] = useState(0);
+    const [isUploadingLabels, setIsUploadingLabels] = useState(false);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -178,7 +185,7 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5003/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8090/");
 
     return (
@@ -199,6 +206,7 @@ export const DataProvider = ({ children }) => {
                 tileUrl,
                 boundsUrl,
                 cursorStyle,
+                processRunning,
 
                 // DataSelectionMenu State
                 locationOptions,
@@ -275,11 +283,17 @@ export const DataProvider = ({ children }) => {
                 progress,
                 currentEpoch,
                 showResults,
-                processRunning,
                 trainingData,
                 chartData,
                 batchSizeLocate,
                 isLocating,
+                currentLocateProgress,
+                closeMenu,
+                selectRoverTrait,
+                isExtracting,
+                batchSizeExtract,
+                currentExtractProgress,
+                isUploadingLabels,
 
                 // ImageViewer State
                 imageIndex,
@@ -327,6 +341,7 @@ export const DataProvider = ({ children }) => {
                     setTileUrl,
                     setBoundsUrl,
                     setCursorStyle,
+                    setProcessRunning,
 
                     // DataSelectionMenu state
                     setLocationOptions,
@@ -402,11 +417,17 @@ export const DataProvider = ({ children }) => {
                     setProgress,
                     setCurrentEpoch,
                     setShowResults,
-                    setProcessRunning,
                     setTrainingData,
                     setChartData,
                     setBatchSizeLocate,
                     setIsLocating,
+                    setCurrentLocateProgress,
+                    setCloseMenu,
+                    setSelectRoverTrait,
+                    setIsExtracting,
+                    setBatchSizeExtract,
+                    setCurrentExtractProgress,
+                    setIsUploadingLabels,
 
                     // ImageViewer State
                     setImageIndex,
