@@ -55,7 +55,7 @@ const FileUploadComponent = () => {
     // Effect to fetch nested directories on component mount
     useEffect(() => {
         setIsLoading(true);
-        fetch(`${flaskUrl}list_dirs_nested/Raw`)
+        fetch(`${flaskUrl}list_dirs_nested`)
             .then((response) => response.json())
             .then((data) => {
                 setNestedDirectories(data);
