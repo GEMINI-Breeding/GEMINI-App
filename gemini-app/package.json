@@ -43,9 +43,9 @@
         "build": "react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "PORT=3001 react-scripts start",
-        "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-App-Data 5050",
-        "gemini": "concurrently \"npm run front\"  \"npm run server\""
+        "front": "react-scripts start",
+        "server": "/home/gemini/GEMINI-Flask-Server/run_flask_server.sh /mnt/d/GEMINI-App-Data 5050",
+        "gemini": "concurrently \"npm run front\"  \"npm run server\" \"docker-compose up -d\""
     },
     "eslintConfig": {
         "extends": [
