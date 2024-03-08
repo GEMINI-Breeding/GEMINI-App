@@ -4,6 +4,11 @@
         "fileType": "image/*",
         "label": "Image Data"
     },
+    "binary": {
+        "fields": ["year", "experiment", "location", "population", "date", "platform"],
+        "fileType": ".bin",
+        "label": "Binary File"
+    },
     "fieldDesign": {
         "fields": ["year", "experiment", "location", "population"],
         "fileType": ".csv",
