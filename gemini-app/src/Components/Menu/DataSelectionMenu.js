@@ -1,173 +1,247 @@
-import React, { useState, useEffect } from 'react';
-import { Autocomplete, TextField } from '@mui/material';
+import React, { useState, useEffect, useRef } from "react";
+import { Autocomplete, TextField, Snackbar } from "@mui/material";
+
+import { useDataState, useDataSetters, fetchData } from "../../DataContext";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
-  const [locationOptions, setLocationOptions] = useState([]);
-  const [selectedLocation, setSelectedLocation] = useState(null);
-  const [populationOptions, setPopulationOptions] = useState([]);
-  const [selectedPopulation, setSelectedPopulation] = useState(null);
-  const [dateOptions, setDateOptions] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [sensorOptions, setSensorOptions] = useState([]);
-  const [selectedSensor, setSelectedSensor] = useState(null);
-  const [metricOptions, setMetricOptions] = useState([]);
+    const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
 
-  useEffect(() => {
-    fetch('http://127.0.0.1:5000/flask_app/list_dirs/Processed/')
-      .then((response) => {
-        if (!response.ok) { throw new Error('Network response was not ok') }
-        return response.json();
-      })
-      .then(data => setLocationOptions(data))
-      .catch((error) => console.error('Error:', error));
-  }, []);
+    const { setGenotypeOptions, setSelectedGenotypes, setMetricOptions } = useDataSetters();
 
-  useEffect(() => {
-    if (selectedLocation) {
-      // fetch the populations based on the selected location
-      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setPopulationOptions(data))
-        .catch((error) => console.error('Error:', error));
-    }
-  }, [selectedLocation]);
+    //////////////////////////////////////////
+    // Local state
+    //////////////////////////////////////////
+    const [nestedStructure, setNestedStructure] = useState({});
+    const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [selectedValues, setSelectedValues] = useState({
+        year: "",
+        experiment: "",
+        location: "",
+        population: "",
+        date: "",
+        platform: "",
+        sensor: "",
+    });
 
-  useEffect(() => {
-    if (selectedPopulation) {
-      // fetch the dates based on the selected population
-      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setDateOptions(data))
-        .catch((error) => console.error('Error:', error));
-    }
-  }, [selectedLocation, selectedPopulation]);
+    //////////////////////////////////////////
+    // Fetch nested structure
+    //////////////////////////////////////////
+    const getData = async (url) => {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error("Network response was not ok");
+        }
+        return await response.json();
+    };
 
-  useEffect(() => {
-    if (selectedDate) {
-      // fetch the dates based on the selected population
-      fetch(`http://127.0.0.1:5000/flask_app/list_dirs/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}`)
-        .then((response) => {
-          if (!response.ok) { throw new Error('Network response was not ok') }
-          return response.json();
-        })
-        .then(data => setSensorOptions(data.filter((item) => item !== 'Results')))
-        .catch((error) => console.error('Error:', error));
-    }
-  }, [selectedLocation, selectedPopulation, selectedDate]);
+    useEffect(() => {
+        getData(`${flaskUrl}list_dirs_nested/Processed/`)
+            .then((data) => setNestedStructure(data))
+            .catch((error) => console.error("Error fetching nested structure:", error));
 
-  useEffect(() => {
-    if (selectedSensor) {
-      const newTilePath = `/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/${selectedSensor}/${selectedDate}-P4-RGB-Pyramid.tif`;
-      const newGeoJsonPath = `http://127.0.0.1:5000/flask_app/files/Processed/${selectedLocation}/${selectedPopulation}/${selectedDate}/Results/${selectedDate}-Traits-WebMerc.geojson`;
-      onTilePathChange(newTilePath);
-      onGeoJsonPathChange(newGeoJsonPath);
-    }
-    if (selectedLocation == null || selectedSensor == null || selectedMetric == null){
-      onGeoJsonPathChange(null)
-    }
-  }, [ selectedMetric, selectedSensor, selectedLocation ]);
+        console.log("nestedStructure", nestedStructure);
+    }, []);
 
-  useEffect(() => {
-    if (selectedSensor == 'Drone') {
-      setMetricOptions([
-        'Height_95p_meters',
-        'Vegetation_Fraction',
-        'Avg_Temp_C'
-      ])
-      // setSelectedMetric('Height_95p_meters')
-    }
-  }, [selectedSensor])
+    //////////////////////////////////////////
+    // Helper functions
+    //////////////////////////////////////////
 
-  useEffect(() => {
-    if (selectedMetric) {
-      console.log('Metric has changed to: ', selectedMetric);
-      // perform some action here based on the new value of selectedMetric
-    }
-  }, [selectedMetric]);  
+    const handleGenotypeChange = (event, newValue) => {
+        if (newValue.includes("All Genotypes") && newValue.length > 1) {
+            if (selectedGenotypes.includes("All Genotypes")) {
+                newValue = newValue.filter((val) => val !== "All Genotypes");
+            } else {
+                newValue = ["All Genotypes"];
+            }
+        }
+        setSelectedGenotypes(newValue);
+    };
 
-  return (
-    <>
-      <Autocomplete
-        id="location-combo-box"
-        options={locationOptions}
-        value={selectedLocation}
-        onChange={(event, newValue) => {
-          setSelectedLocation(newValue);
-          setSelectedPopulation(null);
-          setSelectedDate(null);
-          setSelectedSensor(null);
-          setSelectedMetric(null);
-        }}
-        renderInput={(params) => <TextField {...params} label="Location" />}
-        sx={{ mb: 2 }}
-      />
+    //////////////////////////////////////////
+    // Function to get options based on the current path
+    //////////////////////////////////////////
+    const getOptionsForField = (field) => {
+        let options = [];
+        let currentLevel = nestedStructure;
+        const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
 
-      {selectedLocation !== null ? (
-          <Autocomplete
-            id="population-combo-box"
-            options={populationOptions}
-            value={selectedPopulation}
-            onChange={(event, newValue) => {
-              setSelectedPopulation(newValue);
-              setSelectedDate(null);
-              setSelectedSensor(null);
-              setSelectedMetric(null);
-            }}
-            renderInput={(params) => <TextField {...params} label="Population" />}
-            sx={{ mb: 2 }}
-          />
-        ) : null}
+        for (const key of fieldsOrder) {
+            if (key === field) break;
+            currentLevel = currentLevel[selectedValues[key]] || {};
+        }
 
-      {selectedPopulation !== null ? (
-        <Autocomplete
-          id="date-combo-box"
-          options={dateOptions}
-          value={selectedDate}
-          onChange={(event, newValue) => {
-            setSelectedDate(newValue);
-            setSelectedSensor(null);
+        if (currentLevel) {
+            options = Object.keys(currentLevel);
+        }
+
+        return options;
+    };
+
+    //////////////////////////////////////////
+    // Handle selection change
+    //////////////////////////////////////////
+    const handleSelectionChange = (field, value) => {
+        const newSelectedValues = { ...selectedValues, [field]: value };
+
+        // Reset subsequent selections
+        const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
+        const currentIndex = fieldsOrder.indexOf(field);
+        fieldsOrder.slice(currentIndex + 1).forEach((key) => {
+            newSelectedValues[key] = "";
+        });
+
+        setSelectedValues(newSelectedValues);
+    };
+
+    //////////////////////////////////////////
+    // Fetch data and update options if all fields are selected
+    //////////////////////////////////////////
+    useEffect(() => {
+        if (selectedValues["platform"]) {
+            let newTilePath;
+            if (!selectedValues["sensor"]) {
+                newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/RGB/${selectedValues["date"]}-P4-RGB-Pyramid.tif`;
+            } else {
+                newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-P4-RGB-Pyramid.tif`;
+            }
+            const newGeoJsonPath = `${flaskUrl}files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Results/${selectedValues["date"]}-${selectedValues["platform"]}-Traits-WGS84.geojson`;
+
+            onTilePathChange(newTilePath);
+            onGeoJsonPathChange(newGeoJsonPath);
+
+            fetchData(newGeoJsonPath)
+                .then((data) => {
+                    const traitOutputLabels = data.features.map((f) => f.properties.Label);
+                    const metricColumns = Object.keys(data.features[0].properties);
+                    const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat"];
+                    const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
+                    setMetricOptions(metrics);
+                    const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
+                    uniqueTraitOutputLabels.unshift("All Genotypes");
+                    setGenotypeOptions(uniqueTraitOutputLabels);
+                    if (!selectedGenotypes) {
+                        setSelectedGenotypes(["All Genotypes"]);
+                    }
+                })
+                .catch((error) => console.error("Error fetching genotypes:", error));
+        }
+
+        // Check if any key selection criteria is missing and reset the path if necessary
+        if (
+            !selectedValues["year"] ||
+            !selectedValues["experiment"] ||
+            !selectedValues["location"] ||
+            !selectedValues["population"] ||
+            !selectedValues["date"] ||
+            !selectedValues["platform"] ||
+            !selectedValues["sensor"]
+        ) {
+            onGeoJsonPathChange(null);
+        }
+
+        if (
+            !selectedValues["year"] ||
+            !selectedValues["experiment"] ||
+            !selectedValues["location"] ||
+            !selectedValues["population"] ||
+            !selectedValues["date"] ||
+            !selectedValues["platform"]
+        ) {
+            onTilePathChange(null);
+        }
+
+        if (!selectedValues["sensor"]) {
             setSelectedMetric(null);
-          }}
-          renderInput={(params) => <TextField {...params} label="Date" />}
-          sx={{ mb: 2 }}
-        />
-      ) : null}
-      
-      {selectedDate !== null ? (
-        <Autocomplete
-          id="sensor-combo-box"
-          options={sensorOptions}
-          value={selectedSensor}
-          onChange={(event, newValue) => {
-            setSelectedSensor(newValue);
-            setSelectedMetric(null);
-          }}
-          renderInput={(params) => <TextField {...params} label="Sensing Platform" />}
-          sx={{ mb: 2 }}
-        />
-      ) : null}
+        }
+    }, [
+        selectedValues["year"],
+        selectedValues["experiment"],
+        selectedValues["location"],
+        selectedValues["population"],
+        selectedValues["date"],
+        selectedValues["platform"],
+        selectedValues["sensor"],
+    ]);
 
-      {selectedSensor !== null ? (
-        <Autocomplete
-          id="metric-combo-box"
-          options={metricOptions}
-          value={selectedMetric}
-          onChange={(event, newValue) => {
-            setSelectedMetric(newValue);
-            console.log('new metric is: ', newValue)
-          }}
-          renderInput={(params) => <TextField {...params} label="Trait Metric" />}
-          sx={{ mb: 2 }}
-        />
-      ) : null}
-    </>
-  );
+    //////////////////////////////////////////
+    // Dynamically render Autocomplete components
+    //////////////////////////////////////////
+    const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
+    const autocompleteComponents = fieldsOrder.map((field, index) => {
+        const label = field.charAt(0).toUpperCase() + field.slice(1); // Capitalize the first letter
+        const options = getOptionsForField(field);
+
+        //////////////////////////////////////////
+        // Fetch geojson data for download
+
+        return (
+            <Autocomplete
+                key={field}
+                id={`${field}-autocomplete`}
+                options={options}
+                value={selectedValues[field]}
+                onChange={(event, newValue) => handleSelectionChange(field, newValue)}
+                renderInput={(params) => <TextField {...params} label={label} />}
+                sx={{ mb: 2 }}
+            />
+        );
+    });
+
+    return (
+        <>
+            {autocompleteComponents}
+            {selectedValues["sensor"] ? (
+                <Autocomplete
+                    id="metric-combo-box"
+                    options={metricOptions}
+                    value={selectedMetric}
+                    onChange={(event, newValue) => {
+                        setSelectedMetric(newValue);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Trait Metric" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
+            {selectedMetric ? (
+                <Autocomplete
+                    multiple
+                    id="genotype-combo-box"
+                    options={genotypeOptions}
+                    value={selectedGenotypes}
+                    onChange={(event, newValue) => {
+                        // If "All Genotypes" is selected along with other options
+                        if (newValue.includes("All Genotypes") && newValue.length > 1) {
+                            if (selectedGenotypes.includes("All Genotypes")) {
+                                // This means that "All Genotypes" was already selected, so we remove other selections
+                                newValue = newValue.filter((val) => val !== "All Genotypes");
+                            } else {
+                                // This means "All Genotypes" was freshly selected, so we only keep it and remove others
+                                newValue = ["All Genotypes"];
+                            }
+                        }
+
+                        if (newValue.length === 0 || (newValue.length === 1 && newValue[0] !== "All Genotypes")) {
+                            if (!genotypeOptions.includes("All Genotypes")) {
+                                setGenotypeOptions((prevOptions) => ["All Genotypes", ...prevOptions]);
+                            }
+                        } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
+                            setGenotypeOptions((prevOptions) => prevOptions.filter((val) => val !== "All Genotypes"));
+                        }
+
+                        setSelectedGenotypes(newValue);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Genotype" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
+            <Snackbar
+                open={snackbarOpen}
+                message="Tiff file does not exist for the selected criteria"
+                autoHideDuration={3000}
+                onClose={() => setSnackbarOpen(false)}
+            />
+        </>
+    );
 };
 
 export default DataSelectionMenu;

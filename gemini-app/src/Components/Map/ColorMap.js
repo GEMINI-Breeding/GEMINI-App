@@ -2,10 +2,22 @@ import { useState, useEffect } from 'react';
 import { scaleLinear } from 'd3-scale';
 import * as d3Array from 'd3-array';
 
+import { DataProvider, useDataSetters, useDataState } from '../../DataContext';
+
 function useTraitsColorMap(traitsGeoJsonPath, selectedMetric, setIsLoadingColorScale) {
-  const [colorScale, setColorScale] = useState(null);
-  const [lowerPercentileValue, setLowerPercentileValue] = useState(null);
-  const [upperPercentileValue, setUpperPercentileValue] = useState(null);
+
+  // ColorMap state management; see DataContext.js
+  const {
+    colorScale,
+    lowerPercentileValue,
+    upperPercentileValue
+  } = useDataState();
+
+  const {
+    setColorScale,
+    setLowerPercentileValue,
+    setUpperPercentileValue
+  } = useDataSetters();
 
   useEffect(() => {
     if (traitsGeoJsonPath !== '' && selectedMetric) {
@@ -28,13 +40,23 @@ function useTraitsColorMap(traitsGeoJsonPath, selectedMetric, setIsLoadingColorS
 
             setLowerPercentileValue(lowerPercentileValue);
             setUpperPercentileValue(upperPercentileValue);
+            
+            let scaleRange = [];
+            if (selectedMetric === 'Avg_Temp_C') {
+              scaleRange = [
+                [0, 0, 255],  // blue for min value
+                [255, 0, 0]   // red for max value
+              ]
+            }else{
+              scaleRange = [
+                [255, 0, 0], // red for min value
+                [0, 0, 255]  // blue for max value
+              ]
+            }
 
             const scale = scaleLinear()
               .domain([lowerPercentileValue, upperPercentileValue])
-              .range([
-                [255, 0, 0], // red for min value
-                [0, 0, 255]  // blue for max value
-              ]);
+              .range(scaleRange);
 
             setColorScale(prevScale => {
               return scale;

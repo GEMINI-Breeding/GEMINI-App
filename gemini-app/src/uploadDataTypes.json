@@ -1,0 +1,22 @@
+{
+    "image": {
+        "fields": ["year", "experiment", "location", "population", "date", "platform", "sensor"],
+        "fileType": "image/*",
+        "label": "Image Data"
+    },
+    "fieldDesign": {
+        "fields": ["year", "experiment", "location", "population"],
+        "fileType": ".csv",
+        "label": "Field Design"
+    },
+    "gcpLocations": {
+        "fields": ["year", "experiment", "location", "population"],
+        "fileType": ".csv",
+        "label": "GCP Locations"
+    },
+    "platformLogs": {
+        "fields": ["year", "experiment", "location", "population", "date", "platform"],
+        "fileType": "*",
+        "label": "Platform Logs"
+    }
+}

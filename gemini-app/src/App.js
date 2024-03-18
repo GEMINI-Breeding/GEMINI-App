@@ -1,165 +1,473 @@
 // App.js
 
-import React, { useState, useEffect, useRef } from 'react';
-import DeckGL from '@deck.gl/react';
-import { Map as MapGL } from 'react-map-gl';
-import { BitmapLayer, GeoJsonLayer } from '@deck.gl/layers';
-import { TileLayer } from '@deck.gl/geo-layers';
-import { FlyToInterpolator } from '@deck.gl/core';
-import { scaleLinear } from 'd3-scale';
+import React, { useState, useEffect, useRef } from "react";
+import Drawer from "@mui/material/Drawer";
+import IconButton from "@mui/material/IconButton";
+import HelpIcon from "@mui/icons-material/Help";
+import Grid from "@mui/material/Grid";
+import Box from "@mui/material/Box";
 
-import CollapsibleSidebar from './Components/Menu/CollapsibleSidebar';
-import useTraitsColorMap from './Components/Map/ColorMap';
-import GeoJsonTooltip from './Components/Map/ToolTip';
-import useExtentFromBounds from './Components/Map/MapHooks';
-import ColorMapLegend from './Components/Map/ColorMapLegend';
+import { useDataSetters, useDataState } from "./DataContext";
+import CollapsibleSidebar from "./Components/Menu/CollapsibleSidebar";
 
-// Initial tile server URL and path
-const TILE_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true';
-const BOUNDS_URL_TEMPLATE = 'http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}';
+import TabbedPrepUI from "./Components/GCP/TabbedPrepUI";
+import { ActiveComponentsProvider } from "./ActiveComponentsContext";
+import MapView from "./Components/Map/MapView";
+import HelpPane from "./Components/Help/HelpPane";
 
-const initialViewState = {
-  longitude: -121.781381,
-  latitude: 38.535257,
-  zoom: 17,
-  pitch: 0,
-  bearing: 0,
-};
+import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
+import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
+import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
+import FileUploadComponent from "./Components/Menu/FileUpload";
+import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
 function App() {
-  const [viewState, setViewState] = useState(initialViewState);
-  const [selectedTilePath, setSelectedTilePath] = useState('');
-  const [selectedTraitsGeoJsonPath, setSelectedTraitsGeoJsonPath] = useState('');
-  const [hoverInfo, setHoverInfo] = useState(null);
-  const [selectedMetric, setSelectedMetric] = useState(null);
-  const [isLoadingColorScale, setIsLoadingColorScale] = useState(false);
+    const [helpPaneOpen, setHelpPaneOpen] = useState(false);
 
-  const selectedMetricRef = useRef(selectedMetric);
+    const toggleHelpPane = () => {
+        setHelpPaneOpen(!helpPaneOpen);
+    };
 
-  const { colorScale, lowerPercentileValue, upperPercentileValue } = useTraitsColorMap(selectedTraitsGeoJsonPath, selectedMetric, setIsLoadingColorScale);
+    // App state management; see DataContext.js
+    const {
+        selectedMetric,
+        currentView,
+        flaskUrl,
+        isTraining,
+        progress,
+        epochs,
+        currentEpoch,
+        trainingData,
+        chartData,
+        isLocating,
+        currentLocateProgress,
+        processRunning,
+        isExtracting,
+        currentExtractProgress,
+    } = useDataState();
 
-  useEffect(() => {
-    selectedMetricRef.current = selectedMetric;
-  }, [selectedMetric]);
+    const {
+        setSelectedTilePath,
+        setSelectedTraitsGeoJsonPath,
+        setSelectedMetric,
+        setCurrentView,
+        setSelectedCsv,
+        setSelectedImageFolder,
+        setRadiusMeters,
+        setIsTraining,
+        setProgress,
+        setCurrentEpoch,
+        setTrainingData,
+        setChartData,
+        setCurrentLocateProgress,
+        setIsLocating,
+        setProcessRunning,
+        setIsExtracting,
+        setCurrentExtractProgress,
+        setCloseMenu
+    } = useDataSetters();
 
-  const tileUrl = TILE_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
-  const boundsUrl = BOUNDS_URL_TEMPLATE.replace('${FILE_PATH}', encodeURIComponent(`http://127.0.0.1:5000${selectedTilePath}`));
-  const extentBounds = useExtentFromBounds(boundsUrl);
-  
-  useEffect(() => {
-    if (extentBounds) {
-      const [minLon, minLat, maxLon, maxLat] = extentBounds;
-      const longitude = (minLon + maxLon) / 2;
-      const latitude = (minLat + maxLat) / 2;
-  
-      // Width and height of the current view in pixels
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-  
-      // Map extents in degrees
-      const mapLngDelta = maxLon - minLon;
-      const mapLatDelta = maxLat - minLat;
-  
-      // Calculate zoom level
-      let zoomLng = Math.floor(Math.log(viewportWidth * 360 / mapLngDelta) / Math.log(2));
-      let zoomLat = Math.floor(Math.log(viewportHeight * 360 / mapLatDelta) / Math.log(2));
-  
-      const zoom = Math.min(zoomLng, zoomLat) - 9.5;
-      console.log('zoom', zoom)
-  
-      setViewState(prevViewState => ({
-        ...prevViewState,
-        longitude,
-        latitude,
-        zoom,
-        transitionDuration: 1000, // 1 second transition
-        transitionInterpolator: new FlyToInterpolator(),
-      }));
-    }
-  }, [extentBounds]);
-  
+    const selectedMetricRef = useRef(selectedMetric);
 
-  const orthoTileLayer = new TileLayer({
-    id: 'geotiff-tile-layer',
-    minZoom: 15,
-    maxZoom: 22,
-    tileSize: 256,
-    data: tileUrl,
-    renderSubLayers: (props) => {
-      const {
-        bbox: { west, south, east, north }
-      } = props.tile;
+    useEffect(() => {
+        selectedMetricRef.current = selectedMetric;
+    }, [selectedMetric]);
 
-      return new BitmapLayer(props, {
-        data: null,
-        image: props.data,
-        bounds: [west, south, east, north]
-      });
-    }
-  });
-
-
-  const traitsGeoJsonLayer = React.useMemo(() => new GeoJsonLayer({
-    id: isLoadingColorScale ? `traits-geojson-layer-loading` : `traits-geojson-layer-${selectedMetric}-${colorScale}`,
-    data: selectedTraitsGeoJsonPath,
-    filled: true,
-    getFillColor: d => {
-      if (colorScale) {
-        const value = d.properties[selectedMetricRef.current];
-        const color = colorScale(value);
-        return color;
-      } else {
-        return [160, 160, 180, 200];
-      }
-    },
-    stroked: false,
-    pickable: true,
-    onHover: info => setHoverInfo(info),
-  }), [selectedTraitsGeoJsonPath, colorScale, selectedMetric, isLoadingColorScale]);
-  
-
-  return (
-    <div className="App">
-
-      <DeckGL
-        viewState={viewState}
-        controller={{
-            scrollZoom: {speed: 1.0, smooth: true}
-        }}
-        layers={[orthoTileLayer, traitsGeoJsonLayer]}
-        onViewStateChange={({ viewState }) => setViewState(viewState)}
-      >
-
-        <MapGL
-          mapStyle="mapbox://styles/mapbox/satellite-v9"
-          mapboxAccessToken={"pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"}
+    const sidebar = (
+        <CollapsibleSidebar
+            onTilePathChange={setSelectedTilePath}
+            onGeoJsonPathChange={setSelectedTraitsGeoJsonPath}
+            selectedMetric={selectedMetric}
+            setSelectedMetric={setSelectedMetric}
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            onCsvChange={setSelectedCsv}
+            onImageFolderChange={setSelectedImageFolder}
+            onRadiusChange={setRadiusMeters}
         />
+    );
 
-      </DeckGL>
+    const creditsSection = (title, imgLink) => (
+        <Box
+            sx={{
+                textAlign: "center",
+                p: 2, // padding
+            }}
+        >
+            <h2 style={{ color: "#142a50" }}>{title}</h2>
+            <img src={imgLink} alt={title} style={{ maxWidth: "70%" }} />
+        </Box>
+    );
 
-      <GeoJsonTooltip 
-        hoverInfo={hoverInfo} 
-        selectedMetric={selectedMetric}
-      />
+    // Choose what to render based on the `currentView` state
+    const contentView = (() => {
+        switch (currentView) {
+            case 0:
+                return <MapView />;
+            case 1:
+                return <TabbedPrepUI />;
+            case 2:
+                return (
+                    <div
+                        style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            color: "black",
+                            backgroundColor: "white",
+                            padding: "20px",
+                            zIndex: "1000",
+                            fontSize: "24px",
+                        }}
+                    >
+                        Placeholder for Stats View
+                    </div>
+                );
+            case 3:
+                return <FileUploadComponent />;
+            case 4:
+                return <ImageQueryUI />;
+            default:
+                return (
+                    <Grid
+                        container
+                        spacing={2}
+                        direction="column"
+                        justifyContent="center"
+                        alignItems="center"
+                        style={{
+                            minHeight: "100vh",
+                            position: "relative",
+                        }}
+                    >
+                        <Box
+                            sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                backgroundColor: "rgba(255, 255, 255, 0.75)",
+                                zIndex: 1, // Ensures overlay is above the background but below content
+                            }}
+                        ></Box>
 
-      <CollapsibleSidebar 
-        onTilePathChange={setSelectedTilePath} 
-        onGeoJsonPathChange={setSelectedTraitsGeoJsonPath}
-        selectedMetric={selectedMetric}
-        setSelectedMetric={setSelectedMetric}
-      />
+                        {/* Ensure content is above the overlay */}
+                        <Box
+                            sx={{
+                                position: "relative",
+                                zIndex: 2,
+                                width: "100%",
+                            }}
+                        >
+                            <Grid item xs={12}>
+                                <Box
+                                    sx={{
+                                        textAlign: "center",
+                                        p: 2,
+                                    }}
+                                >
+                                    <img src="/gemini-logo.png" alt="GEMINI Logo" style={{ maxWidth: "80%" }} />
+                                    <p
+                                        style={{
+                                            fontFamily: "Arial",
+                                            fontSize: "28px",
+                                            fontWeight: "regular",
+                                            color: "#142a50",
+                                        }}
+                                    >
+                                        G×E×M Innovation in Intelligence for climate adaptation
+                                    </p>
+                                </Box>
+                            </Grid>
+                            <Grid container direction="row" justifyContent="center" alignItems="center">
+                                <Grid item xs={6}>
+                                    {creditsSection("Financial Support", "/financial-support.png")}
+                                </Grid>
+                                <Grid item xs={6}>
+                                    {creditsSection("Partners", "/our-partners.png")}
+                                </Grid>
+                            </Grid>
+                        </Box>
 
-      {colorScale && 
-        <ColorMapLegend 
-          colorScale={colorScale}
-          lowerPercentileValue={lowerPercentileValue}
-          upperPercentileValue={upperPercentileValue}
-          selectedMetric={selectedMetric}
-        />
-      }
+                        <Box
+                            sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                backgroundImage: "url('/sorghum-background.jpg')",
+                                backgroundPosition: "center",
+                                backgroundSize: "cover",
+                                backgroundRepeat: "no-repeat",
+                                zIndex: 0,
+                            }}
+                        ></Box>
+                    </Grid>
+                );
+        }
+    })();
 
-    </div>
-  );
+    // FOR TRAINING START
+    const handleStopTraining = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_training`, { method: "POST" });
+            // Handle successful stop
+            console.log("Training stopped");
+            setIsTraining(false); // Update isTraining to false
+            setCurrentEpoch(0); // Reset epochs
+            setTrainingData(null);
+            setChartData({ x: [], y: [] }); // Reset chart data
+            setProcessRunning(false);
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    
+    useEffect(() => {
+        console.log({
+            isTraining: isTraining,
+            currentEpoch: currentEpoch,
+            trainingData: trainingData,
+            chartData: chartData,
+            processRunning: processRunning
+        });
+    }, [isTraining, currentEpoch, trainingData, chartData, processRunning]);
+    
+
+    useEffect(() => {
+        let interval;
+        if (isTraining) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
+                        setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
+                        setCurrentEpoch(data.epoch); // Update current epoch
+                        setTrainingData(data);
+                    } else {
+                        console.error("Failed to fetch training progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching training progress", error);
+                }
+            }, 5000); // Poll every 5 seconds
+        }
+        return () => clearInterval(interval);
+    }, [isTraining]);
+    // FOR TRAINING END
+
+    // FOR LOCATE START
+    const handleStopLocating = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_locate`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Locating stopped");
+                setIsLocating(false);
+                setProcessRunning(false);
+                setCurrentLocateProgress(0)
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping locating", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isLocating) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_locate_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentLocateProgress(data.locate)
+                    } else {
+                        console.error("Failed to fetch locate progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching locate progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isLocating, flaskUrl]);
+    // FOR LOCATE END
+
+    // FOR EXTRACT START
+    const handleStopExtracting = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_extract`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Extracting stopped");
+                setIsExtracting(false);
+                setProcessRunning(false);
+                setCurrentExtractProgress(0);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping extracting", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    const handleDoneExtracting = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}done_extract`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Extracting finished");
+                setIsExtracting(false);
+                setProcessRunning(false);
+                setCurrentExtractProgress(0);
+                setCloseMenu(false);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error finishing extraction", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isExtracting) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_extract_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentExtractProgress(data.extract)
+                    } else {
+                        console.error("Failed to fetch locate progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching locate progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isExtracting, flaskUrl]);
+    // FOR EXTRACT END
+
+    return (
+        <ActiveComponentsProvider>
+            <div className="App">
+                <div className="sidebar">{sidebar}</div>
+
+                <div className="content">{contentView}</div>
+
+                <div
+                    className="help-button"
+                    style={{ position: "fixed", bottom: "10px", right: helpPaneOpen ? "300px" : "10px", zIndex: 1000 }}
+                >
+                    <IconButton onClick={toggleHelpPane}>
+                        <HelpIcon fontSize="large" />
+                    </IconButton>
+                </div>
+
+                <Drawer
+                    anchor="right"
+                    variant="persistent"
+                    open={helpPaneOpen}
+                    sx={{ "& .MuiDrawer-paper": { height: "100vh", overflow: "auto" } }}
+                >
+                    <HelpPane />
+                </Drawer>
+
+                {/* training */}
+                {isTraining && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <TrainingProgressBar
+                                progress={progress}
+                                onStopTraining={handleStopTraining}
+                                trainingData={trainingData}
+                                epochs={epochs}
+                                chartData={chartData}
+                                currentEpoch={currentEpoch}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
+                {/* locating */}
+                {isLocating && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <LocateProgressBar
+                                currentLocateProgress={currentLocateProgress}
+                                onStopLocating={handleStopLocating}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
+                {/* extracting */}
+                {isExtracting && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <ExtractProgressBar
+                                currentExtractProgress={currentExtractProgress}
+                                onStopExtracting={handleStopExtracting}
+                                onDoneExtracting={handleDoneExtracting}
+                            />
+                        </Box>
+                    </Box>
+                )}
+            </div>
+        </ActiveComponentsProvider>
+    );
 }
 
 export default App;
