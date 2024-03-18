@@ -28,6 +28,7 @@ const getFileTypeDescription = (fileType) => {
         "image/*": "Image files",
         ".csv": "CSV files",
         ".txt": "Text files",
+        ".bin": "Binary files",
         "*": "All files",
         // Add more mappings as needed
     };
@@ -51,6 +52,11 @@ const FileUploadComponent = () => {
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
     const [currentInputValues, setCurrentInputValues] = useState({});
+    const chunksize = 0.5 * 1024 * 1024; // 0.5 MB
+
+    useEffect(() => {
+        console.log(selectedDataType);
+    }, [selectedDataType]);
 
     // Effect to fetch nested directories on component mount
     useEffect(() => {
@@ -91,13 +97,86 @@ const FileUploadComponent = () => {
                 body: formData,
                 signal: controller.signal,
             });
+            console.log(response)
             clearTimeout(id);
             return response;
         } catch (error) {
+            console.log("Upload error:", error);
             clearTimeout(id);
             throw error;
         }
     };
+
+    const uploadChunkWithTimeout = async (chunk, index, totalChunks, fileIdentifier, dirPath, timeout = 10000) => {
+        const formData = new FormData();
+        formData.append("fileChunk", chunk);
+        formData.append("chunkIndex", index);
+        formData.append("totalChunks", totalChunks);
+        formData.append("fileIdentifier", fileIdentifier);
+        formData.append("dirPath", dirPath);
+
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(`${flaskUrl}upload_chunk`, {
+                method: "POST",
+                body: formData,
+                signal: controller.signal,
+            });
+            console.log(response);
+            clearTimeout(id);
+            return response;
+        } catch(error) {
+            console.log("Upload error:", error);
+            clearTimeout(id);
+            throw error;
+        }
+    };
+
+    const uploadFileChunks = async (file, dirPath) => {
+        const chunkSize = 0.5 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const fileIdentifier = file.name;
+
+        const uploadedChunks = await checkUploadedChunks(fileIdentifier, dirPath);
+        console.log("Uploaded chunks:", uploadedChunks);
+        for (let index = uploadedChunks; index < totalChunks; index++) {
+            if (cancelUploadRef.current) {
+                break;
+            }
+            const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
+            await uploadChunkWithTimeout(chunk, index, totalChunks, fileIdentifier, dirPath)
+                .catch(error => {
+                console.error("Failed to upload chunk", index, error);
+                throw error; // Stop upload process if any chunk fails
+                });
+        
+            // Update progress here.
+            setProgress(Math.round(((index + 1) / totalChunks) * 100));
+        }
+    };
+
+    const checkUploadedChunks = async (fileIdentifier, dirPath) => {
+        try {
+          const response = await fetch(`${flaskUrl}check_uploaded_chunks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileIdentifier, dirPath }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            // Assuming the server returns a JSON object with the count of uploaded chunks
+            return data.uploadedChunksCount;
+          } else {
+            console.error("Failed to retrieve uploaded chunks count");
+            return 0; // If unable to retrieve, assume no chunks uploaded
+          }
+        } catch (error) {
+          console.error("Error checking uploaded chunks:", error);
+          return 0; // On error, assume no chunks uploaded
+        }
+      }
 
     // Formik hook for form state management and validation
     const formik = useFormik({
@@ -139,21 +218,25 @@ const FileUploadComponent = () => {
                         if (cancelUploadRef.current) {
                             break;
                         }
-
                         const file = files.find((f) => f.name === filesToUpload[i]);
-                        await uploadFileWithTimeout(file, dirPath);
-                        setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                        if (selectedDataType === "binary") {
+                            await uploadFileChunks(file, dirPath);
+                        } else {
+                            await uploadFileWithTimeout(file, dirPath);
+                            setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                        }
                         break;
                     } catch (error) {
                         if (retries === maxRetries - 1) {
                             alert(`Failed to upload file: ${filesToUpload[i]}`);
+                            console.log(`Failed to upload file: ${filesToUpload[i]}`, error);
                             break;
                         }
                         retries++;
                     }
                 }
             }
-
+            setProgress(0);
             setIsUploading(false);
             setFiles([]);
         },
@@ -244,6 +327,7 @@ const FileUploadComponent = () => {
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: handleFileChange,
         accept: dataTypes[selectedDataType].fileType,
+        maxFiles: selectedDataType === "binary" ? 1 : Infinity,
     });
 
     // Function to clear the files from the dropzone
@@ -350,7 +434,7 @@ const FileUploadComponent = () => {
                     )}
                     {isUploading && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
-                            <Typography>Uploading...</Typography>
+                            <Typography>Uploading... {`${Math.round(progress)}%`}</Typography>
                             <LinearProgress variant="determinate" value={progress} />
                             <Button
                                 variant="contained"
