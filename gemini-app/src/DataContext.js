@@ -177,6 +177,7 @@ export const DataProvider = ({ children }) => {
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
+    const [currentOrthoProgress, setCurrentOrthoProgress] = useState(0);
 
     // Image Query State
     const [imageDataQuery, setImageDataQuery] = useState([]);
@@ -312,6 +313,7 @@ export const DataProvider = ({ children }) => {
                 isOrthoModalOpen,
                 isOrthoProcessing,
                 orthoServerStatus,
+                currentOrthoProgress,
 
                 // Image Query State
                 imageDataQuery,
@@ -446,6 +448,7 @@ export const DataProvider = ({ children }) => {
                     setOrthoModalOpen,
                     setIsOrthoProcessing,
                     setOrthoServerStatus,
+                    setCurrentOrthoProgress,
 
                     // Image Query State
                     setImageDataQuery,

@@ -446,7 +446,7 @@ function ExtractProgressBar({ currentExtractProgress, onStopExtracting, onDoneEx
         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
                 <Typography variant="body2" sx={{ marginRight: "10px" }}>
-                    Locating in Progress...
+                    Extracting in Progress...
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
                     <Box sx={{ width: "100%", mr: 1 }}>

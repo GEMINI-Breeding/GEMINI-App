@@ -15,7 +15,12 @@ export function useHandleProcessImages() {
         selectedPlatformGCP,
     } = useDataState();
 
-    const { setImageList, setGcpPath, setSidebarCollapsed, setTotalImages } = useDataSetters();
+    const { 
+        setImageList, 
+        setGcpPath, 
+        setSidebarCollapsed, 
+        setTotalImages 
+    } = useDataSetters();
 
     const mergeLists = function (imageList, existingData) {
         // Create a lookup object for faster search using image name
@@ -48,7 +53,7 @@ export function useHandleProcessImages() {
             year: selectedYearGCP,
             experiment: selectedExperimentGCP,
             sensor: selectedSensorGCP,
-            platform: "Drone",
+            platform: selectedPlatformGCP,
         };
 
         fetch(`${flaskUrl}process_images`, {
@@ -69,7 +74,11 @@ export function useHandleProcessImages() {
                     headers: {
                         "Content-Type": "application/json",
                     },
-                    body: JSON.stringify({ basePath: data.selected_images[0].image_path }),
+                    body: JSON.stringify({ 
+                        basePath: data.selected_images[0].image_path,
+                        platform: selectedPlatformGCP,
+                        sensor: selectedSensorGCP,
+                     }),
                 })
                     .then((fileResponse) => fileResponse.json())
                     .then((fileData) => {

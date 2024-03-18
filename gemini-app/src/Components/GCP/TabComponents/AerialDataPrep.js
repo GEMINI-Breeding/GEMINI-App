@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Box } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
@@ -8,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CircularProgress from "@mui/material/CircularProgress";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import { NestedSection, FolderTab, FolderTabs } from "./Processing/CamerasAccordion";
 
 import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
@@ -30,6 +32,7 @@ function AerialDataPrep() {
         selectedExperimentGCP,
         selectedSensorGCP,
         selectedPlatformGCP,
+        aerialPrepTab
     } = useDataState();
 
     const {
@@ -44,88 +47,31 @@ function AerialDataPrep() {
         setSelectedPlatformGCP,
     } = useDataSetters();
 
+    // processing images and existing gcps
     const handleProcessImages = useHandleProcessImages();
-
     const selectedDateRef = useRef(selectedDateGCP);
-    const [sensorData, setSensorData] = useState({});
+    const [sensorData, setSensorData] = useState(null);
+    const CustomComponent = {
+        ortho: ImageViewer
+    };
 
-    useEffect(() => {
-        const fetchDataAndUpdate = async () => {
-            if (selectedLocationGCP && selectedPopulationGCP) {
-                try {
-                    const dates = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
-                    );
+    // included aeriel-based platforms
+    const includedPlatforms = ["Drone", "Phone"];
 
-                    let updatedSensorData = {};
+    // columns to render
+    let columns = [
+        { label: "Date", field: "date" },
+        { label: "Orthomosaic", field: "ortho", actionType: "ortho", actionLabel: "Start" },
+    ];
 
-                    for (const date of dates) {
-                        const folders = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
-                        );
-
-                        // Check if the 'Drone' folder exists
-                        if (folders.includes("Drone")) {
-                            const sensors = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
-                            );
-
-                            for (const sensor of sensors) {
-                                let completed = 0; // Default to not completed
-
-                                // Check for Images folder
-                                const imageFolders = await fetchData(
-                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
-                                );
-
-                                if (imageFolders.includes("Images")) {
-                                    const images = await fetchData(
-                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}/Images`
-                                    );
-
-                                    if (images.length === 0) {
-                                        // If Images folder is empty
-                                        completed = 2;
-                                    } else {
-                                        try {
-                                            const processedFiles = await fetchData(
-                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
-                                            );
-
-                                            completed = processedFiles.some((file) => file.endsWith(".tif")) ? 1 : 0;
-                                        } catch (error) {
-                                            // If there's an error fetching processed files, or no .tif files found
-                                            console.warn(
-                                                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
-                                                error
-                                            );
-                                            completed = 0; // There are images, but no processed .tif files
-                                        }
-                                    }
-                                } else {
-                                    // If Images folder is not found
-                                    completed = 2;
-                                }
-
-                                // Initialize sensor array if not already done
-                                if (!updatedSensorData[sensor]) {
-                                    updatedSensorData[sensor] = [];
-                                }
-                                // Add entry with the determined 'completed' status
-                                updatedSensorData[sensor].push({ label: date, completed });
-                            }
-                        }
-                    }
-
-                    setSensorData(updatedSensorData);
-                } catch (error) {
-                    console.error("Error fetching Raw data:", error);
-                }
-            }
-        };
-
-        fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
+    // row data for nested section
+    const constructRowData = (item, columns) => {
+        const rowData = {};
+        columns.forEach(column => {
+            rowData[column.field] = item[column.field];
+        });
+        return rowData;
+    };
 
     const handleOptionClick = (sensor, option) => {
         if (option.completed !== 2) {
@@ -136,28 +82,105 @@ function AerialDataPrep() {
     };
 
     useEffect(() => {
+        console.log('sensorData has changed:', sensorData);
+    }, [sensorData]);
+
+    useEffect(() => {
         if (selectedDateRef.current !== selectedDateGCP) {
             handleProcessImages();
             selectedDateRef.current = selectedDateGCP;
         }
     }, [selectedDateGCP]);
 
-    if (imageList.length > 0 && isImageViewerOpen) {
-        return (
-            <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-                <ImageViewer />
-            </Grid>
-        );
-    } else if (isImageViewerOpen) {
-        // Return a curcular loading indicator in the center of the page
-        return (
-            <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-                <Grid item style={{ marginTop: "50px" }}>
-                    <CircularProgress />
-                </Grid>
-            </Grid>
-        );
-    }
+    useEffect(() => {
+        const fetchDataAndUpdate = async () => {
+            if (selectedLocationGCP && selectedPopulationGCP) {
+                try {
+                    // check for existing raw drone data
+                    const dates = await fetchData(
+                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                    );
+                    // reset sensor data
+                    let updatedData = {};
+
+                    // iterate through each data and check if images exists
+                    for (const date of dates) {
+                        const folders = await fetchData(
+                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                        );
+
+                        // check if the 'Drone' folder exists
+                        if (folders.includes("Drone") || folders.includes("Phone")) {
+                            let platform = folders.includes("Drone") ? "Drone" : "Phone";
+                            const sensors = await fetchData(
+                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
+                            );
+
+                            for (const sensor of sensors) {
+                                let ortho = 2; // Default to not completed
+
+                                // Initialize sensor array if not already done
+                                if (!updatedData[platform]) {
+                                    updatedData[platform] = {};
+                                }
+                                if (!updatedData[platform][sensor]) {
+                                    updatedData[platform][sensor] = [];
+                                }
+
+                                // check for Images folder
+                                const imageFolders = await fetchData(
+                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                                );
+
+                                if (imageFolders.includes("Images")) {
+                                    const images = await fetchData(
+                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}/Images`
+                                    );
+
+                                    if (images.length === 0) {
+                                        // if Images folder is empty
+                                        ortho = 2;
+                                    } else {
+                                        try {
+                                            const processedFiles = await fetchData(
+                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                                            );
+
+                                            ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
+                                        } catch (error) {
+                                            // if there's an error fetching processed files, or no .tif files found
+                                            console.warn(
+                                                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
+                                                error
+                                            );
+                                            ortho = false; // there are images, but no processed .tif files
+                                        }
+                                    }
+                                } else {
+                                    // if Images folder is not found
+                                    ortho = 2;
+                                }
+                                // add entry with the determined 'ortho' status
+                                updatedData[platform][sensor].push({ date, ortho });
+                            }
+                        }
+                    }
+                    const processedData = Object.keys(updatedData).map((platform) => ({
+                        title: platform,
+                        nestedData: Object.keys(updatedData[platform]).map((sensor) => ({
+                            summary: sensor,
+                            data: updatedData[platform][sensor].map(item => constructRowData(item, columns)),
+                            columns: columns,
+                        })),
+                    }));
+                    setSensorData(processedData);
+                } catch (error) {
+                    console.error("Error fetching Raw data:", error);
+                }
+            }
+        };
+        fetchDataAndUpdate();
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
@@ -165,47 +188,39 @@ function AerialDataPrep() {
                 Aerial Datasets
             </Typography>
 
-            <Typography variant="body1" component="p" align="left" style={{ marginTop: "20px" }}>
-                Image datasets are organized by sensor type and date. datasets with a checkmark have been processed into
-                an orthomosaic. Click on a dataset to begin the process of ground control point identification. After
-                labeling the final image, you will be able to initialize orthomosaic generation.
-            </Typography>
+            <Box sx={{ padding: '10px', textAlign: 'center' }}>
+                <Typography variant="body1" component="p">
+                    Image datasets are organized by sensor type and date.
+                </Typography>
+                <Typography variant="body1" component="p">
+                    Datasets with a checkmark have been processed into an orthomosaic.
+                </Typography>
+                <Typography variant="body1" component="p">
+                    Click on a dataset to begin the process of ground control point identification.
+                </Typography>
+                <Typography variant="body1" component="p">
+                    After labeling the final image, you will be able to initialize orthomosaic generation.
+                </Typography>
+            </Box>
 
-            {Object.keys(sensorData).map((sensor) => (
-                <div key={sensor} style={{ width: "50%" }}>
-                    <Typography variant="h6" component="h3" align="center" style={{ marginTop: "20px" }}>
-                        {sensor}
-                    </Typography>
-                    <List style={{ width: "100%" }}>
-                        {sensorData[sensor].map((option, index) => (
-                            <div key={sensor + "-" + index}>
-                                <ListItemButton onClick={() => handleOptionClick(sensor, option)}>
-                                    <Grid container alignItems="center">
-                                        <Grid item style={{ width: "calc(100% - 64px)" }}>
-                                            {" "}
-                                            {/* Adjusted width to leave space for the checkmark */}
-                                            <ListItemText
-                                                primary={option.label}
-                                                primaryTypographyProps={{ fontSize: "1.25rem" }}
-                                            />
-                                        </Grid>
-                                        {option.completed == true && (
-                                            <CheckCircleIcon style={{ color: "green", marginLeft: "24px" }} />
-                                        )}
-                                        {option.completed === 2 && (
-                                            <WarningAmberIcon
-                                                titleAccess="No images found for this date and sensor"
-                                                style={{ color: "orange", marginLeft: "24px" }}
-                                            />
-                                        )}
-                                    </Grid>
-                                </ListItemButton>
-                                {index !== sensorData[sensor].length - 1 && <Divider />}
-                            </div>
-                        ))}
-                    </List>
-                </div>
-            ))}
+            {sensorData && sensorData.length > 0 && (
+                sensorData
+                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                    .map((platformData) => (
+                    <NestedSection
+                        key={platformData.title}
+                        title={platformData.title}
+                        nestedData={platformData.nestedData.map((sensorData) => ({
+                            summary: sensorData.summary,
+                            data: sensorData.data,
+                            columns: sensorData.columns,
+                        }))}
+                        activeTab={aerialPrepTab}
+                        handleAction={null}
+                        CustomComponent={CustomComponent}
+                    />
+                ))
+            )}
         </Grid>
     );
 }

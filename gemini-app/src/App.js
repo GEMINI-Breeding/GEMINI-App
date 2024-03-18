@@ -18,6 +18,7 @@ import HelpPane from "./Components/Help/HelpPane";
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
 import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
+import { OrthoProgressBar } from "./Components/GCP/OrthoModal";
 import FileUploadComponent from "./Components/Menu/FileUpload";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
@@ -44,6 +45,8 @@ function App() {
         processRunning,
         isExtracting,
         currentExtractProgress,
+        isOrthoProcessing,
+        currentOrthoProgress
     } = useDataState();
 
     const {
@@ -64,7 +67,9 @@ function App() {
         setProcessRunning,
         setIsExtracting,
         setCurrentExtractProgress,
-        setCloseMenu
+        setCloseMenu,
+        setCurrentOrthoProgress,
+        setIsOrthoProcessing
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -209,6 +214,48 @@ function App() {
                 );
         }
     })();
+
+    // FOR ORTHO START
+    useEffect(() => {
+        let interval;
+        if (isOrthoProcessing) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_ortho_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentOrthoProgress(data.ortho)
+                    } else {
+                        console.error("Failed to fetch ortho progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching ortho progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isOrthoProcessing, flaskUrl]);
+
+    const handleStopOrtho = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_odm`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("ODM stopped");
+                setIsOrthoProcessing(false);
+                setProcessRunning(false);
+                setCurrentOrthoProgress(0);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping ODM", errorData);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    // FOR ORTHO END
 
     // FOR TRAINING START
     const handleStopTraining = async () => {
@@ -465,6 +512,30 @@ function App() {
                         </Box>
                     </Box>
                 )}
+
+                {/* ortho */}
+                {isOrthoProcessing &&
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <OrthoProgressBar
+                                currentOrthoProgress={currentOrthoProgress}
+                                onStopOrtho={handleStopOrtho}
+                            />
+                        </Box>
+                    </Box>
+                }
             </div>
         </ActiveComponentsProvider>
     );
