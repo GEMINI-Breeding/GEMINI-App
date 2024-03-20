@@ -3,6 +3,10 @@
     "version": "0.1.0",
     "private": true,
     "dependencies": {
+        "@amarant/deck.gl-raster": "^0.3.3",
+        "@deck.gl/geo-layers": "^8.9.22",
+        "@deck.gl/layers": "^8.9.22",
+        "@deck.gl/react": "^8.9.22",
         "@emotion/react": "^11.11.1",
         "@emotion/styled": "^11.11.0",
         "@kylebarron/deck.gl-raster": "^0.3.1",
