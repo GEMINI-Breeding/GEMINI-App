@@ -84,10 +84,11 @@ const FileUploadComponent = () => {
     };
 
     // Function to upload a file with a timeout
-    const uploadFileWithTimeout = async (file, dirPath, timeout = 10000) => {
+    const uploadFileWithTimeout = async (file, dirPath, dataType, timeout = 10000) => {
         const formData = new FormData();
         formData.append("files", file);
         formData.append("dirPath", dirPath);
+        formData.append("dataType", dataType);
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
 
@@ -219,10 +220,12 @@ const FileUploadComponent = () => {
                             break;
                         }
                         const file = files.find((f) => f.name === filesToUpload[i]);
+                        console.log(file)
+                        
                         if (selectedDataType === "binary") {
                             await uploadFileChunks(file, dirPath);
                         } else {
-                            await uploadFileWithTimeout(file, dirPath);
+                            await uploadFileWithTimeout(file, dirPath, selectedDataType);
                             setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                         }
                         break;

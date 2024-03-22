@@ -14,7 +14,10 @@ import {
     Box,
     Typography,
     LinearProgress,
-    IconButton
+    IconButton,
+    DialogContent,
+    DialogContentText,
+    DialogActions
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
@@ -43,6 +46,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
     } = useDataSetters();
 
     // for extracting traits
+    const [error, setError] = useState(null);
     const handleExtract = async () => {
         try {
             setIsExtracting(true);
@@ -75,9 +79,11 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
             } else {
                 const errorData = await response.json();
                 console.error("Error details:", errorData);
+                throw new Error(errorData.message || "Error occurred, press Stop");
             }
         } catch (error) {
             console.error("There was an error sending the request", error)
+            setError(error.message);
         }
     };
     const handleClose = () => {

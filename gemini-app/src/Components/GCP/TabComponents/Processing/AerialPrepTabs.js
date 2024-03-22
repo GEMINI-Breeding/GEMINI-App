@@ -3,6 +3,7 @@ import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import AskAnalyzeModal from "./AskAnalyzeModal";
+import Snackbar from "@mui/material/Snackbar";
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -19,8 +20,8 @@ export default function AerialPrepTabs() {
     } = useDataState();
 
     const { setAerialPrepTab } = useDataSetters();
-
     const [sensorData, setSensorData] = useState(null);
+    const [submitError, setSubmitError] = useState("");
 
     // Columns definition
     const columns = [
@@ -97,6 +98,7 @@ export default function AerialPrepTabs() {
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);
+                    setSubmitError("Could not fetch data from date ", error)
                 }
             }
         };
@@ -188,6 +190,12 @@ export default function AerialPrepTabs() {
                     </Box>
                 </Grid>
             </Grid>
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </Grid>
     );
 }
