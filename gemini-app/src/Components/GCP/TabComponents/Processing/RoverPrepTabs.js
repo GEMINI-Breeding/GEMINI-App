@@ -212,13 +212,13 @@ export default function RoverPrepTabs() {
 
                                             if (Object.keys(files).length) {
                                                 // retrieve labels data
-                                                if (selectRoverTrait === ''){
-                                                    labels = 0;
-                                                } else {
+                                                try {
                                                     const labels_files = await fetchData(
-                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection`
+                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection/annotations`
                                                     );
                                                     labels = labels_files.length >= 1;
+                                                } catch(error) {
+                                                    labels = false;
                                                 }
                                                 updatedData[platform][sensor].push({ date, labels });
                                             }
@@ -265,6 +265,7 @@ export default function RoverPrepTabs() {
                                                 `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
                                             const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
+                                            console.log(geojsons)
                                             
                                             if (filteredFiles.length >= 1) {
                                                 const extract_files = await fetchData(

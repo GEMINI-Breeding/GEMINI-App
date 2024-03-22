@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
-import {
-    CircularProgress,
-} from "@mui/material";
+import Snackbar from "@mui/material/Snackbar";
 
 const PointPicker = ({ src }) => {
     const { 
         imageList, 
         imageIndex, 
-        gcpPath, 
         flaskUrl, 
-        sliderMarks, 
         imageViewerLoading,
         selectedSensorGCP,
         selectedPlatformGCP
@@ -21,6 +17,7 @@ const PointPicker = ({ src }) => {
         setImageViewerLoading
     } = useDataSetters();
     
+    const [submitError, setSubmitError] = useState("");
     const [pointPosition, setPointPosition] = useState({ x: null, y: null });
 
     const CustomMark = ({ color }) => (
@@ -50,6 +47,7 @@ const PointPicker = ({ src }) => {
                 console.log(result.message); // or handle the success message however you like
             } else {
                 console.error("Error saving data:", result.message); // or handle the error however you like
+                setSubmitError("Error saving data: ", result.message);
             }
         } catch (error) {
             console.error("Network error:", error);
@@ -205,6 +203,12 @@ const PointPicker = ({ src }) => {
                     }}
                 />
             )}
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </div>
     );
 };

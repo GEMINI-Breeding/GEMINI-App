@@ -14,7 +14,7 @@ import {
     LinearProgress,
     IconButton
 } from "@mui/material";
-
+import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
 
 const OrthoModal = () => {
@@ -46,6 +46,7 @@ const OrthoModal = () => {
         setProcessRunning
     } = useDataSetters();
 
+    const [submitError, setSubmitError] = useState("");
     // Process sliderMarks to check the label value for pointX and pointY
     const labeledGcpImages = sliderMarks.filter((mark) => mark.label.props.color !== "rgba(255,255,255,0)");
     const labeledGcpImagesCount = labeledGcpImages.length;
@@ -100,6 +101,7 @@ const OrthoModal = () => {
             .catch((error) => {
                 console.error("Error:", error);
                 setOrthoServerStatus("Error generating ortho");
+                setSubmitError("Error starting ortho generation.")
             });
     };
 
@@ -160,6 +162,12 @@ const OrthoModal = () => {
                     </Typography>
                 )}
             </DialogContent>
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </Dialog>
     );
 };
