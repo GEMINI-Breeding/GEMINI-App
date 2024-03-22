@@ -1,21 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box } from "@mui/material";
 import Grid from "@mui/material/Grid";
-import List from "@mui/material/List";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
-import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CircularProgress from "@mui/material/CircularProgress";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { NestedSection, FolderTab, FolderTabs } from "./Processing/CamerasAccordion";
+import { NestedSection } from "./Processing/CamerasAccordion";
 
 import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 
 import useTrackComponent from "../../../useTrackComponent";
+import Snackbar from "@mui/material/Snackbar";
 
 function AerialDataPrep() {
     useTrackComponent("OrthoPrep");
@@ -24,28 +18,19 @@ function AerialDataPrep() {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
-        dateOptionsGCP,
         flaskUrl,
-        imageList,
-        isImageViewerOpen,
         selectedYearGCP,
         selectedExperimentGCP,
-        selectedSensorGCP,
-        selectedPlatformGCP,
         aerialPrepTab
     } = useDataState();
 
     const {
         setSelectedDateGCP,
-        setDateOptionsGCP,
-        setImageList,
-        setGcpPath,
-        setSidebarCollapsed,
-        setTotalImages,
         setIsImageViewerOpen,
         setSelectedSensorGCP,
-        setSelectedPlatformGCP,
     } = useDataSetters();
+
+    const [submitError, setSubmitError] = useState("");
 
     // processing images and existing gcps
     const handleProcessImages = useHandleProcessImages();
@@ -72,6 +57,17 @@ function AerialDataPrep() {
         });
         return rowData;
     };
+
+    useEffect(() => {
+        console.log('sensorData has changed:', sensorData);
+    }, [sensorData]);
+
+    useEffect(() => {
+        if (selectedDateRef.current !== selectedDateGCP) {
+            handleProcessImages();
+            selectedDateRef.current = selectedDateGCP;
+        }
+    }, [selectedDateGCP]);
 
     const handleOptionClick = (sensor, option) => {
         if (option.completed !== 2) {
@@ -154,6 +150,7 @@ function AerialDataPrep() {
                                                 error
                                             );
                                             ortho = false; // there are images, but no processed .tif files
+                                            setSubmitError(`Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}`)
                                         }
                                     }
                                 } else {
@@ -176,6 +173,7 @@ function AerialDataPrep() {
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching Raw data:", error);
+                    setSubmitError("Could not fetch data from date ", error)
                 }
             }
         };
@@ -221,6 +219,13 @@ function AerialDataPrep() {
                     />
                 ))
             )}
+
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </Grid>
     );
 }

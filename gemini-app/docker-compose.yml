@@ -5,7 +5,7 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     container_name: train
     volumes:
-      - /home/gemini/mnt/d/GEMINI-App-Data:/app/mnt
+      - /home/gemini/mnt/d:/app/mnt
     deploy:
       resources:
         reservations:
@@ -17,11 +17,11 @@ services:
     command: ["tail", "-f", "/dev/null"]
 
   service-2:
-    image: gemini_opcuda_86:v2.7
+    image: gemini_opcuda_86:v3.1
     container_name: locate-extract
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - /home/gemini/mnt/d/GEMINI-App-Data:/app/mnt
+      - /home/gemini/mnt/d:/app/mnt
     deploy:
       resources:
         reservations:
