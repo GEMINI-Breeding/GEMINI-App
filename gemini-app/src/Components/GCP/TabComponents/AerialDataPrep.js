@@ -68,28 +68,6 @@ function AerialDataPrep() {
             selectedDateRef.current = selectedDateGCP;
         }
     }, [selectedDateGCP]);
-    const [sensorData, setSensorData] = useState(null);
-    const CustomComponent = {
-        ortho: ImageViewer
-    };
-
-    // included aeriel-based platforms
-    const includedPlatforms = ["Drone", "Phone"];
-
-    // columns to render
-    let columns = [
-        { label: "Date", field: "date" },
-        { label: "Orthomosaic", field: "ortho", actionType: "ortho", actionLabel: "Start" },
-    ];
-
-    // row data for nested section
-    const constructRowData = (item, columns) => {
-        const rowData = {};
-        columns.forEach(column => {
-            rowData[column.field] = item[column.field];
-        });
-        return rowData;
-    };
 
     const handleOptionClick = (sensor, option) => {
         if (option.completed !== 2) {
