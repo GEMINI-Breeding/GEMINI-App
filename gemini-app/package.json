@@ -15,6 +15,7 @@
         "@mui/icons-material": "^5.14.1",
         "@mui/material": "^5.14.2",
         "@mui/x-charts": "^6.18.7",
+        "@mui/x-data-grid": "^6.19.8",
         "@testing-library/jest-dom": "^5.17.0",
         "@testing-library/react": "^13.4.0",
         "@testing-library/user-event": "^13.5.0",
@@ -22,7 +23,7 @@
         "@urbica/react-map-gl": "^1.16.2",
         "concurrently": "^8.2.1",
         "create-react-app": "^5.0.1",
-        "deck.gl": "^8.9.22",
+        "deck.gl": "^8.9.35",
         "formik": "^2.4.5",
         "geotiff": "^2.0.7",
         "luma.gl": "^7.3.2",
@@ -43,9 +44,9 @@
         "build": "react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "react-scripts start",
-        "server": "/home/gemini/scratch/GEMINI-Flask-Server/run_flask_server.sh /home/gemini/mnt/d/GEMINI-App-Data 5003",
-        "gemini": "concurrently \"npm run front\"  \"npm run server\" \"docker-compose up -d\""
+        "front": "HOST=127.0.0.1 PORT=3000 react-scripts start",
+        "server": "../GEMINI-Flask-Server/run_flask_server.sh /home/GEMINI/GEMINI-App-Data 5050",
+        "gemini": "concurrently \"npm run front\"  \"npm run server\""
     },
     "eslintConfig": {
         "extends": [
