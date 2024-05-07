@@ -220,10 +220,10 @@ const FileUploadComponent = () => {
                             break;
                         }
                         const file = files.find((f) => f.name === filesToUpload[i]);
-                        console.log(file)
                         
                         if (selectedDataType === "binary") {
                             await uploadFileChunks(file, dirPath);
+                            break;
                         } else {
                             await uploadFileWithTimeout(file, dirPath, selectedDataType);
                             setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
