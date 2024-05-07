@@ -211,7 +211,7 @@ const FileUploadComponent = () => {
             const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
 
             // Step 2: Upload the files
-            const maxRetries = 3;
+            const maxRetries = 1;
             for (let i = 0; i < filesToUpload.length; i++) {
                 let retries = 0;
                 while (retries < maxRetries) {
