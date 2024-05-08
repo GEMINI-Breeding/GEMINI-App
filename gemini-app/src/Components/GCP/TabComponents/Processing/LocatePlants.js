@@ -93,7 +93,10 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
     const columns = [
         { field: 'id', headerName: 'Locations ID' },
         { field: 'model', headerName: 'Model ID Used', width: 120 },
-        { field: 'count', headerName: 'Total Stand Count', width: 135 }
+        { field: 'count', headerName: 'Total Stand Count', width: 135 },
+        { field: 'date', headerName: 'Date' },
+        { field: 'platform', headerName: 'Platform' },
+        { field: 'sensor', headerName: 'Sensor' }
     ];
     const handleModelChange = (event) => {
         const selectedID = event.target.value;
@@ -128,6 +131,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 const locate_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
                 )
+                console.log(locate_files)
                 const response = await fetch(`${flaskUrl}get_locate_info`, {
                     method: "POST",
                     headers: {
@@ -155,6 +159,15 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
             <Dialog 
                 open={open && !isLocating && !closeMenu} 
                 onClose={handleClose}
+                sx={{
+                    '& .MuiDialog-paper': {
+                        minWidth: '600px', // Set a minimum width that accommodates your DataGrid comfortably
+                        minHeight: '300px', // Set a minimum height based on your content needs
+                        maxWidth: '95%', // Optionally set a max width relative to the viewport
+                        maxHeight: '90%', // Optionally set a max height relative to the viewport
+                        overflow: 'hidden' // Manages overflow if inner contents are larger than the dialog
+                    }
+                }}
                 // maxWidth="sm"
             >
                 <DialogTitle>Locations</DialogTitle>
@@ -178,13 +191,13 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                             </Box>
                         )}
                         <Box sx={{ padding: '10px' }}>
-                            <Grid container spacing={2} alignItems="center">
+                        <Grid container spacing={2} alignItems="center" justifyContent="center">
                                 <Grid item>
                                     <Typography variant="body1">Model ID:</Typography>
                                 </Grid>
-                                <Grid item xs>
-                                    <FormControl fullWidth>
-                                        <InputLabel id="model-select-label">ID</InputLabel>
+                                <Grid>
+                                    <FormControl sx={{ width: '200px', mx: 'auto', padding: '10px' }}>
+                                        {/* <InputLabel id="model-select-label">ID</InputLabel> */}
                                         <Select
                                             labelId="model-select-label"
                                             id="model-select"
@@ -202,7 +215,12 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                 </Grid>
                             </Grid>
                         </Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'center', paddingBottom: '10px' }}>
+                        <Box sx={{
+                            display: 'flex', 
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            paddingBottom: '10px'
+                        }}>
                             <Button
                                 onClick={handleLocate}
                                 style={{
@@ -216,6 +234,9 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                 {" "}
                                 Locate
                             </Button>
+                            <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
+                                Warning: This can take up to 2 hours!
+                            </Typography>
                         </Box>
                         <AdvancedMenu
                             batchSizeLocate={batchSizeLocate}

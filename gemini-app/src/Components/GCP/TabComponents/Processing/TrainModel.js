@@ -136,6 +136,9 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const [rowsData, setRowsData] = useState([]);
     const columns = [
         { field: 'id', headerName: 'Model ID' },
+        { field: 'dates', headerName: 'Date' },
+        { field: 'platform', headerName: 'Platform' },
+        { field: 'sensor', headerName: 'Sensor' },
         { field: 'epochs', headerName: 'Epochs' },
         { field: 'batch', headerName: 'Batch Size' },
         { field: 'imgsz', headerName: 'Image Size' },
@@ -150,11 +153,8 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 const train_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
                 );
-
-                // extract relevant models with respect to the date
-                const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
-                    return dates.includes(item?.date);
-                });
+                
+                const filteredEntries = Object.entries(train_files)
                 const filteredTrainFiles = Object.fromEntries(filteredEntries);
 
                 // retrieve information of models
@@ -258,13 +258,30 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
     return (
         <>
-            <Dialog open={open && !isTraining} onClose={handleClose}>
+            <Dialog 
+                open={open && !isTraining} 
+                onClose={handleClose}
+                sx={{
+                    '& .MuiDialog-paper': {
+                        minWidth: '800px', // Set a minimum width that accommodates your DataGrid comfortably
+                        minHeight: '300px', // Set a minimum height based on your content needs
+                        maxWidth: '95%', // Optionally set a max width relative to the viewport
+                        maxHeight: '90%', // Optionally set a max height relative to the viewport
+                        overflow: 'hidden' // Manages overflow if inner contents are larger than the dialog
+                    }
+                }}
+            >
                 <DialogTitle>Training</DialogTitle>
                 {!isTraining && roverPrepTab == 0 && (
                     // Render the Train Model button and Advanced Menu
                     <>
                         {rowsData.length > 0 && (
-                            <Box sx={{ padding: '10px' }}>
+                            <Box sx={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                padding: '10px',
+                                overflow: 'auto' // Adds scrollbars if content exceeds the container size
+                            }}>
                                 <DataGrid
                                     rows={rowsData}
                                     columns={columns}
@@ -280,7 +297,12 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                 />
                             </Box>
                         )}
-                        <Box sx={{ display: 'flex', justifyContent: 'center',paddingBottom: '10px' }}>
+                        <Box sx={{
+                            display: 'flex', 
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            paddingBottom: '10px'
+                        }}>
                             <Button
                                 onClick={handleTrainModel}
                                 style={{
@@ -291,6 +313,9 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                             >
                                 Train Model
                             </Button>
+                            <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
+                                Warning: This can take up to 2 hours!
+                            </Typography>
                         </Box>
                         <AdvancedMenu
                             epochs={epochs}
