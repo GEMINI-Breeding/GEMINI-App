@@ -143,6 +143,22 @@ const OrthoModal = () => {
                             </Typography>
                         </Grid>
                     )}
+                    {/* display if orthoSetting is Low */}
+                    {orthoSetting === "Low" && (
+                        <Grid item>
+                            <Typography variant="body1" style={{ color: 'orange' }}>
+                                Warning: Ortho Generation can take up to 4 hours to complete!
+                            </Typography>
+                        </Grid>
+                    )}
+                    {/* display if orthoSetting is High */}
+                    {orthoSetting === "High" && (
+                        <Grid item>
+                            <Typography variant="body1" style={{ color: 'red' }}>
+                                Warning: Ortho Generation can take up to 8 hours to complete!
+                            </Typography>
+                        </Grid>
+                    )}
                 </Grid>
                 <br />
                 <Grid container justifyContent="center" style={{ marginTop: "20px" }}>

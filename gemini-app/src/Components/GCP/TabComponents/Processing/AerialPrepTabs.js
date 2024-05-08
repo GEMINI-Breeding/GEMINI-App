@@ -27,12 +27,13 @@ export default function AerialPrepTabs() {
     const columns = [
         { label: "Date", field: "date" },
         { label: "Orthomosaic", field: "ortho" },
-        { label: "Traits", field: "traits" },
-        { label: "Process", field: "process", actionType: "process", actionLabel: "Process" },
+        { label: "Traits", field: "traits", actionType: "traits", actionLabel: "Start"},
+        { label: "Thermal", field: "thermal", actionType: "thermal", actionLabel: "Start" },
     ];
 
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
+            let traits;
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
                     const dates = await fetchData(
@@ -64,10 +65,31 @@ export default function AerialPrepTabs() {
 
                                 // Try to fetch processed files to check if completed
                                 try {
-                                    const files = await fetchData(
+                                    // Check for ortho photo
+                                    const ortho_files = await fetchData(
                                         `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
-                                    completed = Number(files.some((file) => file.endsWith(".tif")));
+                                    if (platform === "Drone" || platform === "Phone") {
+                                        // check if files ending with .tif exist
+                                        completed = Number(ortho_files.some((file) => file.endsWith(".tif")));
+                                    } else {
+                                        completed = 0;
+                                    }
+
+                                    // check for traits file
+                                    const trait_files = await fetchData(
+                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    );
+                                    if (platform === "Drone" || platform === "Phone") {
+                                        // check if number of files ending with .geojson is greater than 0
+                                        const traits_length = Number(trait_files.filter((file) => file.endsWith(".geojson")).length);
+                                        if (traits_length > 0) {
+                                            traits = true;
+                                        } else {
+                                            traits = false;
+                                        }
+                                    }
+
                                 } catch (error) {
                                     console.warn(
                                         `Processed data not found or error fetching processed data for date ${date}, platform ${platform}, and sensor ${sensor}:`,
@@ -89,7 +111,8 @@ export default function AerialPrepTabs() {
                             data: updatedData[platform][sensor].map(({ date, completed }) => ({
                                 date,
                                 ortho: completed,
-                                traits: "[]", // Placeholder for traits data
+                                traits: traits,
+                                thermal: "[]", // Placeholder for thermal data
                             })),
                             columns: columns,
                         })),
@@ -114,10 +137,8 @@ export default function AerialPrepTabs() {
         aerialPrepTab,
     ]);
 
-    console.log("sensorData", sensorData);
-
     const CustomComponent = {
-        process: AskAnalyzeModal,
+        traits: AskAnalyzeModal,
     };
 
     const handleChange = (event, newValue) => {

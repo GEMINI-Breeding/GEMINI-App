@@ -57,7 +57,7 @@ const AskAnalyzeModal = ({ open, onClose, item }) => {
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth={false}>
             <DialogTitle style={{ textAlign: "center", fontWeight: "bold", fontSize: "x-large" }}>
-                {item && item.date} is not analyzed yet.
+                {item && item.date}
             </DialogTitle>
             <DialogContent>
                 Would you like to process it now?
