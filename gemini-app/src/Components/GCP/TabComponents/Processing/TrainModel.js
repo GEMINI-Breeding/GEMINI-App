@@ -142,7 +142,25 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         { field: 'epochs', headerName: 'Epochs' },
         { field: 'batch', headerName: 'Batch Size' },
         { field: 'imgsz', headerName: 'Image Size' },
-        { field: 'map', headerName: 'Performance' }
+        { field: 'map', headerName: 'Performance',
+            renderCell: (params) => (
+                <Box
+                    sx={{
+                        backgroundColor: '#add8e6',
+                        color: 'black',
+                        padding: '6px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        width: '100%',
+                        height: '100%',
+                    }}
+                    >
+                    {params.value}
+                </Box>
+            ),
+         }
     ];
 
     // For data grid formation
@@ -189,46 +207,53 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                     `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                 );
                 for (const date of dates) {
-                    const platforms = await fetchData(
-                        `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
-                    );
-                    if (date.includes("Training")) {
-                        continue;
-                    }
-
-                    for (const platform of platforms) {
-                        const sensors = await fetchData(
-                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                    try {
+                        const platforms = await fetchData(
+                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
-
-                        for (const sensor of sensors) {
-                            const traits = await fetchData(
-                                `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels`
-                            );
-                            for (const trait of traits) {
-                                if (!updatedData[trait]) {
-                                    updatedData[trait] = {};
+                        if (date.includes("Training")) {
+                            continue;
+                        }
+            
+                        for (const platform of platforms) {
+                            try {
+                                const sensors = await fetchData(
+                                    `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                                );
+            
+                                for (const sensor of sensors) {
+                                    try {
+                                        const traits = await fetchData(
+                                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels`
+                                        );
+                                        for (const trait of traits) {
+                                            if (!updatedData[trait]) {
+                                                updatedData[trait] = {};
+                                            }
+                                            if (!updatedData[trait][platform]) {
+                                                updatedData[trait][platform] = {};
+                                            }
+                                            if (!updatedData[trait][platform][sensor]) {
+                                                updatedData[trait][platform][sensor] = [];
+                                            }
+                                            updatedData[trait][platform][sensor].push({ date });
+                                        }
+                                    } catch (err) {
+                                        console.error("Error fetching trait data:", err);
+                                    }
                                 }
-                                if (!updatedData[trait][platform]) {
-                                    updatedData[trait][platform] = {};
-                                }
-                                if (!updatedData[trait][platform][sensor]) {
-                                    updatedData[trait][platform][sensor] = [];
-                                }
-                                updatedData[trait][platform][sensor].push({ date });
+                            } catch (err) {
+                                console.error("Error fetching sensor data:", err);
                             }
                         }
+                    } catch (err) {
+                        console.error("Error fetching platform data:", err);
                     }
                 }
-                const processedData = Object.keys(updatedData)
-                    .filter(key => key.includes(`${selectRoverTrait} Detection`)) // Only keep keys that match the trait detection
-                    .reduce((acc, key) => {
-                        acc[key] = updatedData[key];
-                        return acc;
-                    }, {});
-                setUpdatedDataState(processedData);
-            } catch(error) {
-                console.error("Error fetching model information: ", error)
+                console.log("Processed data: ", updatedData);
+                setUpdatedDataState(updatedData);
+            } catch (err) {
+                console.error("Error fetching initial date data:", err);
             }
         };
         fetchParamsAndUpdate();
@@ -256,6 +281,11 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         }
     }, [updatedDataState, selectRoverTrait, selections.platform, selections.sensor]);
 
+    // useEffect(() => {
+    //     console.log("updatedDataState: ", updatedDataState);
+    //     // console.log("selections", selections)
+    // }, [updatedDataState, selections]);
+
     return (
         <>
             <Dialog 
@@ -263,7 +293,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 onClose={handleClose}
                 sx={{
                     '& .MuiDialog-paper': {
-                        minWidth: '800px', // Set a minimum width that accommodates your DataGrid comfortably
+                        minWidth: '300px', // Set a minimum width that accommodates your DataGrid comfortably
                         minHeight: '300px', // Set a minimum height based on your content needs
                         maxWidth: '95%', // Optionally set a max width relative to the viewport
                         maxHeight: '90%', // Optionally set a max height relative to the viewport
@@ -280,7 +310,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                 display: 'flex',
                                 flexDirection: 'column',
                                 padding: '10px',
-                                overflow: 'auto' // Adds scrollbars if content exceeds the container size
+                                overflow: 'auto'
                             }}>
                                 <DataGrid
                                     rows={rowsData}
@@ -314,7 +344,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                 Train Model
                             </Button>
                             <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
-                                Warning: This can take up to 2 hours!
+                                Warning: This can take a while!
                             </Typography>
                         </Box>
                         <AdvancedMenu
@@ -379,17 +409,27 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                         </Select>
                                     </FormControl>
                                 </Grid>
-                                <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
-                                    <Button
-                                        onClick={handleTrainModel}
-                                        style={{
-                                            backgroundColor: "#1976d2",
-                                            color: "white",
-                                            borderRadius: "4px",
-                                        }}
-                                    >
-                                        Train Model
-                                    </Button>
+                                <Grid item xs={12} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Box sx={{
+                                        display: 'flex', 
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        paddingBottom: '10px'
+                                    }}>
+                                        <Button
+                                            onClick={handleTrainModel}
+                                            style={{
+                                                backgroundColor: "#1976d2",
+                                                color: "white",
+                                                borderRadius: "4px",
+                                            }}
+                                        >
+                                            Train Model
+                                        </Button>
+                                        <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
+                                            Warning: This can take a while!
+                                        </Typography>
+                                    </Box>
                                 </Grid>
                             </Grid>
                         </Box>

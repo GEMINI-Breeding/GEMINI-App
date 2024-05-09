@@ -75,7 +75,7 @@ export default function RoverPrepTabs() {
     const [extractMenuOpen, setExtractMenuOpen] = useState(false);
     const handleOpenExtractMenu = () => { setExtractMenuOpen(true); };
     const handleCloseExtractMenu = () => { setExtractMenuOpen(false); };
-    
+
     // use effects
     useEffect(() => {
         let newColumns;
@@ -97,19 +97,21 @@ export default function RoverPrepTabs() {
             case 2: // For "Teach Traits"
                 newColumns = [
                     { label: "Model", field: "model" },
-                    { label: "Label Sets", field: "sets" },
-                    { label: "Performance", field: "map" },
+                    { label: "Date(s)", field: "sets" },
+                    { label: "Platform", field: "platform"},
+                    { label: "Sensor", field: "sensor"},
                     { label: "Batch Size", field: "batch" },
                     { label: "Epochs", field: "epochs" },
                     { label: "Image Size", field: "imgsz" },
+                    { label: "Performance", field: "map" },
                 ];
                 break;
             case 3: // For "Extract Traits"
                 newColumns = [
                     { label: "Predictions", field: "date"},
+                    { label: "Localization Date", field: "locate"},
                     { label: "Trait Model ID", field: "model"},
                     { label: "Locations ID", field: "id"},
-                    { label: "Localization Date", field: "locate"}
                 ];
                 break;
             default:
@@ -237,6 +239,8 @@ export default function RoverPrepTabs() {
                                                         const modelId = match[1];
                                                         const modelData = {
                                                             model: String(modelId),
+                                                            platform: String(platform),
+                                                            sensor: String(sensor),
                                                             sets: modelInfo.dates.map(date => String(date)),
                                                             batch: String(modelInfo.batch),
                                                             epochs: String(modelInfo.epochs),
@@ -265,12 +269,12 @@ export default function RoverPrepTabs() {
                                                 `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
                                             const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
-                                            console.log(geojsons)
                                             
                                             if (filteredFiles.length >= 1) {
                                                 const extract_files = await fetchData(
                                                     `${flaskUrl}check_runs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                                 );
+                                                console.log(extract_files)
                                                 locate = extract_files[selectRoverTrait].locate;
                                                 model = extract_files[selectRoverTrait].model;
                                                 const id = extract_files[selectRoverTrait].id
@@ -310,9 +314,6 @@ export default function RoverPrepTabs() {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            <Typography variant="h4" component="h2" align="center">
-                Ground Data Preparation
-            </Typography>
             <br />
 
             <Grid item style={{ width: "100%" }}>

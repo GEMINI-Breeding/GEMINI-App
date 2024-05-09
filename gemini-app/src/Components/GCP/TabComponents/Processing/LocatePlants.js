@@ -131,7 +131,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 const locate_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
                 )
-                console.log(locate_files)
+
                 const response = await fetch(`${flaskUrl}get_locate_info`, {
                     method: "POST",
                     headers: {
@@ -162,7 +162,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 sx={{
                     '& .MuiDialog-paper': {
                         minWidth: '600px', // Set a minimum width that accommodates your DataGrid comfortably
-                        minHeight: '300px', // Set a minimum height based on your content needs
+                        minHeight: '200px', // Set a minimum height based on your content needs
                         maxWidth: '95%', // Optionally set a max width relative to the viewport
                         maxHeight: '90%', // Optionally set a max height relative to the viewport
                         overflow: 'hidden' // Manages overflow if inner contents are larger than the dialog
@@ -235,7 +235,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                 Locate
                             </Button>
                             <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
-                                Warning: This can take up to 2 hours!
+                                Warning: This can take a while!
                             </Typography>
                         </Box>
                         <AdvancedMenu
