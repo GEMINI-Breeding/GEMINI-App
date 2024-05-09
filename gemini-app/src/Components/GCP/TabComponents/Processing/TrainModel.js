@@ -344,7 +344,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                 Train Model
                             </Button>
                             <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
-                                Warning: This can take a while!
+                                Warning: This can take up to 2 hours!
                             </Typography>
                         </Box>
                         <AdvancedMenu
@@ -427,7 +427,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                                             Train Model
                                         </Button>
                                         <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
-                                            Warning: This can take a while!
+                                            Warning: This can take up to 2 hours!
                                         </Typography>
                                     </Box>
                                 </Grid>
