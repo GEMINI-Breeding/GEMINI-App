@@ -31,7 +31,8 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
         batchSizeLocate,
         isLocating,
         closeMenu,
-        processRunning
+        processRunning,
+        roverPrepTab
     } = useDataState();
 
     const {
@@ -93,10 +94,29 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
     const columns = [
         { field: 'id', headerName: 'Locations ID' },
         { field: 'model', headerName: 'Model ID Used', width: 120 },
-        { field: 'count', headerName: 'Total Stand Count', width: 135 },
         { field: 'date', headerName: 'Date' },
         { field: 'platform', headerName: 'Platform' },
-        { field: 'sensor', headerName: 'Sensor' }
+        { field: 'sensor', headerName: 'Sensor' },
+        // { field: 'count', headerName: 'Total Stand Count', width: 135 },
+        { field: 'performance', headerName: 'Performance',
+            renderCell: (params) => (
+                <Box
+                    sx={{
+                        backgroundColor: '#add8e6',
+                        color: 'black',
+                        padding: '6px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        width: '100%',
+                        height: '100%',
+                    }}
+                    >
+                    {params.value}
+                </Box>
+            ),
+         }
     ];
     const handleModelChange = (event) => {
         const selectedID = event.target.value;
@@ -152,7 +172,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
             }
         };
         fetchDataAndUpdate();
-    }, [processRunning]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, processRunning, roverPrepTab]);
 
     return (
         <>
@@ -235,7 +255,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                 Locate
                             </Button>
                             <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
-                                Warning: This can take a while!
+                                Warning: This can take up to 4 hours!
                             </Typography>
                         </Box>
                         <AdvancedMenu
