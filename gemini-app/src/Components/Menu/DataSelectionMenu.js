@@ -35,7 +35,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     };
 
     useEffect(() => {
-        getData(`${flaskUrl}list_dirs_nested/Processed/`)
+        getData(`${flaskUrl}list_dirs_nested_processed`)
             .then((data) => setNestedStructure(data))
             .catch((error) => console.error("Error fetching nested structure:", error));
 
@@ -104,8 +104,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             } else {
                 newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-P4-RGB-Pyramid.tif`;
             }
-            const newGeoJsonPath = `${flaskUrl}files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Results/${selectedValues["date"]}-${selectedValues["platform"]}-Traits-WGS84.geojson`;
-
+            const newGeoJsonPath = `${flaskUrl}files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["date"]}-${selectedValues["platform"]}-${selectedValues["sensor"]}-Traits-WGS84.geojson`;
+            console.log(newGeoJsonPath)
             onTilePathChange(newTilePath);
             onGeoJsonPathChange(newGeoJsonPath);
 
