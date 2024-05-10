@@ -157,9 +157,6 @@ export default function AerialPrepTabs() {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            <Typography variant="h4" component="h2" align="center">
-                Aerial Data Preparation
-            </Typography>
             <br />
             <Grid item style={{ width: "100%" }}>
                 <Box
