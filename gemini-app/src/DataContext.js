@@ -179,6 +179,10 @@ export const DataProvider = ({ children }) => {
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
     const [currentOrthoProgress, setCurrentOrthoProgress] = useState(0);
 
+    // Table States
+    const [isTableMenuInitiated, setIsTableMenuInitiated] = useState(false);
+    const [tableViewTabNo, setTableViewTabNo] = useState(0);
+
     // Image Query State
     const [imageDataQuery, setImageDataQuery] = useState([]);
     const [selectedDateQuery, setSelectedDateQuery] = useState(null);
@@ -315,6 +319,10 @@ export const DataProvider = ({ children }) => {
                 orthoServerStatus,
                 currentOrthoProgress,
 
+                // TableMenu State
+                isTableMenuInitiated,
+                tableViewTabNo,
+
                 // Image Query State
                 imageDataQuery,
                 selectedDateQuery,
@@ -449,6 +457,10 @@ export const DataProvider = ({ children }) => {
                     setIsOrthoProcessing,
                     setOrthoServerStatus,
                     setCurrentOrthoProgress,
+
+                    // TableMenu State
+                    setIsTableMenuInitiated,
+                    setTableViewTabNo,
 
                     // Image Query State
                     setImageDataQuery,

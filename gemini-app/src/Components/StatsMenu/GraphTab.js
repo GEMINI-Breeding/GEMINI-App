@@ -18,7 +18,7 @@ const GraphTab = () => {
                 fontSize: "24px",
             }}
         >
-            <img src="/graph_sample.jpg" alt="Place holder for Graph Tab" style={{ maxWidth: "100%" }}/>
+            {/* <img src="/graph_sample.jpg" alt="Place holder for Graph Tab" style={{ maxWidth: "100%" }}/> */}
         </div>
     );
 }

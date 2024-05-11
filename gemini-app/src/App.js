@@ -21,7 +21,7 @@ import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/Loc
 import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
 import { OrthoProgressBar } from "./Components/GCP/OrthoModal";
 import FileUploadComponent from "./Components/Menu/FileUpload";
-import TableMenuMain from "./Components/TableMenu/main";
+import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
 function App() {
@@ -115,7 +115,7 @@ function App() {
             case 1:
                 return <TabbedPrepUI />;
             case 2:
-                return <TableMenuMain />;
+                return <StatsMenuMain />;
             case 3:
                 return <FileUploadComponent />;
             case 4:
