@@ -21,6 +21,7 @@ import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/Loc
 import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
 import { OrthoProgressBar } from "./Components/GCP/OrthoModal";
 import FileUploadComponent from "./Components/Menu/FileUpload";
+import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
 function App() {
@@ -114,23 +115,7 @@ function App() {
             case 1:
                 return <TabbedPrepUI />;
             case 2:
-                return (
-                    <div
-                        style={{
-                            position: "absolute",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%, -50%)",
-                            color: "black",
-                            backgroundColor: "white",
-                            padding: "20px",
-                            zIndex: "1000",
-                            fontSize: "24px",
-                        }}
-                    >
-                        Placeholder for Stats View
-                    </div>
-                );
+                return <StatsMenuMain />;
             case 3:
                 return <FileUploadComponent />;
             case 4:
