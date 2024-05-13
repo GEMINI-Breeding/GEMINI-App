@@ -65,7 +65,7 @@ export const MapOrthoSwitcher = () => {
         console.log("Selected date:", selectedDate);
         if (selectedDate) {
             setPrepOrthoImagePath(
-                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/RGB/${selectedDate}-P4-RGB-Pyramid.tif`
+                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/RGB/${selectedDate}-RGB-Pyramid.tif`
             );
         }
     };

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
-import AskAnalyzeModal from "./AskAnalyzeModal";
+import AskDroneAnalyzeModal from "./AskDroneAnalyzeModal";
 import Snackbar from "@mui/material/Snackbar";
 
 import useTrackComponent from "../../../../useTrackComponent";
@@ -115,6 +115,8 @@ export default function AerialPrepTabs() {
                                 ortho: completed,
                                 traits: traits,
                                 thermal: "[]", // Placeholder for thermal data
+                                platform: platform,
+                                sensor: sensor,
                             })),
                             columns: columns,
                         })),
@@ -140,7 +142,7 @@ export default function AerialPrepTabs() {
     ]);
 
     const CustomComponent = {
-        traits: AskAnalyzeModal,
+        traits: AskDroneAnalyzeModal,
     };
 
     const handleChange = (event, newValue) => {
