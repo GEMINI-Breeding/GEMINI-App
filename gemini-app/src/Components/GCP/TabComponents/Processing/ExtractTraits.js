@@ -333,20 +333,30 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                     </FormControl>
                                 </Grid>
                                 <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
-                                    <Button
-                                        onClick={handleExtract}
-                                        // onClick={() => {}}
-                                        style={{
-                                            backgroundColor: "#1976d2",
-                                            color: "white",
-                                            borderRadius: "4px",
-                                            marginTop: "10px",
-                                            margin: "0 auto"
-                                        }}
-                                    >
-                                        {" "}
-                                        Extract
-                                    </Button>
+                                    <Box sx={{
+                                        display: 'flex', 
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        paddingBottom: '10px'
+                                    }}>
+                                        <Button
+                                            onClick={handleExtract}
+                                            // onClick={() => {}}
+                                            style={{
+                                                backgroundColor: "#1976d2",
+                                                color: "white",
+                                                borderRadius: "4px",
+                                                marginTop: "10px",
+                                                margin: "0 auto"
+                                            }}
+                                        >
+                                            {" "}
+                                            Extract
+                                        </Button>
+                                        <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
+                                            Warning: This can take up to 8 hours!
+                                        </Typography>
+                                    </Box>
                                 </Grid>
                             </Grid>
                         </Box>

@@ -28,12 +28,11 @@ export default function AerialPrepTabs() {
         { label: "Date", field: "date" },
         { label: "Orthomosaic", field: "ortho" },
         { label: "Traits", field: "traits", actionType: "traits", actionLabel: "Start"},
-        { label: "Thermal", field: "thermal", actionType: "thermal", actionLabel: "Start" },
+        // { label: "Thermal", field: "thermal", actionType: "thermal", actionLabel: "Start" },
     ];
 
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
-            let traits;
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
                     const dates = await fetchData(
@@ -62,6 +61,7 @@ export default function AerialPrepTabs() {
 
                                 // Assume the entry is not completed by default
                                 let completed = 2;
+                                let traits = false;
 
                                 // Try to fetch processed files to check if completed
                                 try {
@@ -83,11 +83,13 @@ export default function AerialPrepTabs() {
                                     if (platform === "Drone" || platform === "Phone") {
                                         // check if number of files ending with .geojson is greater than 0
                                         const traits_length = Number(trait_files.filter((file) => file.endsWith(".geojson")).length);
+                                        console.log("date", date);
                                         if (traits_length > 0) {
                                             traits = true;
                                         } else {
                                             traits = false;
                                         }
+                                        console.log("traits", traits);
                                     }
 
                                 } catch (error) {
@@ -98,7 +100,7 @@ export default function AerialPrepTabs() {
                                 }
 
                                 // Always add the entry, but completed status depends on processed files check
-                                updatedData[platform][sensor].push({ date, completed });
+                                updatedData[platform][sensor].push({ date, completed, traits });
                             }
                         }
                     }
@@ -108,7 +110,7 @@ export default function AerialPrepTabs() {
                         title: platform,
                         nestedData: Object.keys(updatedData[platform]).map((sensor) => ({
                             summary: sensor,
-                            data: updatedData[platform][sensor].map(({ date, completed }) => ({
+                            data: updatedData[platform][sensor].map(({ date, completed, traits }) => ({
                                 date,
                                 ortho: completed,
                                 traits: traits,
@@ -155,9 +157,6 @@ export default function AerialPrepTabs() {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            <Typography variant="h4" component="h2" align="center">
-                Aerial Data Preparation
-            </Typography>
             <br />
             <Grid item style={{ width: "100%" }}>
                 <Box

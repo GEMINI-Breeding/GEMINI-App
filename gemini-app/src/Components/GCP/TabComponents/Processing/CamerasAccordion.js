@@ -24,24 +24,55 @@ const CameraAccordionContext = createContext();
 
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
     const actionHandler = handleAction || handleClickOpen;
-    const { processRunning } = useDataState();
+    const { processRunning, roverPrepTab, selectRoverTrait } = useDataState();
+
+    // Check if the column is "Performance" and apply light blue background
+    if (column.label === "Performance") {
+        return (
+            <Box sx={{ backgroundColor: '#add8e6', color: '#000', padding: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {item[column.field]}
+            </Box>
+        );
+    }
 
     if (column.actionType) {
         if (item[column.field] === false) {
-            const buttonStyle = {
-                background: processRunning ? "grey" : "#1976d2",
-                color: "white",
-                borderRadius: "4px",
-            };
-            return (
-                <Button
-                    onClick={() => !processRunning && actionHandler(item, column)}
-                    style={buttonStyle}
-                    disabled={processRunning}
-                >
-                    {column.actionLabel || "Action"}
-                </Button>
-            );
+            let buttonStyle;
+            if (roverPrepTab == 1) {
+                buttonStyle = {
+                    background: processRunning || selectRoverTrait === '' ? "grey" : "#1976d2",
+                    color: "white",
+                    borderRadius: "4px",
+                };
+                return (
+                    <>
+                        <Button
+                            onClick={() => !processRunning && actionHandler(item, column)}
+                            style={buttonStyle}
+                            disabled={processRunning || selectRoverTrait === ''}
+                        >
+                            {column.actionLabel || "Action"}
+                        </Button>
+                    </>
+                )
+            } else {
+                buttonStyle = {
+                    background: processRunning ? "grey" : "#1976d2",
+                    color: "white",
+                    borderRadius: "4px",
+                };
+                return (
+                    <>
+                        <Button
+                            onClick={() => !processRunning && actionHandler(item, column)}
+                            style={buttonStyle}
+                            disabled={processRunning}
+                        >
+                            {column.actionLabel || "Action"}
+                        </Button>
+                    </>
+                );
+            }
         } else if (item[column.field] === true) {
             return (
                 <Button
