@@ -25,13 +25,12 @@ const ImageQueryViewer = () => {
     console.log("imageQueryData", imageDataQuery);
 
     const API_ENDPOINT = `${flaskUrl}files`;
-    const imagePrefix = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}/${selectedSensorQuery}/`;
 
     // Memoize the slides and photos preparation to avoid recalculating on every render
     const slides = useMemo(
         () =>
             imageDataQuery.map((image) => ({
-                src: API_ENDPOINT + "/" + imagePrefix + image.imageName,
+                src: API_ENDPOINT + "/" + image.imageName,
                 // Add other properties like 'alt' if available
             })),
         [imageDataQuery]
@@ -40,9 +39,9 @@ const ImageQueryViewer = () => {
     const photos = useMemo(
         () =>
             imageDataQuery.map((image) => ({
-                src: API_ENDPOINT + "/" + imagePrefix + image.imageName,
-                width: 4,
-                height: 3,
+                src: API_ENDPOINT + "/" + image.imageName,
+                // width: image.width,
+                // height: image.height,
                 label: image.label,
                 imageName: image.imageName,
                 plot: image.plot,

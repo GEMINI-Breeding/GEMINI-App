@@ -79,9 +79,10 @@ const ImageSelection = () => {
             const accessions = [];
 
             geoJSON.features.forEach((feature) => {
-                const { Plot, Label } = feature.properties;
-                if (Plot && !plots.includes(Plot)) {
-                    plots.push(Plot);
+                const { Plot, plot, Label } = feature.properties;
+                const plotValue = Plot || plot; // Added because of inconsistent capitalization
+                if (plotValue && !plots.includes(plotValue)) {
+                    plots.push(plotValue);
                 }
                 if (Label && !accessions.includes(Label)) {
                     accessions.push(Label);
@@ -103,7 +104,10 @@ const ImageSelection = () => {
             case "accession":
                 return geoJSON.features.filter((feature) => queryValues.includes(feature.properties.Label));
             case "plot":
-                return geoJSON.features.filter((feature) => queryValues.includes(feature.properties.Plot));
+                return geoJSON.features.filter((feature) => {
+                    const plotValue = feature.properties.Plot || feature.properties.plot;
+                    return queryValues.includes(plotValue);
+                });
             case "rowColumn":
                 // Assuming queryValues is an array of { row, column } objects
                 return geoJSON.features.filter((feature) =>
@@ -162,6 +166,7 @@ const ImageSelection = () => {
             selectedPlatformQuery,
             selectedDateQuery,
             selectedSensorQuery,
+            selectedPlots,
             middleImage: middleImage,
         };
 
