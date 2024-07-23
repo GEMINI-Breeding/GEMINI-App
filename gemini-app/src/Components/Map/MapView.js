@@ -54,8 +54,8 @@ export default function MapView() {
     useTrackComponent("MapView");
 
     const INITIAL_TILE_URL =
-        "http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-    const INITIAL_BOUNDS_URL = "http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}";
+        "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+    const INITIAL_BOUNDS_URL = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
 
     const {
         viewState,

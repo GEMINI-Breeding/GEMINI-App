@@ -14,7 +14,10 @@ import {
     Box,
     Typography,
     LinearProgress,
-    IconButton
+    IconButton,
+    DialogContent,
+    DialogContentText,
+    DialogActions
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
@@ -43,6 +46,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
     } = useDataSetters();
 
     // for extracting traits
+    const [error, setError] = useState(null);
     const handleExtract = async () => {
         try {
             setIsExtracting(true);
@@ -75,9 +79,11 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
             } else {
                 const errorData = await response.json();
                 console.error("Error details:", errorData);
+                throw new Error(errorData.message || "Error occurred, press Stop");
             }
         } catch (error) {
             console.error("There was an error sending the request", error)
+            setError(error.message);
         }
     };
     const handleClose = () => {
@@ -327,20 +333,30 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                     </FormControl>
                                 </Grid>
                                 <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'center' }}>
-                                    <Button
-                                        onClick={handleExtract}
-                                        // onClick={() => {}}
-                                        style={{
-                                            backgroundColor: "#1976d2",
-                                            color: "white",
-                                            borderRadius: "4px",
-                                            marginTop: "10px",
-                                            margin: "0 auto"
-                                        }}
-                                    >
-                                        {" "}
-                                        Extract
-                                    </Button>
+                                    <Box sx={{
+                                        display: 'flex', 
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        paddingBottom: '10px'
+                                    }}>
+                                        <Button
+                                            onClick={handleExtract}
+                                            // onClick={() => {}}
+                                            style={{
+                                                backgroundColor: "#1976d2",
+                                                color: "white",
+                                                borderRadius: "4px",
+                                                marginTop: "10px",
+                                                margin: "0 auto"
+                                            }}
+                                        >
+                                            {" "}
+                                            Extract
+                                        </Button>
+                                        <Typography variant="body2" sx={{ color: 'orange', marginTop: '8px' }}>
+                                            Warning: This can take up to 8 hours!
+                                        </Typography>
+                                    </Box>
                                 </Grid>
                             </Grid>
                         </Box>
@@ -446,7 +462,7 @@ function ExtractProgressBar({ currentExtractProgress, onStopExtracting, onDoneEx
         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
                 <Typography variant="body2" sx={{ marginRight: "10px" }}>
-                    Locating in Progress...
+                    Extracting in Progress...
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
                     <Box sx={{ width: "100%", mr: 1 }}>

@@ -17,10 +17,12 @@ import {
 } from "@mui/material";
 import { useDropzone } from "react-dropzone";
 import { useFormik } from "formik";
-import { useDataState } from "../../DataContext";
+import { useDataState, useDataSetters } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
 import Box from "@mui/material/Box";
+
+let uploadedSizeSoFar = 0;
 
 // Helper function to map file types to human-readable descriptions
 const getFileTypeDescription = (fileType) => {
@@ -28,6 +30,7 @@ const getFileTypeDescription = (fileType) => {
         "image/*": "Image files",
         ".csv": "CSV files",
         ".txt": "Text files",
+        ".bin/*": "Binary files",
         "*": "All files",
         // Add more mappings as needed
     };
@@ -41,7 +44,8 @@ const FileUploadComponent = () => {
     useTrackComponent("FileUploadComponent");
 
     // State hooks for various component states
-    const { flaskUrl } = useDataState();
+    const { flaskUrl, extractingBinary } = useDataState();
+    const { setExtractingBinary } = useDataSetters();
     const [isLoading, setIsLoading] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [selectedDataType, setSelectedDataType] = useState("image");
@@ -51,6 +55,23 @@ const FileUploadComponent = () => {
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
     const [currentInputValues, setCurrentInputValues] = useState({});
+    const [dirPath, setDirPath] = useState("");
+
+    useEffect(() => {
+        console.log(selectedDataType);
+    }, [selectedDataType]);
+
+    useEffect(() => {
+        if (extractingBinary) {
+            const intervalId = setInterval(async () => {
+                const processedFilesCount = await getBinaryProgress(dirPath);
+                setProgress(Math.round((processedFilesCount / files.length) * 100));
+            }, 1000);
+
+            return () => clearInterval(intervalId);
+        }
+    }, [extractingBinary, dirPath, files.length]);
+    
 
     // Effect to fetch nested directories on component mount
     useEffect(() => {
@@ -78,10 +99,11 @@ const FileUploadComponent = () => {
     };
 
     // Function to upload a file with a timeout
-    const uploadFileWithTimeout = async (file, dirPath, timeout = 10000) => {
+    const uploadFileWithTimeout = async (file, dirPath, dataType, timeout = 30000) => {
         const formData = new FormData();
         formData.append("files", file);
         formData.append("dirPath", dirPath);
+        formData.append("dataType", dataType);
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
 
@@ -91,13 +113,136 @@ const FileUploadComponent = () => {
                 body: formData,
                 signal: controller.signal,
             });
+            console.log(response)
             clearTimeout(id);
             return response;
         } catch (error) {
+            console.log("Upload error:", error);
             clearTimeout(id);
             throw error;
         }
     };
+
+    const uploadChunkWithTimeout = async (chunk, index, totalChunks, fileIdentifier, dirPath, timeout = 10000) => {
+        const formData = new FormData();
+        formData.append("fileChunk", chunk);
+        formData.append("chunkIndex", index);
+        formData.append("totalChunks", totalChunks);
+        formData.append("fileIdentifier", fileIdentifier);
+        formData.append("dirPath", dirPath);
+
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(`${flaskUrl}upload_chunk`, {
+                method: "POST",
+                body: formData,
+                signal: controller.signal,
+            });
+            clearTimeout(id);
+            return response;
+        } catch(error) {
+            console.log("Upload error:", error);
+            clearTimeout(id);
+            throw error;
+        }
+    };
+
+    const getBinaryProgress = async (dirPath) => {
+        try {
+            const response = await fetch(`${flaskUrl}get_binary_progress`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dirPath }),
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                return data.progress;
+            } else {
+                console.error("Failed to fetch progress");
+                return 0;
+            }
+        } catch (error) {
+            console.error("Error reading text file:", error);
+            return 0; // Return 0 if there's an error
+        }
+    };
+
+    const extractBinaryFiles = async (files, dirPath) => {
+        setExtractingBinary(true);
+        setDirPath(dirPath);
+
+        try {
+            const response = await fetch(`${flaskUrl}extract_binary_file`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ files, dirPath }),
+            });
+
+            if (response.ok) {
+                console.log("Binary file extraction started");
+                const result = await response.json();
+                setExtractingBinary(false);
+                console.log("Extraction complete");
+            } else {
+                console.error("Failed to extract binary file");
+                setExtractingBinary(false);
+            }
+        } catch (error) {
+            console.error("Error extracting binary file:", error);
+            setExtractingBinary(false);
+        }
+    };
+
+    const uploadFileChunks = async (file, dirPath, uploadLength) => {
+        const chunkSize = 0.5 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const fileIdentifier = file.name;
+        let temp = 0;
+
+        const uploadedChunks = await checkUploadedChunks(fileIdentifier, dirPath);
+        console.log("Uploaded chunks:", uploadedChunks);
+        for (let index = uploadedChunks; index < totalChunks; index++) {
+            if (cancelUploadRef.current) {
+                break;
+            }
+            const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
+            await uploadChunkWithTimeout(chunk, index, totalChunks, fileIdentifier, dirPath)
+                .catch(error => {
+                console.error("Failed to upload chunk", index, error);
+                throw error; // Stop upload process if any chunk fails
+                });
+        
+            // Update progress here.
+            temp = uploadedSizeSoFar + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
+            setProgress(temp);
+        }
+        uploadedSizeSoFar = temp
+    };
+
+    const checkUploadedChunks = async (fileIdentifier, dirPath) => {
+        try {
+          const response = await fetch(`${flaskUrl}check_uploaded_chunks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileIdentifier, dirPath }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            // Assuming the server returns a JSON object with the count of uploaded chunks
+            return data.uploadedChunksCount;
+          } else {
+            console.error("Failed to retrieve uploaded chunks count");
+            return 0; // If unable to retrieve, assume no chunks uploaded
+          }
+        } catch (error) {
+          console.error("Error checking uploaded chunks:", error);
+          return 0; // On error, assume no chunks uploaded
+        }
+      }
 
     // Formik hook for form state management and validation
     const formik = useFormik({
@@ -129,6 +274,7 @@ const FileUploadComponent = () => {
             // Step 1: Check which files need to be uploaded
             const fileList = files.map((file) => file.name);
             const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
+            console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
             const maxRetries = 3;
@@ -139,14 +285,20 @@ const FileUploadComponent = () => {
                         if (cancelUploadRef.current) {
                             break;
                         }
-
                         const file = files.find((f) => f.name === filesToUpload[i]);
-                        await uploadFileWithTimeout(file, dirPath);
-                        setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                        
+                        if (selectedDataType === "binary") {
+                            await uploadFileChunks(file, dirPath, filesToUpload.length);
+                            break;
+                        } else {
+                            await uploadFileWithTimeout(file, dirPath, selectedDataType);
+                            setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                        }
                         break;
                     } catch (error) {
                         if (retries === maxRetries - 1) {
                             alert(`Failed to upload file: ${filesToUpload[i]}`);
+                            console.log(`Failed to upload file: ${filesToUpload[i]}`, error);
                             break;
                         }
                         retries++;
@@ -154,6 +306,14 @@ const FileUploadComponent = () => {
                 }
             }
 
+            // Step 3: If binary file, extract the contents
+            if (selectedDataType === "binary") {
+                setProgress(0);
+                console.log("Files to extract:", filesToUpload);
+                await extractBinaryFiles(filesToUpload, dirPath);
+            }
+            uploadedSizeSoFar = 0;
+            setProgress(0);
             setIsUploading(false);
             setFiles([]);
         },
@@ -244,6 +404,7 @@ const FileUploadComponent = () => {
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: handleFileChange,
         accept: dataTypes[selectedDataType].fileType,
+        maxFiles: Infinity,
     });
 
     // Function to clear the files from the dropzone
@@ -350,7 +511,9 @@ const FileUploadComponent = () => {
                     )}
                     {isUploading && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
-                            <Typography>Uploading...</Typography>
+                            <Typography>
+                                {extractingBinary ? "Extracting Binary File..." : "Uploading..."} {`${Math.round(progress)}%`}
+                            </Typography>
                             <LinearProgress variant="determinate" value={progress} />
                             <Button
                                 variant="contained"

@@ -6,6 +6,7 @@ import IconButton from "@mui/material/IconButton";
 import HelpIcon from "@mui/icons-material/Help";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
+import Snackbar from "@mui/material/Snackbar";
 
 import { useDataSetters, useDataState } from "./DataContext";
 import CollapsibleSidebar from "./Components/Menu/CollapsibleSidebar";
@@ -18,11 +19,14 @@ import HelpPane from "./Components/Help/HelpPane";
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
 import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
+import { OrthoProgressBar } from "./Components/GCP/OrthoModal";
 import FileUploadComponent from "./Components/Menu/FileUpload";
+import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 
 function App() {
     const [helpPaneOpen, setHelpPaneOpen] = useState(false);
+    const [submitError, setSubmitError] = useState("");
 
     const toggleHelpPane = () => {
         setHelpPaneOpen(!helpPaneOpen);
@@ -44,6 +48,8 @@ function App() {
         processRunning,
         isExtracting,
         currentExtractProgress,
+        isOrthoProcessing,
+        currentOrthoProgress
     } = useDataState();
 
     const {
@@ -64,7 +70,9 @@ function App() {
         setProcessRunning,
         setIsExtracting,
         setCurrentExtractProgress,
-        setCloseMenu
+        setCloseMenu,
+        setCurrentOrthoProgress,
+        setIsOrthoProcessing
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -107,23 +115,7 @@ function App() {
             case 1:
                 return <TabbedPrepUI />;
             case 2:
-                return (
-                    <div
-                        style={{
-                            position: "absolute",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%, -50%)",
-                            color: "black",
-                            backgroundColor: "white",
-                            padding: "20px",
-                            zIndex: "1000",
-                            fontSize: "24px",
-                        }}
-                    >
-                        Placeholder for Stats View
-                    </div>
-                );
+                return <StatsMenuMain />;
             case 3:
                 return <FileUploadComponent />;
             case 4:
@@ -210,6 +202,50 @@ function App() {
         }
     })();
 
+    // FOR ORTHO START
+    useEffect(() => {
+        let interval;
+        if (isOrthoProcessing) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_ortho_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentOrthoProgress(data.ortho)
+                    } else {
+                        console.error("Failed to fetch ortho progress");
+                    }
+                } catch (error) {
+                    console.error("Error fetching ortho progress", error);
+                    setSubmitError("Error getting ortho progress.")
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isOrthoProcessing, flaskUrl]);
+
+    const handleStopOrtho = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_odm`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("ODM stopped");
+                setIsOrthoProcessing(false);
+                setProcessRunning(false);
+                setCurrentOrthoProgress(0);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping ODM", errorData);
+                setSubmitError("Error stopping ODM.")
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    // FOR ORTHO END
+
     // FOR TRAINING START
     const handleStopTraining = async () => {
         try {
@@ -223,6 +259,7 @@ function App() {
             setProcessRunning(false);
         } catch (error) {
             console.error("Error:", error);
+            setSubmitError("Error stopping training.")
         }
     };
     
@@ -251,6 +288,7 @@ function App() {
                         setTrainingData(data);
                     } else {
                         console.error("Failed to fetch training progress");
+                        setSubmitError("Error getting training progress.")
                     }
                 } catch (error) {
                     console.error("Error fetching training progress", error);
@@ -275,6 +313,7 @@ function App() {
                 // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping locating", errorData);
+                setSubmitError("Error stopping locating.")
             }
         } catch (error) {
             console.error("Error:", error);
@@ -293,6 +332,7 @@ function App() {
                         setCurrentLocateProgress(data.locate)
                     } else {
                         console.error("Failed to fetch locate progress");
+                        setSubmitError("Error fetching locate progress.")
                     }
                 } catch (error) {
                     console.error("Error fetching locate progress", error);
@@ -317,6 +357,7 @@ function App() {
                 // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping extracting", errorData);
+                setSubmitError("Error stopping extraction.")
             }
         } catch (error) {
             console.error("Error:", error);
@@ -336,6 +377,7 @@ function App() {
                 // Handle error response
                 const errorData = await response.json();
                 console.error("Error finishing extraction", errorData);
+                setSubmitError("Error finishing extraction.")
             }
         } catch (error) {
             console.error("Error:", error);
@@ -354,6 +396,7 @@ function App() {
                         setCurrentExtractProgress(data.extract)
                     } else {
                         console.error("Failed to fetch locate progress");
+                        setSubmitError("Error fetching locate progress.")
                     }
                 } catch (error) {
                     console.error("Error fetching locate progress", error);
@@ -465,7 +508,37 @@ function App() {
                         </Box>
                     </Box>
                 )}
+
+                {/* ortho */}
+                {isOrthoProcessing &&
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <OrthoProgressBar
+                                currentOrthoProgress={currentOrthoProgress}
+                                onStopOrtho={handleStopOrtho}
+                            />
+                        </Box>
+                    </Box>
+                }
             </div>
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </ActiveComponentsProvider>
     );
 }

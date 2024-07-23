@@ -18,6 +18,7 @@ import {
 } from "@mui/material";
 import DataSelectionMenu from "./DataSelectionMenu";
 import GCPPickerSelectionMenu from "../GCP/GCPPickerSelectionMenu";
+import TableSelectionMenu from "../StatsMenu/TableSelectionMenu";
 import Menu from "@mui/icons-material/Menu";
 import TableViewIcon from "@mui/icons-material/TableView";
 import MapIcon from "@mui/icons-material/Map";
@@ -82,11 +83,13 @@ export default function CollapsibleSidebar({
                 );
             case 1:
                 return <GCPPickerSelectionMenu />;
-            case 4:
-                return <GCPPickerSelectionMenu />;
+            case 2:
+                return <TableSelectionMenu />; // Items shown when the 'Stats' selected and menu is expanded
             case 3:
                 // return <FileUploadComponent />;
                 return null;
+            case 4:
+                return <GCPPickerSelectionMenu />;
 
             // Add more cases as needed for more views
             default:
@@ -204,7 +207,7 @@ export default function CollapsibleSidebar({
                             align="center"
                             sx={{ fontSize: "14px" }}
                         >
-                            Table
+                            Stats
                         </Typography>
                     </Box>
 

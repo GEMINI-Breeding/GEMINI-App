@@ -177,6 +177,11 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
         }
     };
 
+    // Function to open CVAT annotation tool in a new tab
+    const handleOpenAnnotateTab = () => {
+        window.open("http://localhost:8080/", "_blank");
+    };
+
     return (
         <Dialog open={open} onClose={handleClose}>
             <DialogTitle>Insert Annotations</DialogTitle>
@@ -199,7 +204,18 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
                         borderRadius: "4px",
                     }}
                 >
-                    {isUploadingLabels ? "Cancel" : "Prepare"}
+                    {isUploadingLabels ? "Cancel" : "Upload"}
+                </Button>
+                <Button
+                    onClick={handleOpenAnnotateTab}
+                    style={{
+                        marginLeft: '10px',
+                        backgroundColor: "#4CAF50",
+                        color: "white",
+                        borderRadius: "4px",
+                    }}
+                >
+                    Annotate
                 </Button>
             </Box>
             {isUploadingLabels && (

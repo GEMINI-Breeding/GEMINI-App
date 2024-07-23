@@ -1,10 +1,23 @@
 import React, { useState, useEffect } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
+import Snackbar from "@mui/material/Snackbar";
 
 const PointPicker = ({ src }) => {
-    const { imageList, imageIndex, gcpPath, flaskUrl, sliderMarks } = useDataState();
-    const { setImageList, setSliderMarks } = useDataSetters();
-
+    const { 
+        imageList, 
+        imageIndex, 
+        flaskUrl, 
+        imageViewerLoading,
+        selectedSensorGCP,
+        selectedPlatformGCP
+    } = useDataState();
+    const { 
+        setImageList, 
+        setSliderMarks, 
+        setImageViewerLoading
+    } = useDataSetters();
+    
+    const [submitError, setSubmitError] = useState("");
     const [pointPosition, setPointPosition] = useState({ x: null, y: null });
 
     const CustomMark = ({ color }) => (
@@ -23,6 +36,8 @@ const PointPicker = ({ src }) => {
                 },
                 body: JSON.stringify({
                     array: imageList,
+                    platform: selectedPlatformGCP,
+                    sensor: selectedSensorGCP
                 }),
             });
 
@@ -32,6 +47,7 @@ const PointPicker = ({ src }) => {
                 console.log(result.message); // or handle the success message however you like
             } else {
                 console.error("Error saving data:", result.message); // or handle the error however you like
+                setSubmitError("Error saving data: ", result.message);
             }
         } catch (error) {
             console.error("Network error:", error);
@@ -149,6 +165,7 @@ const PointPicker = ({ src }) => {
     };
 
     const handleImageLoad = (event) => {
+        setImageViewerLoading(false)
         const imgElement = event.target;
         const updatedImageList = [...imageList];
         updatedImageList[imageIndex].naturalWidth = imgElement.naturalWidth;
@@ -156,6 +173,11 @@ const PointPicker = ({ src }) => {
         setImageList(updatedImageList);
     };
 
+    useEffect(() => {
+        setImageViewerLoading(true)
+        console.log("Loading...")
+    }, [imageIndex]);
+    
     return (
         <div style={{ position: "relative", width: "100%", height: "auto" }}>
             <img
@@ -164,7 +186,7 @@ const PointPicker = ({ src }) => {
                 onClick={handleImageClick}
                 onLoad={handleImageLoad}
                 onContextMenu={handleImageRightClick}
-                style={{ cursor: "crosshair", width: "100%", height: "auto" }}
+                style={{ display: imageViewerLoading ? 'none' : 'block', cursor: "crosshair", width: "100%", height: "auto" }}
             />
             {pointPosition.x !== null && pointPosition.y !== null && (
                 <div
@@ -181,6 +203,12 @@ const PointPicker = ({ src }) => {
                     }}
                 />
             )}
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </div>
     );
 };

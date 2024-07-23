@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
-import AskAnalyzeModal from "./AskAnalyzeModal";
+import AskDroneAnalyzeModal from "./AskDroneAnalyzeModal";
+import Snackbar from "@mui/material/Snackbar";
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -19,15 +20,15 @@ export default function AerialPrepTabs() {
     } = useDataState();
 
     const { setAerialPrepTab } = useDataSetters();
-
     const [sensorData, setSensorData] = useState(null);
+    const [submitError, setSubmitError] = useState("");
 
     // Columns definition
     const columns = [
         { label: "Date", field: "date" },
         { label: "Orthomosaic", field: "ortho" },
-        { label: "Traits", field: "traits" },
-        { label: "Process", field: "process", actionType: "process", actionLabel: "Process" },
+        { label: "Traits", field: "traits", actionType: "traits", actionLabel: "Start"},
+        // { label: "Thermal", field: "thermal", actionType: "thermal", actionLabel: "Start" },
     ];
 
     useEffect(() => {
@@ -60,13 +61,37 @@ export default function AerialPrepTabs() {
 
                                 // Assume the entry is not completed by default
                                 let completed = 2;
+                                let traits = false;
 
                                 // Try to fetch processed files to check if completed
                                 try {
-                                    const files = await fetchData(
+                                    // Check for ortho photo
+                                    const ortho_files = await fetchData(
                                         `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
-                                    completed = Number(files.some((file) => file.endsWith(".tif")));
+                                    if (platform === "Drone" || platform === "Phone") {
+                                        // check if files ending with .tif exist
+                                        completed = Number(ortho_files.some((file) => file.endsWith(".tif")));
+                                    } else {
+                                        completed = 0;
+                                    }
+
+                                    // check for traits file
+                                    const trait_files = await fetchData(
+                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    );
+                                    if (platform === "Drone" || platform === "Phone") {
+                                        // check if number of files ending with .geojson is greater than 0
+                                        const traits_length = Number(trait_files.filter((file) => file.endsWith(".geojson")).length);
+                                        console.log("date", date);
+                                        if (traits_length > 0) {
+                                            traits = true;
+                                        } else {
+                                            traits = false;
+                                        }
+                                        console.log("traits", traits);
+                                    }
+
                                 } catch (error) {
                                     console.warn(
                                         `Processed data not found or error fetching processed data for date ${date}, platform ${platform}, and sensor ${sensor}:`,
@@ -75,7 +100,7 @@ export default function AerialPrepTabs() {
                                 }
 
                                 // Always add the entry, but completed status depends on processed files check
-                                updatedData[platform][sensor].push({ date, completed });
+                                updatedData[platform][sensor].push({ date, completed, traits });
                             }
                         }
                     }
@@ -85,10 +110,13 @@ export default function AerialPrepTabs() {
                         title: platform,
                         nestedData: Object.keys(updatedData[platform]).map((sensor) => ({
                             summary: sensor,
-                            data: updatedData[platform][sensor].map(({ date, completed }) => ({
+                            data: updatedData[platform][sensor].map(({ date, completed, traits }) => ({
                                 date,
                                 ortho: completed,
-                                traits: "[]", // Placeholder for traits data
+                                traits: traits,
+                                thermal: "[]", // Placeholder for thermal data
+                                platform: platform,
+                                sensor: sensor,
                             })),
                             columns: columns,
                         })),
@@ -97,6 +125,7 @@ export default function AerialPrepTabs() {
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching data:", error);
+                    setSubmitError("Could not fetch data from date ", error)
                 }
             }
         };
@@ -112,10 +141,8 @@ export default function AerialPrepTabs() {
         aerialPrepTab,
     ]);
 
-    console.log("sensorData", sensorData);
-
     const CustomComponent = {
-        process: AskAnalyzeModal,
+        traits: AskDroneAnalyzeModal,
     };
 
     const handleChange = (event, newValue) => {
@@ -132,9 +159,6 @@ export default function AerialPrepTabs() {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            <Typography variant="h4" component="h2" align="center">
-                Aerial Data Preparation
-            </Typography>
             <br />
             <Grid item style={{ width: "100%" }}>
                 <Box
@@ -188,6 +212,12 @@ export default function AerialPrepTabs() {
                     </Box>
                 </Grid>
             </Grid>
+            <Snackbar
+                open={submitError !== ""}
+                autoHideDuration={6000}
+                onClose={() => setSubmitError("")}
+                message={submitError}
+            />
         </Grid>
     );
 }

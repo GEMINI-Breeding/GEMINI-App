@@ -29,8 +29,8 @@ export const useDataSetters = () => {
 };
 
 export const TILE_URL_TEMPLATE =
-    "http://127.0.0.1:8090/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-export const BOUNDS_URL_TEMPLATE = "http://127.0.0.1:8090/cog/bounds?url=${FILE_PATH}";
+    "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+export const BOUNDS_URL_TEMPLATE = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
 
 export const DataProvider = ({ children }) => {
     const initialViewState = {
@@ -56,6 +56,9 @@ export const DataProvider = ({ children }) => {
     const [boundsUrl, setBoundsUrl] = useState(BOUNDS_URL_TEMPLATE);
     const [cursorStyle, setCursorStyle] = useState("default");
     const [processRunning, setProcessRunning] = useState(false);
+
+    // File Upload State
+    const [extractingBinary, setExtractingBinary] = useState(false);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -177,6 +180,11 @@ export const DataProvider = ({ children }) => {
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
+    const [currentOrthoProgress, setCurrentOrthoProgress] = useState(0);
+
+    // Table States
+    const [isTableMenuInitiated, setIsTableMenuInitiated] = useState(false);
+    const [tableViewTabNo, setTableViewTabNo] = useState(0);
 
     // Image Query State
     const [imageDataQuery, setImageDataQuery] = useState([]);
@@ -185,8 +193,8 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5003/flask_app/");
-    const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8090/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
+    const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8091/");
 
     return (
         <DataStateContext.Provider
@@ -207,6 +215,9 @@ export const DataProvider = ({ children }) => {
                 boundsUrl,
                 cursorStyle,
                 processRunning,
+
+                // File Upload State
+                extractingBinary,
 
                 // DataSelectionMenu State
                 locationOptions,
@@ -312,6 +323,11 @@ export const DataProvider = ({ children }) => {
                 isOrthoModalOpen,
                 isOrthoProcessing,
                 orthoServerStatus,
+                currentOrthoProgress,
+
+                // TableMenu State
+                isTableMenuInitiated,
+                tableViewTabNo,
 
                 // Image Query State
                 imageDataQuery,
@@ -342,6 +358,9 @@ export const DataProvider = ({ children }) => {
                     setBoundsUrl,
                     setCursorStyle,
                     setProcessRunning,
+
+                    // File Upload State
+                    setExtractingBinary,
 
                     // DataSelectionMenu state
                     setLocationOptions,
@@ -446,6 +465,11 @@ export const DataProvider = ({ children }) => {
                     setOrthoModalOpen,
                     setIsOrthoProcessing,
                     setOrthoServerStatus,
+                    setCurrentOrthoProgress,
+
+                    // TableMenu State
+                    setIsTableMenuInitiated,
+                    setTableViewTabNo,
 
                     // Image Query State
                     setImageDataQuery,

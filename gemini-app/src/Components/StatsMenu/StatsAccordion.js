@@ -19,61 +19,31 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { styled } from "@mui/material/styles";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
-import { useDataState } from "../../../../DataContext";
+import { fetchData, useDataSetters, useDataState } from "../../DataContext.js";
 const CameraAccordionContext = createContext();
 
+// RenderItem makes the button
 function RenderItem({ item, column, handleAction, handleClickOpen }) {
     const actionHandler = handleAction || handleClickOpen;
-    const { processRunning, roverPrepTab, selectRoverTrait } = useDataState();
-
-    // Check if the column is "Performance" and apply light blue background
-    if (column.label === "Performance") {
-        return (
-            <Box sx={{ backgroundColor: '#add8e6', color: '#000', padding: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {item[column.field]}
-            </Box>
-        );
-    }
+    const { processRunning } = useDataState();
 
     if (column.actionType) {
-        if (item[column.field] === false) {
-            let buttonStyle;
-            if (roverPrepTab == 1) {
-                buttonStyle = {
-                    background: processRunning || selectRoverTrait === '' ? "grey" : "#1976d2",
-                    color: "white",
-                    borderRadius: "4px",
-                };
-                return (
-                    <>
-                        <Button
-                            onClick={() => !processRunning && actionHandler(item, column)}
-                            style={buttonStyle}
-                            disabled={processRunning || selectRoverTrait === ''}
-                        >
-                            {column.actionLabel || "Action"}
-                        </Button>
-                    </>
-                )
-            } else {
-                buttonStyle = {
-                    background: processRunning ? "grey" : "#1976d2",
-                    color: "white",
-                    borderRadius: "4px",
-                };
-                return (
-                    <>
-                        <Button
-                            onClick={() => !processRunning && actionHandler(item, column)}
-                            style={buttonStyle}
-                            disabled={processRunning}
-                        >
-                            {column.actionLabel || "Action"}
-                        </Button>
-                    </>
-                );
-            }
-        } else if (item[column.field] === true) {
+        if (item[column.field] === true) {
+            const buttonStyle = {
+                background: processRunning ? "grey" : "#1976d2",
+                color: "white",
+                borderRadius: "4px",
+            };
+            return (
+                <Button
+                    onClick={() => !processRunning && actionHandler(item, column)}
+                    style={buttonStyle}
+                    disabled={processRunning}
+                >
+                    {column.actionLabel || "Action"}
+                </Button>
+            );
+        } else if (item[column.field] === false) {
             return (
                 <Button
                     onClick={() => !processRunning && actionHandler(item, column)}
@@ -133,9 +103,11 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
                 <ListItem style={{ backgroundColor: "#f5f5f5" }}>
                     <Grid container>
                         {columns.map((column) => (
-                            <Grid item xs key={column.label}>
-                                <ListItemText primary={column.label} />
-                            </Grid>
+                            column.showColumn && (
+                                <Grid item xs key={column.label}>
+                                    <ListItemText primary={column.label} />
+                                </Grid>
+                            )
                         ))}
                     </Grid>
                 </ListItem>
@@ -145,6 +117,7 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
                     <ListItem key={index}>
                         <Grid container alignItems="center">
                             {columns.map((column) => (
+                                column.showColumn && (
                                 <Grid item xs key={column.label}>
                                     <RenderItem
                                         item={item}
@@ -153,6 +126,7 @@ function CameraDetailsList({ data, columns, handleAction, CustomComponent }) {
                                         handleClickOpen={handleClickOpen}
                                     />
                                 </Grid>
+                                )
                             ))}
                         </Grid>
                     </ListItem>

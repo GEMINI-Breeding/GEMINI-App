@@ -4,6 +4,16 @@
         "fileType": "image/*",
         "label": "Image Data"
     },
+    "binary": {
+        "fields": ["year", "experiment", "location", "population", "date", "platform"],
+        "fileType": ".bin/*",
+        "label": "Amiga File"
+    },
+    "weather": {
+        "fields": ["year", "experiment", "location", "population", "date"],
+        "fileType": ".csv",
+        "label": "Weather Data"
+    },
     "fieldDesign": {
         "fields": ["year", "experiment", "location", "population"],
         "fileType": ".csv",
