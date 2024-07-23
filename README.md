@@ -27,7 +27,8 @@ nvm use 18
 
 # Install dependencies
 cd gemini-app
-npm install
+npm install --legacy-peer-deps # Fix the upstream dependency conflict
+
 
 # Run development server
 npm run gemini # It wil run front and server concurrently. It will mix the logs

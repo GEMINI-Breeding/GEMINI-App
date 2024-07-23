@@ -7,7 +7,8 @@ import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import { useDataState, useDataSetters, fetchData } from "../../../../DataContext";
 
-const AskAnalyzeModal = ({ open, onClose, item }) => {
+const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
+    // Global state
     const {
         flaskUrl,
         nowDroneProcessing,
@@ -15,9 +16,14 @@ const AskAnalyzeModal = ({ open, onClose, item }) => {
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
+        selectedPlatformGCP,
+        selectedSensorGCP,
     } = useDataState();
 
-    const { setNowDroneProcessing } = useDataSetters();
+    // Global setters
+    const { 
+        setNowDroneProcessing 
+    } = useDataSetters();
 
     useEffect(() => {
         if (nowDroneProcessing && item) {
@@ -27,6 +33,8 @@ const AskAnalyzeModal = ({ open, onClose, item }) => {
                 date: item.date,
                 year: selectedYearGCP,
                 experiment: selectedExperimentGCP,
+                platform: item.platform,
+                sensor: item.sensor,
             };
 
             fetch(`${flaskUrl}process_drone_tiff`, {
@@ -57,7 +65,7 @@ const AskAnalyzeModal = ({ open, onClose, item }) => {
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth={false}>
             <DialogTitle style={{ textAlign: "center", fontWeight: "bold", fontSize: "x-large" }}>
-                {item && item.date} is not analyzed yet.
+                {item && item.date}
             </DialogTitle>
             <DialogContent>
                 Would you like to process it now?
@@ -86,4 +94,4 @@ const AskAnalyzeModal = ({ open, onClose, item }) => {
     );
 };
 
-export default AskAnalyzeModal;
+export default AskDroneAnalyzeModal;

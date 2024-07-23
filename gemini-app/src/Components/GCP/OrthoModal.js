@@ -124,7 +124,7 @@ const OrthoModal = () => {
                         <Autocomplete
                             value={orthoSetting}
                             onChange={(event, newValue) => setOrthoSetting(newValue)}
-                            options={["High", "Low", "Custom"]}
+                            options={["High", "Low","Lowest", "Custom"]}
                             renderInput={(params) => (
                                 <TextField {...params} label="Settings" variant="outlined" fullWidth />
                             )}
@@ -140,6 +140,29 @@ const OrthoModal = () => {
                             />
                             <Typography align="center" color="error" style={{ marginTop: 8 }}>
                                 OpenDroneMap args. Only use if you know what you're doing!
+                            </Typography>
+                        </Grid>
+                    )}
+                    {/* display if orthoSetting is Low */}
+                    {orthoSetting === "Low" && (
+                        <Grid item>
+                            <Typography variant="body1" style={{ color: 'orange' }}>
+                                Warning: Ortho Generation can take up to 4 hours to complete!
+                            </Typography>
+                        </Grid>
+                    )}
+                    {orthoSetting === "Lowest" && (
+                        <Grid item>
+                            <Typography variant="body1" style={{ color: 'orange' }}>
+                                Warning: Ortho Generation can take up to 4 hours to complete!
+                            </Typography>
+                        </Grid>
+                    )}
+                    {/* display if orthoSetting is High */}
+                    {orthoSetting === "High" && (
+                        <Grid item>
+                            <Typography variant="body1" style={{ color: 'red' }}>
+                                Warning: Ortho Generation can take up to 8 hours to complete!
                             </Typography>
                         </Grid>
                     )}

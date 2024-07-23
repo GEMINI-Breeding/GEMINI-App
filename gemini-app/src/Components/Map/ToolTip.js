@@ -38,18 +38,20 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
                     position: "absolute",
                     zIndex: 1,
                     pointerEvents: "none",
-                    left: hoverInfo.x,
-                    top: hoverInfo.y,
-                    backgroundColor: "rgba(255, 255, 255, 0.8)",
+                    left: hoverInfo.x + 10,
+                    top: hoverInfo.y + 10,
+                    backgroundColor: "rgba(255, 255, 255, 0.9)",
                     padding: "10px",
                     borderRadius: "5px",
                     border: "1px solid #ccc",
                     color: "#333",
                     fontFamily: "Arial, sans-serif",
                     lineHeight: "1.6",
-                    width: "100px",
+                    minWidth: "150px",
+                    maxWidth: "300px",
+                    overflow: "hidden"
                 }}
-            >
+                >
                 <div
                     style={{ marginBottom: "5px", display: "flex", flexWrap: "wrap", justifyContent: "space-between" }}
                 >
