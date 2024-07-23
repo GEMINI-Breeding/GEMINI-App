@@ -108,7 +108,7 @@ export default function RoverPrepTabs() {
                 break;
             case 3: // For "Extract Traits"
                 newColumns = [
-                    { label: "Predictions", field: "date"},
+                    { label: "Extractions", field: "date"},
                     { label: "Localization Date", field: "locate"},
                     { label: "Trait Model ID", field: "model"},
                     { label: "Locations ID", field: "id"},
@@ -469,7 +469,7 @@ export default function RoverPrepTabs() {
                                         style={buttonStyle}
                                         disabled={processRunning || selectRoverTrait === ''}
                                     >
-                                        New Predictions
+                                        Extract Traits
                                     </Button>
                                     <ExtractMenu
                                         open={extractMenuOpen} 

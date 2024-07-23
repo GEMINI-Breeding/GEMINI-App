@@ -158,6 +158,7 @@ function PlotProposalSwitcher() {
         (updatedOptions) => {
             const mainPolygon = featureCollectionPop.features[0];
             const newRectangles = fillPolygonWithRectangles(mainPolygon, updatedOptions);
+            console.log("Filling polygon with rectangles...")
             if (fieldDesign) {
                 mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
             }
