@@ -20,6 +20,7 @@ import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/T
 import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
 import { ExtractProgressBar } from "./Components/GCP/TabComponents/Processing/ExtractTraits";
 import { OrthoProgressBar } from "./Components/GCP/OrthoModal";
+import { DroneExtractProgressBar } from "./Components/GCP/TabComponents/Processing/AskDroneAnalyzeModal";
 import FileUploadComponent from "./Components/Menu/FileUpload";
 import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
@@ -49,7 +50,9 @@ function App() {
         isExtracting,
         currentExtractProgress,
         isOrthoProcessing,
-        currentOrthoProgress
+        currentOrthoProgress,
+        isDroneExtracting,
+        currentDroneExtractProgress
     } = useDataState();
 
     const {
@@ -70,9 +73,11 @@ function App() {
         setProcessRunning,
         setIsExtracting,
         setCurrentExtractProgress,
+        setCurrentDroneExtractProgress,
         setCloseMenu,
         setCurrentOrthoProgress,
-        setIsOrthoProcessing
+        setIsOrthoProcessing,
+        setIsDroneExtracting
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -350,9 +355,9 @@ function App() {
             if (response.ok) {
                 // Handle successful stop
                 console.log("Extracting stopped");
-                setIsExtracting(false);
+                setIsDroneExtracting(false);
                 setProcessRunning(false);
-                setCurrentExtractProgress(0);
+                // setCurrentExtractProgress(0);
             } else {
                 // Handle error response
                 const errorData = await response.json();
@@ -406,6 +411,50 @@ function App() {
         return () => clearInterval(interval);
     }, [isExtracting, flaskUrl]);
     // FOR EXTRACT END
+
+    // FOR DRONE EXTRACT START
+    const handleStopDroneExtracting = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}stop_drone_extract`, { method: "POST" });
+            if (response.ok) {
+                // Handle successful stop
+                console.log("Extracting stopped");
+                setIsDroneExtracting(false);
+                setProcessRunning(false);
+                setCurrentDroneExtractProgress(0);
+            } else {
+                // Handle error response
+                const errorData = await response.json();
+                console.error("Error stopping drone extracting", errorData);
+                setSubmitError("Error stopping drone extraction.")
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+    useEffect(() => {
+        let interval;
+        if (isDroneExtracting) {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${flaskUrl}get_drone_extract_progress`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data)
+                        setCurrentDroneExtractProgress(data.drone_extract)
+                    } else {
+                        console.error("Failed to fetch drone extract progress");
+                        setSubmitError("Error fetching drone extract progress.")
+                    }
+                } catch (error) {
+                    console.error("Error fetching drone extract progress", error);
+                }
+            }, 60000); // Poll every min
+        }
+        return () => clearInterval(interval);
+    }, [isDroneExtracting, flaskUrl]);
+    // FOR DRONE EXTRACT DONE
 
     return (
         <ActiveComponentsProvider>
@@ -532,6 +581,31 @@ function App() {
                         </Box>
                     </Box>
                 }
+
+                {/* drone extract */}
+                {isLocating && (
+                    <Box
+                        sx={{
+                            position: "fixed",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            pointerEvents: "none", // allows clicks to pass through to the underlying content
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1200, // ensures the overlay is on top
+                        }}
+                    >
+                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                            <DroneExtractProgressBar
+                                currentDroneExtractProgress={currentDroneExtractProgress}
+                                onDroneStopExtracting={handleStopDroneExtracting}
+                            />
+                        </Box>
+                    </Box>
+                )}
+
             </div>
             <Snackbar
                 open={submitError !== ""}

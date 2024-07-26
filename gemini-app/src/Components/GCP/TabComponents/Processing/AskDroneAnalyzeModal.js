@@ -1,11 +1,18 @@
-import React, { useEffect } from "react";
-import Dialog from "@mui/material/Dialog";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Grid from "@mui/material/Grid";
-import Button from "@mui/material/Button";
+import React, { useEffect, useState } from "react";
 import CircularProgress from "@mui/material/CircularProgress";
 import { useDataState, useDataSetters, fetchData } from "../../../../DataContext";
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import {
+    Grid,
+    Dialog,
+    DialogTitle,
+    Button,
+    Box,
+    Typography,
+    LinearProgress,
+    IconButton,
+    DialogContent
+} from "@mui/material";
 
 const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
     // Global state
@@ -18,15 +25,18 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
         selectedExperimentGCP,
         selectedPlatformGCP,
         selectedSensorGCP,
+        isDroneExtracting
     } = useDataState();
 
     // Global setters
     const { 
-        setNowDroneProcessing 
+        setNowDroneProcessing,
+        setIsDroneExtracting,
     } = useDataSetters();
 
     useEffect(() => {
         if (nowDroneProcessing && item) {
+            setIsDroneExtracting(true);
             const data = {
                 location: selectedLocationGCP,
                 population: selectedPopulationGCP,
@@ -94,4 +104,60 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
     );
 };
 
-export default AskDroneAnalyzeModal;
+function DroneExtractProgressBar({ currentDroneExtractProgress, onDroneStopExtracting }) {
+    // const { setCurrentExtractProgress, setIsExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
+    const [expanded, setExpanded] = useState(false);
+    const { setDroneCurrentExtractProgress, setDroneIsExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
+    const validProgress = Number.isFinite(currentDroneExtractProgress) ? currentDroneExtractProgress : 0;
+
+    const handleExpandClick = () => {
+        setExpanded(!expanded);
+    };
+
+    const handleDone = () => {
+        setDroneIsExtracting(false);
+        setDroneCurrentExtractProgress(0); // Reset progress
+        setProcessRunning(false);
+        setCloseMenu(false);
+    };
+
+    const isDroneExtractingComplete = currentDroneExtractProgress >= 100;
+
+    return (
+        <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
+                <Typography variant="body2" sx={{ marginRight: "10px" }}>
+                    Extracting in Progress...
+                </Typography>
+                <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
+                    <Box sx={{ width: "100%", mr: 1 }}>
+                        <LinearProgress variant="determinate" value={validProgress} />
+                    </Box>
+                    <Box sx={{ minWidth: 35, mr: 1 }}>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(
+                            validProgress
+                        )}%`}</Typography>
+                    </Box>
+                </Box>
+                <Button
+                    onClick={isDroneExtractingComplete ? handleDone : onDroneStopExtracting}
+                    style={{
+                        backgroundColor: isDroneExtractingComplete ? "green" : "red",
+                        color: "white",
+                        alignSelf: "center",
+                    }}
+                >
+                    {isDroneExtractingComplete ? "DONE" : "STOP"}
+                </Button>
+                <IconButton
+                    onClick={handleExpandClick}
+                    sx={{ transform: expanded ? "rotate(0deg)" : "rotate(180deg)" }}
+                >
+                    <ExpandMoreIcon />
+                </IconButton>
+            </Box>
+        </Box>
+    );
+}
+
+export { AskDroneAnalyzeModal, DroneExtractProgressBar };
