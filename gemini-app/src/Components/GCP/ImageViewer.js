@@ -155,7 +155,14 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                                 Previous
                             </Button>
                             &nbsp;&nbsp;&nbsp;
-                            {imageIndex === imageList.length - 1 ? (
+                            <Button variant="contained" onClick={handleNext}>
+                                    Next
+                            </Button>
+                            &nbsp;&nbsp;&nbsp;
+                            <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>
+                                    Generate Orthophoto
+                            </Button>
+                            {/* {imageIndex === imageList.length - 1 ? (
                                 <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>
                                     Generate Orthophoto
                                 </Button>
@@ -163,7 +170,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                                 <Button variant="contained" onClick={handleNext}>
                                     Next
                                 </Button>
-                            )}
+                            )} */}
                         </div>
                     )}
                     <OrthoModal />
