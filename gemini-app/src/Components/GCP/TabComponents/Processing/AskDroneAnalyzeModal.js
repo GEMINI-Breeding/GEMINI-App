@@ -30,13 +30,12 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
 
     // Global setters
     const { 
-        setNowDroneProcessing,
+        // setNowDroneProcessing,
         setIsDroneExtracting,
     } = useDataSetters();
 
     useEffect(() => {
-        if (nowDroneProcessing && item) {
-            setIsDroneExtracting(true);
+        if (isDroneExtracting && item) {
             const data = {
                 location: selectedLocationGCP,
                 population: selectedPopulationGCP,
@@ -54,13 +53,20 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
                 },
                 body: JSON.stringify(data),
             })
-                .then((response) => response.json())
-                .then((data) => {
-                    console.log("Drone tiff file processed!");
-                    setNowDroneProcessing(false);
-                    onClose();
-                })
-                .catch((error) => console.error("Error:", error));
+            .then((response) => {
+                if (!response.ok) {
+                    return response.json().then((error) => {
+                        throw new Error(error.message);
+                    });
+                }
+                return response.json();
+            })
+            .then((data) => {
+                console.log("Drone tiff file processed!");
+                // setNowDroneProcessing(false);
+                onClose();
+            })
+            .catch((error) => console.error("Error:", error));
         }
     }, [
         nowDroneProcessing,
@@ -69,7 +75,7 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
         flaskUrl,
         selectedLocationGCP,
         selectedPopulationGCP,
-        setNowDroneProcessing,
+        // setNowDroneProcessing,
     ]);
 
     return (
@@ -84,13 +90,13 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
                         <Button
                             variant="contained"
                             color="primary"
-                            disabled={nowDroneProcessing}
+                            // disabled={nowDroneProcessing}
                             onClick={() => {
-                                setNowDroneProcessing(true);
+                                setIsDroneExtracting(true);
                             }}
                         >
-                            {nowDroneProcessing ? "Analyzing" : "Analyze"}
-                            {nowDroneProcessing && <CircularProgress size={24} style={{ marginLeft: "14px" }} />}
+                            {"Analyze"}
+                            {/* {nowDroneProcessing && <CircularProgress size={24} style={{ marginLeft: "14px" }} />} */}
                         </Button>
                     </Grid>
                     <Grid item>
@@ -107,7 +113,7 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
 function DroneExtractProgressBar({ currentDroneExtractProgress, onDroneStopExtracting }) {
     // const { setCurrentExtractProgress, setIsExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
-    const { setDroneCurrentExtractProgress, setDroneIsExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
+    const { setCurrentDroneExtractProgress, setIsDroneExtracting, setProcessRunning, setCloseMenu } = useDataSetters();
     const validProgress = Number.isFinite(currentDroneExtractProgress) ? currentDroneExtractProgress : 0;
 
     const handleExpandClick = () => {
@@ -115,8 +121,8 @@ function DroneExtractProgressBar({ currentDroneExtractProgress, onDroneStopExtra
     };
 
     const handleDone = () => {
-        setDroneIsExtracting(false);
-        setDroneCurrentExtractProgress(0); // Reset progress
+        setIsDroneExtracting(false);
+        setCurrentDroneExtractProgress(0); // Reset progress
         setProcessRunning(false);
         setCloseMenu(false);
     };

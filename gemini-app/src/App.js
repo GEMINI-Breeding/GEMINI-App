@@ -355,7 +355,7 @@ function App() {
             if (response.ok) {
                 // Handle successful stop
                 console.log("Extracting stopped");
-                setIsDroneExtracting(false);
+                setIsExtracting(false);
                 setProcessRunning(false);
                 // setCurrentExtractProgress(0);
             } else {
@@ -450,7 +450,7 @@ function App() {
                 } catch (error) {
                     console.error("Error fetching drone extract progress", error);
                 }
-            }, 60000); // Poll every min
+            }, 1000); // Poll every min
         }
         return () => clearInterval(interval);
     }, [isDroneExtracting, flaskUrl]);
@@ -583,7 +583,7 @@ function App() {
                 }
 
                 {/* drone extract */}
-                {isLocating && (
+                {isDroneExtracting && (
                     <Box
                         sx={{
                             position: "fixed",
