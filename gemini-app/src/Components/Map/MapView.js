@@ -172,7 +172,7 @@ export default function MapView() {
             }
 
             const filteredFeatures = geojsonData.features.filter((feature) =>
-                selectedGenotypes.includes(feature.properties.Label)
+                selectedGenotypes.includes(feature.properties.accession)
             );
 
             return {
