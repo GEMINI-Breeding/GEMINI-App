@@ -139,6 +139,8 @@ export const DataProvider = ({ children }) => {
 
     // Aerial Prep State
     const [aerialPrepTab, setAerialPrepTab] = useState(0);
+    const [isDroneExtracting, setIsDroneExtracting] = useState(false);
+    const [currentDroneExtractProgress, setCurrentDroneExtractProgress] = useState(0);
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
@@ -284,6 +286,8 @@ export const DataProvider = ({ children }) => {
 
                 // Aerial Prep State
                 aerialPrepTab,
+                isDroneExtracting,
+                currentDroneExtractProgress,
 
                 // Rover Prep State
                 roverPrepTab,
@@ -426,6 +430,8 @@ export const DataProvider = ({ children }) => {
 
                     // Aerial Prep State
                     setAerialPrepTab,
+                    setIsDroneExtracting,
+                    setCurrentDroneExtractProgress,
 
                     // Rover Prep State
                     setRoverPrepTab,

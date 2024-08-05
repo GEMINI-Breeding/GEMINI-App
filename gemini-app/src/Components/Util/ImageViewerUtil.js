@@ -69,6 +69,7 @@ export function useHandleProcessImages() {
                     setTotalImages(data.num_total);
                 }
                 // Before setting the image list, initialize (or fetch existing) file content
+                console.log("data", data);
                 fetch(`${flaskUrl}initialize_file`, {
                     method: "POST",
                     headers: {
