@@ -61,8 +61,8 @@ function TabbedPrepUI() {
                     <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
                         <Tab label="Orthomosaic Generation" style={titleStyle} />
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
-                        <Tab label="Ground Processing" style={titleStyle} />
                         <Tab label="Aerial Processing" style={titleStyle} />
+                        <Tab label="Ground Processing" style={titleStyle} />
                     </Tabs>
                 </Grid>
             )}
@@ -70,8 +70,8 @@ function TabbedPrepUI() {
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
                     {selectedTabPrep === 0 && <AerialDataPrep />}
                     {selectedTabPrep === 1 && <PlotBoundaryPrep />}
-                    {selectedTabPrep === 3 && <AerialPrepTabs />}
-                    {selectedTabPrep === 2 && <RoverPrepTabs />}
+                    {selectedTabPrep === 2 && <AerialPrepTabs />}
+                    {selectedTabPrep === 3 && <RoverPrepTabs />}
                 </Grid>
             )}
         </Grid>

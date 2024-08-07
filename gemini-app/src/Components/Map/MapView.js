@@ -289,19 +289,19 @@ export default function MapView() {
                     selectedMetric={selectedMetric}
                 />
             )}
-            <div style={{ position: "fixed", top: "20px", right: "20px", zIndex: 1000 }}>
+            <div style={{ position: "absolute", top: "20px", right: "20px", zIndex: 1000 }}>
                 <SplitButton
                     buttonOptions={buttonOptions}
                     style={{ position: "relative" }}
                 />
             </div>
-
             {isPopupVisible && (
                 <Popup 
                     text="💡 Click ☰ to select data to view"
                     onClose={handlePopupClose}
                 />
             )}
+
         </React.Fragment>
     );
 }

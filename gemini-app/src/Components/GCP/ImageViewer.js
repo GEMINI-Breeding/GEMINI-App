@@ -80,7 +80,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     return (
-        <Dialog open={open} onClose={handleBackButton} fullWidth maxWidth={'xl'}>
+        <Dialog open={isImageViewerOpen} onClose={handleBackButton} fullWidth maxWidth={'xl'}>
                 <div
                     style={{
                         position: "relative",
