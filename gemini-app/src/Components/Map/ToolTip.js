@@ -14,7 +14,7 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
                     {" "}
                     {/* Use div instead of span */}
                     <b>{capitalizeFirstLetter(metric)}:</b>{" "}
-                    {hoverInfo.object.properties[metric] !== null ? hoverInfo.object.properties[metric] : "No Data"}
+                    {(hoverInfo.object.properties[metric] !== null && hoverInfo.object.properties[metric] !== undefined) ? hoverInfo.object.properties[metric] : "No Data"}
                     {"\n"}
                 </div> // Each metric will now appear on a new line
             ));
@@ -22,7 +22,7 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
             return (
                 <span style={{ marginRight: "5px" }}>
                     <b>{selectedMetric}:</b>{" "}
-                    {hoverInfo.object.properties[selectedMetric] !== null
+                    {(hoverInfo.object.properties[selectedMetric] !== null && hoverInfo.object.properties[selectedMetric] !== undefined)
                         ? hoverInfo.object.properties[selectedMetric].toFixed(2)
                         : "No Data"}
                 </span>
