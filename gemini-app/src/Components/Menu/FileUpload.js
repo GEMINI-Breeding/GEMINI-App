@@ -51,6 +51,7 @@ const FileUploadComponent = () => {
     const [selectedDataType, setSelectedDataType] = useState("image");
     const [files, setFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
+    const [isFinishedUploading, setIsFinishedUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
@@ -315,6 +316,10 @@ const FileUploadComponent = () => {
             uploadedSizeSoFar = 0;
             setProgress(0);
             setIsUploading(false);
+            if(!cancelUploadRef.current)
+            {
+                setIsFinishedUploading(true);
+            }
             setFiles([]);
         },
         validate: (values) => {
@@ -456,7 +461,7 @@ const FileUploadComponent = () => {
             <Grid item xs={8}>
                 <form onSubmit={formik.handleSubmit}>
                     {isLoading && <CircularProgress />}
-                    {!isLoading && !isUploading && (
+                    {!isLoading && !isUploading && !isFinishedUploading && (
                         <>
                             {dataTypes[selectedDataType].fields.map((field) =>
                                 renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
@@ -517,7 +522,7 @@ const FileUploadComponent = () => {
                             <LinearProgress variant="determinate" value={progress} />
                             <Button
                                 variant="contained"
-                                color="secondary"
+                                color="error"
                                 sx={{ mt: 2 }}
                                 onClick={() => {
                                     cancelUploadRef.current = true;
@@ -525,6 +530,24 @@ const FileUploadComponent = () => {
                                 }}
                             >
                                 Cancel Upload
+                            </Button>
+                        </Paper>
+                    )}
+                    {!isUploading && isFinishedUploading && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
+                            <Typography>
+                                {extractingBinary ? <b>Extraction Successful</b> : <b>Upload Successful</b>} 
+                            </Typography>
+                            <LinearProgress color ="success" variant="determinate" value={100} />
+                            <Button
+                                variant="contained"
+                                color="success"
+                                sx={{ mt: 2 }}
+                                onClick={() => {
+                                    setIsFinishedUploading(false);
+                                }}
+                            >
+                                Done
                             </Button>
                         </Paper>
                     )}
