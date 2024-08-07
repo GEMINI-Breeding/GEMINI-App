@@ -1,6 +1,7 @@
 import React, { useContext, useEffect } from "react";
 import { ActiveComponentsContext } from "../../ActiveComponentsContext";
 import { styled } from "@mui/system";
+import Link from '@mui/material/Link';
 
 const HelpStyled = styled("div")(({ theme }) => ({
     width: "250px", // Adjust the width as needed
@@ -81,13 +82,23 @@ const HelpPane = () => {
         );
     } else {
         return (
-            <HelpStyled>                
-                <h2>Active Components</h2>
-                <ul>
+            <HelpStyled>    
+                 <div>
+                    <h1>Help</h1>
+                        See&nbsp; 
+                        <Link
+                        href="https://gemini-breeding.github.io/3.%20App/1-%20Installation/"
+                        target="_blank"
+                        >
+                        GEMINI App Docs
+                        </Link> for instructions on how to use the GEMINI App.
+                    <h2>Active Components</h2>
+                    <ul>
                     {[...activeComponents].map((componentName) => (
                         <li key={componentName}>{componentName}</li>
                     ))}
-                </ul>
+                    </ul>
+                </div>            
             </HelpStyled>
         );
     }

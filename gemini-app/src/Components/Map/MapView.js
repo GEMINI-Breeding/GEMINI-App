@@ -250,10 +250,12 @@ export default function MapView() {
                     selectedMetric={selectedMetric}
                 />
             )}
-            <SplitButton
-                buttonOptions={buttonOptions}
-                style={{ position: "relative", bottom: "20px", right: "20px" }}
-            />
+            <div style={{ position: "absolute", top: "20px", right: "20px", zIndex: 1000 }}>
+                <SplitButton
+                    buttonOptions={buttonOptions}
+                    style={{ position: "relative" }}
+                />
+            </div>
         </React.Fragment>
     );
 }
