@@ -154,7 +154,7 @@ const LoadTableModal = ({ open, onClose, item }) => {
     
 
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth={false}>
+        <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth={false}>
             <DialogTitle style={{ textAlign: "center", fontWeight: "bold", fontSize: "x-large" }}>
                 {"Table view of " + (item && item.date)}
             </DialogTitle>
