@@ -116,10 +116,10 @@ export const DataProvider = ({ children }) => {
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
     const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
     const [polygonProposalOptions, setPolygonProposalOptions] = useState({
-        width: 1.5,
+        width: 1,
         length: 3,
-        rows: 30,
-        columns: 70,
+        rows: 23,
+        columns: 15,
         verticalSpacing: 1.5,
         horizontalSpacing: 0.2,
         angle: 0,
