@@ -154,8 +154,8 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                     display: "flex",
                     justifyContent: "center",
                     alignItems: "center",
-                    overflow: "hidden",
-                    padding: "20px",
+                    // overflow: "hidden",
+                    padding: "10px",
                 }}>
                     {imageViewerLoading && <CircularProgress />}
                     {imageList.length > 0 && (
