@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import DeckGL from "@deck.gl/react";
 import { Map as MapGL } from "react-map-gl";
 import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers";
@@ -224,6 +224,45 @@ export default function MapView() {
         { text: "Download All CSV", action: handleDownloadAllCSV },
     ];
 
+    const [isPopupVisible, setIsPopupVisible] = useState(true);
+
+    const handlePopupClose = () => {
+        setIsPopupVisible(false);
+    };
+
+    const Popup = ({ text, onClose }) => (
+        <div style={{
+            position: "fixed",
+            top: "80px",
+            right: "20px",
+            backgroundColor: "rgba(255, 255, 255, 0.7)",
+            border: "1px solid #ccc",
+            borderRadius: "4px",
+            padding: "10px",
+            boxShadow: "0 4px 8px rgba(0, 0, 0, 0.2)",
+            zIndex: 1001,
+            height: "35px",
+            width: "250px",
+            paddingTop: "20px",
+        }}>
+            <button 
+                onClick={onClose} 
+                style={{
+                    position: "absolute",
+                    top: "5px",
+                    right: "5px",
+                    border: "none",
+                    background: "transparent",
+                    fontSize: "16px",
+                    cursor: "pointer"
+                }}
+            >
+                &times;
+            </button>
+            <div>{text}</div>
+        </div>
+    );
+
     return (
         <React.Fragment>
             <DeckGL
@@ -256,6 +295,13 @@ export default function MapView() {
                     style={{ position: "relative" }}
                 />
             </div>
+            {isPopupVisible && (
+                <Popup 
+                    text="💡 Click ☰ to select data to view"
+                    onClose={handlePopupClose}
+                />
+            )}
+
         </React.Fragment>
     );
 }
