@@ -8,9 +8,6 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
     // Helper function to render metrics
     const renderMetrics = () => {
         if (Array.isArray(selectedMetric)) {
-            console.log("Here");
-            console.log(hoverInfo.object.properties);
-            console.log("Here after");
             return selectedMetric.map((metric, index) => (
                 <div key={index} style={{ marginBottom: "5px" }}>
                     {" "}
