@@ -608,10 +608,6 @@ const FileUploadComponent = () => {
                             <Button
                                 variant="contained"
                                 color="success"
-
-                                // test if having button as reset clears fields for upload
-
-                                type="reset"
                                 sx={{ mt: 2 }}
                                 onClick={() => {
                                     setIsFinishedUploading(false);
