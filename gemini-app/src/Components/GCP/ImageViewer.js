@@ -3,7 +3,8 @@ import { useDataState, useDataSetters } from "../../DataContext";
 import {
     Button,
     CircularProgress,
-    Dialog
+    Dialog,
+    Typography
 } from "@mui/material";
 import Slider from "@mui/material/Slider";
 import PointPicker from "./PointPicker";
@@ -12,6 +13,9 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
 
 import useTrackComponent from "../../useTrackComponent";
+
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 
 // const ImageViewer = () => {
 function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
@@ -79,6 +83,10 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         onClose();
     };
 
+    // Dialog window styling
+    // const theme = useTheme();
+    // const fullScreen = useMediaQuery(theme.breakpoints.down('lg'));
+
     const DIALOG_HEIGHT = "90vh";
     const GRID_GAP = "5px";
     const BUTTON_SIZE = "40px";
@@ -97,65 +105,61 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         <Dialog
             open={isImageViewerOpen}
             onClose={handleBackButton}
-            fullWidth
+            fullScreen
+            fullWidth={true}
             maxWidth={'xl'}
-            // PaperProps={{
-            //     style: {
-            //         overflow: 'hidden', // Prevent scrollbar from showing
-            //     },
-            // }}
+            PaperProps={{
+                style: {
+                    minHeight: '90vh', // Ensures that the dialog takes up most of the viewport height
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden', // Prevents internal scroll bars by managing overflow
+                    padding: '5px', // Adds padding around the dialog content
+                }
+            }}
+            // fullWidth
+            // maxWidth={'xl'}
         >
             
             <div
                 style={{
-                    position: "relative",
-                    display: "grid",
-                    height: DIALOG_HEIGHT,
-                    gridTemplateColumns: "1fr auto 1fr",
-                    gridTemplateRows: "1fr auto auto",
-                    gridGap: GRID_GAP,
-                    alignItems: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    height: "100%", // Full height of the dialog
+                    padding: '5px',
+                    gap: '5px',
+                    // marginBottom: '10px'
                 }}
             >
-                {/* Text above the image */}
-                <div style={{
-                        gridColumn: "2",
-                        gridRow: "1",
-                        textAlign: "center",
-                        zIndex: 9,
-                        background: "#fff", // Background to ensure visibility
-                        padding: TEXT_PADDING,
-                        borderRadius: TEXT_BORDER_RADIUS, // Optional: rounded corners
-                        alignItems: "center",
-                    }}>
-                        <h2 style={{ fontSize: "14px" }}>
-                            <span style={{ color: "red", fontWeight: "bold" }}>Note:</span> If you have uploaded GCP Locations, please click on all visible GCPs in the images.<br />
-                            Right click to add a point. Left click to remove a point.
-                        </h2>
+                <Typography variant="body1" component="p" style={{ textAlign: 'center' }}>
+                    <strong>Note:</strong> If you have uploaded GCP Locations, please click on all visible GCPs in the images.<br />
+                    Right click to add a point. Left click to remove a point.
+                </Typography>
 
-                    <IconButton
-                        children={<ArrowBackIcon sx={{ color: "white", fontSize: ICON_SIZE }} />}
-                        onClick={handleBackButton}
-                        style={{
-                            position: "absolute",
-                            top: "10px",
-                            left: "10px",
-                            zIndex: 10,
-                            width: BUTTON_SIZE,
-                            height: BUTTON_SIZE,
-                            backgroundColor: BUTTON_COLOR,
-                        }}
-                        size="large"
-                    ></IconButton>
-                </div>
+                <IconButton
+                    onClick={handleBackButton}
+                    style={{
+                        position: "absolute",
+                        top: "10px",
+                        left: "10px",
+                        zIndex: 10,
+                        width: '40px',
+                        height: '40px',
+                        backgroundColor: '#3874cb',
+                    }}
+                    size="large"
+                >
+                    <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
+                </IconButton>
 
                 <div style={{
-                    gridColumn: "2",
+                    flexGrow: 1,
+                    // gridColumn: "2",
                     display: "flex",
                     justifyContent: "center",
                     alignItems: "center",
-                    // overflow: "hidden",
-                    padding: "10px",
+                    overflow: "auto",
+                    // padding: "10px",
                 }}>
                     {imageViewerLoading && <CircularProgress />}
                     {imageList.length > 0 && (
@@ -167,45 +171,47 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                 </div>
                 
                 {imageList.length > 0 && (
-                    <Slider
-                        value={imageIndex}
-                        onChange={(event, newValue) => setImageIndex(newValue)}
-                        aria-labelledby="image-slider"
-                        step={1}
-                        marks={sliderMarks}
-                        min={0}
-                        max={imageList.length - 1}
-                        valueLabelDisplay="auto"
-                        valueLabelFormat={(value) => `${value + 1} of ${imageList.length}`}
-                        track={false}
-                        style={{ gridColumn: "2", width: SLIDER_WIDTH, justifySelf: SLIDER_JUSTIFY_SELF }}
-                        sx={{
-                            "& .MuiSlider-rail": {
-                                height: SLIDER_RAIL_HEIGHT, // Increase rail and track thickness
-                                width: "120%",
-                                // Center the track on the tick marks
-                                marginLeft: "-10%",
-                            },
-                            "& .MuiSlider-thumb": {
-                                width: SLIDER_THUMB_SIZE, // Increase thumb size
-                                height: SLIDER_THUMB_SIZE,
-                            },
-                        }}
-                    />
-                )}
-                {imageList.length > 0 && (
-                    <div style={{ gridColumn: "2", display: "block", height: BUTTON_CONTAINER_HEIGHT, justifySelf: SLIDER_JUSTIFY_SELF, gap: BUTTON_CONTAINER_GAP }}>
-                        <Button variant="contained" onClick={handlePrevious}>
-                            Previous
-                        </Button>
-                        &nbsp;&nbsp;&nbsp;
-                        <Button variant="contained" onClick={handleNext}>
-                            Next
-                        </Button>
-                        &nbsp;&nbsp;&nbsp;
-                        <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>
-                            Generate Orthophoto
-                        </Button>
+                    <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center', // Centers content horizontally in the flex container
+                        justifyContent: 'center', // Centers content vertically in the flex container
+                        width: '100%', // Ensures the container takes the full width of its parent
+                        gap: '5px', // Adds space between the slider and button container
+                        marginBottom: '20px',
+                    }}>
+                        <Slider
+                            value={imageIndex}
+                            onChange={(event, newValue) => setImageIndex(newValue)}
+                            aria-labelledby="image-slider"
+                            step={1}
+                            marks={sliderMarks}
+                            min={0}
+                            max={imageList.length - 1}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(value) => `${value + 1} of ${imageList.length}`}
+                            track={false}
+                            sx={{
+                                width: '80%', // Adjust this value to control the slider's width
+                                "& .MuiSlider-rail": {
+                                    height: SLIDER_RAIL_HEIGHT,
+                                },
+                                "& .MuiSlider-thumb": {
+                                    width: SLIDER_THUMB_SIZE,
+                                    height: SLIDER_THUMB_SIZE,
+                                },
+                            }}
+                        />
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-around', // Evenly spaces items along the line
+                            // width: '80%', // Match the slider width for alignment,
+                            gap: '20px', // Adds space between the buttons
+                        }}>
+                            <Button variant="contained" onClick={handlePrevious}>Previous</Button>
+                            <Button variant="contained" onClick={handleNext}>Next</Button>
+                            <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
+                        </div>
                     </div>
                 )}
                 <OrthoModal />
