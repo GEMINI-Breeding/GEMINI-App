@@ -14,9 +14,6 @@ import IconButton from "@mui/material/IconButton";
 
 import useTrackComponent from "../../useTrackComponent";
 
-import useMediaQuery from '@mui/material/useMediaQuery';
-import { useTheme } from '@mui/material/styles';
-
 // const ImageViewer = () => {
 function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     useTrackComponent("ImageViewer");
@@ -83,23 +80,8 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         onClose();
     };
 
-    // Dialog window styling
-    // const theme = useTheme();
-    // const fullScreen = useMediaQuery(theme.breakpoints.down('lg'));
-
-    const DIALOG_HEIGHT = "90vh";
-    const GRID_GAP = "5px";
-    const BUTTON_SIZE = "40px";
-    const BUTTON_COLOR = "#3874cb";
-    const ICON_SIZE = "3rem";
-    const TEXT_PADDING = "1px";
-    const TEXT_BORDER_RADIUS = "1px";
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;
-    const SLIDER_WIDTH = "50%";
-    const SLIDER_JUSTIFY_SELF = "center";
-    const BUTTON_CONTAINER_HEIGHT = "50px";
-    const BUTTON_CONTAINER_GAP = "20px";
 
     return (
         <Dialog
@@ -117,8 +99,6 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                     padding: '5px', // Adds padding around the dialog content
                 }
             }}
-            // fullWidth
-            // maxWidth={'xl'}
         >
             
             <div
@@ -133,6 +113,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
             >
                 <Typography variant="body1" component="p" style={{ textAlign: 'center' }}>
                     <strong>Note:</strong> If you have uploaded GCP Locations, please click on all visible GCPs in the images.<br />
+                    <span style={{ color: "red", fontWeight: "bold" }}>Important:</span> If you DID NOT upload GCP Locations, generate orthophoto without selecting GCPs.<br />
                     Right click to add a point. Left click to remove a point.
                 </Typography>
 
