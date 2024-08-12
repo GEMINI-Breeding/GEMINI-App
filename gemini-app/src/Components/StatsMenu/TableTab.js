@@ -162,12 +162,12 @@ const TableViewTab = () => {
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
             {sensorData && sensorData.length > 0 ? (
-                <Typography variant="h4" component="h2" align="center">
+                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
                     Statistics
                 </Typography>
             ) : (
-                <Typography variant="h4" component="h2" align="center">
-                Please select a population to view statistics
+                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
+                    Please select a population to view statistics
                 </Typography>
             )} 
 

@@ -108,12 +108,14 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             console.log(newGeoJsonPath)
             onTilePathChange(newTilePath);
             onGeoJsonPathChange(newGeoJsonPath);
-
+            
             fetchData(newGeoJsonPath)
                 .then((data) => {
-                    const traitOutputLabels = data.features.map((f) => f.properties.Label);
+                    // console.log("map features: ", data.features);
+                    const traitOutputLabels = data.features.map((f) => f.properties.accession);
+                    // console.log("traitOutputLabels: ", traitOutputLabels);
                     const metricColumns = Object.keys(data.features[0].properties);
-                    const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat"];
+                    const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat", "row", "column", "location", "plot", "population", "accession", "col"];
                     const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
                     setMetricOptions(metrics);
                     const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
@@ -219,7 +221,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                                 newValue = ["All Genotypes"];
                             }
                         }
-
                         if (newValue.length === 0 || (newValue.length === 1 && newValue[0] !== "All Genotypes")) {
                             if (!genotypeOptions.includes("All Genotypes")) {
                                 setGenotypeOptions((prevOptions) => ["All Genotypes", ...prevOptions]);
@@ -227,7 +228,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                         } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
                             setGenotypeOptions((prevOptions) => prevOptions.filter((val) => val !== "All Genotypes"));
                         }
-
+                        // console.log("genotype options", genotypeOptions);
                         setSelectedGenotypes(newValue);
                     }}
                     renderInput={(params) => <TextField {...params} label="Genotype" />}

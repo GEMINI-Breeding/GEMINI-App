@@ -8,13 +8,12 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
     // Helper function to render metrics
     const renderMetrics = () => {
         if (Array.isArray(selectedMetric)) {
-            console.log(hoverInfo.object);
             return selectedMetric.map((metric, index) => (
                 <div key={index} style={{ marginBottom: "5px" }}>
                     {" "}
                     {/* Use div instead of span */}
                     <b>{capitalizeFirstLetter(metric)}:</b>{" "}
-                    {hoverInfo.object.properties[metric] !== null ? hoverInfo.object.properties[metric] : "No Data"}
+                    {(hoverInfo.object.properties[metric] !== null && hoverInfo.object.properties[metric] !== undefined) ? hoverInfo.object.properties[metric] : "No Data"}
                     {"\n"}
                 </div> // Each metric will now appear on a new line
             ));
@@ -22,7 +21,7 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
             return (
                 <span style={{ marginRight: "5px" }}>
                     <b>{selectedMetric}:</b>{" "}
-                    {hoverInfo.object.properties[selectedMetric] !== null
+                    {(hoverInfo.object.properties[selectedMetric] !== null && hoverInfo.object.properties[selectedMetric] !== undefined)
                         ? hoverInfo.object.properties[selectedMetric].toFixed(2)
                         : "No Data"}
                 </span>
@@ -56,6 +55,16 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
                     style={{ marginBottom: "5px", display: "flex", flexWrap: "wrap", justifyContent: "space-between" }}
                 >
                     {renderMetrics()}
+                </div>
+                <div style={{ marginBottom: "5px" }}>
+                    <b>Plot:</b> {hoverInfo.object.properties.plot !== null && hoverInfo.object.properties.plot !== undefined
+                        ? hoverInfo.object.properties.plot
+                        : "No Data"}
+                </div>
+                <div style={{ marginBottom: "5px" }}>
+                    <b>Accession:</b> {hoverInfo.object.properties.accession !== null && hoverInfo.object.properties.accession !== undefined
+                        ? hoverInfo.object.properties.accession
+                        : "No Data"}
                 </div>
                 {Array.isArray(selectedMetric) ? null : (
                     <hr style={{ borderTop: "1px solid #aaa", marginBottom: "5px" }} />

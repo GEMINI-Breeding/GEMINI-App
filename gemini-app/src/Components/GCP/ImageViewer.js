@@ -3,7 +3,8 @@ import { useDataState, useDataSetters } from "../../DataContext";
 import {
     Button,
     CircularProgress,
-    Dialog
+    Dialog,
+    Typography
 } from "@mui/material";
 import Slider from "@mui/material/Slider";
 import PointPicker from "./PointPicker";
@@ -79,50 +80,87 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         onClose();
     };
 
+    const SLIDER_RAIL_HEIGHT = 10;
+    const SLIDER_THUMB_SIZE = 20;
+
     return (
-        <Dialog open={open} onClose={handleBackButton} fullWidth maxWidth={'xl'}>
-                <div
+        <Dialog
+            open={isImageViewerOpen}
+            onClose={handleBackButton}
+            fullScreen
+            fullWidth={true}
+            maxWidth={'xl'}
+            PaperProps={{
+                style: {
+                    minHeight: '90vh', // Ensures that the dialog takes up most of the viewport height
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden', // Prevents internal scroll bars by managing overflow
+                    padding: '5px', // Adds padding around the dialog content
+                }
+            }}
+        >
+            
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    height: "100%", // Full height of the dialog
+                    padding: '5px',
+                    gap: '5px',
+                    // marginBottom: '10px'
+                }}
+            >
+                <Typography variant="body1" component="p" style={{ textAlign: 'center' }}>
+                    <strong>Note:</strong> If you have uploaded GCP Locations, please click on all visible GCPs in the images.<br />
+                    <span style={{ color: "red", fontWeight: "bold" }}>Important:</span> If you DID NOT upload GCP Locations, generate orthophoto without selecting GCPs.<br />
+                    Right click to add a point. Left click to remove a point.
+                </Typography>
+
+                <IconButton
+                    onClick={handleBackButton}
                     style={{
-                        position: "relative",
-                        display: "grid",
-                        height: "90vh",
-                        gridTemplateColumns: "1fr auto 1fr",
-                        gridTemplateRows: "1fr auto auto",
-                        gridGap: "5px",
-                        alignItems: "center",
+                        position: "absolute",
+                        top: "10px",
+                        left: "10px",
+                        zIndex: 10,
+                        width: '40px',
+                        height: '40px',
+                        backgroundColor: '#3874cb',
                     }}
+                    size="large"
                 >
-                    <IconButton
-                        children={<ArrowBackIcon sx={{ color: "white", fontSize: "3rem" }} />}
-                        onClick={handleBackButton}
-                        style={{
-                            position: "absolute",
-                            top: "10px",
-                            left: "10px",
-                            zIndex: 9,
-                            width: "50px",
-                            height: "50px",
-                            backgroundColor: "#3874cb",
-                        }}
-                        size="large"
-                    ></IconButton>
-                    <div style={{
-                        gridColumn: "2",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        overflow: "hidden",
-                        padding: "20px",
-                    }}>
-                        {imageViewerLoading && <CircularProgress />}
-                        {imageList.length > 0 && (
-                            <PointPicker
-                                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                                src={API_ENDPOINT + imageList[imageIndex].image_path}
-                            />
-                        )}
-                    </div>
+                    <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
+                </IconButton>
+
+                <div style={{
+                    flexGrow: 1,
+                    // gridColumn: "2",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    overflow: "auto",
+                    // padding: "10px",
+                }}>
+                    {imageViewerLoading && <CircularProgress />}
                     {imageList.length > 0 && (
+                        <PointPicker
+                            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                            src={API_ENDPOINT + imageList[imageIndex].image_path}
+                        />
+                    )}
+                </div>
+                
+                {imageList.length > 0 && (
+                    <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center', // Centers content horizontally in the flex container
+                        justifyContent: 'center', // Centers content vertically in the flex container
+                        width: '100%', // Ensures the container takes the full width of its parent
+                        gap: '5px', // Adds space between the slider and button container
+                        marginBottom: '20px',
+                    }}>
                         <Slider
                             value={imageIndex}
                             onChange={(event, newValue) => setImageIndex(newValue)}
@@ -134,40 +172,31 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                             valueLabelDisplay="auto"
                             valueLabelFormat={(value) => `${value + 1} of ${imageList.length}`}
                             track={false}
-                            style={{ gridColumn: "2", width: "50%", justifySelf: "center" }}
                             sx={{
+                                width: '80%', // Adjust this value to control the slider's width
                                 "& .MuiSlider-rail": {
-                                    height: 10, // Increase rail and track thickness
-                                    width: "120%",
-                                    // Center the track on the tick marks
-                                    marginLeft: "-10%",
+                                    height: SLIDER_RAIL_HEIGHT,
                                 },
                                 "& .MuiSlider-thumb": {
-                                    width: 20, // Increase thumb size
-                                    height: 20,
+                                    width: SLIDER_THUMB_SIZE,
+                                    height: SLIDER_THUMB_SIZE,
                                 },
                             }}
                         />
-                    )}
-                    {imageList.length > 0 && (
-                        <div style={{ gridColumn: "2", display: "block", height: "50px", justifySelf: "center", gap: "20px" }}>
-                            <Button variant="contained" onClick={handlePrevious}>
-                                Previous
-                            </Button>
-                            &nbsp;&nbsp;&nbsp;
-                            {imageIndex === imageList.length - 1 ? (
-                                <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>
-                                    Generate Orthophoto
-                                </Button>
-                            ) : (
-                                <Button variant="contained" onClick={handleNext}>
-                                    Next
-                                </Button>
-                            )}
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-around', // Evenly spaces items along the line
+                            // width: '80%', // Match the slider width for alignment,
+                            gap: '20px', // Adds space between the buttons
+                        }}>
+                            <Button variant="contained" onClick={handlePrevious}>Previous</Button>
+                            <Button variant="contained" onClick={handleNext}>Next</Button>
+                            <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
                         </div>
-                    )}
-                    <OrthoModal />
-                </div>
+                    </div>
+                )}
+                <OrthoModal />
+            </div>
         </Dialog>
     );
 };

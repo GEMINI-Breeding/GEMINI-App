@@ -116,10 +116,10 @@ export const DataProvider = ({ children }) => {
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
     const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
     const [polygonProposalOptions, setPolygonProposalOptions] = useState({
-        width: 1.5,
+        width: 1,
         length: 3,
-        rows: 30,
-        columns: 70,
+        rows: 23,
+        columns: 15,
         verticalSpacing: 1.5,
         horizontalSpacing: 0.2,
         angle: 0,
@@ -139,6 +139,8 @@ export const DataProvider = ({ children }) => {
 
     // Aerial Prep State
     const [aerialPrepTab, setAerialPrepTab] = useState(0);
+    const [isDroneExtracting, setIsDroneExtracting] = useState(false);
+    const [currentDroneExtractProgress, setCurrentDroneExtractProgress] = useState(0);
 
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
@@ -284,6 +286,8 @@ export const DataProvider = ({ children }) => {
 
                 // Aerial Prep State
                 aerialPrepTab,
+                isDroneExtracting,
+                currentDroneExtractProgress,
 
                 // Rover Prep State
                 roverPrepTab,
@@ -426,6 +430,8 @@ export const DataProvider = ({ children }) => {
 
                     // Aerial Prep State
                     setAerialPrepTab,
+                    setIsDroneExtracting,
+                    setCurrentDroneExtractProgress,
 
                     // Rover Prep State
                     setRoverPrepTab,

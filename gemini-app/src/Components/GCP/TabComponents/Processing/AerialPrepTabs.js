@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
 import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
-import AskDroneAnalyzeModal from "./AskDroneAnalyzeModal";
+import { AskDroneAnalyzeModal } from "./AskDroneAnalyzeModal";
 import Snackbar from "@mui/material/Snackbar";
 
 import useTrackComponent from "../../../../useTrackComponent";
