@@ -180,6 +180,7 @@ const PointPicker = ({ src }) => {
     
     return (
         <div style={{ position: "relative", width: "100%", height: "auto" }}>
+
             <img
                 src={src}
                 alt="Point Picker"
