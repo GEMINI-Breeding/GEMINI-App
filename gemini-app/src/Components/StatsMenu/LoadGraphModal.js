@@ -88,7 +88,7 @@ const LoadGraphModal = ({ open, onClose, item }) => {
                 </Button>
             </DialogTitle>
             <DialogContent style={{ padding: 0, height: '65vh' }}>
-                <GraphTab data={csvData} />
+                <GraphTab data={csvData} item={item}/>
             </DialogContent>
         </Dialog>
     );

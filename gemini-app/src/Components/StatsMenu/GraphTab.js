@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
-import { Box, Tabs, Tab, FormControl, InputLabel, Select, MenuItem, Typography } from '@mui/material';
+import { Box, Tabs, Tab, FormControl, InputLabel, Select, MenuItem, Typography, Button } from '@mui/material';
 import useTrackComponent from "../../useTrackComponent";
+import html2canvas from 'html2canvas';
 
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
-const GraphTab = ({ data }) => {
+const GraphTab = ({ data, item }) => {
     useTrackComponent("GraphTab");
 
     const [selectedAccession, setSelectedAccession] = useState('');
@@ -17,6 +18,7 @@ const GraphTab = ({ data }) => {
     });
     const [accessionOptions, setAccessionOptions] = useState([]);
     const [error, setError] = useState(null);
+    const chartRef = useRef(null);
 
     useEffect(() => {
         if (data && data.length > 0) {
@@ -96,6 +98,18 @@ const GraphTab = ({ data }) => {
         };
     };
 
+    const saveChartAsImage = () => {
+        if (chartRef.current) {
+            html2canvas(chartRef.current).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.href = imgData;
+                link.download = `${item.date}_${chartType === 'heightHistogram' ? 'height_95_p' : 'veg_frac'}_chart.png`;
+                link.click();
+            });
+        }
+    };
+
     return (
         <Box sx={{ padding: 2, width: '50vw'}}>
             {error ? (
@@ -112,47 +126,52 @@ const GraphTab = ({ data }) => {
                             ))}
                         </Select>
                     </FormControl>
-
-                    <Tabs value={chartType} onChange={(event, newValue) => setChartType(newValue)} aria-label="chart type tabs" sx={{ marginBottom: 2 }}>
-                        <Tab value="heightHistogram" label="Height Distribution" />
-                        <Tab value="vegetationHistogram" label="Vegetation Fraction Distribution" />
-                    </Tabs>
-
-                    <Box sx={{ height: 'calc(100% - 60px)', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {chartType === 'heightHistogram' && (chartData.heightHistogramData.labels?.length > 0 ? <Bar data={chartData.heightHistogramData} options={{
-                            scales: {
-                                x: {
-                                    title: {
-                                        display: true,
-                                        text: 'Height (meters)'
-                                    }
-                                },
-                                y: {
-                                    title: {
-                                        display: true,
-                                        text: 'Frequency'
-                                    }
-                                }
-                            }
-                        }} /> : <Typography>No height data available.</Typography>)}
-                        {chartType === 'vegetationHistogram' && (chartData.vegetationHistogramData.labels?.length > 0 ? <Bar data={chartData.vegetationHistogramData} options={{
-                            scales: {
-                                x: {
-                                    title: {
-                                        display: true,
-                                        text: 'Vegetation Fraction'
-                                    }
-                                },
-                                y: {
-                                    title: {
-                                        display: true,
-                                        text: 'Frequency'
-                                    }
-                                }
-                            }
-                        }} /> : <Typography>No vegetation data available.</Typography>)}
-                        
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Tabs value={chartType} onChange={(event, newValue) => setChartType(newValue)} aria-label="chart type tabs" sx={{ marginBottom: 2 }}>
+                            <Tab value="heightHistogram" label="Height Distribution" />
+                            <Tab value="vegetationHistogram" label="Vegetation Fraction Distribution" />
+                        </Tabs>
+                        <Button variant="contained" color="primary" onClick={saveChartAsImage}>
+                            Save as Image
+                        </Button>
                     </Box>
+                    <Box sx={{ height: 'calc(100% - 60px)', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Box ref={chartRef} sx={{ width: '100%' }}>
+                            {chartType === 'heightHistogram' && (chartData.heightHistogramData.labels?.length > 0 ? <Bar data={chartData.heightHistogramData} options={{
+                                scales: {
+                                    x: {
+                                        title: {
+                                            display: true,
+                                            text: 'Height (meters)'
+                                        }
+                                    },
+                                    y: {
+                                        title: {
+                                            display: true,
+                                            text: 'Frequency'
+                                        }
+                                    }
+                                }
+                            }} /> : <Typography>No height data available.</Typography>)}
+                            {chartType === 'vegetationHistogram' && (chartData.vegetationHistogramData.labels?.length > 0 ? <Bar data={chartData.vegetationHistogramData} options={{
+                                scales: {
+                                    x: {
+                                        title: {
+                                            display: true,
+                                            text: 'Vegetation Fraction'
+                                        }
+                                    },
+                                    y: {
+                                        title: {
+                                            display: true,
+                                            text: 'Frequency'
+                                        }
+                                    }
+                                }
+                            }} /> : <Typography>No vegetation data available.</Typography>)}
+                        </Box>
+                    </Box>
+                    
                 </>
             )} 
         </Box>
