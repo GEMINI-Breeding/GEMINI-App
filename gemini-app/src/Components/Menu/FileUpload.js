@@ -52,6 +52,8 @@ const FileUploadComponent = () => {
     const [files, setFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
     const [isFinishedUploading, setIsFinishedUploading] = useState(false);
+    const [noFilesToUpload, setNoFilesToUpload] = useState(true);
+    const [badFileType, setBadFileType] = useState(false);
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
@@ -260,7 +262,7 @@ const FileUploadComponent = () => {
             setIsUploading(true);
             cancelUploadRef.current = false;
             setProgress(0);
-
+            setBadFileType(false);
             // Construct directory path based on data type and form values
             let dirPath = "";
             for (const field of dataTypes[selectedDataType].fields) {
@@ -273,54 +275,82 @@ const FileUploadComponent = () => {
             }
 
             // Step 1: Check which files need to be uploaded
+            const fileTypes = {};
+            files.forEach(file => {
+                fileTypes[file.name] = file.type;
+            });
             const fileList = files.map((file) => file.name);
             const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
             console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
-            const maxRetries = 3;
-            for (let i = 0; i < filesToUpload.length; i++) {
-                let retries = 0;
-                while (retries < maxRetries) {
-                    try {
-                        if (cancelUploadRef.current) {
-                            break;
-                        }
-                        const file = files.find((f) => f.name === filesToUpload[i]);
-                        
-                        if (selectedDataType === "binary") {
-                            await uploadFileChunks(file, dirPath, filesToUpload.length);
-                            break;
-                        } else {
-                            await uploadFileWithTimeout(file, dirPath, selectedDataType);
-                            setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
-                        }
+    
+            if(filesToUpload.length === 0){
+                setNoFilesToUpload(true);
+            }
+            else{
+                setNoFilesToUpload(false);
+                const maxRetries = 3;
+                let bFT = false;
+                for (let i = 0; i < filesToUpload.length; i++) {
+                    if(selectedDataType === "image" && fileTypes[filesToUpload[i]].split('/')[0] != "image")
+                    {
+                        bFT = true;
+                        setBadFileType(true);
                         break;
-                    } catch (error) {
-                        if (retries === maxRetries - 1) {
-                            alert(`Failed to upload file: ${filesToUpload[i]}`);
-                            console.log(`Failed to upload file: ${filesToUpload[i]}`, error);
-                            break;
+                    }
+                    else if((selectedDataType != "image") && (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
+                    {
+                        bFT = true;
+                        setBadFileType(true);
+                        break;
+                    }
+                    else{
+                        let retries = 0;
+                        while (retries < maxRetries) {
+                            try {
+                                if (cancelUploadRef.current) {
+                                    break;
+                                }
+                                const file = files.find((f) => f.name === filesToUpload[i]);
+                                
+                                if (selectedDataType === "binary") {
+                                    await uploadFileChunks(file, dirPath, filesToUpload.length);
+                                    break;
+                                } else {
+                                    await uploadFileWithTimeout(file, dirPath, selectedDataType);
+                                    setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                                }
+                                break;
+                            } catch (error) {
+                                if (retries === maxRetries - 1) {
+                                    alert(`Failed to upload file: ${filesToUpload[i]}`);
+                                    console.log(`Failed to upload file: ${filesToUpload[i]}`, error);
+                                    break;
+                                }
+                                retries++;
+                            }
                         }
-                        retries++;
                     }
                 }
+                if(!bFT)
+                {
+                    // Step 3: If binary file, extract the contents
+                    if (selectedDataType === "binary") {
+                        setProgress(0);
+                        console.log("Files to extract:", filesToUpload);
+                        await extractBinaryFiles(filesToUpload, dirPath);
+                    }
+                    uploadedSizeSoFar = 0;
+                    setProgress(0);
+                    setIsUploading(false);
+                    if(!cancelUploadRef.current)
+                    {
+                        setIsFinishedUploading(true);
+                    }
+                    setFiles([]);
+                }
             }
-
-            // Step 3: If binary file, extract the contents
-            if (selectedDataType === "binary") {
-                setProgress(0);
-                console.log("Files to extract:", filesToUpload);
-                await extractBinaryFiles(filesToUpload, dirPath);
-            }
-            uploadedSizeSoFar = 0;
-            setProgress(0);
-            setIsUploading(false);
-            if(!cancelUploadRef.current)
-            {
-                setIsFinishedUploading(true);
-            }
-            setFiles([]);
         },
         validate: (values) => {
             let errors = {};
@@ -514,7 +544,43 @@ const FileUploadComponent = () => {
                             </Box>
                         </>
                     )}
-                    {isUploading && (
+                    {isUploading && noFilesToUpload && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
+                        <Typography>
+                            <b>No files to upload.</b>
+                        </Typography>
+                        <Button
+                            variant="contained"
+                            color="error"
+                            sx={{ mt: 2 }}
+                            onClick={() => {
+                                setIsUploading(false);
+                            }}
+                        >
+                            Return
+                        </Button>
+                    </Paper>
+                    )}
+                    {isUploading && badFileType && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
+                        <Typography>
+                            <b>Incorrect file type found for selected data type.</b>
+                        </Typography>
+                        <Button
+                            variant="contained"
+                            color="error"
+                            sx={{ mt: 2 }}
+                            onClick={() => {
+                                setIsUploading(false);
+                                setBadFileType(false);
+                                setFiles([]);
+                            }}
+                        >
+                            Return
+                        </Button>
+                    </Paper>
+                    )}
+                    {isUploading && !noFilesToUpload && !badFileType && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
                             <Typography>
                                 {extractingBinary ? "Extracting Binary File..." : "Uploading..."} {`${Math.round(progress)}%`}

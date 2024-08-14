@@ -6,7 +6,7 @@
     },
     "binary": {
         "fields": ["year", "experiment", "location", "population", "date", "platform"],
-        "fileType": ".bin/*",
+        "fileType": ".bin",
         "label": "Amiga File"
     },
     "weather": {
