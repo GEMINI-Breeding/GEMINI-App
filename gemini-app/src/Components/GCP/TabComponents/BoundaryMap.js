@@ -10,6 +10,8 @@ import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
 import PlotProposalSwitcher from "../../Util/PlotProposalSwitcher";
 import useTrackComponent from "../../../useTrackComponent";
+import useExtentFromBounds from "../../Map/MapHooks";
+import { FlyToInterpolator } from "@deck.gl/core";
 
 // const fc = {
 //     type: "FeatureCollection",
@@ -23,13 +25,21 @@ export const translateMode = new TranslateMode();
 export const viewMode = new ViewMode();
 export const selectionMode = new TranslateMode();
 
+
+
+
 function BoundaryMap({ task }) {
     useTrackComponent("BoundaryMap");
-
+    const INITIAL_TILE_URL =
+        "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+    const INITIAL_BOUNDS_URL = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
+    
     const {
         viewState,
         selectedTilePath,
         flaskUrl,
+        tileUrl,
+        boundsUrl,
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedYearGCP,
@@ -40,7 +50,7 @@ function BoundaryMap({ task }) {
         featureCollectionPlot,
         showTooltipGCP,
     } = useDataState();
-    const { setViewState, setCursorStyle, setFeatureCollectionPop, setFeatureCollectionPlot } = useDataSetters();
+    const { setViewState, setCursorStyle, setFeatureCollectionPop, setFeatureCollectionPlot, setSelectedTilePath, setTileUrl, setBoundsUrl } = useDataSetters();
 
     const [featureCollection, setFeatureCollection] =
         task === "pop_boundary"
@@ -49,10 +59,19 @@ function BoundaryMap({ task }) {
 
     const [prepOrthoTileLayer, setPrepOrthoTileLayer] = useState(null);
     const [hoverInfoGCP, setHoverInfoGCP] = useState(null);
-
+    
     useEffect(() => {
-        console.log("prepOrthoImagePath", prepOrthoImagePath);
-
+        if (prepOrthoImagePath) {
+            const newPath = "files/" + prepOrthoImagePath;
+            setSelectedTilePath(newPath);
+            
+            const encodedPath = encodeURIComponent(`${flaskUrl}${newPath}`);
+            setTileUrl(INITIAL_TILE_URL.replace("${FILE_PATH}", encodedPath));
+            setBoundsUrl(INITIAL_BOUNDS_URL.replace("${FILE_PATH}", encodedPath));
+        } else {
+            setTileUrl(INITIAL_TILE_URL);
+            setBoundsUrl(INITIAL_BOUNDS_URL);
+        }
         const newPrepOrthoTileLayer = new TileLayer({
             id: "geotiff-tile-layer",
             minZoom: 10,
@@ -77,6 +96,39 @@ function BoundaryMap({ task }) {
 
         setPrepOrthoTileLayer(newPrepOrthoTileLayer);
     }, [prepOrthoImagePath]);
+
+    const extentBounds = useExtentFromBounds(boundsUrl);
+
+    useEffect(() => {
+        if (extentBounds) {
+            const [minLon, minLat, maxLon, maxLat] = extentBounds;
+            const longitude = (minLon + maxLon) / 2;
+            const latitude = (minLat + maxLat) / 2;
+
+            // Width and height of the current view in pixels
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            // Map extents in degrees
+            const mapLngDelta = maxLon - minLon;
+            const mapLatDelta = maxLat - minLat;
+
+            // Calculate zoom level
+            let zoomLng = Math.floor(Math.log((viewportWidth * 360) / mapLngDelta) / Math.log(2));
+            let zoomLat = Math.floor(Math.log((viewportHeight * 360) / mapLatDelta) / Math.log(2));
+
+            const zoom = Math.min(zoomLng, zoomLat) - 9.5;
+
+            setViewState((prevViewState) => ({
+                ...prevViewState,
+                longitude,
+                latitude,
+                zoom,
+                transitionDuration: 1000, // 1 second transition
+                transitionInterpolator: new FlyToInterpolator(),
+            }));
+        }
+    }, [extentBounds]);
 
     useEffect(() => {
         console.log("task", task);
