@@ -126,15 +126,10 @@ const GraphTab = ({ data, item }) => {
                             ))}
                         </Select>
                     </FormControl>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Tabs value={chartType} onChange={(event, newValue) => setChartType(newValue)} aria-label="chart type tabs" sx={{ marginBottom: 2 }}>
                             <Tab value="heightHistogram" label="Height Distribution" />
                             <Tab value="vegetationHistogram" label="Vegetation Fraction Distribution" />
                         </Tabs>
-                        <Button variant="contained" color="primary" onClick={saveChartAsImage}>
-                            Save as Image
-                        </Button>
-                    </Box>
                     <Box sx={{ height: 'calc(100% - 60px)', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Box ref={chartRef} sx={{ width: '100%' }}>
                             {chartType === 'heightHistogram' && (chartData.heightHistogramData.labels?.length > 0 ? <Bar data={chartData.heightHistogramData} options={{
@@ -171,7 +166,9 @@ const GraphTab = ({ data, item }) => {
                             }} /> : <Typography>No vegetation data available.</Typography>)}
                         </Box>
                     </Box>
-                    
+                    <Button variant="contained" color="primary" onClick={saveChartAsImage}>
+                            Save as Image
+                    </Button>
                 </>
             )} 
         </Box>
