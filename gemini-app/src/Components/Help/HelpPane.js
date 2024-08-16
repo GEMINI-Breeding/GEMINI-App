@@ -41,12 +41,6 @@ const HelpPane = () => {
                     <p>
                         <b>GCP Locations:</b> This is a csv file containing locations of GCPs. The first column should contain the label, the second column contains latitude and the third column contains longitude.
                     </p>
-                    <h2>Active Components</h2>
-                    <ul>
-                        {[...activeComponents].map((componentName) => (
-                            <li key={componentName}>{componentName}</li>
-                        ))}
-                    </ul>
                 </div>
             </HelpStyled>
         );
@@ -92,12 +86,6 @@ const HelpPane = () => {
                         >
                         GEMINI App Docs
                         </Link> for instructions on how to use the GEMINI App.
-                    <h2>Active Components</h2>
-                    <ul>
-                    {[...activeComponents].map((componentName) => (
-                        <li key={componentName}>{componentName}</li>
-                    ))}
-                    </ul>
                 </div>            
             </HelpStyled>
         );
