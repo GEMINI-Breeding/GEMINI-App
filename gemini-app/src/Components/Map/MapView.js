@@ -14,6 +14,8 @@ import ColorMapLegend from "./ColorMapLegend";
 
 import useTrackComponent from "../../useTrackComponent";
 
+const mapboxAccessToken = process.env.REACT_APP_MAPBOX_TOKEN;
+
 function geojsonToCSV(geojson) {
     // Check if the GeoJSON has features
     if (!geojson || !geojson.features || !geojson.features.length) {
@@ -276,7 +278,7 @@ export default function MapView() {
                 <MapGL
                     mapStyle="mapbox://styles/mapbox/satellite-v9"
                     mapboxAccessToken={
-                        "pk.eyJ1IjoibWFzb25lYXJsZXMiLCJhIjoiY2xkeXR3bXNyMG5heDNucHJhYWFscnZnbyJ9.A03O6PN1N1u771c4Qqg1SA"
+                        mapboxAccessToken
                     }
                 />
             </DeckGL>
