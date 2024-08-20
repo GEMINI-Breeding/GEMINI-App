@@ -30,7 +30,7 @@ export default function RoverPrepTabs() {
     const traitOptions = ['Flower', 'Pod', 'Leaf']
 
     // included ground-based platforms
-    const includedPlatforms = ["Rover", "Amiga-Onboard", "Phone"];
+    const includedPlatforms = ["Rover", "Amiga-Onboard", "Phone", "T4"];
 
     // components with action
     const CustomComponent = {

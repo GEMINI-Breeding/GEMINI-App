@@ -294,7 +294,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 sx={{
                     '& .MuiDialog-paper': {
                         minWidth: '300px', // Set a minimum width that accommodates your DataGrid comfortably
-                        minHeight: '300px', // Set a minimum height based on your content needs
+                        // minHeight: '300px', // Set a minimum height based on your content needs
                         maxWidth: '95%', // Optionally set a max width relative to the viewport
                         maxHeight: '90%', // Optionally set a max height relative to the viewport
                         overflow: 'hidden' // Manages overflow if inner contents are larger than the dialog

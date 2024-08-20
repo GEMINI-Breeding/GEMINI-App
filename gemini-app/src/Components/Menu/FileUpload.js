@@ -273,6 +273,9 @@ const FileUploadComponent = () => {
             if (selectedDataType === "image") {
                 dirPath += "/Images";
             }
+            if (selectedDataType === "platformLogs") {
+                dirPath += "/Metadata";
+            }
 
             // Step 1: Check which files need to be uploaded
             const fileTypes = {};
@@ -284,7 +287,6 @@ const FileUploadComponent = () => {
             console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
-    
             if(filesToUpload.length === 0){
                 setNoFilesToUpload(true);
             }
@@ -293,13 +295,17 @@ const FileUploadComponent = () => {
                 const maxRetries = 3;
                 let bFT = false;
                 for (let i = 0; i < filesToUpload.length; i++) {
+                    console.log(('.' + filesToUpload[i].split('.')[1]))
                     if(selectedDataType === "image" && fileTypes[filesToUpload[i]].split('/')[0] != "image")
                     {
                         bFT = true;
                         setBadFileType(true);
                         break;
                     }
-                    else if((selectedDataType != "image") && (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
+                    else if(
+                        (selectedDataType != "image") && 
+                        selectedDataType !== "platformLogs" &&
+                        (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
                     {
                         bFT = true;
                         setBadFileType(true);
