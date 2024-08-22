@@ -334,10 +334,10 @@ export default function RoverPrepTabs() {
                         scrollButtons="auto"
                         centered
                     >
-                        <FolderTab label="Locate Plants" />
-                        <FolderTab label="Label Traits" />
-                        <FolderTab label="Teach Traits" />
-                        <FolderTab label="Extract Traits" />
+                        <FolderTab label="1. Locate Plants" />
+                        <FolderTab label="2. Label Traits" />
+                        <FolderTab label="3. Train Traits" />
+                        <FolderTab label="4. Extract Traits" />
                     </FolderTabs>
                 </Box>
 
