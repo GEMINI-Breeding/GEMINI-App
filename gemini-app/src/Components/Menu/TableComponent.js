@@ -66,7 +66,6 @@ export const TableComponent = () => {
             platform: row.platform
         };
     
-        // Send delete request to backend
         fetch(`${flaskUrl}delete_files`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -74,7 +73,6 @@ export const TableComponent = () => {
         })
             .then(response => response.json())
             .then(() => {
-                // Update frontend state to remove the deleted row
                 setProcData((prevData) =>
                     prevData.filter((row) => row.id !== id)
                 );
@@ -140,26 +138,27 @@ export const TableComponent = () => {
             });
     };
 
+    // Make sure it gets nested under same parent correctly
     const convertToPath = (data) => {
         const paths = [];
     
         const traverse = (node, path = []) => {
-          if (typeof node === 'object' && node !== null && Object.keys(node).length > 0) {
-            for (const [key, value] of Object.entries(node)) {
-              traverse(value, [...path, key]);
+            if (typeof node === 'object' && node !== null && Object.keys(node).length > 0) {
+                for (const [key, value] of Object.entries(node)) {
+                    traverse(value, [...path, key]);
+                }
+            } else {
+                paths.push([...path, node].join(' > '));
             }
-          } else {
-            paths.push([...path, node].join(' > '));
-          }
         };
     
-        Object.entries(data).forEach(([key, value]) => {
-          traverse(value, [key]);
-        });
+        for (const [key, value] of Object.entries(data)) {
+            traverse(value, [key]);
+        }
     
         return paths;
-      };
-
+    };
+    
     const transformNestedData = (nestedData) => {
         const flattenedPaths = convertToPath(nestedData);
         return flattenedPaths.map((path, index) => {
