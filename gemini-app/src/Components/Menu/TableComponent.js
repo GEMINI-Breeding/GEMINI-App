@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useDataState } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
+import { Edit, Delete, Visibility } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
+import { ImagePreviewer } from "./ImagePreviewer";
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
@@ -13,10 +13,13 @@ export const TableComponent = () => {
     const [procData, setProcData] = useState([]);
 
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [dialogViewOpen, setDialogViewOpen] = useState(false);
     const [currentRow, setCurrentRow] = useState(null);
     const [editFields, setEditFields] = useState({});
     const [showEditSuccess, setShowEditSuccess] = useState(false);
     const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
+    const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [imagePreviewData, setImagePreviewData] = useState(null);
 
     useEffect(() => {
         setShowEditSuccess(false);
@@ -88,9 +91,30 @@ export const TableComponent = () => {
         setDialogOpen(false);
     };
 
+    const handleViewDialogClose = () => {
+        setDialogViewOpen(false);
+    };
+
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setEditFields((prev) => ({ ...prev, [name]: value }));
+    };
+
+    const handleView = (id) => {
+        const row = procData.find((row) => row.id === id);
+        if (row) {
+            const obj = {
+                location: row.location,
+                population: row.population,
+                date: row.date,
+                year: row.year,
+                experiment: row.experiment,
+                sensor: row.sensor,
+                platform: row.platform
+            };
+            setImagePreviewData(obj);
+            setImagePreviewOpen(true);
+        }
     };
 
     const handleSave = () => {
@@ -190,15 +214,20 @@ export const TableComponent = () => {
             width: 120,
             renderCell: (params) => (
                 <div style={{ display: 'flex', gap: '12px' }}>
-                    <EditIcon
+                    <Edit
                         color="primary"
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleEdit(params.id)}
                     />
-                    <DeleteIcon
+                    <Delete
                         color="error"
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleDelete(params.id)}
+                    />
+                    <Visibility
+                        color="action"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleView(params.id)}
                     />
                 </div>
             ),
@@ -291,8 +320,11 @@ export const TableComponent = () => {
                     <Button onClick={handleSave}>Save</Button>
                 </DialogActions>
             </Dialog>
+            <ImagePreviewer
+                open={imagePreviewOpen}
+                obj={imagePreviewData}
+                onClose={() => setImagePreviewOpen(false)}
+            /> 
         </div>
-
-        
     );
 };
