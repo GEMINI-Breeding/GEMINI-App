@@ -21,7 +21,8 @@ function AerialDataPrep() {
         flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
-        aerialPrepTab
+        aerialPrepTab,
+        isGCPReady
     } = useDataState();
 
     const {
@@ -201,7 +202,7 @@ function AerialDataPrep() {
                 </Typography>
             </Box>
 
-            {sensorData && sensorData.length > 0 && (
+            {sensorData && sensorData.length > 0 && isGCPReady && (
                 sensorData
                     .filter((platformData) => includedPlatforms.includes(platformData.title))
                     .map((platformData) => (

@@ -17,6 +17,7 @@ export default function AerialPrepTabs() {
         selectedExperimentGCP,
         flaskUrl,
         aerialPrepTab,
+        isGCPReady
     } = useDataState();
 
     const { setAerialPrepTab } = useDataSetters();
@@ -184,7 +185,7 @@ export default function AerialPrepTabs() {
                 </Box>
                 <Grid item container justifyContent="center">
                     <Box sx={{ width: "100%" }}>
-                        {aerialPrepTab === 0 && sensorData && (
+                        {aerialPrepTab === 0 && sensorData && isGCPReady && (
                             <div>
                                 {sensorData
                                     .filter((platformData) => includedPlatforms.includes(platformData.title))

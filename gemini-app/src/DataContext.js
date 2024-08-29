@@ -84,6 +84,8 @@ export const DataProvider = ({ children }) => {
     // CollapsibleSideBar State
     const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+    const[isGCPReady, setIsGCPReady] = useState(false);
+
     // ColorMap State
     const [colorScale, setColorScale] = useState(null);
     const [lowerPercentileValue, setLowerPercentileValue] = useState(null);
@@ -246,6 +248,9 @@ export const DataProvider = ({ children }) => {
                 // CollapsibleSideBarState
                 isSidebarCollapsed,
 
+                // Begin Data Preparation
+                isGCPReady, 
+
                 // ColorMap State
                 colorScale,
                 lowerPercentileValue,
@@ -389,6 +394,9 @@ export const DataProvider = ({ children }) => {
 
                     // CollapsibleSideBar State
                     setSidebarCollapsed,
+
+                    // Begin Data Prep
+                    setIsGCPReady,
 
                     // ColorMap State
                     setColorScale,
