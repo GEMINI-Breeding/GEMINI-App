@@ -63,8 +63,13 @@ const FileUploadComponent = () => {
     const [currentInputValues, setCurrentInputValues] = useState({});
     const [dirPath, setDirPath] = useState("");
     const [actionType, setActionType] = useState('upload');
-    const [uploadedData, setUploadedData] = useState(false);
+    const {
+        uploadedData
+    } = useDataState();
 
+    const {
+        setUploadedData
+    } = useDataSetters();
     useEffect(() => {
         console.log(selectedDataType);
     }, [selectedDataType]);
@@ -354,6 +359,7 @@ const FileUploadComponent = () => {
                     if(!cancelUploadRef.current)
                     {
                         setIsFinishedUploading(true);
+                        setUploadedData(true);
                     }
                     setFiles([]);
                 }

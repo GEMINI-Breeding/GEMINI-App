@@ -59,6 +59,7 @@ export const DataProvider = ({ children }) => {
 
     // File Upload State
     const [extractingBinary, setExtractingBinary] = useState(false);
+    const [uploadedData, setUploadedData] = useState(false);
 
     // DataSelectionMenu State
     const [locationOptions, setLocationOptions] = useState([]);
@@ -222,6 +223,7 @@ export const DataProvider = ({ children }) => {
 
                 // File Upload State
                 extractingBinary,
+                uploadedData,
 
                 // DataSelectionMenu State
                 locationOptions,
@@ -370,6 +372,7 @@ export const DataProvider = ({ children }) => {
 
                     // File Upload State
                     setExtractingBinary,
+                    setUploadedData,
 
                     // DataSelectionMenu state
                     setLocationOptions,

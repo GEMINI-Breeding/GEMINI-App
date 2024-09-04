@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useDataState } from "../../DataContext";
+import { useDataState, useDataSetters  } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
@@ -19,8 +19,16 @@ export const TableComponent = () => {
     const [showEditSuccess, setShowEditSuccess] = useState(false);
     const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [nestedDirectories, setNestedDirectories] = useState({});
     const [imagePreviewData, setImagePreviewData] = useState(null);
+    const {
+        uploadedData
+    } = useDataState();
 
+    const {
+        setUploadedData
+    } = useDataSetters();
+    
     useEffect(() => {
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
@@ -80,6 +88,15 @@ export const TableComponent = () => {
                     prevData.filter((row) => row.id !== id)
                 );
                 setShowDeleteSuccess(true);
+                fetch(`${flaskUrl}list_dirs_nested`)
+                    .then((response) => response.json())
+                    .then((data) => {
+                        setNestedDirectories(data);
+                    })
+                    .catch((error) => {
+                        console.error("Error fetching nested directories:", error);
+                        setUploadedData(false);
+                    });
             })
             .catch((error) => {
                 console.error("Error deleting data:", error);
