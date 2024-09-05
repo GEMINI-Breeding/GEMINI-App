@@ -55,7 +55,12 @@ export function useHandleProcessImages() {
             sensor: selectedSensorGCP,
             platform: selectedPlatformGCP,
         };
-
+        
+        /*if(typeof data.selected_images === 'undefined')
+        {
+            console.log("Data selection error caught")
+            return;
+        }*/
         fetch(`${flaskUrl}process_images`, {
             method: "POST",
             headers: {
@@ -79,7 +84,7 @@ export function useHandleProcessImages() {
                         basePath: data.selected_images[0].image_path,
                         platform: selectedPlatformGCP,
                         sensor: selectedSensorGCP,
-                     }),
+                        }),
                 })
                     .then((fileResponse) => fileResponse.json())
                     .then((fileData) => {
@@ -99,7 +104,10 @@ export function useHandleProcessImages() {
                             console.log("No GCP path found again");
                         }
                     });
+            }).catch ((error) => {
+                console.log("Error with data selection, "+ error);
             });
+        
 
         // If the sidebar is not collapsed, collapse it
         if (!isSidebarCollapsed) {
