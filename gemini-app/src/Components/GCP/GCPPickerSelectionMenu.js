@@ -19,6 +19,7 @@ const GCPPickerSelectionMenu = () => {
         flaskUrl,
         gcpPath,
         isSidebarCollapsed,
+        isGCPReady
     } = useDataState();
 
     const {
@@ -37,6 +38,7 @@ const GCPPickerSelectionMenu = () => {
         setSidebarCollapsed,
         setTotalImages,
         setIsPrepInitiated,
+        setIsGCPReady
     } = useDataSetters();
 
     useEffect(() => {
@@ -76,9 +78,12 @@ const GCPPickerSelectionMenu = () => {
     }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP]);
 
     const initiatePrep = () => {
-        setIsPrepInitiated(true);
-        if (!isSidebarCollapsed) {
-            setSidebarCollapsed(true);
+        if(selectedPopulationGCP !== null){
+            setIsPrepInitiated(true);
+            setIsGCPReady(true);
+            if (!isSidebarCollapsed) {
+                setSidebarCollapsed(true);
+            }
         }
     };
 
@@ -94,6 +99,7 @@ const GCPPickerSelectionMenu = () => {
                     setSelectedLocationGCP(null);
                     setSelectedPopulationGCP(null);
                     setSelectedDateGCP(null);
+                    setIsGCPReady(false);
                 }}
                 renderInput={(params) => <TextField {...params} label="Year" />}
                 sx={{ mb: 2 }}
@@ -109,6 +115,7 @@ const GCPPickerSelectionMenu = () => {
                         setSelectedLocationGCP(null);
                         setSelectedPopulationGCP(null);
                         setSelectedDateGCP(null);
+                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Experiment" />}
                     sx={{ mb: 2 }}
@@ -124,6 +131,7 @@ const GCPPickerSelectionMenu = () => {
                         setSelectedLocationGCP(newValue);
                         setSelectedPopulationGCP(null);
                         setSelectedDateGCP(null);
+                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Location" />}
                     sx={{ mb: 2 }}
@@ -138,6 +146,7 @@ const GCPPickerSelectionMenu = () => {
                     onChange={(event, newValue) => {
                         setSelectedPopulationGCP(newValue);
                         setSelectedDateGCP(null);
+                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Population" />}
                     sx={{ mb: 2 }}

@@ -84,13 +84,13 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
                 {item && item.date}
             </DialogTitle>
             <DialogContent>
-                Would you like to process it now?
+                {isDroneExtracting ? "Extracting..." : "Extract Traits?"}
                 <Grid container spacing={1} justifyContent="center" alignItems="center" style={{ marginTop: "20px" }}>
                     <Grid item>
                         <Button
                             variant="contained"
                             color="primary"
-                            // disabled={nowDroneProcessing}
+                            disabled={isDroneExtracting}
                             onClick={() => {
                                 setIsDroneExtracting(true);
                             }}

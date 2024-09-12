@@ -14,6 +14,8 @@ import {
     FormControlLabel,
     Switch,
     LinearProgress,
+    Tabs,
+    Tab,
 } from "@mui/material";
 import { useDropzone } from "react-dropzone";
 import { useFormik } from "formik";
@@ -21,6 +23,7 @@ import { useDataState, useDataSetters } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
 import Box from "@mui/material/Box";
+import { TableComponent } from "./TableComponent";
 
 let uploadedSizeSoFar = 0;
 
@@ -59,6 +62,8 @@ const FileUploadComponent = () => {
     const cancelUploadRef = useRef(false);
     const [currentInputValues, setCurrentInputValues] = useState({});
     const [dirPath, setDirPath] = useState("");
+    const [actionType, setActionType] = useState('upload');
+
 
     useEffect(() => {
         console.log(selectedDataType);
@@ -449,6 +454,7 @@ const FileUploadComponent = () => {
 
     // Component render
     return (
+        <>
         <Grid
             container
             justifyContent="center"
@@ -462,6 +468,15 @@ const FileUploadComponent = () => {
                 </Typography>
             </Grid>
             <Grid item xs={8}>
+                <Tabs value={actionType} onChange={(event, newValue) => setActionType(newValue)} aria-label="action type tabs" sx={{ marginBottom: 2 }}>
+                    <Tab value="upload" label="Upload Files" />
+                    <Tab value="manage" label="Manage Files" />
+                </Tabs>
+            </Grid>
+
+            {actionType === 'upload' && (
+                <>
+                <Grid item xs={8}>
                 <FormControl fullWidth>
                     <InputLabel>Data Type</InputLabel>
                     <Select
@@ -495,7 +510,7 @@ const FileUploadComponent = () => {
                         <>
                             {dataTypes[selectedDataType].fields.map((field) =>
                                 renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
-                            )}
+                            ) } 
                             <Paper
                                 variant="outlined"
                                 sx={{
@@ -619,7 +634,15 @@ const FileUploadComponent = () => {
                     )}
                 </form>
             </Grid>
+                </>)
+            }
+            {actionType === 'manage' && (
+                <Grid item xs={8}>
+                    <TableComponent />
+                </Grid>
+        )}         
         </Grid>
+        </>
     );
 };
 
