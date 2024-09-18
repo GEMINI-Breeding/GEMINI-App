@@ -53,7 +53,8 @@ function App() {
         isOrthoProcessing,
         currentOrthoProgress,
         isDroneExtracting,
-        currentDroneExtractProgress
+        currentDroneExtractProgress,
+        isGCPReady
     } = useDataState();
 
     const {
@@ -120,6 +121,9 @@ function App() {
             case 0:
                 return <MapView />;
             case 1:
+                if(!isGCPReady){
+                    setSidebarCollapsed(false);
+                }
                 return <TabbedPrepUI />;
             case 2:
                 return <StatsMenuMain />;
