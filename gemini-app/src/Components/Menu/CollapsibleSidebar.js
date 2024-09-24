@@ -140,13 +140,13 @@ export default function CollapsibleSidebar({
                             color="white"
                             aria-label="docs"
                             onClick={() => handleDrawerToggle(5)}
-                            sx={{ backgroundColor: currentView === 5 ? "rgba(255, 255, 255, 0.1)" : "transparent" }}
+                            sx={{ backgroundColor: currentView === 5 || currentView == null ? "rgba(255, 255, 255, 0.1)" : "transparent" }}
                         >
-                            <DescriptionIcon color={currentView === 5 ? "secondary" : "white"} fontSize="medium" />
+                            <DescriptionIcon color={currentView === 5 || currentView == null ? "secondary" : "white"} fontSize="medium" />
                         </IconButton>
                         <Typography
                             variant="body"
-                            color={currentView === 5 ? "secondary" : "white"}
+                            color={currentView === 5 || currentView == null ? "secondary" : "white"}
                             align="center"
                             sx={{ fontSize: "14px" }}
                         >
