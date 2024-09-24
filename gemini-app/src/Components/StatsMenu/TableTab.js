@@ -64,7 +64,7 @@ const TableViewTab = () => {
         //console.log('[TableTab] sensorData has changed:', sensorData);
     }, [sensorData]);
     
-    const includedPlatforms = ["Drone", "Rover","Amiga-Onboard"];
+    // const includedPlatforms = ["Drone", "Rover","Amiga-Onboard", "T4"];
     
     const constructUrl = (path, ...args) => `${flaskUrl}${path}/${args.join('/')}`;
 
@@ -127,15 +127,15 @@ const TableViewTab = () => {
                         );
 
                         for (const platform of platforms) {
-                            if (includedPlatforms.includes(platform)) {
-                                const sensors = await fetchData(
-                                    constructUrl('list_dirs/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform)
-                                );
+                            // if (includedPlatforms.includes(platform)) {
+                            const sensors = await fetchData(
+                                constructUrl('list_dirs/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform)
+                            );
 
-                                for (const sensor of sensors) {
-                                    await fetchDataAndUpdate(date, platform, sensor, updatedData);
-                                }
+                            for (const sensor of sensors) {
+                                await fetchDataAndUpdate(date, platform, sensor, updatedData);
                             }
+                            // }
                         }
                     }
                     //@TODO: Restructure the hierarchy to Dates -> Platforms -> Sensors -> Data
@@ -188,7 +188,7 @@ const TableViewTab = () => {
 
             {sensorData && sensorData.length > 0 && (
                 sensorData
-                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                     .map((platformData) => (
                     <NestedSection
                         key={platformData.title}

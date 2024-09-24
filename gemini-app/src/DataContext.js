@@ -148,7 +148,7 @@ export const DataProvider = ({ children }) => {
     // Rover Prep State
     const [roverPrepTab, setRoverPrepTab] = useState(0);
     const [epochs, setEpochs] = useState(100);
-    const [batchSize, setBatchSize] = useState(32);
+    const [batchSize, setBatchSize] = useState(-1);
     const [imageSize, setImageSize] = useState(640);
     const [isTraining, setIsTraining] = useState(false);
     const [progress, setProgress] = useState(0);
