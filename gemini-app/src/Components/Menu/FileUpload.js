@@ -63,8 +63,13 @@ const FileUploadComponent = () => {
     const [currentInputValues, setCurrentInputValues] = useState({});
     const [dirPath, setDirPath] = useState("");
     const [actionType, setActionType] = useState('upload');
+    const {
+        uploadedData
+    } = useDataState();
 
-
+    const {
+        setUploadedData
+    } = useDataSetters();
     useEffect(() => {
         console.log(selectedDataType);
     }, [selectedDataType]);
@@ -84,6 +89,7 @@ const FileUploadComponent = () => {
     // Effect to fetch nested directories on component mount
     useEffect(() => {
         setIsLoading(true);
+        setUploadedData(true);
         fetch(`${flaskUrl}list_dirs_nested`)
             .then((response) => response.json())
             .then((data) => {
@@ -93,6 +99,7 @@ const FileUploadComponent = () => {
             .catch((error) => {
                 console.error("Error fetching nested directories:", error);
                 setIsLoading(false);
+                setUploadedData(false);
             });
     }, [flaskUrl]);
 
@@ -352,6 +359,7 @@ const FileUploadComponent = () => {
                     if(!cancelUploadRef.current)
                     {
                         setIsFinishedUploading(true);
+                        setUploadedData(true);
                     }
                     setFiles([]);
                 }
@@ -636,11 +644,16 @@ const FileUploadComponent = () => {
             </Grid>
                 </>)
             }
-            {actionType === 'manage' && (
+            {actionType === 'manage' && uploadedData && (
                 <Grid item xs={8}>
                     <TableComponent />
                 </Grid>
-        )}         
+        )} 
+            {actionType === 'manage' && !uploadedData && (
+                <Grid item xs={8}>
+                    <b>Uploaded data must be present to manage files.</b>
+                </Grid>
+        )}     
         </Grid>
         </>
     );
