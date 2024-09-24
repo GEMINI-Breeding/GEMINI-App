@@ -247,6 +247,11 @@ export default function RoverPrepTabs() {
                                                             imgsz: String(modelInfo.imgsz),
                                                             map: String(modelInfo.map)
                                                         };
+
+                                                        // if batch value is -1, change to word "Auto"
+                                                        if (modelData.batch === "-1") {
+                                                            modelData.batch = "Auto";
+                                                        }   
                                         
                                                         // Check if an entry with the same model already exists
                                                         const existingIndex = updatedData[platform][sensor].findIndex(entry => entry.model === modelId);
@@ -265,21 +270,22 @@ export default function RoverPrepTabs() {
                                             }
                                             break;
                                         case 3: // For "Extract Traits"
-                                            const geojsons = await fetchData(
-                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                            );
-                                            const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
+                                            // const geojsons = await fetchData(
+                                            //     `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            // );
+                                            // console.log("GEOJSONS:", geojsons)
+                                            // const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
                                             
-                                            if (filteredFiles.length >= 1) {
-                                                const extract_files = await fetchData(
-                                                    `${flaskUrl}check_runs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                                );
-                                                console.log(extract_files)
-                                                locate = extract_files[selectRoverTrait].locate;
-                                                model = extract_files[selectRoverTrait].model;
-                                                const id = extract_files[selectRoverTrait].id
-                                                updatedData[platform][sensor].push({ date, model, id, locate });
-                                            }
+                                            // if (filteredFiles.length >= 1) {
+                                            const extract_files = await fetchData(
+                                                `${flaskUrl}check_runs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            );
+                                            console.log(extract_files)
+                                            locate = extract_files[selectRoverTrait].locate;
+                                            model = extract_files[selectRoverTrait].model;
+                                            const id = extract_files[selectRoverTrait].id
+                                            updatedData[platform][sensor].push({ date, model, id, locate });
+                                            // }
                                             break;
                                     }
                                 } catch (error) {
