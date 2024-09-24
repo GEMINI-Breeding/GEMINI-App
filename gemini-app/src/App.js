@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
-import HelpIcon from "@mui/icons-material/Help";
+//import HelpIcon from "@mui/icons-material/Help";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Snackbar from "@mui/material/Snackbar";
@@ -14,7 +14,7 @@ import CollapsibleSidebar from "./Components/Menu/CollapsibleSidebar";
 import TabbedPrepUI from "./Components/GCP/TabbedPrepUI";
 import { ActiveComponentsProvider } from "./ActiveComponentsContext";
 import MapView from "./Components/Map/MapView";
-import HelpPane from "./Components/Help/HelpPane";
+//import HelpPane from "./Components/Help/HelpPane";
 
 import { TrainingProgressBar } from "./Components/GCP/TabComponents/Processing/TrainModel";
 import { LocateProgressBar } from "./Components/GCP/TabComponents/Processing/LocatePlants";
@@ -24,14 +24,15 @@ import { DroneExtractProgressBar } from "./Components/GCP/TabComponents/Processi
 import FileUploadComponent from "./Components/Menu/FileUpload";
 import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
+import DocsFrame from "./Components/DocsFrame";
 
 function App() {
-    const [helpPaneOpen, setHelpPaneOpen] = useState(false);
+    //const [helpPaneOpen, setHelpPaneOpen] = useState(false);
     const [submitError, setSubmitError] = useState("");
 
-    const toggleHelpPane = () => {
+    /*const toggleHelpPane = () => {
         setHelpPaneOpen(!helpPaneOpen);
-    };
+    };*/
 
     // App state management; see DataContext.js
     const {
@@ -52,7 +53,8 @@ function App() {
         isOrthoProcessing,
         currentOrthoProgress,
         isDroneExtracting,
-        currentDroneExtractProgress
+        currentDroneExtractProgress,
+        isGCPReady
     } = useDataState();
 
     const {
@@ -77,7 +79,8 @@ function App() {
         setCloseMenu,
         setCurrentOrthoProgress,
         setIsOrthoProcessing,
-        setIsDroneExtracting
+        setIsDroneExtracting,
+        setSidebarCollapsed
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -118,6 +121,9 @@ function App() {
             case 0:
                 return <MapView />;
             case 1:
+                if(!isGCPReady){
+                    setSidebarCollapsed(false);
+                }
                 return <TabbedPrepUI />;
             case 2:
                 return <StatsMenuMain />;
@@ -125,85 +131,12 @@ function App() {
                 return <FileUploadComponent />;
             case 4:
                 return <ImageQueryUI />;
+            case 5:
+                setSidebarCollapsed(true);
+                return <DocsFrame />;
             default:
-                return (
-                    <Grid
-                        container
-                        spacing={2}
-                        direction="column"
-                        justifyContent="center"
-                        alignItems="center"
-                        style={{
-                            minHeight: "100vh",
-                            position: "relative",
-                        }}
-                    >
-                        <Box
-                            sx={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width: "100%",
-                                height: "100%",
-                                backgroundColor: "rgba(255, 255, 255, 0.75)",
-                                zIndex: 1, // Ensures overlay is above the background but below content
-                            }}
-                        ></Box>
-
-                        {/* Ensure content is above the overlay */}
-                        <Box
-                            sx={{
-                                position: "relative",
-                                zIndex: 2,
-                                width: "100%",
-                            }}
-                        >
-                            <Grid item xs={12}>
-                                <Box
-                                    sx={{
-                                        textAlign: "center",
-                                        p: 2,
-                                    }}
-                                >
-                                    <img src="/gemini-logo.png" alt="GEMINI Logo" style={{ maxWidth: "80%" }} />
-                                    <p
-                                        style={{
-                                            fontFamily: "Arial",
-                                            fontSize: "28px",
-                                            fontWeight: "regular",
-                                            color: "#142a50",
-                                        }}
-                                    >
-                                        G×E×M Innovation in Intelligence for climate adaptation
-                                    </p>
-                                </Box>
-                            </Grid>
-                            <Grid container direction="row" justifyContent="center" alignItems="center">
-                                <Grid item xs={6}>
-                                    {creditsSection("Financial Support", "/financial-support.png")}
-                                </Grid>
-                                <Grid item xs={6}>
-                                    {creditsSection("Partners", "/our-partners.png")}
-                                </Grid>
-                            </Grid>
-                        </Box>
-
-                        <Box
-                            sx={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width: "100%",
-                                height: "100%",
-                                backgroundImage: "url('/sorghum-background.jpg')",
-                                backgroundPosition: "center",
-                                backgroundSize: "cover",
-                                backgroundRepeat: "no-repeat",
-                                zIndex: 0,
-                            }}
-                        ></Box>
-                    </Grid>
-                );
+                setSidebarCollapsed(true);
+                return <DocsFrame />;
         }
     })();
 
@@ -462,24 +395,6 @@ function App() {
                 <div className="sidebar">{sidebar}</div>
 
                 <div className="content">{contentView}</div>
-
-                <div
-                    className="help-button"
-                    style={{ position: "fixed", bottom: "10px", right: helpPaneOpen ? "300px" : "10px", zIndex: 1000 }}
-                >
-                    <IconButton onClick={toggleHelpPane}>
-                        <HelpIcon fontSize="large" />
-                    </IconButton>
-                </div>
-
-                <Drawer
-                    anchor="right"
-                    variant="persistent"
-                    open={helpPaneOpen}
-                    sx={{ "& .MuiDrawer-paper": { height: "100vh", overflow: "auto" } }}
-                >
-                    <HelpPane />
-                </Drawer>
 
                 {/* training */}
                 {isTraining && (

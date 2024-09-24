@@ -25,6 +25,7 @@ import MapIcon from "@mui/icons-material/Map";
 import InsightsIcon from "@mui/icons-material/Insights";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import FilterIcon from "@mui/icons-material/Filter";
+import DescriptionIcon from "@mui/icons-material/Description";
 
 import { DataProvider, useDataSetters, useDataState } from "../../DataContext";
 import FileUploadComponent from "./FileUpload";
@@ -125,6 +126,32 @@ export default function CollapsibleSidebar({
                         <IconButton color="white" aria-label="collapse-menu" onClick={() => handleMenuToggle()}>
                             <Menu color="white" fontSize="large" />
                         </IconButton>
+                    </Box>
+
+                    <Box
+                        sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            mb: 2,
+                        }}
+                    >
+                        <IconButton
+                            color="white"
+                            aria-label="docs"
+                            onClick={() => handleDrawerToggle(5)}
+                            sx={{ backgroundColor: currentView === 5 || currentView == null ? "rgba(255, 255, 255, 0.1)" : "transparent" }}
+                        >
+                            <DescriptionIcon color={currentView === 5 || currentView == null ? "secondary" : "white"} fontSize="medium" />
+                        </IconButton>
+                        <Typography
+                            variant="body"
+                            color={currentView === 5 || currentView == null ? "secondary" : "white"}
+                            align="center"
+                            sx={{ fontSize: "14px" }}
+                        >
+                            Docs
+                        </Typography>
                     </Box>
 
                     <Box
