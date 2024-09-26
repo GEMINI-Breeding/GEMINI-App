@@ -196,7 +196,7 @@ function AerialDataPrep() {
 
             {activeTab === 0 && (
                 <>
-                    <Box sx={{ padding: '10px', textAlign: 'center' }}>
+                    {/* <Box sx={{ padding: '10px', textAlign: 'center' }}>
                         <Typography variant="body1" component="p">
                             Image datasets are organized by sensor type and date.
                         </Typography>
@@ -209,7 +209,7 @@ function AerialDataPrep() {
                         <Typography variant="body1" component="p">
                             After labeling the final image, you will be able to initialize orthomosaic generation.
                         </Typography>
-                    </Box>
+                    </Box> */}
 
                     {sensorData && sensorData.length > 0 && isGCPReady && (
                         sensorData
