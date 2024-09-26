@@ -4,6 +4,9 @@ GEMINI web browser based application using React JS as front-end.
 Full Documentation found here:
 https://gemini-breeding.github.io/
 
+Example Data found here:
+https://ucdavis.box.com/s/ts802xlcddyufixfjmeayxwiiz2mxrb9
+
 ### Setup
 ```bash
 # Download git submodules
