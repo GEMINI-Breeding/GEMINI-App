@@ -42,9 +42,6 @@ function AerialDataPrep() {
         orthoTable: OrthoTable
     };
 
-    // included aeriel-based platforms
-    const includedPlatforms = ["Drone", "Phone"];
-
     // columns to render
     let columns = [
         { label: "Date", field: "date" },
@@ -96,66 +93,62 @@ function AerialDataPrep() {
 
                     // iterate through each data and check if images exists
                     for (const date of dates) {
-                        const folders = await fetchData(
+                        const platform = await fetchData(
                             `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
-                        // check if the 'Drone' folder exists
-                        if (folders.includes("Drone") || folders.includes("Phone")) {
-                            let platform = folders.includes("Drone") ? "Drone" : "Phone";
-                            const sensors = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
+                        const sensors = await fetchData(
+                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone`
+                        );
+
+                        for (const sensor of sensors) {
+                            let ortho = 2; // Default to not completed
+
+                            // Initialize sensor array if not already done
+                            if (!updatedData[platform]) {
+                                updatedData[platform] = {};
+                            }
+                            if (!updatedData[platform][sensor]) {
+                                updatedData[platform][sensor] = [];
+                            }
+
+                            // check for Images folder
+                            const imageFolders = await fetchData(
+                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
                             );
 
-                            for (const sensor of sensors) {
-                                let ortho = 2; // Default to not completed
-
-                                // Initialize sensor array if not already done
-                                if (!updatedData[platform]) {
-                                    updatedData[platform] = {};
-                                }
-                                if (!updatedData[platform][sensor]) {
-                                    updatedData[platform][sensor] = [];
-                                }
-
-                                // check for Images folder
-                                const imageFolders = await fetchData(
-                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                            if (imageFolders.includes("Images")) {
+                                const images = await fetchData(
+                                    `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}/Images`
                                 );
 
-                                if (imageFolders.includes("Images")) {
-                                    const images = await fetchData(
-                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}/Images`
-                                    );
-
-                                    if (images.length === 0) {
-                                        // if Images folder is empty
-                                        ortho = 2;
-                                    } else {
-                                        try {
-                                            const processedFiles = await fetchData(
-                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
-                                            );
-
-                                            ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
-                                        } catch (error) {
-                                            // if there's an error fetching processed files, or no .tif files found
-                                            console.warn(
-                                                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
-                                                error
-                                            );
-                                            ortho = false; // there are images, but no processed .tif files
-                                            setSubmitError(`Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}`)
-                                        }
-                                    }
-                                } else {
-                                    // if Images folder is not found
+                                if (images.length === 0) {
+                                    // if Images folder is empty
                                     ortho = 2;
+                                } else {
+                                    try {
+                                        const processedFiles = await fetchData(
+                                            `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/${sensor}`
+                                        );
+
+                                        ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
+                                    } catch (error) {
+                                        // if there's an error fetching processed files, or no .tif files found
+                                        console.warn(
+                                            `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
+                                            error
+                                        );
+                                        ortho = false; // there are images, but no processed .tif files
+                                    }
                                 }
-                                // add entry with the determined 'ortho' status
-                                updatedData[platform][sensor].push({ date, ortho });
+                            } else {
+                                // if Images folder is not found
+                                ortho = 2;
                             }
+                            // add entry with the determined 'ortho' status
+                            updatedData[platform][sensor].push({ date, ortho });
                         }
+                        // }
                     }
                     const processedData = Object.keys(updatedData).map((platform) => ({
                         title: platform,
@@ -213,7 +206,7 @@ function AerialDataPrep() {
 
                     {sensorData && sensorData.length > 0 && isGCPReady && (
                         sensorData
-                            .filter((platformData) => includedPlatforms.includes(platformData.title))
+                            // .filter((platformData) => includedPlatforms.includes(platformData.title))
                             .map((platformData) => (
                                 <NestedSection
                                     key={platformData.title}
