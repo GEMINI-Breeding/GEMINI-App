@@ -15,6 +15,7 @@ import {
     LinearProgress,
     Box,
     IconButton,
+    Menu,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { DataGrid } from '@mui/x-data-grid';
@@ -185,6 +186,12 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 });
                 if (response.ok) {
                     const data = await response.json();
+                    // if batch is -1, replace with Auto
+                    data.forEach((item) => {
+                        if (item.batch == -1) {
+                            item.batch = "Auto";
+                        }
+                    });
                     setRowsData(data)
                     console.log("Response from server:", data);
                 } else {
@@ -294,7 +301,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 sx={{
                     '& .MuiDialog-paper': {
                         minWidth: '300px', // Set a minimum width that accommodates your DataGrid comfortably
-                        minHeight: '300px', // Set a minimum height based on your content needs
+                        // minHeight: '300px', // Set a minimum height based on your content needs
                         maxWidth: '95%', // Optionally set a max width relative to the viewport
                         maxHeight: '90%', // Optionally set a max height relative to the viewport
                         overflow: 'hidden' // Manages overflow if inner contents are larger than the dialog
@@ -550,7 +557,7 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
 
     const resetToDefault = () => {
         setEpochs(100);
-        setBatchSize(32);
+        setBatchSize(-1);
         setImageSize(640);
     };
 
@@ -579,6 +586,7 @@ function AdvancedMenu({ epochs, setEpochs, batchSize, setBatchSize, imageSize, s
                         <FormControl fullWidth>
                             <InputLabel>Batch Size</InputLabel>
                             <Select value={batchSize} label="Batch Size" onChange={handleBatchSizeChange}>
+                                <MenuItem value={-1}>Auto</MenuItem>
                                 <MenuItem value={16}>16</MenuItem>
                                 <MenuItem value={32}>32</MenuItem>
                                 <MenuItem value={64}>64</MenuItem>

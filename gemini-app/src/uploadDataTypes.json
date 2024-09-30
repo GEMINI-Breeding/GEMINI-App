@@ -25,7 +25,7 @@
         "label": "GCP Locations"
     },
     "platformLogs": {
-        "fields": ["year", "experiment", "location", "population", "date", "platform"],
+        "fields": ["year", "experiment", "location", "population", "date", "platform", "sensor"],
         "fileType": "*",
         "label": "Platform Logs"
     }

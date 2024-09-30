@@ -289,7 +289,7 @@ const ImageSelection = () => {
     }, [selectedPlatformQuery, selectedDateQuery]);
 
     return (
-        <Grid container spacing={2}>
+        <Grid container spacing={2} style={{ paddingTop: "25px" }}>
             <Grid item xs={10}>
                 <Typography variant="h6">Select Data</Typography>
                 {isLoading && <CircularProgress />}

@@ -5,6 +5,8 @@
 
 .App .content {
     flex: 1; /* add this */
+    height: 100vh;
+    overflow: hidden;
 }
 
 .App .sidebar {

@@ -54,7 +54,7 @@ const ImageQueryViewer = () => {
     );
 
     return (
-        <div>
+        <div style={{ paddingTop: "25px" }}> 
             {imageDataQuery.length > 0 ? (
                 <>
                     <Gallery

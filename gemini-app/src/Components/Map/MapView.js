@@ -71,6 +71,7 @@ export default function MapView() {
         flaskUrl,
         tileUrl,
         boundsUrl,
+        isSidebarCollapsed
     } = useDataState();
 
     const { setViewState, setHoverInfo, setIsLoadingColorScale, setGeojsonData, setTileUrl, setBoundsUrl } =
@@ -235,8 +236,8 @@ export default function MapView() {
     const Popup = ({ text, onClose }) => (
         <div style={{
             position: "fixed",
-            top: "80px",
-            right: "20px",
+            top: "20px",
+            left: "100px",
             backgroundColor: "rgba(255, 255, 255, 0.7)",
             border: "1px solid #ccc",
             borderRadius: "4px",
@@ -297,7 +298,7 @@ export default function MapView() {
                     style={{ position: "relative" }}
                 />
             </div>
-            {isPopupVisible && (
+            {isPopupVisible && isSidebarCollapsed && (
                 <Popup 
                     text="💡 Click ☰ to select data to view"
                     onClose={handlePopupClose}
