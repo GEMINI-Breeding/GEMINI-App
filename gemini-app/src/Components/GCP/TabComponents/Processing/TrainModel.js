@@ -97,9 +97,13 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
             } else {
                 const errorData = await response.json();
                 console.error("Error details:", errorData);
+
+                // create dialog box containing error message
+                alert("Error: " + errorData.error);
             }
         } catch (error) {
             console.error("There was an error sending the request", error);
+            alert("Error: " + error);
         }
     };
     const handleClose = () => {

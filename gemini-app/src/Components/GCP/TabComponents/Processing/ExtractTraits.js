@@ -79,7 +79,9 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
             } else {
                 const errorData = await response.json();
                 console.error("Error details:", errorData);
-                throw new Error(errorData.message || "Error occurred, press Stop");
+                // throw new Error(errorData.message || "Error occurred, press Stop");
+
+                alert("Error: " + errorData.error);
             }
         } catch (error) {
             console.error("There was an error sending the request", error)
