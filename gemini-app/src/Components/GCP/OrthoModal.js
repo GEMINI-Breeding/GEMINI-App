@@ -102,6 +102,8 @@ const OrthoModal = () => {
                 console.error("Error:", error);
                 setOrthoServerStatus("Error generating ortho");
                 setSubmitError("Error starting ortho generation.")
+
+                alert("Error starting ortho generation. Please try again.");
             });
     };
 
