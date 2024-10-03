@@ -317,6 +317,7 @@ const FileUploadComponent = () => {
                     else if(
                         (selectedDataType != "image") && 
                         selectedDataType !== "platformLogs" &&
+                        selectedDataType !== "binary" &&
                         (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
                     {
                         bFT = true;
@@ -622,6 +623,21 @@ const FileUploadComponent = () => {
                                 onClick={() => {
                                     cancelUploadRef.current = true;
                                     setIsUploading(false);
+
+                                    // clear cache of uploaded files if exists
+                                    console.log("Clearing cache of uploaded files");
+                                    fetch(`${flaskUrl}/clear_upload_cache`, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ dirPath }),
+                                    })
+                                    .then((response) => response.json())
+                                    .then((data) => {
+                                        console.log(data);
+                                    })
+                                    .catch((error) => {
+                                        console.error('Error:', error);
+                                    });
                                 }}
                             >
                                 Cancel Upload
@@ -640,6 +656,21 @@ const FileUploadComponent = () => {
                                 sx={{ mt: 2 }}
                                 onClick={() => {
                                     setIsFinishedUploading(false);
+
+                                    // clear cache of uploaded files if exists
+                                    console.log("Clearing cache of uploaded files");
+                                    fetch(`${flaskUrl}/clear_upload_cache`, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ dirPath }),
+                                    })
+                                    .then((response) => response.json())
+                                    .then((data) => {
+                                        console.log(data);
+                                    })
+                                    .catch((error) => {
+                                        console.error('Error:', error);
+                                    });
                                 }}
                             >
                                 Done
