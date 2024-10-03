@@ -73,9 +73,16 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
             } else {
                 const errorData = await response.json();
                 console.error("Error details:", errorData);
+                
+                // Raise error dialog of error message (500 message)
+                // message from backend: return jsonify({"error": error_output}), 500
+                alert("Error: " + errorData.error);
             }
         } catch (error) {
             console.error("There was an error sending the request", error)
+
+            // Raise error dialog of error message
+            alert("Error: " + error);
         }
     };
 
