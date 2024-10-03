@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -198,9 +198,53 @@ const OrthoModal = () => {
 };
 
 function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
+    const { flaskUrl } = useDataState();
     const { setCurrentOrthoProgress, setIsOrthoProcessing, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentOrthoProgress) ? currentOrthoProgress : 0;
+
+    // For log text contents
+    const [logContent, setLogContent] = useState("");
+    const [loadingLogs, setLoadingLogs] = useState(false);
+
+    useEffect(() => {
+        let pollingInterval = null;
+
+        if (expanded) {
+            // Fetch logs immediately when expanding
+            const fetchLogs = async () => {
+                setLoadingLogs(true);
+                try {
+                    const response = await fetch(`${flaskUrl}get_odm_logs`);
+                    const data = await response.json();
+                    if (response.ok) {
+                        console.log("Logs:", data);
+                        setLogContent(prevContent => prevContent + "\n" + data.log_content);
+                    } else {
+                        console.log("Error fetching logs:", data.error);
+                        setLogContent("Error: " + data.error);
+                    }
+                } catch (error) {
+                    setLogContent("Error fetching logs");
+                } finally {
+                    setLoadingLogs(false);
+                }
+            };
+
+            fetchLogs();  // Fetch logs immediately
+            // Start polling every 3 seconds for new logs
+            pollingInterval = setInterval(fetchLogs, 3000);
+        } else {
+            // Clear polling when the panel is collapsed
+            clearInterval(pollingInterval);
+        }
+
+        return () => {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+        };
+    }, [expanded]);
 
     const handleExpandClick = () => {
         setExpanded(!expanded);
@@ -226,9 +270,7 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                         <LinearProgress variant="determinate" value={validProgress} />
                     </Box>
                     <Box sx={{ minWidth: 35, mr: 1 }}>
-                        <Typography variant="body2" color="text.secondary">{`${Math.round(
-                            validProgress
-                        )}%`}</Typography>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(validProgress)}%`}</Typography>
                     </Box>
                 </Box>
                 <Button
@@ -248,8 +290,20 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                     <ExpandMoreIcon />
                 </IconButton>
             </Box>
+            {expanded && (
+                <Box sx={{ marginTop: "10px", maxHeight: "200px", overflowY: "scroll", border: "1px solid #e0e0e0", padding: "10px", borderRadius: "5px" }}>
+                    {loadingLogs && !logContent ? (
+                        <Typography variant="body2">Loading logs...</Typography>
+                    ) : (
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                            {logContent || "Logs are being generated..."}
+                        </Typography>
+                    )}
+                </Box>
+            )}
         </Box>
     );
 }
+
 
 export { OrthoModal, OrthoProgressBar };
