@@ -274,7 +274,10 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                     </Box>
                 </Box>
                 <Button
-                    onClick={isOrthoComplete ? handleDone : onStopOrtho}
+                    onClick={() => {
+                        onStopOrtho();
+                        handleDone();
+                    }}
                     style={{
                         backgroundColor: isOrthoComplete ? "green" : "red",
                         color: "white",
