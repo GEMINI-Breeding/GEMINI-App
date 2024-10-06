@@ -28,6 +28,7 @@ export const MapOrthoSwitcher = () => {
             `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
         )
             .then((dates) => {
+                console.log("fetched dates", dates);
                 return Promise.all(
                     dates.map((date) =>
                         checkDroneFolder(date).then((hasDronePyramid) => (hasDronePyramid ? date : null))
@@ -43,32 +44,104 @@ export const MapOrthoSwitcher = () => {
             .catch((error) => console.error("Error fetching dates:", error));
     }, []);
 
+    // const checkDroneFolder = (date) => {
+    //     return fetchData(
+    //         `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+    //     ) // Adjust for actual location and population
+    //         .then((data) => {
+    //             console.log("data in dates to fetch in folder", data);
+    //             if (data.includes("Drone")) {
+    //                 return fetchData(
+    //                     `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/RGB`
+    //                 )
+    //                     .then((droneData) => droneData.some((item) => item.endsWith("Pyramid.tif")))
+    //                     .catch(() => false);
+    //             } else {
+    //                 return false;
+    //             }
+    //         })
+    //         .catch(() => false);
+    // };
+
     const checkDroneFolder = (date) => {
         return fetchData(
             `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
         ) // Adjust for actual location and population
-            .then((data) => {
-                if (data.includes("Drone")) {
-                    return fetchData(
-                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/Drone/RGB`
+            .then((platforms) => {
+                if (platforms.length === 0) return false;
+    
+                // Iterate over each platform directory
+                const platformChecks = platforms.map((platform) =>
+                    fetchData(
+                        `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                     )
-                        .then((droneData) => droneData.some((item) => item.endsWith("Pyramid.tif")))
-                        .catch(() => false);
-                } else {
-                    return false;
-                }
+                        .then((sensors) => {
+                            if (sensors.length === 0) return false;
+    
+                            // Iterate over each sensor directory and check for "Pyramid.tif" files
+                            const sensorChecks = sensors.map((sensor) =>
+                                fetchData(
+                                    `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                )
+                                    .then((sensorData) =>
+                                        sensorData.some((item) => item.endsWith("Pyramid.tif"))
+                                    )
+                                    .catch(() => false)
+                            );
+    
+                            // Return true if any sensor contains a "Pyramid.tif" file
+                            return Promise.all(sensorChecks).then((results) => results.some((res) => res));
+                        })
+                        .catch(() => false)
+                );
+    
+                // Return true if any platform contains a valid sensor with "Pyramid.tif" files
+                return Promise.all(platformChecks).then((results) => results.some((res) => res));
             })
             .catch(() => false);
     };
+    
+
+    // const handleDateSelection = (selectedDate) => {
+    //     console.log("Selected date:", selectedDate);
+    //     if (selectedDate) {
+    //         setPrepOrthoImagePath(
+    //             `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/RGB/${selectedDate}-RGB-Pyramid.tif`
+    //         );
+    //     }
+    // };
 
     const handleDateSelection = (selectedDate) => {
         console.log("Selected date:", selectedDate);
         if (selectedDate) {
-            setPrepOrthoImagePath(
-                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/Drone/RGB/${selectedDate}-RGB-Pyramid.tif`
-            );
+            fetchData(
+                `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`
+            )
+                .then((platforms) => {
+                    if (platforms.length === 0) return;
+    
+                    // Assume we are interested in the first platform directory
+                    const platform = platforms[0];
+    
+                    fetchData(
+                        `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${platform}`
+                    )
+                        .then((sensors) => {
+                            if (sensors.length === 0) return;
+    
+                            // Assume we are interested in the first sensor directory
+                            const sensor = sensors[0];
+    
+                            setPrepOrthoImagePath(
+                                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${platform}/${sensor}/${selectedDate}-RGB-Pyramid.tif`
+                            );
+                        })
+                        .catch((error) => console.error("Error fetching sensors:", error));
+                })
+                .catch((error) => console.error("Error fetching platforms:", error));
         }
     };
+    
 
     return (
         <div
