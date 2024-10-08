@@ -164,6 +164,7 @@ export default function MapView() {
                 .then((data) => setGeojsonData(data))
                 .catch((error) => console.error("Error fetching geojson:", error));
         }
+        console.log("selectedTraitsGeoJsonPath", selectedTraitsGeoJsonPath);
     }, [selectedTraitsGeoJsonPath]);
 
     //
@@ -178,6 +179,8 @@ export default function MapView() {
                 selectedGenotypes.includes(feature.properties.accession)
             );
 
+            console.log("filteredFeatures", filteredFeatures);
+
             return {
                 ...geojsonData,
                 features: filteredFeatures,
@@ -189,6 +192,7 @@ export default function MapView() {
     const traitsGeoJsonLayer = React.useMemo(() => {
         if (selectedTraitsGeoJsonPath) {
             // Check if selectedTraitsGeoJsonPath exists
+            console.log("filteredGeoJsonData", filteredGeoJsonData);
             return new GeoJsonLayer({
                 id: isLoadingColorScale
                     ? `traits-geojson-layer-loading`
@@ -197,11 +201,19 @@ export default function MapView() {
                 filled: true,
                 getFillColor: (d) => {
                     if (colorScale) {
-                        const value = d.properties[selectedMetricRef.current];
-                        const color = colorScale(value);
-                        return color;
+                      const value = d.properties[selectedMetricRef.current];
+                  
+                      // Check for null, undefined, NaN, or zero and return gray
+                      if (value === null || value === undefined || isNaN(value) || value === 0) {
+                        return [160, 160, 180, 200];  // Gray color for invalid or zero values
+                      }
+                  
+                      // Apply the color scale for non-zero values
+                      const color = colorScale(value);
+                      return color;
                     } else {
-                        return [160, 160, 180, 200];
+                      // Fallback color if colorScale is not ready
+                      return [160, 160, 180, 200];
                     }
                 },
                 stroked: false,
