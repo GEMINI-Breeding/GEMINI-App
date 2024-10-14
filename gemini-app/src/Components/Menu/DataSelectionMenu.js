@@ -117,8 +117,10 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                     const metricColumns = Object.keys(data.features[0].properties);
                     const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat", "row", "column", "location", "plot", "population", "accession", "col"];
                     const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
+                    console.log("metrics: ", metrics);
                     setMetricOptions(metrics);
                     const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
+                    // console.log("uniqueTraitOutputLabels: ", uniqueTraitOutputLabels);
                     uniqueTraitOutputLabels.unshift("All Genotypes");
                     setGenotypeOptions(uniqueTraitOutputLabels);
                     if (!selectedGenotypes) {
