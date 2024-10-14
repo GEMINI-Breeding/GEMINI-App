@@ -301,7 +301,7 @@ function PlotProposalSwitcher() {
                             value={typeof options.angle === "number" ? options.angle : 0}
                             onChange={handleSliderChange("angle")}
                             step={0.1}
-                            min={0}
+                            min={-90}
                             max={90}
                             sx={{ my: 0.5 }}
                         />
