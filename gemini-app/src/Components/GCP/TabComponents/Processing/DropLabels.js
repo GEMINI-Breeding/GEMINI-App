@@ -5,7 +5,8 @@ import {
     Box,
     Typography,
     Button,
-    LinearProgress
+    LinearProgress,
+    CircularProgress
 } from "@mui/material";
 import { useDropzone } from 'react-dropzone';
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
@@ -29,6 +30,7 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0); 
     const cancelUploadRef = useRef(false);
+    const [isSettingUpServer, setIsSettingUpServer] = useState(false);
 
     const onDropAnnotations = useCallback(acceptedFiles => {
         // Handle file objects for images here
@@ -178,8 +180,33 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     // Function to open CVAT annotation tool in a new tab
-    const handleOpenAnnotateTab = () => {
-        window.open("http://localhost:8080/", "_blank");
+    const handleOpenAnnotateTab = async () => {
+        setIsSettingUpServer(true); // Start loading
+
+        // call flask endpoint
+        try {
+            const response = await fetch(`${flaskUrl}start_cvat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log(data.status);
+
+                // Open CVAT instance
+                window.open("http://localhost:8080/", "_blank");
+            } else {
+                const errorData = await response.json();
+                console.error("Error starting CVAT:", errorData.error);
+                alert(`Error starting CVAT: ${errorData.error}`);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+            alert("An error occurred while starting CVAT.");
+        } finally {
+            setIsSettingUpServer(false); // Stop loading
+        }
     };
 
     return (
@@ -214,19 +241,18 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
                         color: "white",
                         borderRadius: "4px",
                     }}
+                    disabled={isSettingUpServer} // Disable button while loading
                 >
-                    Annotate
+                    {isSettingUpServer ? <CircularProgress size={24} style={{ color: "white" }} /> : "Annotate"}
                 </Button>
             </Box>
             {isUploadingLabels && (
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
-                    <Box sx={{ width: "100%", padding: '10px'}}>
+                    <Box sx={{ width: "100%", padding: '10px' }}>
                         {uploadProgress > 0 && <LinearProgress variant="determinate" value={uploadProgress} />}
                     </Box>
                     <Box sx={{ minWidth: 35, mr: 1 }}>
-                        <Typography variant="body2" color="text.secondary">{`${Math.round(
-                            uploadProgress
-                        )}%`}</Typography>
+                        <Typography variant="body2" color="text.secondary">{`${Math.round(uploadProgress)}%`}</Typography>
                     </Box>
                 </Box>
             )}
