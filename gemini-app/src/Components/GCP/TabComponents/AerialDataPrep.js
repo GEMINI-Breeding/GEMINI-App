@@ -9,6 +9,7 @@ import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 
 import useTrackComponent from "../../../useTrackComponent";
 import Snackbar from "@mui/material/Snackbar";
+import GroundT4OrthophotoDialog from "../GroundT4Ortho";
 
 function AerialDataPrep() {
     useTrackComponent("OrthoPrep");
@@ -182,7 +183,8 @@ function AerialDataPrep() {
                     scrollButtons="auto"
                     centered
                 >
-                    <FolderTab label="Orthomosaic Generation" />
+                    <FolderTab label="Aerial Orthomosaic Generation" />
+                    <FolderTab label="T4 Ground Orthomosaic Generation" />
                     <FolderTab label="Generated Orthomosaics" />
                 </FolderTabs>
             </Box>
@@ -225,9 +227,15 @@ function AerialDataPrep() {
                 </>
             )}
 
-            {activeTab === 1 && (
+            {activeTab === 2 && (
                 <Box sx={{ width: '100%', marginTop: 3 }}>
                     <OrthoTable />
+                </Box>
+            )}
+
+            {activeTab === 1 && (
+                <Box sx={{ width: '100%', marginTop: 3 }}>
+                    <GroundT4OrthophotoDialog/>
                 </Box>
             )}
 
