@@ -8,7 +8,7 @@ cd GEMINI-Flask-Server
 
 # 2. Install npm packages
 cd ../gemini-app
-npm install --no-legacy-peer-deps
+npm install --legacy-peer-deps
 
 # 3. Test run
 npm run gemini
