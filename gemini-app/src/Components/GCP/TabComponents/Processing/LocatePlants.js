@@ -127,13 +127,27 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
     ];
     const handleModelChange = (event) => {
         const selectedID = event.target.value;
-        const selectedModelOption = modelOptions.find(model => model.id === selectedID);
-        if (selectedModelOption) {
-            setSelectedModelId(selectedID)
-            setSelectedLocateModel(selectedModelOption.path);
+    
+        if (selectedID === 'Best') {
+            const bestModel = modelOptions.reduce((best, current) => {
+                return current.performance > best.performance ? current : best;
+            }, modelOptions[0]);
+            
+            if (bestModel) {
+                setSelectedModelId(bestModel.id);
+                setSelectedLocateModel(bestModel.path);
+                console.log('Selected best model for locate: ', bestModel);
+            }
+        } else {
+            const selectedModelOption = modelOptions.find(model => model.id === selectedID);
+            if (selectedModelOption) {
+                setSelectedModelId(selectedID);
+                setSelectedLocateModel(selectedModelOption.path);
+                console.log('Selected model for locate: ', selectedModelOption);
+            }
         }
-        console.log('Selected model for locate: ', selectedModelOption)
     };
+
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
             try {
@@ -149,15 +163,17 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                     // This pattern matches any alphanumeric string (ID) that comes after "Plant-" and before "/weights"
                     const match = path.match(/Plant-([A-Za-z0-9]+)\/weights/);
                     const id = match ? match[1] : `unknown-${index}`; // Fallback ID in case there's no match
-                
-                    return { id, path };
+
+                    return { id, path, performance: Math.random() * 100 }; // Add random performance scores for demo purposes
                 });
-                setModelOptions(options);
+
+                // Add a "Best" option with the highest performance
+                setModelOptions([...options, { id: 'Best', path: '', performance: -1 }]);
 
                 // obtain locate run files
                 const locate_files = await fetchData(
                     `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
-                )
+                );
 
                 const response = await fetch(`${flaskUrl}get_locate_info`, {
                     method: "POST",
@@ -168,18 +184,19 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 });
                 if (response.ok) {
                     const data = await response.json();
-                    setRowsData(data)
+                    setRowsData(data);
                     console.log("Response from server:", data);
                 } else {
                     const errorData = await response.json();
                     console.error("Error details:", errorData);
                 }
-            } catch(error) {
-                console.error("Error fetching model information: ", error)
+            } catch (error) {
+                console.error("Error fetching model information: ", error);
             }
         };
         fetchDataAndUpdate();
     }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, processRunning, roverPrepTab]);
+
 
     return (
         <>
@@ -226,10 +243,10 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                                     <FormControl sx={{ width: '200px', mx: 'auto', padding: '10px' }}>
                                         {/* <InputLabel id="model-select-label">ID</InputLabel> */}
                                         <Select
-                                            labelId="model-select-label"
-                                            id="model-select"
+                                            // labelId="model-select-label"
+                                            // id="model-select"
                                             value={selectedModelId}
-                                            label="ID"
+                                            // label="ID"
                                             onChange={handleModelChange}
                                         >
                                             {modelOptions.map((option) => (
