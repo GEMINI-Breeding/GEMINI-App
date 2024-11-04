@@ -84,7 +84,13 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
                 {item && item.date}
             </DialogTitle>
             <DialogContent>
-                {isDroneExtracting ? "Extracting..." : "Extract Traits?"}
+                {isDroneExtracting ? (
+                    "Extracting..."
+                ) : (
+                    <>
+                        <strong>Extract Traits:</strong> Height and Vegetation Fraction
+                    </>
+                )}
                 <Grid container spacing={1} justifyContent="center" alignItems="center" style={{ marginTop: "20px" }}>
                     <Grid item>
                         <Button
