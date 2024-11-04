@@ -45,6 +45,10 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
         setCloseMenu,
     } = useDataSetters();
 
+    // for recommended models
+    const [bestLocate, setBestLocate] = useState(null)
+    const [bestModel, setBestModel] = useState(null)
+
     // for extracting traits
     const [error, setError] = useState(null);
     const handleExtract = async () => {
@@ -180,6 +184,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                     }
                 }
                 setUpdatedDataState(updatedData);
+                console.log("Updated Data State: ", updatedDataState)
             } catch(error) {
                 console.error("Error fetching model information: ", error)
             }
@@ -189,36 +194,80 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
 
     useEffect(() => {
 
+        const fetchBestFiles = async () => {
+            try {
+                const platforms = Object.keys(updatedDataState || {});
+                const sensors = selections.platform ? Object.keys(updatedDataState[selections.platform] || {}) : [];
+                const dates = selections.platform && selections.sensor ? (updatedDataState[selections.platform][selections.sensor] || []).map(item => item.date) : [];
+                const locates = selections.platform && selections.sensor 
+                    ? [...new Set((updatedDataState[selections.platform][selections.sensor] || [])
+                        .filter(item => item.locate_files !== false)  // Filter out items where locate_files is false
+                        .flatMap(item => item.locate_files))]  // Remove duplicates by converting to Set and back to array
+                    : [];
+                const models = selections.platform && selections.sensor 
+                    ? [...new Set((updatedDataState[selections.platform][selections.sensor] || [])
+                        .filter(item => item.train_files !== false)  // Filter out items where train_files is false
+                        .flatMap(item => Object.keys(item.train_files)))]  // Remove duplicates
+                    : [];
+
+                console.log("All locates: ", locates)
+                console.log("All models: ", models)
+
+                const locateResponse = await fetch(`${flaskUrl}best_locate_file`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(locates),
+                });
+                if (locateResponse.ok) {
+                    const bestLocateData = await locateResponse.json();
+                    setBestLocate(bestLocateData)
+                } else {
+                    const errorData = await locateResponse.json();
+                    console.error("Error details: ", errorData)
+                    alert("Error fetching best locate file: " + errorData.error);
+                }
+                
+                const modelResponse = await fetch(`${flaskUrl}best_model_file`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(models),
+                });
+                if (modelResponse.ok) {
+                    const bestModelData = await modelResponse.json();
+                    setBestModel(bestModelData)
+                } else {
+                    const errorData = await modelResponse.json();
+                    console.error("Error details: ", errorData)
+                    alert("Error fetching best model file: " + errorData.error);
+                }
+        
+                setSelections({
+                    ...selections,
+                    options: {
+                        platforms,
+                        sensors,
+                        dates,
+                        locates,
+                        models,
+                    },
+                    platform: platforms.includes(selections.platform) ? selections.platform : '',
+                    sensor: sensors.includes(selections.sensor) ? selections.sensor : '',
+                    date: dates.includes(selections.date) ? selections.date : '',
+                    locate: locates.includes(selections.locate) ? selections.locate : '',
+                    model: models.includes(selections.model) ? selections.model : '',
+                });
+            } catch (error) {
+                console.log("Error updating option state.")
+                alert("Error updating option state.")
+            }
+        };
+
         if (selectRoverTrait) {
-            const platforms = Object.keys(updatedDataState || {});
-            const sensors = selections.platform ? Object.keys(updatedDataState[selections.platform] || {}) : [];
-            const dates = selections.platform && selections.sensor ? (updatedDataState[selections.platform][selections.sensor] || []).map(item => item.date) : [];
-            const locates = selections.platform && selections.sensor 
-                ? [...new Set((updatedDataState[selections.platform][selections.sensor] || [])
-                    .filter(item => item.locate_files !== false)  // Filter out items where locate_files is false
-                    .flatMap(item => item.locate_files))]  // Remove duplicates by converting to Set and back to array
-                : [];
-            const models = selections.platform && selections.sensor 
-                ? [...new Set((updatedDataState[selections.platform][selections.sensor] || [])
-                    .filter(item => item.train_files !== false)  // Filter out items where train_files is false
-                    .flatMap(item => Object.keys(item.train_files)))]  // Remove duplicates
-                : [];
-    
-            setSelections({
-                ...selections,
-                options: {
-                    platforms,
-                    sensors,
-                    dates,
-                    locates,
-                    models,
-                },
-                platform: platforms.includes(selections.platform) ? selections.platform : '',
-                sensor: sensors.includes(selections.sensor) ? selections.sensor : '',
-                date: dates.includes(selections.date) ? selections.date : '',
-                locate: locates.includes(selections.locate) ? selections.locate : '',
-                model: models.includes(selections.model) ? selections.model : '',
-            });
+            fetchBestFiles();
         }
     }, [updatedDataState, selectRoverTrait, selections.platform, selections.sensor]);
 
@@ -293,12 +342,28 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                             labelId="locate-select-label"
                                             label="Locate"
                                             value={selections.locate}
-                                            onChange={e => setSelections({ ...selections, locate: e.target.value })}
+                                            onChange={e => {
+                                                const selectedValue = e.target.value;
+                                
+                                                if (selectedValue === "Best") {
+                                                    // Check if any of the locates match the bestLocate
+                                                    const bestLocateMatch = selections.options.locates.find(locate => {
+                                                        const match = locate.match(/Locate-([^\/]+)\/locate\.csv$/);
+                                                        return match && match[1] === bestLocate;
+                                                    });
+                                
+                                                    if (bestLocateMatch) {
+                                                        setSelections({ ...selections, locate: bestLocateMatch });
+                                                    } else {
+                                                        alert("Best locate file not found in the available options: ", bestLocate);
+                                                    }
+                                                } else {
+                                                    setSelections({ ...selections, locate: selectedValue });
+                                                }
+                                            }}
                                             disabled={!selections.date || !selections.options.locates.length}
                                         >
-                                            {/* {selections.options.locates.map(locate => (
-                                                <MenuItem key={locate} value={locate}>{locate}</MenuItem>
-                                            ))} */}
+                                            <MenuItem value="Best">Best</MenuItem> {/* Add "Best" option */}
                                             {selections.options.locates.map(locate => {
                                                 const match = locate.match(/Locate-([^\/]+)\/locate\.csv$/);
                                                 let displayName = match ? match[1] : "Unknown";
@@ -312,21 +377,36 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                                 </Grid>
                                 <Grid item xs={10}>
                                     <FormControl fullWidth>
-                                        <InputLabel id="model-select-label">Model ID</InputLabel>
+                                        <InputLabel id="model-select-label">Trait Model ID</InputLabel>
                                         <Select
                                             labelId="model-select-label"
                                             label="Model"
                                             value={selections.model}
-                                            onChange={e => setSelections({ ...selections, model: e.target.value })}
+                                            onChange={e => {
+                                                const selectedValue = e.target.value;
+
+                                                if (selectedValue === "Best") {
+                                                    // Check if any of the models match the bestModel
+                                                    const bestModelMatch = selections.options.models.find(model => {
+                                                        const match = model.match(/-([^\/]+)\/weights/);
+                                                        return match && match[1] === bestModel;
+                                                    });
+
+                                                    if (bestModelMatch) {
+                                                        setSelections({ ...selections, model: bestModelMatch });
+                                                    } else {
+                                                        alert("Error: Best model file not found in the available options.");
+                                                    }
+                                                } else {
+                                                    setSelections({ ...selections, model: selectedValue });
+                                                }
+                                            }}
                                             disabled={!selections.locate || !selections.options.models.length}
                                         >
-                                            {/* {selections.options.models.map(model => (
-                                                <MenuItem key={model} value={model}>{model}</MenuItem>
-                                            ))} */}
+                                            <MenuItem value="Best">Best</MenuItem> {/* Add "Best" option */}
                                             {selections.options.models.map(model => {
                                                 const match = model.match(/-([^\/]+)\/weights/);
                                                 let displayName = match ? match[1] : "Unknown";
-                                                // displayName = displayName.replace("Locate-", "");
                                                 return (
                                                     <MenuItem key={model} value={model}>{displayName}</MenuItem>
                                                 );

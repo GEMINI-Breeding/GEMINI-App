@@ -29,7 +29,7 @@ function useTraitsColorMap(traitsGeoJsonPath, selectedMetric, setIsLoadingColorS
             // Filter out null or undefined values
             const metricValues = data.features
               .map(f => f.properties[selectedMetric])
-              .filter(f => f !== null && f !== undefined);
+              .filter(f => f !== null && f !== undefined && f > 0);
 
             // Sort metricValues array
             metricValues.sort((a, b) => a - b);

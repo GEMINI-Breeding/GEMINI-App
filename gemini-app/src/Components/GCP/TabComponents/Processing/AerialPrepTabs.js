@@ -70,28 +70,28 @@ export default function AerialPrepTabs() {
                                     const ortho_files = await fetchData(
                                         `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
-                                    if (platform === "Drone" || platform === "Phone") {
+                                    // if (platform === "Drone" || platform === "Phone") {
                                         // check if files ending with .tif exist
-                                        completed = Number(ortho_files.some((file) => file.endsWith(".tif")));
-                                    } else {
-                                        completed = 0;
-                                    }
+                                    completed = Number(ortho_files.some((file) => file.endsWith(".tif")));
+                                    // } else {
+                                        // completed = 0;
+                                    // }
 
                                     // check for traits file
                                     const trait_files = await fetchData(
                                         `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
-                                    if (platform === "Drone" || platform === "Phone") {
-                                        // check if number of files ending with .geojson is greater than 0
-                                        const traits_length = Number(trait_files.filter((file) => file.endsWith(".geojson")).length);
-                                        console.log("date", date);
-                                        if (traits_length > 0) {
-                                            traits = true;
-                                        } else {
-                                            traits = false;
-                                        }
-                                        console.log("traits", traits);
+                                    // if (platform === "Drone" || platform === "Phone") {
+                                    // check if number of files ending with .geojson is greater than 0
+                                    const traits_length = Number(trait_files.filter((file) => file.endsWith(".geojson")).length);
+                                    console.log("date", date);
+                                    if (traits_length > 0) {
+                                        traits = true;
+                                    } else {
+                                        traits = false;
                                     }
+                                    console.log("traits", traits);
+                                    // }
 
                                 } catch (error) {
                                     console.warn(
@@ -156,7 +156,7 @@ export default function AerialPrepTabs() {
         // Define what should happen when the button is clicked
     };
 
-    const includedPlatforms = ["Drone"];
+    // const includedPlatforms = ["Drone"];
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
@@ -188,7 +188,7 @@ export default function AerialPrepTabs() {
                         {aerialPrepTab === 0 && sensorData && isGCPReady && (
                             <div>
                                 {sensorData
-                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                                     .map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}

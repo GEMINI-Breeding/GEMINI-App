@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Box, Grid, Typography, Tabs, Tab } from "@mui/material";
+import { Box, Grid, Typography, Tabs, Tab, CircularProgress } from "@mui/material";
 import { NestedSection } from "./Processing/CamerasAccordion";
 import { FolderTab, FolderTabs } from "./Processing/CamerasAccordion";
 import OrthoTable from '../../StatsMenu/OrthoTable';
@@ -32,6 +32,7 @@ function AerialDataPrep() {
 
     const [submitError, setSubmitError] = useState("");
     const [activeTab, setActiveTab] = useState(0);
+    const [loading, setLoading] = useState(true); // New loading state
 
     // processing images and existing gcps
     const handleProcessImages = useHandleProcessImages();
@@ -82,16 +83,14 @@ function AerialDataPrep() {
 
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
+            setLoading(true); // Start loading
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
-                    // check for existing raw drone data
                     const dates = await fetchData(
                         `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
-                    // reset sensor data
                     let updatedData = {};
 
-                    // iterate through each data and check if images exists
                     for (const date of dates) {
                         const platform = await fetchData(
                             `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
@@ -102,9 +101,8 @@ function AerialDataPrep() {
                         );
 
                         for (const sensor of sensors) {
-                            let ortho = 2; // Default to not completed
+                            let ortho = 2; 
 
-                            // Initialize sensor array if not already done
                             if (!updatedData[platform]) {
                                 updatedData[platform] = {};
                             }
@@ -112,7 +110,6 @@ function AerialDataPrep() {
                                 updatedData[platform][sensor] = [];
                             }
 
-                            // check for Images folder
                             const imageFolders = await fetchData(
                                 `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                             );
@@ -123,7 +120,6 @@ function AerialDataPrep() {
                                 );
 
                                 if (images.length === 0) {
-                                    // if Images folder is empty
                                     ortho = 2;
                                 } else {
                                     try {
@@ -133,22 +129,19 @@ function AerialDataPrep() {
 
                                         ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
                                     } catch (error) {
-                                        // if there's an error fetching processed files, or no .tif files found
                                         console.warn(
                                             `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
                                             error
                                         );
-                                        ortho = false; // there are images, but no processed .tif files
+                                        ortho = false;
                                     }
                                 }
                             } else {
-                                // if Images folder is not found
                                 ortho = 2;
                             }
-                            // add entry with the determined 'ortho' status
+
                             updatedData[platform][sensor].push({ date, ortho });
                         }
-                        // }
                     }
                     const processedData = Object.keys(updatedData).map((platform) => ({
                         title: platform,
@@ -161,7 +154,9 @@ function AerialDataPrep() {
                     setSensorData(processedData);
                 } catch (error) {
                     console.error("Error fetching Raw data:", error);
-                    setSubmitError("Could not fetch data from date ", error)
+                    setSubmitError("Could not fetch data from date ", error);
+                } finally {
+                    setLoading(false); // Stop loading
                 }
             }
         };
@@ -170,65 +165,64 @@ function AerialDataPrep() {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-           
-
-            <Box sx={{ width: '100%', bgcolor: 'background.paper', marginTop: 3 }}>
-            
-                <FolderTabs
-                    value={activeTab}
-                    onChange={handleTabChange}
-                    aria-label="styled tabs example"
-                    variant="fullWidth"
-                    scrollButtons="auto"
-                    centered
+            {loading ? (
+                <Box
+                    sx={{
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        height: '100vh',
+                        flexDirection: 'column',
+                    }}
                 >
-                    <FolderTab label="Orthomosaic Generation" />
-                    <FolderTab label="Generated Orthomosaics" />
-                </FolderTabs>
-            </Box>
-
-            {activeTab === 0 && (
+                    <CircularProgress />
+                    <Typography variant="h6" sx={{ marginTop: 2 }}>
+                        Loading data...
+                    </Typography>
+                </Box>
+            ) : (
                 <>
-                    {/* <Box sx={{ padding: '10px', textAlign: 'center' }}>
-                        <Typography variant="body1" component="p">
-                            Image datasets are organized by sensor type and date.
-                        </Typography>
-                        <Typography variant="body1" component="p">
-                            Datasets with a checkmark have been processed into an orthomosaic.
-                        </Typography>
-                        <Typography variant="body1" component="p">
-                            Click on a dataset to begin the process of ground control point identification.
-                        </Typography>
-                        <Typography variant="body1" component="p">
-                            After labeling the final image, you will be able to initialize orthomosaic generation.
-                        </Typography>
-                    </Box> */}
+                    <Box sx={{ width: '100%', bgcolor: 'background.paper', marginTop: 3 }}>
+                        <FolderTabs
+                            value={activeTab}
+                            onChange={handleTabChange}
+                            aria-label="styled tabs example"
+                            variant="fullWidth"
+                            scrollButtons="auto"
+                            centered
+                        >
+                            <FolderTab label="Orthomosaic Generation" />
+                            <FolderTab label="Generated Orthomosaics" />
+                        </FolderTabs>
+                    </Box>
 
-                    {sensorData && sensorData.length > 0 && isGCPReady && (
-                        sensorData
-                            // .filter((platformData) => includedPlatforms.includes(platformData.title))
-                            .map((platformData) => (
-                                <NestedSection
-                                    key={platformData.title}
-                                    title={platformData.title}
-                                    nestedData={platformData.nestedData.map((sensorData) => ({
-                                        summary: sensorData.summary,
-                                        data: sensorData.data,
-                                        columns: sensorData.columns,
-                                    }))}
-                                    activeTab={aerialPrepTab}
-                                    handleAction={null}
-                                    CustomComponent={CustomComponent}
-                                />
-                            ))
+                    {activeTab === 0 && (
+                        <>
+                            {sensorData && sensorData.length > 0 && isGCPReady && (
+                                sensorData.map((platformData) => (
+                                    <NestedSection
+                                        key={platformData.title}
+                                        title={platformData.title}
+                                        nestedData={platformData.nestedData.map((sensorData) => ({
+                                            summary: sensorData.summary,
+                                            data: sensorData.data,
+                                            columns: sensorData.columns,
+                                        }))}
+                                        activeTab={aerialPrepTab}
+                                        handleAction={null}
+                                        CustomComponent={CustomComponent}
+                                    />
+                                ))
+                            )}
+                        </>
+                    )}
+
+                    {activeTab === 1 && (
+                        <Box sx={{ width: '100%', marginTop: 3 }}>
+                            <OrthoTable />
+                        </Box>
                     )}
                 </>
-            )}
-
-            {activeTab === 1 && (
-                <Box sx={{ width: '100%', marginTop: 3 }}>
-                    <OrthoTable />
-                </Box>
             )}
 
             <Snackbar

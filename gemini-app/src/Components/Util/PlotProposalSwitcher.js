@@ -302,7 +302,7 @@ function PlotProposalSwitcher() {
                             onChange={handleSliderChange("angle")}
                             step={0.1}
                             min={0}
-                            max={90}
+                            max={360}
                             sx={{ my: 0.5 }}
                         />
 

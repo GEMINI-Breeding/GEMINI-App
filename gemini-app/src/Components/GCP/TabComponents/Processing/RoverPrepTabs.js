@@ -30,7 +30,7 @@ export default function RoverPrepTabs() {
     const traitOptions = ['Flower', 'Pod', 'Leaf']
 
     // included ground-based platforms
-    const includedPlatforms = ["Rover", "Amiga-Onboard", "Phone", "T4"];
+    // const includedPlatforms = ["Rover", "Amiga-Onboard", "Phone", "T4"];
 
     // components with action
     const CustomComponent = {
@@ -352,7 +352,7 @@ export default function RoverPrepTabs() {
                         {roverPrepTab === 0 && sensorData && (
                             <div>
                                 {sensorData
-                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                                     .map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}
@@ -388,7 +388,7 @@ export default function RoverPrepTabs() {
                                     </FormControl>
                                 </Box>
                                 {sensorData
-                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                                     .map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}
@@ -436,7 +436,7 @@ export default function RoverPrepTabs() {
                                     />
                                 </Box>
                                 {sensorData
-                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                                     .map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}
@@ -484,7 +484,7 @@ export default function RoverPrepTabs() {
                                     />
                                 </Box>
                                 {sensorData
-                                    .filter((platformData) => includedPlatforms.includes(platformData.title))
+                                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
                                     .map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}
