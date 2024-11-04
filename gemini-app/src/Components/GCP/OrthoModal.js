@@ -126,7 +126,7 @@ const OrthoModal = () => {
                         <Autocomplete
                             value={orthoSetting}
                             onChange={(event, newValue) => setOrthoSetting(newValue)}
-                            options={["High", "Low","Lowest", "Custom"]}
+                            options={["Default", "Custom"]}
                             renderInput={(params) => (
                                 <TextField {...params} label="Settings" variant="outlined" fullWidth />
                             )}
@@ -146,25 +146,10 @@ const OrthoModal = () => {
                         </Grid>
                     )}
                     {/* display if orthoSetting is Low */}
-                    {orthoSetting === "Low" && (
+                    {orthoSetting === "Default" && (
                         <Grid item>
                             <Typography variant="body1" style={{ color: 'orange' }}>
-                                Warning: Ortho Generation can take up to 4 hours to complete!
-                            </Typography>
-                        </Grid>
-                    )}
-                    {orthoSetting === "Lowest" && (
-                        <Grid item>
-                            <Typography variant="body1" style={{ color: 'orange' }}>
-                                Warning: Ortho Generation can take up to 4 hours to complete!
-                            </Typography>
-                        </Grid>
-                    )}
-                    {/* display if orthoSetting is High */}
-                    {orthoSetting === "High" && (
-                        <Grid item>
-                            <Typography variant="body1" style={{ color: 'red' }}>
-                                Warning: Ortho Generation can take up to 8 hours to complete!
+                                Warning: Ortho Generation may take up to 2 hours to complete.
                             </Typography>
                         </Grid>
                     )}
