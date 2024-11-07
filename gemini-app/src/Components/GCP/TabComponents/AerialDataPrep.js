@@ -92,55 +92,58 @@ function AerialDataPrep() {
                     let updatedData = {};
 
                     for (const date of dates) {
-                        const platform = await fetchData(
+                        const platforms = await fetchData(
                             `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
-                        const sensors = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
-                        );
+                        for (const platform of platforms) {
 
-                        for (const sensor of sensors) {
-                            let ortho = 2; 
-
-                            if (!updatedData[platform]) {
-                                updatedData[platform] = {};
-                            }
-                            if (!updatedData[platform][sensor]) {
-                                updatedData[platform][sensor] = [];
-                            }
-
-                            const imageFolders = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                            const sensors = await fetchData(
+                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
-                            if (imageFolders.includes("Images")) {
-                                const images = await fetchData(
-                                    `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images`
+                            for (const sensor of sensors) {
+                                let ortho = 2; 
+
+                                if (!updatedData[platform]) {
+                                    updatedData[platform] = {};
+                                }
+                                if (!updatedData[platform][sensor]) {
+                                    updatedData[platform][sensor] = [];
+                                }
+
+                                const imageFolders = await fetchData(
+                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                 );
 
-                                if (images.length === 0) {
-                                    ortho = 2;
-                                } else {
-                                    try {
-                                        const processedFiles = await fetchData(
-                                            `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                        );
+                                if (imageFolders.includes("Images")) {
+                                    const images = await fetchData(
+                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images`
+                                    );
 
-                                        ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
-                                    } catch (error) {
-                                        console.warn(
-                                            `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
-                                            error
-                                        );
-                                        ortho = false;
+                                    if (images.length === 0) {
+                                        ortho = 2;
+                                    } else {
+                                        try {
+                                            const processedFiles = await fetchData(
+                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            );
+
+                                            ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
+                                        } catch (error) {
+                                            console.warn(
+                                                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
+                                                error
+                                            );
+                                            ortho = false;
+                                        }
                                     }
+                                } else {
+                                    ortho = 2;
                                 }
-                            } else {
-                                ortho = 2;
-                            }
 
-                            updatedData[platform][sensor].push({ date, ortho });
+                                updatedData[platform][sensor].push({ date, ortho });
+                            }
                         }
                     }
                     const processedData = Object.keys(updatedData).map((platform) => ({
