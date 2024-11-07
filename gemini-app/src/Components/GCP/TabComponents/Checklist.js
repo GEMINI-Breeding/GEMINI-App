@@ -39,6 +39,8 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
         flaskUrl,
         selectedDateGCP,
         selectedTilePath,
+        selectedYearGCP,
+        selectedExperimentGCP,
     } = useDataState();
 
     const {
@@ -80,13 +82,14 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
 
         // Function to fetch and set the GCP file path
         const fetchAndSetGcpFilePath = async () => {
-            const files = await fetchData(`${flaskUrl}list_files/Raw/${selectedLocationGCP}/${selectedPopulationGCP}`);
+            const files = await fetchData(`${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
             const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
             if (gcpLocationsFile) {
-                const newPath = `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
+                const newPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
                 setPrepGcpFilePath(newPath);
                 console.log("GCP path found, setting to ", newPath);
             } else {
+                setPrepGcpFilePath("");
                 console.log("No GCP path found");
             }
         };
