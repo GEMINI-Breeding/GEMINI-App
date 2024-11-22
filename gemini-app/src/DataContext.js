@@ -178,6 +178,7 @@ export const DataProvider = ({ children }) => {
     const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
     const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+    const [isImageViewerReady, setImageViewerReady] = useState(false);
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState("High");
@@ -198,7 +199,7 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5053/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8091/");
 
     return (
@@ -327,6 +328,7 @@ export const DataProvider = ({ children }) => {
                 isImageViewerOpen,
                 currentImageIndex,
                 isLightboxOpen,
+                isImageViewerReady,
 
                 // Ortho Generation State
                 orthoSetting,
@@ -475,6 +477,7 @@ export const DataProvider = ({ children }) => {
                     setIsImageViewerOpen,
                     setCurrentImageIndex,
                     setIsLightboxOpen,
+                    setImageViewerReady,
 
                     // Ortho Generation State
                     setOrthoSetting,
