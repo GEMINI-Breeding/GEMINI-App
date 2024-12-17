@@ -58,6 +58,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         setImageViewerReady
     } = useDataSetters();
     
+    const [buttonLabel, setButtonLabel] = useState("Continue without GCP")
     const [dialogOpen, setDialogOpen] = useState(false);
     const uploadFileWithTimeout = async (file, timeout = 30000) => {
         const Values = {
@@ -106,12 +107,15 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         console.log('${flaskUrl', flaskUrl);
         const files = await fetchData(`${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
         const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
+        
         if (gcpLocationsFile) {
             const newPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
             setPrepGcpFilePath(newPath);
+            setButtonLabel("Continue with current GCP");
             console.log("GCP path found, setting to ", newPath);
         } else {
             setPrepGcpFilePath("");
+            setButtonLabel("Continue without GCP");
             console.log("No GCP path found");
         }
     };
@@ -131,18 +135,20 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     // update state variables
     useEffect(() => {
         if (open) {
+            // reset image viewer
             setImageViewerReady(false);
-            console.log("prepGcpFilePath initial: ", prepGcpFilePath);
+
+            // get gcp path info
             setSelectedDateGCP(item.date);
             setSelectedPlatformGCP(platform);
             setSelectedSensorGCP(sensor);
-            //fetchAndSetGcpFilePath();
-            if (prepGcpFilePath != "") {
-                setImageViewerReady(true);
-                setIsImageViewerOpen(true);
-            } else {
-                setDialogOpen(true);
-            }
+
+            // check if gcp file exists
+            fetchAndSetGcpFilePath();
+            console.log("prepGcpFilePath initial: ", prepGcpFilePath);
+
+            // open dialog
+            setDialogOpen(true);
         }
         return () => {
             if (!open) {
@@ -305,7 +311,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleDialogClose} color="primary">
-                        Continue without GCP
+                        {buttonLabel}
                     </Button>
                 </DialogActions>
             </Dialog>

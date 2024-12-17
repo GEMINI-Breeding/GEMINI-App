@@ -181,7 +181,7 @@ export const DataProvider = ({ children }) => {
     const [isImageViewerReady, setImageViewerReady] = useState(false);
 
     // Ortho Generation State
-    const [orthoSetting, setOrthoSetting] = useState("High");
+    const [orthoSetting, setOrthoSetting] = useState("Default");
     const [orthoCustomValue, setOrthoCustomValue] = useState("");
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
@@ -199,7 +199,7 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5053/flask_app/");
+    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
     const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8091/");
 
     return (
