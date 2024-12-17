@@ -302,6 +302,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                 <DialogContent>
                     <DialogContentText>
                         Please upload the gcp_locations.csv file before proceeding for maximum orthomosaic quality.
+                        For more information, press <a href="https://gemini-breeding.github.io/1.%20App/2-%20File%20Upload/" target="_blank" rel="noopener noreferrer">here</a>.
                     </DialogContentText>
                     <TextField
                         type="file"
