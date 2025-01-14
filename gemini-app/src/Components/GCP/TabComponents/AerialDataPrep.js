@@ -21,7 +21,9 @@ function AerialDataPrep() {
         selectedYearGCP,
         selectedExperimentGCP,
         aerialPrepTab,
-        isGCPReady
+        isGCPReady,
+        prepGcpFilePath,
+        isImageViewerReady
     } = useDataState();
 
     const {
@@ -71,7 +73,7 @@ function AerialDataPrep() {
             handleProcessImages();
             selectedDateRef.current = selectedDateGCP;
         }
-    }, [selectedDateGCP]);
+    }, [isImageViewerReady]);
 
     const handleOptionClick = (sensor, option) => {
         if (option.completed !== 2) {

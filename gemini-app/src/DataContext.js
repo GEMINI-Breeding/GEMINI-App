@@ -178,9 +178,10 @@ export const DataProvider = ({ children }) => {
     const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
     const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+    const [isImageViewerReady, setImageViewerReady] = useState(false);
 
     // Ortho Generation State
-    const [orthoSetting, setOrthoSetting] = useState("High");
+    const [orthoSetting, setOrthoSetting] = useState("Default");
     const [orthoCustomValue, setOrthoCustomValue] = useState("");
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
@@ -327,6 +328,7 @@ export const DataProvider = ({ children }) => {
                 isImageViewerOpen,
                 currentImageIndex,
                 isLightboxOpen,
+                isImageViewerReady,
 
                 // Ortho Generation State
                 orthoSetting,
@@ -475,6 +477,7 @@ export const DataProvider = ({ children }) => {
                     setIsImageViewerOpen,
                     setCurrentImageIndex,
                     setIsLightboxOpen,
+                    setImageViewerReady,
 
                     // Ortho Generation State
                     setOrthoSetting,
