@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useDataState, useDataSetters  } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
-import { Edit, Delete, Visibility } from '@mui/icons-material';
+import { Edit, Delete, Visibility, Download } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
 
@@ -216,6 +216,7 @@ export const TableComponent = () => {
             };
         });
     };
+            
 
     const columns = [
         { field: 'year', headerName: 'Year', width: 100 },
@@ -228,7 +229,7 @@ export const TableComponent = () => {
         {
             field: 'actions',
             headerName: 'Actions',
-            width: 120,
+            width: 180,
             renderCell: (params) => (
                 <div style={{ display: 'flex', gap: '12px' }}>
                     <Edit

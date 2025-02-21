@@ -6,6 +6,7 @@ import { IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
 import OrthoPreview from '../Menu/OrthoPreview';
+import Download from "@mui/icons-material/Download";
 
 const OrthoTable = () => {
     const [orthoData, setOrthoData] = useState([]);
@@ -132,6 +133,56 @@ const OrthoTable = () => {
         }
     };
 
+    const handleDownloadOrtho = async (row) => {
+        try {
+            const response = await fetch(`${flaskUrl}download_ortho`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: row.date,
+                    platform: row.platform,
+                    sensor: row.sensor,
+                }),
+            });
+    
+            if (!response.ok) {
+                throw new Error('Failed to download ortho');
+            }
+    
+            // Convert the response to a Blob
+            const blob = await response.blob();
+            // Create a temporary URL for the blob
+            const url = window.URL.createObjectURL(blob);
+            // Create a temporary anchor element and trigger the download
+            const a = document.createElement("a");
+            a.href = url;
+            // Extract the filename from the response headers or set a default one
+            const disposition = response.headers.get("Content-Disposition");
+            let fileName = row.fileName.replace('.tif', '.png');
+            if (disposition && disposition.indexOf("filename=") !== -1) {
+                const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                const matches = filenameRegex.exec(disposition);
+                if (matches != null && matches[1]) {
+                    fileName = matches[1].replace(/['"]/g, '');
+                }
+            }
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Error downloading ortho:', error);
+            setError('Failed to download ortho');
+        }
+    };
+
     const columns = [
         { field: 'date', headerName: 'Date', width: 120 },
         { field: 'platform', headerName: 'Platform', width: 120 },
@@ -159,6 +210,16 @@ const OrthoTable = () => {
                 </IconButton>
             ),
         },
+        {
+            field: 'download',
+            headerName: 'Download',
+            width: 100,
+            renderCell: (params) => (
+                <IconButton onClick={() => handleDownloadOrtho(params.row)}>
+                    <Download />
+                </IconButton>
+            ),
+        }
     ];
 
     if (loading) return <Typography>Loading...</Typography>;
