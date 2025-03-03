@@ -12,7 +12,7 @@ const OrthoPreview = ({ open, onClose, imageUrl }) => {
         if (open && imageUrl) {
             setLoading(true);
             setError(null);
-            fetch(`${flaskUrl}convert_tif_to_png`, {
+            fetch(`${flaskUrl}get_tif_to_png`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
