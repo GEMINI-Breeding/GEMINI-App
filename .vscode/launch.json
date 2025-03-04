@@ -1,0 +1,34 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "locate",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/gemini/scratch/GEMINI/GEMINI-App/GEMINI-Flask-Server/src/scripts/deep_learning/trait_extraction/locate.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--images", "/mnt/d/GEMINI-App-Data-DEMO/Raw/2024/GEMINI/Davis/Legumes/2024-06-26/Amiga/RGB/Images",
+                "--model", "/mnt/d/GEMINI-App-Data-DEMO/Intermediate/2024/GEMINI/Davis/Legumes/Training/Amiga/RGB Plant Detection/Plant-x9buiG/weights/last.pt",
+                "--plotmap", "/mnt/d/GEMINI-App-Data-DEMO/Intermediate/2024/GEMINI/Davis/Legumes/Plot-Boundary-WGS84.geojson",
+                "--save", "/mnt/d/Temporary/locate_test",
+                "--metadata", "/mnt/d/GEMINI-App-Data-DEMO/Raw/2024/GEMINI/Davis/Legumes/2024-06-26/Amiga/RGB/Metadata",
+                "--skip-stereo"
+            ]
+        },
+        {
+            "name": "bin_to_images",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/gemini/scratch/GEMINI/GEMINI-App/GEMINI-Flask-Server/src/scripts/bin_to_images/bin_to_images.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file_names", "/home/gemini/scratch/eranario/random/2025_02_21_08_03_42_707633_magenta-mushroom.0000.bin",
+                "--output_path", "/home/gemini/scratch/eranario/random",
+            ]
+        }
+    ]
+}
