@@ -282,6 +282,9 @@ const FileUploadComponent = () => {
                     dirPath += dirPath ? `/${values[field]}` : values[field];
                 }
             }
+            if(selectedDataType === "binary"){
+                dirPath += "/rover";
+            }
             if (selectedDataType === "image") {
                 dirPath += "/Images";
             }
