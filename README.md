@@ -59,3 +59,5 @@ npm install --legacy-peer-deps  # Fixes upstream dependency conflict
 - **Linked Data Visualization** – Visualize data with direct links to field design layouts.
 - **AI-Enabled Model Creation** – Train and deploy machine learning models for trait analysis.
 - **Trait Extraction & Export** – Extract key traits and export results for downstream use.
+
+![Financial Support](assets/financial_support.png)
