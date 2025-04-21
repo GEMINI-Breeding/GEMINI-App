@@ -5,7 +5,7 @@ import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, Re
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
 import dataTypes from "../../uploadDataTypes.json";
-import { CSVPreviewer } from "./CSVPreview";
+// import { CSVPreviewer } from "./CSVPreview";
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
@@ -19,7 +19,7 @@ export const TableComponent = () => {
     const [dialogViewOpen, setDialogViewOpen] = useState(false);
     const [currentRow, setCurrentRow] = useState(null);
     const [editFields, setEditFields] = useState({});
-    const [rowDataType, setRowDataType] = useState(""); // Store the data type of the current row
+    const [rowDataType, setRowDataType] = useState(""); 
     const [showEditSuccess, setShowEditSuccess] = useState(false);
     const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
@@ -42,7 +42,6 @@ export const TableComponent = () => {
         { field: 'population', headerName: 'Population', width: 150 },
     ];
     
-    // Data type specific columns
     const typeSpecificColumns = {
         image: [
             { field: 'date', headerName: 'Date', width: 150 },
@@ -84,13 +83,11 @@ export const TableComponent = () => {
             });
     }, [flaskUrl]);
     
-    // Filter data when data type selection changes
     useEffect(() => {
         const filtered = procData.filter(row => detectDataType(row) === selectedDataType);
         setFilteredData(filtered);
     }, [selectedDataType, procData]);
 
-    // Detect data type based on path structure
     const detectDataType = (row) => {
         if (row.sensor && (row.platform && row.platform !== "rover") && row.date) return "image";
         if (row.platform === "rover" && row.camera !== "") return "binary";
@@ -107,7 +104,6 @@ export const TableComponent = () => {
         setCurrentRow(row);
         setEditFields({ ...row });
         
-        // Set data type for the current row
         const dataType = detectDataType(row);
         setRowDataType(dataType);
         
@@ -187,7 +183,7 @@ export const TableComponent = () => {
                 experiment: row.experiment,
                 sensor: row.sensor,
                 platform: row.platform,
-                camera: row.camera  // Add camera to the object
+                camera: row.camera
             };
             setImagePreviewData(obj);
             setImagePreviewOpen(true);
@@ -251,8 +247,6 @@ export const TableComponent = () => {
                 console.error("Error updating data:", error);
             });
     };
-
-    // Make sure it gets nested under same parent correctly
     const convertToPath = (data) => {
         const paths = [];
     
@@ -277,7 +271,6 @@ export const TableComponent = () => {
         const flattenedPaths = convertToPath(nestedData);
         return flattenedPaths.map((path, index) => {
             const parts = path.split(' > ');
-            // Extract camera position for rover platform images
             let camera = '';
             if (parts[5] === 'rover' && parts[7] === 'Images') { 
                 camera = parts[8];
@@ -296,7 +289,6 @@ export const TableComponent = () => {
         });
     };
             
-    // Then modify getColumns to use these variables
     const getColumns = () => {
         const actionsColumn = [
             {
@@ -332,7 +324,6 @@ export const TableComponent = () => {
             }
         ];
         
-        // Combine the columns based on the selected data type
         return [
             ...baseColumns,
             ...(typeSpecificColumns[selectedDataType] || []),
@@ -377,7 +368,6 @@ export const TableComponent = () => {
                 <DialogContent>
                     {currentRow && (
                         <div>
-                            {/* Base fields that all types have */}
                             {baseColumns.map(column => (
                                 <TextField
                                     key={column.field}
@@ -389,8 +379,6 @@ export const TableComponent = () => {
                                     onChange={handleInputChange}
                                 />
                             ))}
-                            
-                            {/* Type-specific fields */}
                             {typeSpecificColumns[rowDataType] && typeSpecificColumns[rowDataType].map(column => (
                                 <TextField
                                     key={column.field}
