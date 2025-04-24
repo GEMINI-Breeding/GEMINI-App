@@ -57,6 +57,7 @@ const FileUploadComponent = () => {
     const [isFinishedUploading, setIsFinishedUploading] = useState(false);
     const [noFilesToUpload, setNoFilesToUpload] = useState(true);
     const [badFileType, setBadFileType] = useState(false);
+    const [failedUpload, setFailedUpload] = useState(false);
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
@@ -204,10 +205,14 @@ const FileUploadComponent = () => {
                 console.log("Extraction complete");
             } else {
                 console.error("Failed to extract binary file");
+                setIsFinishedUploading(true);
+                setFailedUpload(true);
                 setExtractingBinary(false);
             }
         } catch (error) {
             console.error("Error extracting binary file:", error);
+            setIsFinishedUploading(true);
+            setFailedUpload(true);
             setExtractingBinary(false);
         }
     };
@@ -650,36 +655,46 @@ const FileUploadComponent = () => {
                     {!isUploading && isFinishedUploading && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
                             <Typography>
-                                {extractingBinary ? <b>Extraction Successful</b> : <b>Upload Successful</b>} 
+                                {!failedUpload ? (
+                                    extractingBinary ? <b>Extraction Successful</b> : <b>Upload Successful</b>
+                                ) : (
+                                    <b>Upload completed, but extraction failed.</b>
+                                )}
                             </Typography>
-                            <LinearProgress color ="success" variant="determinate" value={100} />
+                            <LinearProgress
+                                color={!failedUpload ? "success" : "error"}
+                                variant="determinate"
+                                value={100}
+                            />
                             <Button
                                 variant="contained"
-                                color="success"
+                                color={!failedUpload ? "success" : "error"}
                                 sx={{ mt: 2 }}
                                 onClick={() => {
                                     setIsFinishedUploading(false);
+                                    setFailedUpload(false); // Reset both flags
 
-                                    // clear cache of uploaded files if exists
+                                    // Clear cache
                                     console.log("Clearing cache of uploaded files");
                                     fetch(`${flaskUrl}/clear_upload_cache`, {
                                         method: "POST",
                                         headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify({ dirPath }),
                                     })
-                                    .then((response) => response.json())
-                                    .then((data) => {
-                                        console.log(data);
-                                    })
-                                    .catch((error) => {
-                                        console.error('Error:', error);
-                                    });
+                                        .then((response) => response.json())
+                                        .then((data) => {
+                                            console.log(data);
+                                        })
+                                        .catch((error) => {
+                                            console.error('Error:', error);
+                                        });
                                 }}
                             >
-                                Done
+                                {failedUpload ? "Return" : "Done"}
                             </Button>
                         </Paper>
                     )}
+
                 </form>
             </Grid>
                 </>)
