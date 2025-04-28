@@ -264,6 +264,22 @@ const FileUploadComponent = () => {
         }
       }
 
+      const clearCache = () => {
+        console.log("Clearing cache of uploaded files");
+        fetch(`${flaskUrl}/clear_upload_cache`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dirPath }),
+        })
+        .then((response) => response.json())
+        .then((data) => {
+            console.log(data);
+        })
+        .catch((error) => {
+            console.error('Error clearing cache:', error);
+        });
+    };
+
     // Formik hook for form state management and validation
     const formik = useFormik({
         initialValues: {
@@ -632,20 +648,11 @@ const FileUploadComponent = () => {
                                     cancelUploadRef.current = true;
                                     setIsUploading(false);
 
-                                    // clear cache of uploaded files if exists
-                                    console.log("Clearing cache of uploaded files");
-                                    fetch(`${flaskUrl}/clear_upload_cache`, {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ dirPath }),
-                                    })
-                                    .then((response) => response.json())
-                                    .then((data) => {
-                                        console.log(data);
-                                    })
-                                    .catch((error) => {
-                                        console.error('Error:', error);
-                                    });
+                                    if (!extractingBinary) {
+                                        clearCache();
+                                    } else {
+                                        console.log("Extraction in progress; delay clearing cache.");
+                                    }
                                 }}
                             >
                                 Cancel Upload
@@ -672,22 +679,8 @@ const FileUploadComponent = () => {
                                 sx={{ mt: 2 }}
                                 onClick={() => {
                                     setIsFinishedUploading(false);
-                                    setFailedUpload(false); // Reset both flags
-
-                                    // Clear cache
-                                    console.log("Clearing cache of uploaded files");
-                                    fetch(`${flaskUrl}/clear_upload_cache`, {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ dirPath }),
-                                    })
-                                        .then((response) => response.json())
-                                        .then((data) => {
-                                            console.log(data);
-                                        })
-                                        .catch((error) => {
-                                            console.error('Error:', error);
-                                        });
+                                    setFailedUpload(false);
+                                    clearCache(); // Here, safe to clear after successful or failed upload
                                 }}
                             >
                                 {failedUpload ? "Return" : "Done"}
