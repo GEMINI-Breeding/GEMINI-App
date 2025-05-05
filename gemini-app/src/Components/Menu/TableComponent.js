@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { useDataState, useDataSetters  } from "../../DataContext";
+import { useDataState, useDataSetters } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
-import { Edit, Delete, Visibility, Download } from '@mui/icons-material';
-import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Button } from '@mui/material';
+import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
+import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
+import dataTypes from "../../uploadDataTypes.json";
+// import { CSVPreviewer } from "./CSVPreview";
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
@@ -11,16 +13,20 @@ export const TableComponent = () => {
     const [error, setError] = useState(null);
     const { flaskUrl } = useDataState();
     const [procData, setProcData] = useState([]);
-
+    const [filteredData, setFilteredData] = useState([]);
+    const [selectedDataType, setSelectedDataType] = useState("image");
     const [dialogOpen, setDialogOpen] = useState(false);
     const [dialogViewOpen, setDialogViewOpen] = useState(false);
     const [currentRow, setCurrentRow] = useState(null);
     const [editFields, setEditFields] = useState({});
+    const [rowDataType, setRowDataType] = useState(""); 
     const [showEditSuccess, setShowEditSuccess] = useState(false);
     const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [imagePreviewData, setImagePreviewData] = useState(null);
+    // const [csvPreviewData, setCSVPreviewData] = useState(null);
+    // const [csvPreviewOpen, setCSVPreviewOpen] = useState(false);
     const {
         uploadedData
     } = useDataState();
@@ -29,6 +35,34 @@ export const TableComponent = () => {
         setUploadedData
     } = useDataSetters();
     
+    const baseColumns = [
+        { field: 'year', headerName: 'Year', width: 100 },
+        { field: 'experiment', headerName: 'Experiment', width: 150 },
+        { field: 'location', headerName: 'Location', width: 150 },
+        { field: 'population', headerName: 'Population', width: 150 },
+    ];
+    
+    const typeSpecificColumns = {
+        image: [
+            { field: 'date', headerName: 'Date', width: 150 },
+            { field: 'platform', headerName: 'Platform', width: 150 },
+            { field: 'sensor', headerName: 'Sensor', width: 150 },
+        ],
+        binary: [
+            { field: 'date', headerName: 'Date', width: 150 },
+            { field: 'camera', headerName: 'Camera', width: 150 },
+        ],
+        weather: [
+            { field: 'date', headerName: 'Date', width: 150 },
+        ],
+        gcpLocations: [],
+        platformLogs: [
+            { field: 'date', headerName: 'Date', width: 150 },
+            { field: 'platform', headerName: 'Platform', width: 150 },
+            { field: 'sensor', headerName: 'Sensor', width: 150 },
+        ],
+    };
+
     useEffect(() => {
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
@@ -37,7 +71,9 @@ export const TableComponent = () => {
             .then((response) => response.json())
             .then((data) => {
                 setData(data);
-                setProcData(transformNestedData(data));
+                const transformedData = transformNestedData(data);
+                setProcData(transformedData);
+                setFilteredData(transformedData);
                 setLoading(false);
             })
             .catch((error) => {
@@ -46,6 +82,20 @@ export const TableComponent = () => {
                 setLoading(false);
             });
     }, [flaskUrl]);
+    
+    useEffect(() => {
+        const filtered = procData.filter(row => detectDataType(row) === selectedDataType);
+        setFilteredData(filtered);
+    }, [selectedDataType, procData]);
+
+    const detectDataType = (row) => {
+        if (row.sensor && (row.platform && row.platform !== "rover") && row.date) return "image";
+        if (row.platform === "rover" && row.camera !== "") return "binary";
+        if ((row.date && row.date !== "[object Object]") && (!row.platform || row.platform === "[object Object]")) return "weather";
+        if ((!row.date || row.date === "[object Object]") && row.population) return "gcpLocations";
+        if (row.sensor && (row.platform && row.platform !== "rover")) return "platformLogs";
+        return "unknown";
+    };
 
     const handleEdit = (id) => {
         setShowEditSuccess(false);
@@ -53,6 +103,10 @@ export const TableComponent = () => {
         const row = procData.find((row) => row.id === id);
         setCurrentRow(row);
         setEditFields({ ...row });
+        
+        const dataType = detectDataType(row);
+        setRowDataType(dataType);
+        
         setDialogOpen(true);
     };
 
@@ -119,7 +173,8 @@ export const TableComponent = () => {
 
     const handleView = (id) => {
         const row = procData.find((row) => row.id === id);
-        if (row) {
+        console.log(rowDataType);
+        if (row && row.platform !== "") {
             const obj = {
                 location: row.location,
                 population: row.population,
@@ -127,11 +182,25 @@ export const TableComponent = () => {
                 year: row.year,
                 experiment: row.experiment,
                 sensor: row.sensor,
-                platform: row.platform
+                platform: row.platform,
+                camera: row.camera
             };
             setImagePreviewData(obj);
             setImagePreviewOpen(true);
         }
+        // else if (row) {
+        //     const obj = {
+        //         location: row.location,
+        //         population: row.population,
+        //         year: row.year,
+        //         experiment: row.experiment,
+        //         date: row.date
+        //     };
+        //     console.log("CSV Preview Data: ", obj);
+        //     setCSVPreviewData(obj);
+        //     setCSVPreviewOpen(true);
+            
+        // }
     };
 
     const handleSave = () => {
@@ -178,8 +247,6 @@ export const TableComponent = () => {
                 console.error("Error updating data:", error);
             });
     };
-
-    // Make sure it gets nested under same parent correctly
     const convertToPath = (data) => {
         const paths = [];
     
@@ -204,6 +271,10 @@ export const TableComponent = () => {
         const flattenedPaths = convertToPath(nestedData);
         return flattenedPaths.map((path, index) => {
             const parts = path.split(' > ');
+            let camera = '';
+            if (parts[5] === 'rover' && parts[7] === 'Images') { 
+                camera = parts[8];
+            }
             return {
                 id: index,
                 year: parts[0] || '',
@@ -213,25 +284,22 @@ export const TableComponent = () => {
                 date: parts[4] || '',
                 platform: parts[5] || '',
                 sensor: parts[6] || '',
+                camera: camera // for Amiga file viewing
             };
         });
     };
             
-
-    const columns = [
-        { field: 'year', headerName: 'Year', width: 100 },
-        { field: 'experiment', headerName: 'Experiment', width: 150 },
-        { field: 'location', headerName: 'Location', width: 150 },
-        { field: 'population', headerName: 'Population', width: 150 },
-        { field: 'date', headerName: 'Date', width: 150 },
-        { field: 'platform', headerName: 'Platform', width: 150 },
-        { field: 'sensor', headerName: 'Sensor', width: 150 },
-        {
+    const getColumns = () => {
+        const actionsColumn = [
+            {
             field: 'actions',
             headerName: 'Actions',
             width: 180,
+            
             renderCell: (params) => (
                 <div style={{ display: 'flex', gap: '12px' }}>
+                {selectedDataType !== "binary" && (
+                    <>
                     <Edit
                         color="primary"
                         style={{ cursor: 'pointer' }}
@@ -242,15 +310,26 @@ export const TableComponent = () => {
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleDelete(params.id)}
                     />
+                    </>
+                )}
+                {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && (
                     <Visibility
                         color="action"
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleView(params.id)}
                     />
+                )}
                 </div>
             ),
-        },
-    ];
+            }
+        ];
+        
+        return [
+            ...baseColumns,
+            ...(typeSpecificColumns[selectedDataType] || []),
+            ...actionsColumn
+        ];
+    };
 
     if (loading) return <p>Loading...</p>;
     if (error) return <p>Error: {error.message}</p>;
@@ -260,76 +339,57 @@ export const TableComponent = () => {
             {showEditSuccess && <Alert severity="success">Successfully updated data.</Alert>}
             {showDeleteSuccess && <Alert severity="success">Successfully deleted data.</Alert>}
             <h2>Data Table</h2>
+            <FormControl fullWidth style={{ marginBottom: '20px' }}>
+                <InputLabel>Data Type</InputLabel>
+                <Select
+                    value={selectedDataType}
+                    label="Data Type"
+                    onChange={(e) => setSelectedDataType(e.target.value)}
+                >
+                    {Object.entries(dataTypes).map(([type, config]) => (
+                        <MenuItem key={type} value={type}>
+                            {config.label}
+                        </MenuItem>
+                    ))}
+                </Select>
+            </FormControl>
             <div style={{ height: 400, width: '100%' }}>
                 <DataGrid
-                    rows={procData}
-                    columns={columns}
+                    rows={filteredData}
+                    columns={getColumns()}
                     pageSize={10}
                     rowsPerPageOptions={[10]}
                     getRowId={(row) => row.id}
                 />
             </div>
+
             <Dialog open={dialogOpen} onClose={handleDialogClose}>
                 <DialogTitle>Edit Row</DialogTitle>
                 <DialogContent>
                     {currentRow && (
                         <div>
-                            <TextField
-                                margin="dense"
-                                name="year"
-                                label="Year"
-                                fullWidth
-                                value={editFields.year || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="experiment"
-                                label="Experiment"
-                                fullWidth
-                                value={editFields.experiment || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="location"
-                                label="Location"
-                                fullWidth
-                                value={editFields.location || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="population"
-                                label="Population"
-                                fullWidth
-                                value={editFields.population || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="date"
-                                label="Date"
-                                fullWidth
-                                value={editFields.date || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="platform"
-                                label="Platform"
-                                fullWidth
-                                value={editFields.platform || ''}
-                                onChange={handleInputChange}
-                            />
-                            <TextField
-                                margin="dense"
-                                name="sensor"
-                                label="Sensor"
-                                fullWidth
-                                value={editFields.sensor || ''}
-                                onChange={handleInputChange}
-                            />
+                            {baseColumns.map(column => (
+                                <TextField
+                                    key={column.field}
+                                    margin="dense"
+                                    name={column.field}
+                                    label={column.headerName}
+                                    fullWidth
+                                    value={editFields[column.field] || ''}
+                                    onChange={handleInputChange}
+                                />
+                            ))}
+                            {typeSpecificColumns[rowDataType] && typeSpecificColumns[rowDataType].map(column => (
+                                <TextField
+                                    key={column.field}
+                                    margin="dense"
+                                    name={column.field}
+                                    label={column.headerName}
+                                    fullWidth
+                                    value={editFields[column.field] || ''}
+                                    onChange={handleInputChange}
+                                />
+                            ))}
                         </div>
                     )}
                 </DialogContent>
@@ -343,6 +403,11 @@ export const TableComponent = () => {
                 obj={imagePreviewData}
                 onClose={() => setImagePreviewOpen(false)}
             /> 
+            {/* <CSVPreviewer
+                open={csvPreviewOpen}
+                obj={csvPreviewData}
+                onClose={() => setCSVPreviewOpen(false)}
+            />  */}
         </div>
     );
 };
