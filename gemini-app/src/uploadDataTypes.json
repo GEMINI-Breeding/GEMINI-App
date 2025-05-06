@@ -5,7 +5,7 @@
         "label": "Image Data"
     },
     "binary": {
-        "fields": ["year", "experiment", "location", "population", "date", "platform"],
+        "fields": ["year", "experiment", "location", "population", "date"],
         "fileType": ".bin",
         "label": "Amiga File"
     },
