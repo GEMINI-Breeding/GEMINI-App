@@ -208,12 +208,18 @@ const FileUploadComponent = () => {
                 setIsFinishedUploading(true);
                 setFailedUpload(true);
                 setExtractingBinary(false);
+
+                // If extraction fails, clear the directory
+                clearDirPath();
             }
         } catch (error) {
             console.error("Error extracting binary file:", error);
             setIsFinishedUploading(true);
             setFailedUpload(true);
             setExtractingBinary(false);
+
+            // If extraction fails, clear the directory
+            clearDirPath();
         }
     };
 
@@ -265,8 +271,8 @@ const FileUploadComponent = () => {
       }
 
       const clearCache = () => {
-        console.log("Clearing cache of uploaded files");
-        fetch(`${flaskUrl}/clear_upload_cache`, {
+        console.log("Clearing cache of uploaded files in: ", dirPath);
+        fetch(`${flaskUrl}clear_upload_cache`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ dirPath }),
@@ -279,6 +285,22 @@ const FileUploadComponent = () => {
             console.error('Error clearing cache:', error);
         });
     };
+
+    const clearDirPath = () => {
+        console.log("Clearing dir of uploaded files in: ", dirPath);
+        fetch(`${flaskUrl}clear_upload_dir`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dirPath }),
+        })
+        .then((response) => response.json())
+        .then((data) => {
+            console.log(data);
+        })
+        .catch((error) => {
+            console.error('Error clearing directory:', error);
+        });
+    }
 
     // Formik hook for form state management and validation
     const formik = useFormik({
@@ -312,6 +334,7 @@ const FileUploadComponent = () => {
             if (selectedDataType === "platformLogs") {
                 dirPath += "/Metadata";
             }
+            console.log("Directory path on submit:", dirPath);
 
             // Step 1: Check which files need to be uploaded
             const fileTypes = {};
@@ -647,12 +670,12 @@ const FileUploadComponent = () => {
                                 onClick={() => {
                                     cancelUploadRef.current = true;
                                     setIsUploading(false);
+                                    setIsFinishedUploading(false);
+                                    setFiles([]);
+                                    setDirPath("");
 
-                                    if (!extractingBinary) {
-                                        clearCache();
-                                    } else {
-                                        console.log("Extraction in progress; delay clearing cache.");
-                                    }
+                                    // clearCache();     // wipes chunk cache
+                                    clearDirPath();   // deletes any files already landed in the dir
                                 }}
                             >
                                 Cancel Upload
@@ -665,7 +688,7 @@ const FileUploadComponent = () => {
                                 {!failedUpload ? (
                                     extractingBinary ? <b>Extraction Successful</b> : <b>Upload Successful</b>
                                 ) : (
-                                    <b>Upload completed, but extraction failed.</b>
+                                    <b>Upload has been stopped.</b>
                                 )}
                             </Typography>
                             <LinearProgress
@@ -680,7 +703,15 @@ const FileUploadComponent = () => {
                                 onClick={() => {
                                     setIsFinishedUploading(false);
                                     setFailedUpload(false);
-                                    clearCache(); // Here, safe to clear after successful or failed upload
+                                    setDirPath("");
+                                    setFiles([]);
+
+                                    if (failedUpload) {
+                                        // clearCache();
+                                        clearDirPath();
+                                    } else {
+                                        clearCache(); // Here, safe to clear after successful or failed upload
+                                    }
                                 }}
                             >
                                 {failedUpload ? "Return" : "Done"}
