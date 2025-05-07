@@ -76,12 +76,22 @@ const FileUploadComponent = () => {
     }, [selectedDataType]);
 
     useEffect(() => {
-        if (extractingBinary) {
-            const intervalId = setInterval(async () => {
-                const processedFilesCount = await getBinaryProgress(dirPath);
-                setProgress(Math.round((processedFilesCount / files.length) * 100));
-            }, 1000);
 
+        if (extractingBinary) {
+        
+            const intervalId = setInterval(async () => {
+                    const processedFilesCount = await getBinaryProgress(dirPath);
+                    let prog_calc = Math.round((processedFilesCount / files.length) * 100);
+                    setProgress(prog_calc);
+
+                    if (prog_calc >= 100) {
+                        setIsFinishedUploading(true);
+                        setUploadedData(true);
+                        setIsUploading(false);
+                        setExtractingBinary(false);
+                    }
+                }, 1000);
+            
             return () => clearInterval(intervalId);
         }
     }, [extractingBinary, dirPath, files.length]);
@@ -169,27 +179,26 @@ const FileUploadComponent = () => {
         try {
             const response = await fetch(`${flaskUrl}get_binary_progress`,
                 {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ dirPath }),
-                }
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dirPath }),
+          }
             );
-            if (response.ok) {
-                const data = await response.json();
-                return data.progress;
-            } else {
-                console.error("Failed to fetch progress");
-                return 0;
-            }
+          if (response.ok) {
+            const data = await response.json();
+            return data.progress;
+          } else {
+            console.error("Failed to fetch progress");
+            return 0;
+          }
         } catch (error) {
             console.error("Error reading text file:", error);
             return 0; // Return 0 if there's an error
         }
     };
 
-    const extractBinaryFiles = async (files, dirPath) => {
+    const extractBinaryFiles = async (files) => {
         setExtractingBinary(true);
-        setDirPath(dirPath);
 
         try {
             const response = await fetch(`${flaskUrl}extract_binary_file`, {
@@ -201,13 +210,11 @@ const FileUploadComponent = () => {
             if (response.ok) {
                 console.log("Binary file extraction started");
                 const result = await response.json();
-                setExtractingBinary(false);
-                console.log("Extraction complete");
+                console.log("Extraction started");
             } else {
                 console.error("Failed to extract binary file");
                 setIsFinishedUploading(true);
                 setFailedUpload(true);
-                setExtractingBinary(false);
 
                 // If extraction fails, clear the directory
                 clearDirPath();
@@ -216,7 +223,7 @@ const FileUploadComponent = () => {
             console.error("Error extracting binary file:", error);
             setIsFinishedUploading(true);
             setFailedUpload(true);
-            setExtractingBinary(false);
+            // setExtractingBinary(false);
 
             // If extraction fails, clear the directory
             clearDirPath();
@@ -287,6 +294,7 @@ const FileUploadComponent = () => {
     };
 
     const clearDirPath = () => {
+        setProgress(0);
         console.log("Clearing dir of uploaded files in: ", dirPath);
         fetch(`${flaskUrl}clear_upload_dir`, {
             method: "POST",
@@ -300,6 +308,18 @@ const FileUploadComponent = () => {
         .catch((error) => {
             console.error('Error clearing directory:', error);
         });
+    }
+
+    const handleCancelExtraction = async () => {
+        console.log("Cancelling extraction of files in: ", dirPath);
+        if (extractingBinary) {
+            // ask the server to kill the extraction process
+            await fetch(`${flaskUrl}cancel_extraction`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dirPath }),
+            });
+        };
     }
 
     // Formik hook for form state management and validation
@@ -316,25 +336,27 @@ const FileUploadComponent = () => {
         onSubmit: async (values) => {
             setIsUploading(true);
             cancelUploadRef.current = false;
+            uploadedSizeSoFar = 0;
             setProgress(0);
             setBadFileType(false);
             // Construct directory path based on data type and form values
-            let dirPath = "";
+            let localDirPath = "";
             for (const field of dataTypes[selectedDataType].fields) {
                 if (values[field]) {
-                    dirPath += dirPath ? `/${values[field]}` : values[field];
+                    localDirPath += localDirPath ? `/${values[field]}` : values[field];
                 }
             }
             if(selectedDataType === "binary"){
-                dirPath += "/rover";
+                localDirPath += "/rover";
             }
             if (selectedDataType === "image") {
-                dirPath += "/Images";
+                localDirPath += "/Images";
             }
             if (selectedDataType === "platformLogs") {
-                dirPath += "/Metadata";
+                localDirPath += "/Metadata";
             }
-            console.log("Directory path on submit:", dirPath);
+            console.log("Directory path on submit:", localDirPath);
+            setDirPath(localDirPath);
 
             // Step 1: Check which files need to be uploaded
             const fileTypes = {};
@@ -401,21 +423,19 @@ const FileUploadComponent = () => {
                 }
                 if(!bFT)
                 {
-                    // Step 3: If binary file, extract the contents
-                    if (selectedDataType === "binary") {
+                    // Step 3: only extract if not cancelled
+                    if (selectedDataType === "binary" && !cancelUploadRef.current) {
                         setProgress(0);
                         console.log("Files to extract:", filesToUpload);
-                        await extractBinaryFiles(filesToUpload, dirPath);
+                        await extractBinaryFiles(filesToUpload);
                     }
-                    uploadedSizeSoFar = 0;
-                    setProgress(0);
-                    setIsUploading(false);
-                    if(!cancelUploadRef.current)
-                    {
-                        setIsFinishedUploading(true);
-                        setUploadedData(true);
+                    
+                    // now handle “finished” state
+                    if (!cancelUploadRef.current) {
+                        setIsFinishedUploading(true)
+                        setUploadedData(true)
+                        setProgress(0);
                     }
-                    setFiles([]);
                 }
             }
         },
@@ -651,7 +671,7 @@ const FileUploadComponent = () => {
                                 setIsUploading(false);
                                 setBadFileType(false);
                                 setFiles([]);
-                            }}
+                                                            }}
                         >
                             Return
                         </Button>
@@ -668,13 +688,16 @@ const FileUploadComponent = () => {
                                 color="error"
                                 sx={{ mt: 2 }}
                                 onClick={() => {
+                                    
                                     cancelUploadRef.current = true;
+                                    uploadedSizeSoFar = 0;
                                     setIsUploading(false);
+                                    setExtractingBinary(false);
                                     setIsFinishedUploading(false);
                                     setFiles([]);
-                                    setDirPath("");
-
-                                    // clearCache();     // wipes chunk cache
+                                    setProgress(0);
+                                    
+                                    handleCancelExtraction(); // Cancel extraction if in progress
                                     clearDirPath();   // deletes any files already landed in the dir
                                 }}
                             >
@@ -703,11 +726,11 @@ const FileUploadComponent = () => {
                                 onClick={() => {
                                     setIsFinishedUploading(false);
                                     setFailedUpload(false);
-                                    setDirPath("");
                                     setFiles([]);
-
+                                    setProgress(0);
+                                    setExtractingBinary(false);
+                                    
                                     if (failedUpload) {
-                                        // clearCache();
                                         clearDirPath();
                                     } else {
                                         clearCache(); // Here, safe to clear after successful or failed upload
