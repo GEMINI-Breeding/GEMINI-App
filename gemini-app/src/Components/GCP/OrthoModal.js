@@ -12,7 +12,12 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
     Box,
     LinearProgress,
-    IconButton
+    IconButton,
+    FormControl,
+    FormLabel,
+    RadioGroup,
+    FormControlLabel,
+    Radio
 } from "@mui/material";
 import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
@@ -46,6 +51,7 @@ const OrthoModal = () => {
         setProcessRunning
     } = useDataSetters();
 
+    const [selectedPipeline, setSelectedPipeline] = useState("aerial");
     const [submitError, setSubmitError] = useState("");
     // Process sliderMarks to check the label value for pointX and pointY
     const labeledGcpImages = sliderMarks.filter((mark) => mark.label.props.color !== "rgba(255,255,255,0)");
@@ -80,8 +86,13 @@ const OrthoModal = () => {
             sensor: selectedSensorGCP,
             reconstruction_quality: orthoSetting,
             custom_options: orthoCustomValue ? orthoCustomValue : [],
+            pipeline_type: selectedPipeline
         };
-        fetch(`${flaskUrl}run_odm`, {
+        
+        // Determine which endpoint to call based on the selected pipeline
+        const endpoint = selectedPipeline === "aerial" ? "run_odm" : "run_ground_ortho";
+        
+        fetch(`${flaskUrl}${endpoint}`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -90,7 +101,7 @@ const OrthoModal = () => {
         })
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error("Error generating ortho");
+                    throw new Error(`Error generating ${selectedPipeline} ortho`);
                 }
                 return response.json();
             })
@@ -100,10 +111,10 @@ const OrthoModal = () => {
             })
             .catch((error) => {
                 console.error("Error:", error);
-                setOrthoServerStatus("Error generating ortho");
-                setSubmitError("Error starting ortho generation.")
+                setOrthoServerStatus(`Error generating ${selectedPipeline} ortho`);
+                setSubmitError(`Error starting ${selectedPipeline} ortho generation.`)
 
-                alert("Error starting ortho generation. Please try again.");
+                alert(`Error starting ${selectedPipeline} ortho generation. Please try again.`);
             });
     };
 
@@ -122,6 +133,29 @@ const OrthoModal = () => {
                     <Grid item>
                         <Typography variant="body1">Labeled GCP Images: {labeledGcpImagesCount}</Typography>
                     </Grid>
+                    
+                    <Grid item>
+                        <FormControl component="fieldset">
+                            <FormLabel component="legend">Image Stitching Pipeline</FormLabel>
+                            <RadioGroup
+                                row
+                                value={selectedPipeline}
+                                onChange={(e) => setSelectedPipeline(e.target.value)}
+                            >
+                                <FormControlLabel 
+                                    value="aerial" 
+                                    control={<Radio />} 
+                                    label="Aerial Drone Images" 
+                                />
+                                <FormControlLabel 
+                                    value="ground" 
+                                    control={<Radio />} 
+                                    label="Ground-Based Rover Images" 
+                                />
+                            </RadioGroup>
+                        </FormControl>
+                    </Grid>
+                    
                     <Grid item>
                         <Autocomplete
                             value={orthoSetting}
@@ -141,15 +175,19 @@ const OrthoModal = () => {
                                 fullWidth // Using full width for consistent layout
                             />
                             <Typography align="center" color="error" style={{ marginTop: 8 }}>
-                                OpenDroneMap args. Only use if you know what you're doing!
+                                {selectedPipeline === "aerial" 
+                                    ? "OpenDroneMap args. Only use if you know what you're doing!" 
+                                    : "Ground stitching args. Only use if you know what you're doing!"}
                             </Typography>
                         </Grid>
                     )}
-                    {/* display if orthoSetting is Low */}
+                    {/* display if orthoSetting is Default */}
                     {orthoSetting === "Default" && (
                         <Grid item>
                             <Typography variant="body1" style={{ color: 'orange' }}>
-                                Warning: Ortho Generation may take up to 2 hours to complete.
+                                {selectedPipeline === "aerial"
+                                    ? "Warning: Aerial Ortho Generation may take up to 2 hours to complete."
+                                    : "Warning: Ground-Based Ortho Generation may take up to 1 hour to complete."}
                             </Typography>
                         </Grid>
                     )}
@@ -187,10 +225,28 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
     const { setCurrentOrthoProgress, setIsOrthoProcessing, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentOrthoProgress) ? currentOrthoProgress : 0;
+    const [pipelineType, setPipelineType] = useState("aerial"); // Default to aerial
 
     // For log text contents
     const [logContent, setLogContent] = useState("");
     const [loadingLogs, setLoadingLogs] = useState(false);
+
+    // Get the current pipeline type when the component mounts (prevent confusion during reload)
+    useEffect(() => {
+        const getPipelineType = async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_current_pipeline`);
+                const data = await response.json();
+                if (response.ok && data.pipeline_type) {
+                    setPipelineType(data.pipeline_type);
+                }
+            } catch (error) {
+                console.error("Error fetching pipeline type:", error);
+            }
+        };
+        
+        getPipelineType();
+    }, [flaskUrl]);
 
     useEffect(() => {
         let pollingInterval = null;
@@ -200,17 +256,19 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
             const fetchLogs = async () => {
                 setLoadingLogs(true);
                 try {
-                    const response = await fetch(`${flaskUrl}get_odm_logs`);
+                    // endpoints based on pipeline type
+                    const endpoint = pipelineType === "aerial" ? "get_odm_logs" : "get_ground_ortho_logs";
+                    const response = await fetch(`${flaskUrl}${endpoint}`);
                     const data = await response.json();
                     if (response.ok) {
-                        console.log("Logs:", data);
+                        console.log(`${pipelineType} Logs:`, data);
                         setLogContent(prevContent => prevContent + "\n" + data.log_content);
                     } else {
-                        console.log("Error fetching logs:", data.error);
+                        console.log(`Error fetching ${pipelineType} logs:`, data.error);
                         setLogContent("Error: " + data.error);
                     }
                 } catch (error) {
-                    setLogContent("Error fetching logs");
+                    setLogContent(`Error fetching ${pipelineType} logs`);
                 } finally {
                     setLoadingLogs(false);
                 }
@@ -229,7 +287,7 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                 clearInterval(pollingInterval);
             }
         };
-    }, [expanded]);
+    }, [expanded, flaskUrl, pipelineType]);
 
     const handleExpandClick = () => {
         setExpanded(!expanded);
@@ -248,7 +306,9 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
                 <Typography variant="body2" sx={{ marginRight: "10px" }}>
-                    Ortho Generation in Progress...
+                    {pipelineType === "aerial" 
+                        ? "Aerial Ortho Generation in Progress..." 
+                        : "Ground-Based Ortho Generation in Progress..."}
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
                     <Box sx={{ width: "100%", mr: 1 }}>
