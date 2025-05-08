@@ -8,7 +8,7 @@ import html2canvas from 'html2canvas';
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
 const GraphTab = ({ data, item }) => {
-    useTrackComponent("GraphTab");
+        useTrackComponent("GraphTab");
 
     const [selectedAccession, setSelectedAccession] = useState('');
     const [chartType, setChartType] = useState('heightHistogram');
@@ -98,15 +98,30 @@ const GraphTab = ({ data, item }) => {
         };
     };
 
+    // Improved saveChartAsImage function with proper error handling and null checks
     const saveChartAsImage = () => {
-        if (chartRef.current) {
+        if (!chartRef.current) {
+            console.error("Chart reference is not available");
+            return;
+        }
+        
+        try {
             html2canvas(chartRef.current).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const link = document.createElement('a');
-                link.href = imgData;
-                link.download = `${item.date}_${chartType === 'heightHistogram' ? 'height_95_p' : 'veg_frac'}_chart.png`;
-                link.click();
+                try {
+                    const imgData = canvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    link.href = imgData;
+                    // Added null check with optional chaining for item.date
+                    link.download = `${item?.date || 'chart'}_${chartType === 'heightHistogram' ? 'height_95_p' : 'veg_frac'}_chart.png`;
+                    link.click();
+                } catch (err) {
+                    console.error("Error creating download link:", err);
+                }
+            }).catch(err => {
+                console.error("Failed to create canvas:", err);
             });
+        } catch (err) {
+            console.error("Error in saveChartAsImage:", err);
         }
     };
 
@@ -131,39 +146,48 @@ const GraphTab = ({ data, item }) => {
                             <Tab value="vegetationHistogram" label="Vegetation Fraction Distribution" />
                         </Tabs>
                     <Box sx={{ height: 'calc(100% - 60px)', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {/* Added wrapper Box with null checks for chart data */}
                         <Box ref={chartRef} sx={{ width: '100%' }}>
-                            {chartType === 'heightHistogram' && (chartData.heightHistogramData.labels?.length > 0 ? <Bar data={chartData.heightHistogramData} options={{
-                                scales: {
-                                    x: {
-                                        title: {
-                                            display: true,
-                                            text: 'Height (meters)'
-                                        }
-                                    },
-                                    y: {
-                                        title: {
-                                            display: true,
-                                            text: 'Frequency'
-                                        }
-                                    }
-                                }
-                            }} /> : <Typography>No height data available.</Typography>)}
-                            {chartType === 'vegetationHistogram' && (chartData.vegetationHistogramData.labels?.length > 0 ? <Bar data={chartData.vegetationHistogramData} options={{
-                                scales: {
-                                    x: {
-                                        title: {
-                                            display: true,
-                                            text: 'Vegetation Fraction'
-                                        }
-                                    },
-                                    y: {
-                                        title: {
-                                            display: true,
-                                            text: 'Frequency'
+                            {chartType === 'heightHistogram' && (
+                                chartData?.heightHistogramData?.labels?.length > 0 ? 
+                                <Bar data={chartData.heightHistogramData} options={{
+                                    scales: {
+                                        x: {
+                                            title: {
+                                                display: true,
+                                                text: 'Height (meters)'
+                                            }
+                                        },
+                                        y: {
+                                            title: {
+                                                display: true,
+                                                text: 'Frequency'
+                                            }
                                         }
                                     }
-                                }
-                            }} /> : <Typography>No vegetation data available.</Typography>)}
+                                }} /> : 
+                                <Typography>No height data available.</Typography>
+                            )}
+                            {chartType === 'vegetationHistogram' && (
+                                chartData?.vegetationHistogramData?.labels?.length > 0 ? 
+                                <Bar data={chartData.vegetationHistogramData} options={{
+                                    scales: {
+                                        x: {
+                                            title: {
+                                                display: true,
+                                                text: 'Vegetation Fraction'
+                                            }
+                                        },
+                                        y: {
+                                            title: {
+                                                display: true,
+                                                text: 'Frequency'
+                                            }
+                                        }
+                                    }
+                                }} /> : 
+                                <Typography>No vegetation data available.</Typography>
+                            )}
                         </Box>
                     </Box>
                     <Button variant="contained" color="primary" onClick={saveChartAsImage}>

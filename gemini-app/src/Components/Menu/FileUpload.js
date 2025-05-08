@@ -115,20 +115,20 @@ const FileUploadComponent = () => {
     }, [flaskUrl]);
 
     // Function to check for existing files on the server
-    const checkFilesOnServer = async (fileList, dirPath) => {
+    const checkFilesOnServer = async (fileList, localDirPath) => {
         const response = await fetch(`${flaskUrl}check_files`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileList, dirPath }),
+            body: JSON.stringify({ fileList, localDirPath }),
         });
         return response.json();
     };
 
     // Function to upload a file with a timeout
-    const uploadFileWithTimeout = async (file, dirPath, dataType, timeout = 30000) => {
+    const uploadFileWithTimeout = async (file, localDirPath, dataType, timeout = 30000) => {
         const formData = new FormData();
         formData.append("files", file);
-        formData.append("dirPath", dirPath);
+        formData.append("dirPath", localDirPath);
         formData.append("dataType", dataType);
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
@@ -149,13 +149,13 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadChunkWithTimeout = async (chunk, index, totalChunks, fileIdentifier, dirPath, timeout = 10000) => {
+    const uploadChunkWithTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath, timeout = 10000) => {
         const formData = new FormData();
         formData.append("fileChunk", chunk);
         formData.append("chunkIndex", index);
         formData.append("totalChunks", totalChunks);
         formData.append("fileIdentifier", fileIdentifier);
-        formData.append("dirPath", dirPath);
+        formData.append("dirPath", localDirPath);
 
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
@@ -175,13 +175,13 @@ const FileUploadComponent = () => {
         }
     };
 
-    const getBinaryProgress = async (dirPath) => {
+    const getBinaryProgress = async (localDirPath) => {
         try {
             const response = await fetch(`${flaskUrl}get_binary_progress`,
                 {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dirPath }),
+            body: JSON.stringify({ localDirPath }),
           }
             );
           if (response.ok) {
@@ -197,14 +197,14 @@ const FileUploadComponent = () => {
         }
     };
 
-    const extractBinaryFiles = async (files) => {
+    const extractBinaryFiles = async (files, localDirPath) => {
         setExtractingBinary(true);
 
         try {
             const response = await fetch(`${flaskUrl}extract_binary_file`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ files, dirPath }),
+                body: JSON.stringify({ files, localDirPath }),
             });
 
             if (response.ok) {
@@ -230,20 +230,20 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadFileChunks = async (file, dirPath, uploadLength) => {
+    const uploadFileChunks = async (file, localDirPath, uploadLength) => {
         const chunkSize = 0.5 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / chunkSize);
         const fileIdentifier = file.name;
         let temp = 0;
 
-        const uploadedChunks = await checkUploadedChunks(fileIdentifier, dirPath);
+        const uploadedChunks = await checkUploadedChunks(fileIdentifier, localDirPath);
         console.log("Uploaded chunks:", uploadedChunks);
         for (let index = uploadedChunks; index < totalChunks; index++) {
             if (cancelUploadRef.current) {
                 break;
             }
             const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
-            await uploadChunkWithTimeout(chunk, index, totalChunks, fileIdentifier, dirPath)
+            await uploadChunkWithTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath)
                 .catch(error => {
                 console.error("Failed to upload chunk", index, error);
                 throw error; // Stop upload process if any chunk fails
@@ -256,12 +256,12 @@ const FileUploadComponent = () => {
         uploadedSizeSoFar = temp
     };
 
-    const checkUploadedChunks = async (fileIdentifier, dirPath) => {
+    const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
         try {
           const response = await fetch(`${flaskUrl}check_uploaded_chunks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileIdentifier, dirPath }),
+            body: JSON.stringify({ fileIdentifier, localDirPath }),
           });
           if (response.ok) {
             const data = await response.json();
@@ -364,7 +364,7 @@ const FileUploadComponent = () => {
                 fileTypes[file.name] = file.type;
             });
             const fileList = files.map((file) => file.name);
-            const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, dirPath) : fileList;
+            const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, localDirPath) : fileList;
             console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
@@ -403,10 +403,10 @@ const FileUploadComponent = () => {
                                 const file = files.find((f) => f.name === filesToUpload[i]);
                                 
                                 if (selectedDataType === "binary") {
-                                    await uploadFileChunks(file, dirPath, filesToUpload.length);
+                                    await uploadFileChunks(file, localDirPath, filesToUpload.length);
                                     break;
                                 } else {
-                                    await uploadFileWithTimeout(file, dirPath, selectedDataType);
+                                    await uploadFileWithTimeout(file, localDirPath, selectedDataType);
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                                 }
                                 break;
@@ -427,7 +427,7 @@ const FileUploadComponent = () => {
                     if (selectedDataType === "binary" && !cancelUploadRef.current) {
                         setProgress(0);
                         console.log("Files to extract:", filesToUpload);
-                        await extractBinaryFiles(filesToUpload);
+                        await extractBinaryFiles(filesToUpload, localDirPath);
                     }
                     
                     // now handle “finished” state
@@ -469,7 +469,51 @@ const FileUploadComponent = () => {
 
     // Handler for file changes in the dropzone
     const handleFileChange = (fileArray) => {
-        setFiles(fileArray);
+        setFiles(prevFiles => {
+            // Create a map of existing file names for quick lookup
+            const existingFileNames = new Map(prevFiles.map(file => [file.name, file]));
+            
+            // Process incoming files including folder content
+            const newFiles = [];
+            
+            // Process each file
+            for (const file of fileArray) {
+                // Check if this file is from a folder (contains path separator)
+                const pathParts = file.path ? file.path.split('/') : file.webkitRelativePath ? file.webkitRelativePath.split('/') : null;
+                
+                // If file is from a folder
+                if (pathParts && pathParts.length > 1) {
+                    // Get all folder parts (exclude the file name which is the last part)
+                    const folderParts = pathParts.slice(0, pathParts.length - 1);
+                    const folderPath = folderParts.join('_');
+                    const originalFileName = pathParts[pathParts.length - 1];
+                    const newFileName = `${folderPath}_${originalFileName}`;
+                    
+                    // Create a new file object with the renamed filename
+                    const renamedFile = new File(
+                        [file], 
+                        newFileName, 
+                        { type: file.type }
+                    );
+                    
+                    // Add additional metadata to track original info
+                    renamedFile.originalName = file.name;
+                    renamedFile.folderName = folderPath;
+                    
+                    // Only add if not already in the list
+                    if (!existingFileNames.has(newFileName)) {
+                        newFiles.push(renamedFile);
+                    }
+                } else {
+                    // Regular file (not from folder)
+                    if (!existingFileNames.has(file.name)) {
+                        newFiles.push(file);
+                    }
+                }
+            }
+            
+            return [...prevFiles, ...newFiles];
+        });
     };
 
     // Function to get options for a specific field
@@ -527,6 +571,13 @@ const FileUploadComponent = () => {
         onDrop: handleFileChange,
         accept: dataTypes[selectedDataType].fileType,
         maxFiles: Infinity,
+        noClick: false,
+        noKeyboard: false,
+        // Enable directory support
+        directory: true,
+        webkitdirectory: true,
+        // Allow both normal files and directories
+        multiple: true
     });
 
     // Function to clear the files from the dropzone
@@ -604,7 +655,7 @@ const FileUploadComponent = () => {
                                 }}
                                 {...getRootProps()}
                             >
-                                <input {...getInputProps()} />
+                                <input {...getInputProps()} directory="" webkitdirectory="" />
                                 {files.length > 0 ? (
                                     <div
                                         style={{
@@ -618,23 +669,45 @@ const FileUploadComponent = () => {
                                         {files.map((file) => (
                                             <div key={file.name} style={{ textAlign: "left" }}>
                                                 {file.name}
+                                                {file.folderName && <span style={{fontSize: '0.8em', color: '#666'}}> (from {file.folderName})</span>}
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
                                     <Typography>
                                         {isDragActive
-                                            ? "Drop the files here..."
-                                            : `Drag and drop files here, or click to select files (${getFileTypeDescription(
+                                            ? "Drop the files or folders here..."
+                                            : `Drag and drop files or folders here, or click to select (${getFileTypeDescription(
                                                   dataTypes[selectedDataType].fileType
                                               )})`}
                                     </Typography>
                                 )}
                             </Paper>
                             <Box display="flex" justifyContent="space-between" sx={{ mt: 2, width: "100%" }}>
-                                <Button variant="contained" color="primary" type="submit">
-                                    Upload
-                                </Button>
+                                <div>
+                                    <Button variant="contained" color="primary" type="submit" style={{ marginRight: '8px' }}>
+                                        Upload
+                                    </Button>
+                                    <Button 
+                                        variant="contained"
+                                        component="label"
+                                        style={{ marginRight: '8px' }}
+                                    >
+                                        Select Folder
+                                        <input
+                                            type="file"
+                                            directory=""
+                                            webkitdirectory=""
+                                            mozdirectory=""
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => {
+                                                if (e.target.files) {
+                                                    handleFileChange(Array.from(e.target.files));
+                                                }
+                                            }}
+                                        />
+                                    </Button>
+                                </div>
                                 <Button variant="outlined" color="secondary" onClick={clearFiles}>
                                     Clear Files
                                 </Button>
