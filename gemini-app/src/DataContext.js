@@ -182,7 +182,7 @@ export const DataProvider = ({ children }) => {
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState("Default");
-    const [orthoCustomValue, setOrthoCustomValue] = useState("");
+    const [orthoCustomValue, setOrthoCustomValue] = useState("--dem-resolution 0.25 --orthophoto-resolution 0.25");
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
