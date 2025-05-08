@@ -204,7 +204,8 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                     const data = await response.json();
                     if (response.ok) {
                         console.log("Logs:", data);
-                        setLogContent(prevContent => prevContent + "\n" + data.log_content);
+                        //setLogContent(prevContent => prevContent + "\n" + data.log_content); // => Why?
+                        setLogContent(data.log_content);
                     } else {
                         console.log("Error fetching logs:", data.error);
                         setLogContent("Error: " + data.error);
@@ -217,8 +218,8 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
             };
 
             fetchLogs();  // Fetch logs immediately
-            // Start polling every 3 seconds for new logs
-            pollingInterval = setInterval(fetchLogs, 3000);
+            // Start polling every 30 seconds for new logs
+            pollingInterval = setInterval(fetchLogs, 30*1000);
         } else {
             // Clear polling when the panel is collapsed
             clearInterval(pollingInterval);

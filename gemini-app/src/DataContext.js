@@ -182,7 +182,7 @@ export const DataProvider = ({ children }) => {
 
     // Ortho Generation State
     const [orthoSetting, setOrthoSetting] = useState("Default");
-    const [orthoCustomValue, setOrthoCustomValue] = useState("");
+    const [orthoCustomValue, setOrthoCustomValue] = useState("--dem-resolution 0.25 --orthophoto-resolution 0.25");
     const [isOrthoModalOpen, setOrthoModalOpen] = useState(false);
     const [isOrthoProcessing, setIsOrthoProcessing] = useState(false);
     const [orthoServerStatus, setOrthoServerStatus] = useState(null);
@@ -199,8 +199,8 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState("http://127.0.0.1:5050/flask_app/");
-    const [tileServerUrl, setTileServerUrl] = useState("http://127.0.0.1:8091/");
+    const [flaskUrl, setFlaskUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_FLASK_PORT || '5050'}/flask_app/`);
+    const [tileServerUrl, setTileServerUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}/`);
 
     return (
         <DataStateContext.Provider

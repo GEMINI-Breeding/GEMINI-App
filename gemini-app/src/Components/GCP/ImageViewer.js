@@ -60,6 +60,9 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     
     const [buttonLabel, setButtonLabel] = useState("Continue without GCP")
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [nextImageUrl, setNextImageUrl] = useState(null);
+    const [prevImageUrl, setPrevImageUrl] = useState(null);
+
     const uploadFileWithTimeout = async (file, timeout = 30000) => {
         const Values = {
             year: selectedYearGCP,
@@ -174,6 +177,71 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
             setImageIndex(imageIndex + 1);
         }
     };
+    
+    // Add this useEffect hook inside the ImageViewer component
+    useEffect(() => {
+        // Function to handle keyboard navigation
+        const handleKeyDown = (e) => {
+            // Don't handle keyboard events if the dialog isn't open
+            if (!isImageViewerOpen) return;
+            
+            // Navigate with left arrow or 'A' key
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                handlePrevious();
+            }
+            // Navigate with right arrow or 'D' key
+            else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                handleNext();
+            }
+            // Optional: Up/down or W/S could navigate through multiple images at once
+            else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                const jumpAmount = 5; // Jump by 5 images
+                if (imageIndex - jumpAmount >= 0) {
+                    setImageIndex(imageIndex - jumpAmount);
+                } else {
+                    setImageIndex(0);
+                }
+            }
+            else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+                const jumpAmount = 5; // Jump by 5 images
+                if (imageIndex + jumpAmount < imageList.length) {
+                    setImageIndex(imageIndex + jumpAmount);
+                } else {
+                    setImageIndex(imageList.length - 1);
+                }
+            }
+        };
+
+        // Add event listener
+        document.addEventListener('keydown', handleKeyDown);
+
+        // Cleanup
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [imageIndex, imageList.length, isImageViewerOpen, handlePrevious, handleNext]);
+
+    // Add this useEffect to handle preloading of images
+    useEffect(() => {
+        // Only preload if we have image list and the viewer is open
+        if (imageList.length > 0 && isImageViewerOpen) {
+            // Preload next image if available
+            if (imageIndex < imageList.length - 1) {
+                const nextUrl = `${API_ENDPOINT}${imageList[imageIndex + 1].image_path}`;
+                setNextImageUrl(nextUrl); // don't appear in the UI but still get loaded into the browser's cache.
+            } else {
+                setNextImageUrl(null);
+            }
+            
+            // Optionally preload previous image too
+            if (imageIndex > 0) {
+                const prevUrl = `${API_ENDPOINT}${imageList[imageIndex - 1].image_path}`;
+                setPrevImageUrl(prevUrl); // don't appear in the UI but still get loaded into the browser's cache.
+            } else {
+                setPrevImageUrl(null);
+            }
+        }
+    }, [imageIndex, imageList, API_ENDPOINT, isImageViewerOpen]);
 
     // exit window
     const handleBackButton = () => {
@@ -295,6 +363,22 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                         </div>
                     )}
                     <OrthoModal />
+                    
+                    {/* Hidden images for preloading */}
+                    {nextImageUrl && (
+                        <img 
+                            src={nextImageUrl} 
+                            alt="Next preload" 
+                            style={{ display: 'none' }} 
+                        />
+                    )}
+                    {prevImageUrl && (
+                        <img 
+                            src={prevImageUrl} 
+                            alt="Previous preload" 
+                            style={{ display: 'none' }} 
+                        />
+                    )}
                 </div>
             </Dialog>
             <Dialog open={dialogOpen} onClose={handleDialogClose}>

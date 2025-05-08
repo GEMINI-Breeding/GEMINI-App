@@ -426,7 +426,51 @@ const FileUploadComponent = () => {
 
     // Handler for file changes in the dropzone
     const handleFileChange = (fileArray) => {
-        setFiles(fileArray);
+        setFiles(prevFiles => {
+            // Create a map of existing file names for quick lookup
+            const existingFileNames = new Map(prevFiles.map(file => [file.name, file]));
+            
+            // Process incoming files including folder content
+            const newFiles = [];
+            
+            // Process each file
+            for (const file of fileArray) {
+                // Check if this file is from a folder (contains path separator)
+                const pathParts = file.path ? file.path.split('/') : file.webkitRelativePath ? file.webkitRelativePath.split('/') : null;
+                
+                // If file is from a folder
+                if (pathParts && pathParts.length > 1) {
+                    // Get all folder parts (exclude the file name which is the last part)
+                    const folderParts = pathParts.slice(0, pathParts.length - 1);
+                    const folderPath = folderParts.join('_');
+                    const originalFileName = pathParts[pathParts.length - 1];
+                    const newFileName = `${folderPath}_${originalFileName}`;
+                    
+                    // Create a new file object with the renamed filename
+                    const renamedFile = new File(
+                        [file], 
+                        newFileName, 
+                        { type: file.type }
+                    );
+                    
+                    // Add additional metadata to track original info
+                    renamedFile.originalName = file.name;
+                    renamedFile.folderName = folderPath;
+                    
+                    // Only add if not already in the list
+                    if (!existingFileNames.has(newFileName)) {
+                        newFiles.push(renamedFile);
+                    }
+                } else {
+                    // Regular file (not from folder)
+                    if (!existingFileNames.has(file.name)) {
+                        newFiles.push(file);
+                    }
+                }
+            }
+            
+            return [...prevFiles, ...newFiles];
+        });
     };
 
     // Function to get options for a specific field
@@ -484,6 +528,13 @@ const FileUploadComponent = () => {
         onDrop: handleFileChange,
         accept: dataTypes[selectedDataType].fileType,
         maxFiles: Infinity,
+        noClick: false,
+        noKeyboard: false,
+        // Enable directory support
+        directory: true,
+        webkitdirectory: true,
+        // Allow both normal files and directories
+        multiple: true
     });
 
     // Function to clear the files from the dropzone
@@ -561,7 +612,7 @@ const FileUploadComponent = () => {
                                 }}
                                 {...getRootProps()}
                             >
-                                <input {...getInputProps()} />
+                                <input {...getInputProps()} directory="" webkitdirectory="" />
                                 {files.length > 0 ? (
                                     <div
                                         style={{
@@ -575,23 +626,45 @@ const FileUploadComponent = () => {
                                         {files.map((file) => (
                                             <div key={file.name} style={{ textAlign: "left" }}>
                                                 {file.name}
+                                                {file.folderName && <span style={{fontSize: '0.8em', color: '#666'}}> (from {file.folderName})</span>}
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
                                     <Typography>
                                         {isDragActive
-                                            ? "Drop the files here..."
-                                            : `Drag and drop files here, or click to select files (${getFileTypeDescription(
+                                            ? "Drop the files or folders here..."
+                                            : `Drag and drop files or folders here, or click to select (${getFileTypeDescription(
                                                   dataTypes[selectedDataType].fileType
                                               )})`}
                                     </Typography>
                                 )}
                             </Paper>
                             <Box display="flex" justifyContent="space-between" sx={{ mt: 2, width: "100%" }}>
-                                <Button variant="contained" color="primary" type="submit">
-                                    Upload
-                                </Button>
+                                <div>
+                                    <Button variant="contained" color="primary" type="submit" style={{ marginRight: '8px' }}>
+                                        Upload
+                                    </Button>
+                                    <Button 
+                                        variant="contained"
+                                        component="label"
+                                        style={{ marginRight: '8px' }}
+                                    >
+                                        Select Folder
+                                        <input
+                                            type="file"
+                                            directory=""
+                                            webkitdirectory=""
+                                            mozdirectory=""
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => {
+                                                if (e.target.files) {
+                                                    handleFileChange(Array.from(e.target.files));
+                                                }
+                                            }}
+                                        />
+                                    </Button>
+                                </div>
                                 <Button variant="outlined" color="secondary" onClick={clearFiles}>
                                     Clear Files
                                 </Button>
