@@ -118,6 +118,119 @@ export function useHandleProcessImages() {
     return handleProcessImages;
 }
 
+export function useHandleGcpRefreshImages() {
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedDateGCP,
+        flaskUrl,
+        radiusMeters,
+        isSidebarCollapsed,
+        selectedYearGCP,
+        selectedExperimentGCP,
+        selectedSensorGCP,
+        selectedPlatformGCP,
+    } = useDataState();
+
+    const { 
+        setImageList, 
+        setGcpPath, 
+        setSidebarCollapsed, 
+        setTotalImages 
+    } = useDataSetters();
+
+    const mergeLists = function (imageList, existingData) {
+        // Create a lookup object for faster search using image name
+        const dataLookup = existingData.reduce((acc, image) => {
+            acc[image.image_path.split("/").pop()] = image;
+            return acc;
+        }, {});
+
+        // Merge the lists
+        return imageList.map((image) => {
+            const imageName = image.image_path.split("/").pop();
+            if (dataLookup[imageName]) {
+                // If the image name exists in the previous data, append pointX and pointY
+                return {
+                    ...image,
+                    pointX: dataLookup[imageName].pointX,
+                    pointY: dataLookup[imageName].pointY,
+                };
+            }
+            return image; // Return the image as it is if no match found
+        });
+    };
+
+    const handleGcpRefreshImages = () => {
+        const data = {
+            location: selectedLocationGCP,
+            population: selectedPopulationGCP,
+            date: selectedDateGCP,
+            radius_meters: radiusMeters,
+            year: selectedYearGCP,
+            experiment: selectedExperimentGCP,
+            sensor: selectedSensorGCP,
+            platform: selectedPlatformGCP,
+        };
+        
+
+        fetch(`${flaskUrl}refresh_gcp_selcted_images`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        })
+            .then((response) => response.json())
+            .then((data) => {
+                if (data.num_total) {
+                    setTotalImages(data.num_total);
+                }
+                // Before setting the image list, initialize (or fetch existing) file content
+                console.log("data", data);
+                fetch(`${flaskUrl}initialize_file`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ 
+                        basePath: data.selected_images[0].image_path,
+                        platform: selectedPlatformGCP,
+                        sensor: selectedSensorGCP,
+                        }),
+                })
+                    .then((fileResponse) => fileResponse.json())
+                    .then((fileData) => {
+                        console.log("fileData", fileData);
+
+                        if (fileData.existing_data && fileData.existing_data.length > 0) {
+                            // Logic to merge existing data with current imageList
+                            const mergedList = mergeLists(data.selected_images, fileData.existing_data);
+                            setImageList(mergedList);
+                        } else {
+                            setImageList(data.selected_images);
+                        }
+
+                        if (fileData.file_path) {
+                            setGcpPath(fileData.file_path);
+                        } else {
+                            console.log("No GCP path found again");
+                        }
+                    });
+            }).catch ((error) => {
+                console.log("Error with data selection, "+ error);
+            });
+        
+
+        // If the sidebar is not collapsed, collapse it
+        if (!isSidebarCollapsed) {
+            setSidebarCollapsed(true);
+        }
+    };
+
+    return handleGcpRefreshImages;
+}
+
 const Checkmark = ({ selected }) => (
     <div style={selected ? { left: "4px", top: "4px", position: "absolute", zIndex: "1" } : { display: "none" }}>
         <svg style={{ fill: "white", position: "absolute" }} width="24px" height="24px">
