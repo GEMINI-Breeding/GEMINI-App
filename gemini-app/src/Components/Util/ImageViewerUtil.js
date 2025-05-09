@@ -61,7 +61,7 @@ export function useHandleProcessImages() {
             console.log("Data selection error caught")
             return;
         }*/
-        fetch(`${flaskUrl}process_images`, {
+        fetch(`${flaskUrl}get_gcp_selcted_images`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
