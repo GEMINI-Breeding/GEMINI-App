@@ -25,8 +25,6 @@ import dataTypes from "../../uploadDataTypes.json";
 import Box from "@mui/material/Box";
 import { TableComponent } from "./TableComponent";
 
-let uploadedSizeSoFar = 0;
-
 // Helper function to map file types to human-readable descriptions
 const getFileTypeDescription = (fileType) => {
     const typeMap = {
@@ -234,7 +232,7 @@ const FileUploadComponent = () => {
         const chunkSize = 0.5 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / chunkSize);
         const fileIdentifier = file.name;
-        let temp = 0;
+        // let temp = 0;
 
         const uploadedChunks = await checkUploadedChunks(fileIdentifier, localDirPath);
         console.log("Uploaded chunks:", uploadedChunks);
@@ -250,10 +248,10 @@ const FileUploadComponent = () => {
                 });
         
             // Update progress here.
-            temp = uploadedSizeSoFar + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
-            setProgress(temp);
+            // temp = progress + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
+            // setProgress(temp);
         }
-        uploadedSizeSoFar = temp
+
     };
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
@@ -336,8 +334,7 @@ const FileUploadComponent = () => {
         onSubmit: async (values) => {
             setIsUploading(true);
             cancelUploadRef.current = false;
-            uploadedSizeSoFar = 0;
-            setProgress(0);
+            // setProgress(0);
             setBadFileType(false);
             // Construct directory path based on data type and form values
             let localDirPath = "";
@@ -404,6 +401,10 @@ const FileUploadComponent = () => {
                                 
                                 if (selectedDataType === "binary") {
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length);
+                                    setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+
+                                    // clear the cache of uploaded files
+                                    clearCache();
                                     break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
@@ -685,7 +686,15 @@ const FileUploadComponent = () => {
                             </Paper>
                             <Box display="flex" justifyContent="space-between" sx={{ mt: 2, width: "100%" }}>
                                 <div>
-                                    <Button variant="contained" color="primary" type="submit" style={{ marginRight: '8px' }}>
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        type="submit"
+                                        onClick={() => {
+                                            setProgress(0);
+                                        }}
+                                        style={{ marginRight: '8px' }}
+                                        >
                                         Upload
                                     </Button>
                                     <Button 
@@ -763,7 +772,6 @@ const FileUploadComponent = () => {
                                 onClick={() => {
                                     
                                     cancelUploadRef.current = true;
-                                    uploadedSizeSoFar = 0;
                                     setIsUploading(false);
                                     setExtractingBinary(false);
                                     setIsFinishedUploading(false);
