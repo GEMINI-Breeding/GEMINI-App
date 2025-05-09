@@ -275,12 +275,18 @@ const FileUploadComponent = () => {
         }
       }
 
-      const clearCache = () => {
-        console.log("Clearing cache of uploaded files in: ", dirPath);
+      const clearCache = (localDirPath = null) => {
+
+        // if no localDirPath is provided, use the current dirPath
+        if (!localDirPath) {
+            localDirPath = dirPath;
+        }
+
+        console.log("Clearing cache of uploaded files in: ", localDirPath);
         fetch(`${flaskUrl}clear_upload_cache`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dirPath }),
+            body: JSON.stringify({ localDirPath }),
         })
         .then((response) => response.json())
         .then((data) => {
@@ -404,7 +410,7 @@ const FileUploadComponent = () => {
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
 
                                     // clear the cache of uploaded files
-                                    clearCache();
+                                    clearCache(localDirPath);
                                     break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
