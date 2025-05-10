@@ -93,8 +93,33 @@ const FileUploadComponent = () => {
             return () => clearInterval(intervalId);
         }
     }, [extractingBinary, dirPath, files.length]);
-    
 
+    useEffect(() => {
+        if (!extractingBinary) return;
+    
+        const intervalId = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_binary_status`);
+                const { status } = await response.json();
+    
+                if (status === "done") {
+                    setIsFinishedUploading(true);
+                    setIsUploading(false);
+                    clearInterval(intervalId);
+                } else if (status === "failed") {
+                    setIsFinishedUploading(true);
+                    setFailedUpload(true);
+                    setIsUploading(false);
+                    clearInterval(intervalId);
+                }
+            } catch (error) {
+                console.error("Error fetching binary status:", error);
+            }
+        }, 1000);
+    
+        return () => clearInterval(intervalId);
+    }, [extractingBinary]);
+    
     // Effect to fetch nested directories on component mount
     useEffect(() => {
         setIsLoading(true);
@@ -221,7 +246,6 @@ const FileUploadComponent = () => {
             console.error("Error extracting binary file:", error);
             setIsFinishedUploading(true);
             setFailedUpload(true);
-            // setExtractingBinary(false);
 
             // If extraction fails, clear the directory
             clearDirPath();
