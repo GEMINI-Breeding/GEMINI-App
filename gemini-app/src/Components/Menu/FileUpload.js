@@ -86,7 +86,6 @@ const FileUploadComponent = () => {
                         setIsFinishedUploading(true);
                         setUploadedData(true);
                         setIsUploading(false);
-                        setExtractingBinary(false);
                     }
                 }, 1000);
             
@@ -102,11 +101,7 @@ const FileUploadComponent = () => {
                 const response = await fetch(`${flaskUrl}get_binary_status`);
                 const { status } = await response.json();
     
-                if (status === "done") {
-                    setIsFinishedUploading(true);
-                    setIsUploading(false);
-                    clearInterval(intervalId);
-                } else if (status === "failed") {
+                if (status === "failed") {
                     setIsFinishedUploading(true);
                     setFailedUpload(true);
                     setIsUploading(false);
