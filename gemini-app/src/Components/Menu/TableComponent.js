@@ -4,6 +4,7 @@ import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
+import ArticleIcon from '@mui/icons-material/Article'; // paper icon for reports
 import dataTypes from "../../uploadDataTypes.json";
 // import { CSVPreviewer } from "./CSVPreview";
 
@@ -27,6 +28,9 @@ export const TableComponent = () => {
     const [imagePreviewData, setImagePreviewData] = useState(null);
     // const [csvPreviewData, setCSVPreviewData] = useState(null);
     // const [csvPreviewOpen, setCSVPreviewOpen] = useState(false);
+    const [reportDialogOpen, setReportDialogOpen] = useState(false);
+    const [reportContent, setReportContent] = useState("");
+
     const {
         uploadedData
     } = useDataState();
@@ -96,6 +100,34 @@ export const TableComponent = () => {
         if (row.sensor && (row.platform && row.platform !== "rover")) return "platformLogs";
         return "unknown";
     };
+
+    const handleViewReport = async (id) => {
+        const row = procData.find((row) => row.id === id);
+        if (!row) return;
+    
+        try {
+            const response = await fetch(`${flaskUrl}get_binary_report`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    location: row.location,
+                    population: row.population,
+                    date: row.date,
+                    year: row.year,
+                    experiment: row.experiment,
+                    camera: row.camera
+                })
+            });
+    
+            const data = await response.text();
+            setReportContent(data);
+            setReportDialogOpen(true);
+        } catch (error) {
+            console.error("Error fetching report:", error);
+            setReportContent("Failed to load report.");
+            setReportDialogOpen(true);
+        }
+    };    
 
     const handleEdit = (id) => {
         setShowEditSuccess(false);
@@ -319,6 +351,13 @@ export const TableComponent = () => {
                         onClick={() => handleView(params.id)}
                     />
                 )}
+                {selectedDataType === "binary" && (
+                    <ArticleIcon
+                        color="action"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleViewReport(params.id)}
+                    />
+                )}
                 </div>
             ),
             }
@@ -408,6 +447,34 @@ export const TableComponent = () => {
                 obj={csvPreviewData}
                 onClose={() => setCSVPreviewOpen(false)}
             />  */}
+            <Dialog
+                open={reportDialogOpen}
+                onClose={() => setReportDialogOpen(false)}
+                maxWidth="lg"
+                fullWidth
+                PaperProps={{
+                    style: {
+                    maxHeight: '80vh', // taller dialog
+                    width: '90vw'       // wider dialog
+                    }
+                }}
+                >
+                <DialogTitle>Amiga File Report</DialogTitle>
+                <DialogContent dividers>
+                    <pre style={{
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                    maxHeight: '60vh',
+                    overflowY: 'auto',
+                    fontFamily: 'monospace'
+                    }}>
+                    {reportContent}
+                    </pre>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setReportDialogOpen(false)}>Close</Button>
+                </DialogActions>
+            </Dialog>
         </div>
     );
 };
