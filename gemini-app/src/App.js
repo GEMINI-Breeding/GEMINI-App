@@ -158,7 +158,7 @@ function App() {
                     console.error("Error fetching ortho progress", error);
                     setSubmitError("Error getting ortho progress.")
                 }
-            }, 60000); // Poll every min
+            }, 30*1000); // Poll every 30 secs
         }
         return () => clearInterval(interval);
     }, [isOrthoProcessing, flaskUrl]);

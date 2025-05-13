@@ -12,6 +12,8 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const {flaskUrl} = useDataState();
     const [directory, setDirectory] = useState("");
     const [imageLoading, setImageLoading] = useState(false);
+    const [nextImageUrl, setNextImageUrl] = useState(null);
+    const [prevImageUrl, setPrevImageUrl] = useState(null);
 
     useEffect(() => {
         if (open) {
@@ -68,6 +70,61 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const handleImageLoadEnd = () => {
         setImageLoading(false);
     };
+
+    useEffect(() => {
+        if (!open) return;
+        
+        const handleKeyDown = (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                handlePrevious();
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                handleNext();
+            } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                const jumpAmount = 5;
+                if (imageIndex - jumpAmount >= 0) {
+                    setImageIndex(imageIndex - jumpAmount);
+                    setImageLoading(true);
+                } else {
+                    setImageIndex(0);
+                    setImageLoading(true);
+                }
+            } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+                const jumpAmount = 5;
+                if (imageIndex + jumpAmount < imageList.length) {
+                    setImageIndex(imageIndex + jumpAmount);
+                    setImageLoading(true);
+                } else {
+                    setImageIndex(imageList.length - 1);
+                    setImageLoading(true);
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [open, imageIndex, imageList.length, handlePrevious, handleNext]);
+
+    useEffect(() => {
+        if (imageList.length > 0 && open) {
+            if (imageIndex < imageList.length - 1) {
+                const nextUrl = `${API_ENDPOINT}/${directory}${imageList[imageIndex + 1]}`;
+                setNextImageUrl(nextUrl);
+            } else {
+                setNextImageUrl(null);
+            }
+            
+            if (imageIndex > 0) {
+                const prevUrl = `${API_ENDPOINT}/${directory}${imageList[imageIndex - 1]}`;
+                setPrevImageUrl(prevUrl);
+            } else {
+                setPrevImageUrl(null);
+            }
+        }
+    }, [imageIndex, imageList, API_ENDPOINT, directory, open]);
+
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;
 
@@ -182,6 +239,22 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
                             <Button variant="contained" onClick={handleNext}>Next</Button>
                         </div>
                     </div>
+                )}
+                
+                {/* Hidden images for preloading */}
+                {nextImageUrl && (
+                    <img 
+                        src={nextImageUrl} 
+                        alt="Next preload" 
+                        style={{ display: 'none' }} 
+                    />
+                )}
+                {prevImageUrl && (
+                    <img 
+                        src={prevImageUrl} 
+                        alt="Previous preload" 
+                        style={{ display: 'none' }} 
+                    />
                 )}
             </div>
         </Dialog>

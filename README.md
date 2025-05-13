@@ -43,6 +43,11 @@ nvm use 18
 # Step 5: Install frontend dependencies
 cd gemini-app
 npm install --legacy-peer-deps  # Fixes upstream dependency conflict
+
+## 🌾 Pipeline Overview
+
+![Sensing Pipeline](assets/sensing_pipeline.png)
+
 ```
 
 ---
