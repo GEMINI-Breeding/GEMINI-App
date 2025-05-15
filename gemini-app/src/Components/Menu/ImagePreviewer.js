@@ -128,6 +128,39 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;
 
+    const handleRemoveImage = async () => {
+        const imageName = imageList[imageIndex];
+        const payload = {
+            image: imageName,
+            source_dir: directory,
+        };
+    
+        try {
+            const response = await fetch(`${flaskUrl}remove_image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+    
+            if (response.ok) {
+                console.log(`Image ${imageName} removed from processing.`);
+    
+                // Optionally remove from list in UI
+                const updatedList = imageList.filter((_, idx) => idx !== imageIndex);
+                setImageList(updatedList);
+                if (imageIndex > 0) {
+                    setImageIndex(imageIndex - 1);
+                } else {
+                    setImageIndex(0);
+                }
+            } else {
+                console.error("Failed to remove image");
+            }
+        } catch (error) {
+            console.error("Error removing image:", error);
+        }
+    };
+
     return (
         <Dialog
             open={open}
@@ -153,7 +186,7 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
                     gap: '5px'
                 }}
             >
-                <DialogTitle align="center">View Images</DialogTitle>
+                <DialogTitle align="center">View Images and Select Images to be Removed</DialogTitle>
 
                 <IconButton
                     onClick={handleBackButton}
@@ -231,12 +264,34 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
                             }}
                         />
                         <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-around',
-                            gap: '20px',
+                            position: 'relative',
+                            width: '80%',
+                            height: '50px',  // Fixed height to help with alignment
+                            marginTop: '10px',
                         }}>
-                            <Button variant="contained" onClick={handlePrevious}>Previous</Button>
-                            <Button variant="contained" onClick={handleNext}>Next</Button>
+                            {/* Centered Previous/Next */}
+                            <div style={{
+                                position: 'absolute',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                display: 'flex',
+                                gap: '20px',
+                            }}>
+                                <Button variant="contained" onClick={handlePrevious}>Previous</Button>
+                                <Button variant="contained" onClick={handleNext}>Next</Button>
+                            </div>
+
+                            {/* Right-aligned Remove button */}
+                            <div style={{
+                                position: 'absolute',
+                                right: 0,
+                                top: '50%',
+                                transform: 'translateY(-70%)',
+                            }}>
+                                <Button variant="outlined" color="secondary" onClick={handleRemoveImage}>
+                                    Select to Remove
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 )}
