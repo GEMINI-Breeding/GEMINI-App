@@ -4,6 +4,8 @@ import Slider from "@mui/material/Slider";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
 import { useDataState } from "../../DataContext";
+import Checkbox from "@mui/material/Checkbox";
+import RestoreImageSelector from './RestoreImageSelector';
 
 export const ImagePreviewer = ({ open, obj, onClose }) => {
     const [imageIndex, setImageIndex] = useState(0);
@@ -14,6 +16,13 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const [imageLoading, setImageLoading] = useState(false);
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
+
+    // for image removal selection
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedImages, setSelectedImages] = useState(new Set());
+    const [sliderMarks, setSliderMarks] = useState([]);
+    const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+    const [showRestoreView, setShowRestoreView] = useState(false);
 
     useEffect(() => {
         if (open) {
@@ -108,6 +117,25 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     }, [open, imageIndex, imageList.length, handlePrevious, handleNext]);
 
     useEffect(() => {
+        if (!imageList.length) return;
+    
+        const marks = imageList.map((_, index) => ({
+            value: index,
+            label: selectedImages.has(imageList[index])
+                ? <div style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    backgroundColor: 'red',
+                    marginTop: 4
+                }} />
+                : <div style={{ width: 10, height: 10 }} /> // empty placeholder for spacing
+        }));
+    
+        setSliderMarks(marks);
+    }, [imageList, selectedImages]);
+
+    useEffect(() => {
         if (imageList.length > 0 && open) {
             if (imageIndex < imageList.length - 1) {
                 const nextUrl = `${API_ENDPOINT}/${directory}${imageList[imageIndex + 1]}`;
@@ -128,38 +156,36 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;
 
-    const handleRemoveImage = async () => {
-        const imageName = imageList[imageIndex];
+    const handleRemoveSelectedImages = async () => {
         const payload = {
-            image: imageName,
+            images: Array.from(selectedImages),
             source_dir: directory,
         };
     
         try {
-            const response = await fetch(`${flaskUrl}remove_image`, {
+            const response = await fetch(`${flaskUrl}remove_images`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
     
             if (response.ok) {
-                console.log(`Image ${imageName} removed from processing.`);
+                console.log("Images removed:", payload.images);
     
-                // Optionally remove from list in UI
-                const updatedList = imageList.filter((_, idx) => idx !== imageIndex);
+                const updatedList = imageList.filter(name => !selectedImages.has(name));
                 setImageList(updatedList);
-                if (imageIndex > 0) {
-                    setImageIndex(imageIndex - 1);
-                } else {
-                    setImageIndex(0);
-                }
+    
+                // Reset state
+                setSelectedImages(new Set());
+                setSelectionMode(false);
+                setImageIndex(0);
             } else {
-                console.error("Failed to remove image");
+                console.error("Failed to remove selected images.");
             }
         } catch (error) {
-            console.error("Error removing image:", error);
+            console.error("Error removing selected images:", error);
         }
-    };
+    };    
 
     return (
         <Dialog
@@ -169,149 +195,254 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
             fullWidth
             PaperProps={{
                 style: {
-                    minHeight: '60vh',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                    padding: '5px'
+                minHeight: '60vh',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                padding: '5px'
                 }
             }}
         >
-            <div
-                style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    height: "100%",
-                    padding: '5px',
-                    gap: '5px'
-                }}
-            >
-                <DialogTitle align="center">View Images and Select Images to be Removed</DialogTitle>
-
-                <IconButton
-                    onClick={handleBackButton}
+            {showRestoreView ? (
+                <RestoreImageSelector
+                open={true}
+                onClose={() => setShowRestoreView(false)}
+                sourceDirectory={directory}
+                />
+            ) : (
+                <div
                     style={{
-                        position: "absolute",
-                        top: "10px",
-                        left: "10px",
-                        zIndex: 10,
-                        width: '40px',
-                        height: '40px',
-                        backgroundColor: '#3874cb',
+                        display: "flex",
+                        flexDirection: "column",
+                        height: "100%",
+                        padding: '5px',
+                        gap: '5px'
                     }}
-                    size="large"
                 >
-                    <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
-                </IconButton>
+                    <DialogTitle align="center">View Images and Select Images to be Removed</DialogTitle>
 
-                <div style={{
-                    flexGrow: 1,
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    overflow: "auto",
-                    position: "relative",
-                    height: "50vh",
-                }}>
+                    <IconButton
+                        onClick={handleBackButton}
+                        style={{
+                            position: "absolute",
+                            top: "10px",
+                            left: "10px",
+                            zIndex: 10,
+                            width: '40px',
+                            height: '40px',
+                            backgroundColor: '#3874cb',
+                        }}
+                        size="large"
+                    >
+                        <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
+                    </IconButton>
+
                     <div style={{
-                        position: "absolute",
-                        display: imageLoading || imageViewerLoading ? "flex" : "none",
+                        flexGrow: 1,
+                        display: "flex",
                         justifyContent: "center",
                         alignItems: "center",
-                        width: "100%",
-                        height: "100%",
+                        overflow: "auto",
+                        position: "relative",
+                        height: "50vh",
                     }}>
-                        <CircularProgress />
-                    </div>
-                    <img
-                        src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
-                        alt={`Image ${imageIndex + 1}`}
-                        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                        onLoad={handleImageLoadEnd}
-                        hidden={imageLoading}
-                    />
-                </div>
-
-                {imageList.length > 0 && (
-                    <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '100%',
-                        gap: '5px',
-                        marginBottom: '20px',
-                    }}>
-                        <Slider
-                            value={imageIndex}
-                            onChange={(_, newValue) => {setImageIndex(newValue); setImageLoading(true);}}
-                            aria-labelledby="image-slider"
-                            step={1}
-                            min={0}
-                            max={imageList.length - 1}
-                            valueLabelDisplay="auto"
-                            valueLabelFormat={(value) => `${value + 1} of ${imageList.length}`}
-                            track={false}
-                            sx={{
-                                width: '80%',
-                                "& .MuiSlider-rail": {
-                                    height: SLIDER_RAIL_HEIGHT,
-                                },
-                                "& .MuiSlider-thumb": {
-                                    width: SLIDER_THUMB_SIZE,
-                                    height: SLIDER_THUMB_SIZE,
-                                },
-                            }}
-                        />
                         <div style={{
-                            position: 'relative',
-                            width: '80%',
-                            height: '50px',  // Fixed height to help with alignment
-                            marginTop: '10px',
+                            position: "absolute",
+                            display: imageLoading || imageViewerLoading ? "flex" : "none",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            width: "100%",
+                            height: "100%",
                         }}>
-                            {/* Centered Previous/Next */}
-                            <div style={{
-                                position: 'absolute',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                display: 'flex',
-                                gap: '20px',
-                            }}>
-                                <Button variant="contained" onClick={handlePrevious}>Previous</Button>
-                                <Button variant="contained" onClick={handleNext}>Next</Button>
-                            </div>
+                            <CircularProgress />
+                        </div>
+                        <div style={{
+                            position: "relative",
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            maxHeight: "100%",
+                            maxWidth: "100%",
+                        }}>
+                            {/* Image */}
+                            <img
+                                src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
+                                alt={`Image ${imageIndex + 1}`}
+                                style={{
+                                    maxWidth: "100%",
+                                    maxHeight: "100%",
+                                    objectFit: "contain",
+                                    cursor: selectionMode ? 'pointer' : 'default',
+                                    outline: selectionMode && selectedImages.has(imageList[imageIndex]) ? '5px solid red' : 'none'
+                                }}
+                                onClick={() => {
+                                    if (selectionMode) {
+                                        const name = imageList[imageIndex];
+                                        setSelectedImages(prev => {
+                                            const updated = new Set(prev);
+                                            if (updated.has(name)) updated.delete(name);
+                                            else updated.add(name);
+                                            return updated;
+                                        });
+                                    }
+                                }}
+                                onLoad={handleImageLoadEnd}
+                                hidden={imageLoading}
+                            />
 
-                            {/* Right-aligned Remove button */}
-                            <div style={{
-                                position: 'absolute',
-                                right: 0,
-                                top: '50%',
-                                transform: 'translateY(-70%)',
-                            }}>
-                                <Button variant="outlined" color="secondary" onClick={handleRemoveImage}>
-                                    Select to Remove
-                                </Button>
-                            </div>
+                            {/* Checkbox overlay for selection mode */}
+                            {selectionMode && (
+                                <Checkbox
+                                    checked={selectedImages.has(imageList[imageIndex])}
+                                    onChange={() => {
+                                        const name = imageList[imageIndex];
+                                        setSelectedImages(prev => {
+                                            const updated = new Set(prev);
+                                            if (updated.has(name)) updated.delete(name);
+                                            else updated.add(name);
+                                            return updated;
+                                        });
+                                    }}
+                                    style={{
+                                        position: "absolute",
+                                        top: 10,
+                                        right: 10,
+                                        backgroundColor: "rgba(255,255,255,0.7)",
+                                        borderRadius: "50%",
+                                    }}
+                                />
+                            )}
                         </div>
                     </div>
-                )}
-                
-                {/* Hidden images for preloading */}
-                {nextImageUrl && (
-                    <img 
-                        src={nextImageUrl} 
-                        alt="Next preload" 
-                        style={{ display: 'none' }} 
-                    />
-                )}
-                {prevImageUrl && (
-                    <img 
-                        src={prevImageUrl} 
-                        alt="Previous preload" 
-                        style={{ display: 'none' }} 
-                    />
-                )}
-            </div>
+
+                    {imageList.length > 0 && (
+                        <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '100%',
+                            gap: '5px',
+                            marginBottom: '20px',
+                        }}>
+                            <Slider
+                                value={imageIndex}
+                                onChange={(_, newValue) => {
+                                    setImageIndex(newValue);
+                                    setImageLoading(true);
+                                }}
+                                aria-labelledby="image-slider"
+                                step={1}
+                                min={0}
+                                max={imageList.length - 1}
+                                marks={sliderMarks}
+                                valueLabelDisplay="auto"
+                                valueLabelFormat={(value) => `${value + 1} of ${imageList.length}`}
+                                track={false}
+                                sx={{
+                                    width: '80%',
+                                    "& .MuiSlider-rail": {
+                                        height: SLIDER_RAIL_HEIGHT,
+                                    },
+                                    "& .MuiSlider-thumb": {
+                                        width: SLIDER_THUMB_SIZE,
+                                        height: SLIDER_THUMB_SIZE,
+                                    },
+                                }}
+                            />
+                            <div style={{
+                                position: 'relative',
+                                width: '80%',
+                                height: '50px',
+                                marginTop: '10px',
+                            }}>
+
+                                {/* Left: Restore Removed */}
+                                <div style={{
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: '50%',
+                                    transform: 'translateY(-65%)',
+                                }}>
+                                    <Button
+                                        variant="outlined"
+                                        color="primary"
+                                        onClick={() => setShowRestoreView(true)}
+                                    >
+                                        Restore Removed
+                                    </Button>
+                                </div>
+
+                                {/* Center: Previous / Next */}
+                                <div style={{
+                                    position: 'absolute',
+                                    left: '50%',
+                                    transform: 'translateX(-50%)',
+                                    display: 'flex',
+                                    gap: '20px',
+                                }}>
+                                    <Button variant="contained" onClick={handlePrevious}>Previous</Button>
+                                    <Button variant="contained" onClick={handleNext}>Next</Button>
+                                </div>
+
+                                {/* Right: Select to Remove or Done/Cancel */}
+                                <div style={{
+                                    position: 'absolute',
+                                    right: 0,
+                                    top: '50%',
+                                    transform: 'translateY(-65%)',
+                                }}>
+                                    {!selectionMode ? (
+                                        <Button 
+                                            variant="outlined" 
+                                            color="secondary" 
+                                            onClick={() => setSelectionMode(true)}
+                                        >
+                                            Select to Remove
+                                        </Button>
+                                    ) : (
+                                        <>
+                                            <Button 
+                                                variant="contained" 
+                                                color="success" 
+                                                onClick={handleRemoveSelectedImages}
+                                            >
+                                                Done
+                                            </Button>
+                                            <Button 
+                                                variant="text" 
+                                                color="error" 
+                                                onClick={() => {
+                                                    setSelectionMode(false);
+                                                    setSelectedImages(new Set());
+                                                }}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Hidden images for preloading */}
+                    {nextImageUrl && (
+                        <img 
+                            src={nextImageUrl} 
+                            alt="Next preload" 
+                            style={{ display: 'none' }} 
+                        />
+                    )}
+                    {prevImageUrl && (
+                        <img 
+                            src={prevImageUrl} 
+                            alt="Previous preload" 
+                            style={{ display: 'none' }} 
+                        />
+                    )}
+                </div>
+            )}
         </Dialog>
     );
 };
