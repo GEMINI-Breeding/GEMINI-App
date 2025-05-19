@@ -358,20 +358,22 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
                             }}>
 
                                 {/* Left: Restore Removed */}
-                                <div style={{
-                                    position: 'absolute',
-                                    left: 0,
-                                    top: '50%',
-                                    transform: 'translateY(-65%)',
-                                }}>
-                                    <Button
-                                        variant="outlined"
-                                        color="primary"
-                                        onClick={() => setShowRestoreView(true)}
-                                    >
-                                        Restore Removed
-                                    </Button>
-                                </div>
+                                {!selectionMode && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: '50%',
+                                        transform: 'translateY(-65%)',
+                                    }}>
+                                        <Button
+                                            variant="outlined"
+                                            color="primary"
+                                            onClick={() => setShowRestoreView(true)}
+                                        >
+                                            Restore Removed
+                                        </Button>
+                                    </div>
+                                )}
 
                                 {/* Center: Previous / Next */}
                                 <div style={{
