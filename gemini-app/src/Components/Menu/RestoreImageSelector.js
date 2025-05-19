@@ -175,47 +175,75 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
                                 <CircularProgress style={{ position: 'absolute' }} />
                             ) : (
                                 <div style={{ position: "relative", display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "100%", maxWidth: "100%" }}>
-                                    <img
-                                        src={`${API_ENDPOINT}/${removedDirectory}${imageList[imageIndex]}`}
-                                        alt={`Image ${imageIndex + 1}`}
+                                    
+                                    <div
                                         style={{
-                                            maxWidth: "100%",
-                                            maxHeight: "100%",
-                                            objectFit: "contain",
-                                            cursor: 'pointer',
-                                            outline: selectedImages.has(imageList[imageIndex]) ? '5px solid green' : 'none'
+                                            position: "relative",
+                                            display: "flex",
+                                            justifyContent: "center",
+                                            alignItems: "center",
+                                            width: "100%",
+                                            height: "100%",
                                         }}
-                                        onClick={() => {
-                                            const name = imageList[imageIndex];
-                                            setSelectedImages(prev => {
-                                                const updated = new Set(prev);
-                                                if (updated.has(name)) updated.delete(name);
-                                                else updated.add(name);
-                                                return updated;
-                                            });
-                                        }}
-                                        onLoad={handleImageLoadEnd}
-                                    />
+                                    >
+                                        <img
+                                            src={`${API_ENDPOINT}/${removedDirectory}${imageList[imageIndex]}`}
+                                            alt={`Image ${imageIndex + 1}`}
+                                            style={{
+                                                maxWidth: "100%",
+                                                maxHeight: "100%",
+                                                objectFit: "contain",
+                                                cursor: 'pointer',
+                                                display: imageLoading ? 'none' : 'block'
+                                            }}
+                                            onClick={() => {
+                                                const name = imageList[imageIndex];
+                                                setSelectedImages(prev => {
+                                                    const updated = new Set(prev);
+                                                    if (updated.has(name)) updated.delete(name);
+                                                    else updated.add(name);
+                                                    return updated;
+                                                });
+                                            }}
+                                            onLoad={handleImageLoadEnd}
+                                        />
 
-                                    <Checkbox
-                                        checked={selectedImages.has(imageList[imageIndex])}
-                                        onChange={() => {
-                                            const name = imageList[imageIndex];
-                                            setSelectedImages(prev => {
-                                                const updated = new Set(prev);
-                                                if (updated.has(name)) updated.delete(name);
-                                                else updated.add(name);
-                                                return updated;
-                                            });
-                                        }}
-                                        style={{
-                                            position: "absolute",
-                                            top: 10,
-                                            right: 10,
-                                            backgroundColor: "rgba(255,255,255,0.7)",
-                                            borderRadius: "50%",
-                                        }}
-                                    />
+                                        {/* Green overlay border if selected */}
+                                        {selectedImages.has(imageList[imageIndex]) && (
+                                            <div
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: 0,
+                                                    left: 0,
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    border: '5px solid green',
+                                                    boxSizing: 'border-box',
+                                                    pointerEvents: 'none',
+                                                }}
+                                            />
+                                        )}
+
+                                        <Checkbox
+                                            checked={selectedImages.has(imageList[imageIndex])}
+                                            onChange={() => {
+                                                const name = imageList[imageIndex];
+                                                setSelectedImages(prev => {
+                                                    const updated = new Set(prev);
+                                                    if (updated.has(name)) updated.delete(name);
+                                                    else updated.add(name);
+                                                    return updated;
+                                                });
+                                            }}
+                                            style={{
+                                                position: "absolute",
+                                                top: 10,
+                                                right: 10,
+                                                backgroundColor: "rgba(255,255,255,0.7)",
+                                                borderRadius: "50%",
+                                            }}
+                                        />
+                                    </div>
 
                                     {/* Hidden images for preloading */}
                                     {nextImageUrl && (
