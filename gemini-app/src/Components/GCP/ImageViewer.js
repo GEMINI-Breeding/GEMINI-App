@@ -373,14 +373,14 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                                 >
                                     Next
                                 </Button>
-                                <Button 
+                                {/* <Button 
                                     variant="contained" 
                                     color="info" 
                                     onClick={handleGcpRefreshImages}
                                     startIcon={<RefreshIcon />}
                                 >
                                     Refresh
-                                </Button>
+                                </Button> */}
                                 <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
                             </div>
                         </div>
