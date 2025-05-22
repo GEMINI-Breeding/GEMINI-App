@@ -41,7 +41,7 @@ const OrthoTable = () => {
                                 `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                             );
 
-                            const rgbFile = orthoFiles.find(file => file === `${date}-RGB.tif`);
+                            const rgbFile = orthoFiles.find(file => file === `${date}-RGB-Pyramid.tif`);
 
                             if (rgbFile) {
                                 let orthoEntry = {

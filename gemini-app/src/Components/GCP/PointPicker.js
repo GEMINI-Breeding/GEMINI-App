@@ -108,7 +108,7 @@ const PointPicker = ({ src }) => {
         });
         setSliderMarks(marks);
 
-        console.log("Slider Marks: ", marks);
+        //console.log("Slider Marks: ", marks);
     }, [imageList]);
 
     const distanceBetween = (x1, y1, x2, y2) => {
