@@ -16,7 +16,9 @@ import PointPicker from "./PointPicker";
 import { OrthoModal } from "./OrthoModal";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
+import RefreshIcon from "@mui/icons-material/Refresh";
 //import FileUploadComponent from "../Menu/FileUpload";
+import { useHandleGcpRefreshImages } from "../Util/ImageViewerUtil";
 import useTrackComponent from "../../useTrackComponent";
 import fetchAndSetGcpFilePath from "./TabComponents/Checklist";
 import { fetchData } from "../../DataContext";
@@ -62,6 +64,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
+    const handleGcpRefreshImages = useHandleGcpRefreshImages();
 
     const uploadFileWithTimeout = async (file, timeout = 30000) => {
         const Values = {
@@ -356,8 +359,28 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                                 // width: '80%', // Match the slider width for alignment,
                                 gap: '20px', // Adds space between the buttons
                             }}>
-                                <Button variant="contained" onClick={handlePrevious}>Previous</Button>
-                                <Button variant="contained" onClick={handleNext}>Next</Button>
+                                <Button 
+                                    variant="contained" 
+                                    onClick={handlePrevious}
+                                    disabled={imageIndex === 0}  // Disable when at first image
+                                >
+                                    Previous
+                                </Button>
+                                <Button 
+                                    variant="contained" 
+                                    onClick={handleNext}
+                                    disabled={imageIndex === imageList.length - 1}  // Disable when at last image
+                                >
+                                    Next
+                                </Button>
+                                {/* <Button 
+                                    variant="contained" 
+                                    color="info" 
+                                    onClick={handleGcpRefreshImages}
+                                    startIcon={<RefreshIcon />}
+                                >
+                                    Refresh
+                                </Button> */}
                                 <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
                             </div>
                         </div>
