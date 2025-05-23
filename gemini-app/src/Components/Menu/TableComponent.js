@@ -6,6 +6,9 @@ import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, 
 import { ImagePreviewer } from "./ImagePreviewer";
 import ArticleIcon from '@mui/icons-material/Article'; // paper icon for reports
 import dataTypes from "../../uploadDataTypes.json";
+import { Tooltip } from '@mui/material';
+import ExploreIcon from '@mui/icons-material/Explore';
+import CSVDataTable from "../StatsMenu/CSVDataTable";
 // import { CSVPreviewer } from "./CSVPreview";
 
 export const TableComponent = () => {
@@ -30,6 +33,8 @@ export const TableComponent = () => {
     // const [csvPreviewOpen, setCSVPreviewOpen] = useState(false);
     const [reportDialogOpen, setReportDialogOpen] = useState(false);
     const [reportContent, setReportContent] = useState("");
+    const [csvData, setCsvData] = useState([]);
+    const [csvDialogOpen, setCsvDialogOpen] = useState(false);
 
     const {
         uploadedData
@@ -320,6 +325,32 @@ export const TableComponent = () => {
             };
         });
     };
+
+    const handleViewSyncedData = async (id) => {
+        const row = procData.find((row) => row.id === id);  
+        if (!row) return;
+    
+        const baseDir = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}`;
+    
+        try {
+            const response = await fetch(`${flaskUrl}view_synced_data`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ base_dir: baseDir }),
+            });
+    
+            const data = await response.json();
+    
+            if (response.ok && data.data) {
+                setCsvData(data.data);  // ✅ Directly set parsed JSON
+                setCsvDialogOpen(true);
+            } else {
+                console.error("Error fetching CSV:", data.error || "Unknown error");
+            }
+        } catch (err) {
+            console.error("Fetch error:", err);
+        }
+    };
             
     const getColumns = () => {
         const actionsColumn = [
@@ -345,18 +376,31 @@ export const TableComponent = () => {
                     </>
                 )}
                 {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && (
-                    <Visibility
-                        color="action"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleView(params.id)}
-                    />
+                    <Tooltip title="View Image">
+                        <Visibility
+                            color="action"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleView(params.id)}
+                        />
+                    </Tooltip>
                 )}
                 {selectedDataType === "binary" && (
-                    <ArticleIcon
-                        color="action"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleViewReport(params.id)}
-                    />
+                <>
+                    <Tooltip title="View Report">
+                        <ArticleIcon
+                            color="action"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleViewReport(params.id)}
+                        />
+                        </Tooltip>
+                    <Tooltip title="View Synced Data">
+                        <ExploreIcon
+                            color="action"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleViewSyncedData(params.id)}
+                        />
+                    </Tooltip>
+                </>
                 )}
                 </div>
             ),
@@ -447,6 +491,17 @@ export const TableComponent = () => {
                 obj={csvPreviewData}
                 onClose={() => setCSVPreviewOpen(false)}
             />  */}
+            <Dialog open={csvDialogOpen} onClose={() => setCsvDialogOpen(false)} maxWidth="xl" fullWidth>
+            <DialogTitle>Synced CSV Data</DialogTitle>
+                <DialogContent>
+                    <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                    <CSVDataTable data={csvData} />
+                    </div>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setCsvDialogOpen(false)}>Close</Button>
+                </DialogActions>
+            </Dialog>
             <Dialog
                 open={reportDialogOpen}
                 onClose={() => setReportDialogOpen(false)}
