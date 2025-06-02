@@ -457,10 +457,16 @@ const FileUploadComponent = () => {
                     }
                     
                     // now handle “finished” state
-                    if (!cancelUploadRef.current) {
+                    if (!cancelUploadRef.current && selectedDataType === "binary") {
                         setIsFinishedUploading(true)
                         setUploadedData(true)
                         setProgress(0);
+                        // setIsUploading(false);
+                    } else if (!cancelUploadRef.current) {
+                        setIsFinishedUploading(true);
+                        setUploadedData(true);
+                        setProgress(0);
+                        setIsUploading(false);
                     }
                 }
             }
