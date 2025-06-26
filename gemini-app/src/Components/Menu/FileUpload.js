@@ -167,7 +167,7 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadChunkWithTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath, timeout = 10000) => {
+    const uploadChunkWithoutTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath) => {
         const formData = new FormData();
         formData.append("fileChunk", chunk);
         formData.append("chunkIndex", index);
@@ -175,20 +175,15 @@ const FileUploadComponent = () => {
         formData.append("fileIdentifier", fileIdentifier);
         formData.append("dirPath", localDirPath);
 
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), timeout);
-
         try {
             const response = await fetch(`${flaskUrl}upload_chunk`, {
                 method: "POST",
-                body: formData,
-                signal: controller.signal,
+                body: formData
+                // No `signal` = no timeout or abort controller
             });
-            clearTimeout(id);
             return response;
-        } catch(error) {
+        } catch (error) {
             console.log("Upload error:", error);
-            clearTimeout(id);
             throw error;
         }
     };
@@ -260,12 +255,12 @@ const FileUploadComponent = () => {
                 break;
             }
             const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
-            await uploadChunkWithTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath)
+            await uploadChunkWithoutTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath)
                 .catch(error => {
                 console.error("Failed to upload chunk", index, error);
                 throw error; // Stop upload process if any chunk fails
                 });
-        
+
             // Update progress here.
             // temp = progress + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
             // setProgress(temp);
@@ -427,9 +422,6 @@ const FileUploadComponent = () => {
                                 if (selectedDataType === "binary") {
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length);
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
-
-                                    // clear the cache of uploaded files
-                                    clearCache(localDirPath);
                                     break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
