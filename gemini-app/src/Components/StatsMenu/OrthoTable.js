@@ -41,13 +41,13 @@ const OrthoTable = () => {
                                 `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                             );
 
-                            const rgbFile = orthoFiles.find(file => 
-                                file.startsWith('AgRowStitch_') || file === `${date}-RGB-Pyramid.tif`
+                            const rgbFiles = orthoFiles.filter(file => 
+                                (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) || file === `${date}-RGB-Pyramid.tif`
                             );
 
-                            if (rgbFile) {
+                            for (const rgbFile of rgbFiles) {
                                 let orthoEntry = {
-                                    id: `${date}-${platform}-${sensor}`,
+                                    id: `${date}-${platform}-${sensor}-${rgbFile}`,
                                     date,
                                     platform,
                                     sensor,
@@ -58,23 +58,22 @@ const OrthoTable = () => {
 
                                 try {
                                     const response = await fetch(
-                                        `${flaskUrl}get_ortho_metadata?date=${date}&platform=${platform}&sensor=${sensor}&year=${selectedYearGCP}&experiment=${selectedExperimentGCP}&location=${selectedLocationGCP}&population=${selectedPopulationGCP}`
+                                    `${flaskUrl}get_ortho_metadata?date=${date}&platform=${platform}&sensor=${sensor}&year=${selectedYearGCP}&experiment=${selectedExperimentGCP}&location=${selectedLocationGCP}&population=${selectedPopulationGCP}&fileName=${rgbFile}`
                                     );
 
                                     if (!response.ok) {
-                                        throw new Error(`HTTP error! status: ${response.status}`);
+                                    throw new Error(`HTTP error! status: ${response.status}`);
                                     }
 
                                     const metadata = await response.json();
-
                                     if (metadata && !metadata.error) {
-                                        orthoEntry.quality = metadata.quality || 'N/A';
-                                        orthoEntry.timestamp = metadata.timestamp || 'N/A';
+                                    orthoEntry.quality = metadata.quality || 'N/A';
+                                    orthoEntry.timestamp = metadata.timestamp || 'N/A';
                                     } else {
-                                        console.warn(`Metadata error for ${date}/${platform}/${sensor}:`, metadata ? metadata.error : 'No metadata');
+                                    console.warn(`Metadata error for ${date}/${platform}/${sensor}/${rgbFile}:`, metadata ? metadata.error : 'No metadata');
                                     }
                                 } catch (error) {
-                                    console.error(`Error fetching metadata for ${date}/${platform}/${sensor}:`, error);
+                                    console.error(`Error fetching metadata for ${date}/${platform}/${sensor}/${rgbFile}:`, error);
                                 }
 
                                 allOrthoData.push(orthoEntry);
