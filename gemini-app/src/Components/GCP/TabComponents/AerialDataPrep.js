@@ -23,13 +23,16 @@ function AerialDataPrep() {
         aerialPrepTab,
         isGCPReady,
         prepGcpFilePath,
-        isImageViewerReady
+        isImageViewerReady,
+        isImageViewerOpen
     } = useDataState();
 
     const {
         setSelectedDateGCP,
         setIsImageViewerOpen,
         setSelectedSensorGCP,
+        setImageIndex, // Reset image index to 0,
+        setImageList,
     } = useDataSetters();
 
     const [submitError, setSubmitError] = useState("");
@@ -39,6 +42,7 @@ function AerialDataPrep() {
     // processing images and existing gcps
     const handleProcessImages = useHandleProcessImages();
     const selectedDateRef = useRef(selectedDateGCP);
+    const selectedExperimentRef = useRef(selectedExperimentGCP);
     const [sensorData, setSensorData] = useState(null);
     const CustomComponent = {
         ortho: ImageViewer,
@@ -69,9 +73,14 @@ function AerialDataPrep() {
     }, [sensorData]);
 
     useEffect(() => {
-        if (selectedDateRef.current !== selectedDateGCP) {
+        if (selectedDateRef.current !== selectedDateGCP || selectedExperimentRef.current !== selectedExperimentGCP) {
+            setImageIndex(0); // Reset image index to 0,
+            setImageList([]);
             handleProcessImages();
             selectedDateRef.current = selectedDateGCP;
+            selectedExperimentRef.current = selectedExperimentGCP;
+        } else {
+            console.log("Selected date has not changed, skipping image processing.");
         }
     }, [isImageViewerReady]);
 

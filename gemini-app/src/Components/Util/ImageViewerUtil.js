@@ -19,7 +19,9 @@ export function useHandleProcessImages() {
         setImageList, 
         setGcpPath, 
         setSidebarCollapsed, 
-        setTotalImages 
+        setTotalImages,
+        setImageViewerLoading,
+        setImageViewerReady
     } = useDataSetters();
 
     const mergeLists = function (imageList, existingData) {
@@ -61,6 +63,7 @@ export function useHandleProcessImages() {
             console.log("Data selection error caught")
             return;
         }*/
+        // setImageViewerLoading(true);
         fetch(`${flaskUrl}get_gcp_selcted_images`, {
             method: "POST",
             headers: {
@@ -136,7 +139,7 @@ export function useHandleGcpRefreshImages() {
         setImageList, 
         setGcpPath, 
         setSidebarCollapsed, 
-        setTotalImages 
+        setTotalImages,
     } = useDataSetters();
 
     const mergeLists = function (imageList, existingData) {

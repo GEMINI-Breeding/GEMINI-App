@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
 import {
     Button,
@@ -9,7 +9,11 @@ import {
     DialogContent,
     DialogContentText,
     DialogTitle,
-    TextField
+    TextField,
+    FormControl,
+    InputLabel,
+    MenuItem,
+    Select
 } from "@mui/material";
 import Slider from "@mui/material/Slider";
 import PointPicker from "./PointPicker";
@@ -65,6 +69,12 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
     const handleGcpRefreshImages = useHandleGcpRefreshImages();
+    const [selectedOrthoMethod, setSelectedOrthoMethod] = useState("ODM");
+
+    const orthoMethodOptions = [
+        { label: "OpenDroneMap (Recommended for Aerial)", value: "ODM" },
+        { label: "AgRowStitch (Recommended for Ground)", value: "STITCH" },
+    ];
 
     const uploadFileWithTimeout = async (file, timeout = 30000) => {
         const Values = {
@@ -312,7 +322,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                         overflow: "auto",
                         // padding: "10px",
                     }}>
-                        {imageViewerLoading && <CircularProgress />}
+                        {imageViewerLoading && imageList.length == 0 && <CircularProgress />}
                         {imageList.length > 0 && (
                             <PointPicker
                                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
@@ -381,11 +391,20 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                                 >
                                     Refresh
                                 </Button> */}
-                                <Button variant="contained" color="warning" onClick={() => setOrthoModalOpen(true)}>Generate Orthophoto</Button>
+                                <Button 
+                                    variant="contained" 
+                                    color="warning" 
+                                    onClick={() => {
+                                        console.log("Selected ortho method: ", selectedOrthoMethod)
+                                        setOrthoModalOpen(true)
+                                    }}
+                                >
+                                    Generate Orthophoto
+                                </Button>
                             </div>
                         </div>
                     )}
-                    <OrthoModal />
+                    <OrthoModal selectedOrthoMethod={selectedOrthoMethod}/>
                     
                     {/* Hidden images for preloading */}
                     {nextImageUrl && (
@@ -405,17 +424,36 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                 </div>
             </Dialog>
             <Dialog open={dialogOpen} onClose={handleDialogClose}>
-                <DialogTitle>Upload GCP Locations</DialogTitle>
+                <DialogTitle>Orthomosaic Options</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
                         Please upload the gcp_locations.csv file before proceeding for maximum orthomosaic quality.
                         For more information, press <a href="https://gemini-breeding.github.io/1.%20App/2-%20File%20Upload/" target="_blank" rel="noopener noreferrer">here</a>.
                     </DialogContentText>
+                    
                     <TextField
                         type="file"
                         onChange={handleFileUpload}
                         fullWidth 
+                        sx={{ mt: 2 }}
                     />
+
+                    <FormControl fullWidth sx={{ mt: 3 }}>
+                        <InputLabel id="ortho-method-label">Orthomosaic Method</InputLabel>
+                        <Select
+                            labelId="ortho-method-label"
+                            id="ortho-method-select"
+                            value={selectedOrthoMethod}
+                            label="Orthomosaic Method"
+                            onChange={(e) => setSelectedOrthoMethod(e.target.value)}
+                        >
+                            {orthoMethodOptions.map((option) => (
+                                <MenuItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleDialogClose} color="primary">
