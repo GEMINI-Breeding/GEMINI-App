@@ -243,29 +243,52 @@ const FileUploadComponent = () => {
     };
 
     const uploadFileChunks = async (file, localDirPath, uploadLength) => {
-        const chunkSize = 0.5 * 1024 * 1024;
+        // Increase chunk size for faster upload (e.g., 4MB)
+        const chunkSize = 4 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / chunkSize);
         const fileIdentifier = file.name;
-        // let temp = 0;
 
         const uploadedChunks = await checkUploadedChunks(fileIdentifier, localDirPath);
         console.log("Uploaded chunks:", uploadedChunks);
-        for (let index = uploadedChunks; index < totalChunks; index++) {
-            if (cancelUploadRef.current) {
+
+        // Parallel upload settings
+        const MAX_PARALLEL = 4;
+        let current = uploadedChunks;
+        let activeUploads = [];
+        let errorOccurred = false;
+
+        const uploadChunk = async (index) => {
+            if (cancelUploadRef.current || errorOccurred) return;
+            const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
+            try {
+                await uploadChunkWithoutTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath);
+                // Update progress after each chunk
+                setProgress(prev => {
+                    // Calculate based on chunks uploaded for this file
+                    const uploaded = Math.min(index + 1, totalChunks);
+                    return Math.round((uploaded / totalChunks) * 100);
+                });
+            } catch (error) {
+                errorOccurred = true;
+                console.error("Failed to upload chunk", index, error);
+                throw error;
+            }
+        };
+
+        while (current < totalChunks && !cancelUploadRef.current && !errorOccurred) {
+            // Start up to MAX_PARALLEL uploads
+            activeUploads = [];
+            for (let i = 0; i < MAX_PARALLEL && current < totalChunks; i++, current++) {
+                activeUploads.push(uploadChunk(current));
+            }
+            // Wait for all in this batch to finish
+            try {
+                await Promise.all(activeUploads);
+            } catch (e) {
+                // If any chunk fails, stop further uploads
                 break;
             }
-            const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
-            await uploadChunkWithoutTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath)
-                .catch(error => {
-                console.error("Failed to upload chunk", index, error);
-                throw error; // Stop upload process if any chunk fails
-                });
-
-            // Update progress here.
-            // temp = progress + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
-            // setProgress(temp);
         }
-
     };
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
