@@ -242,30 +242,35 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadFileChunks = async (file, localDirPath, uploadLength) => {
-        const chunkSize = 0.5 * 1024 * 1024;
+    const uploadFileChunks = async (file, localDirPath, uploadLength, fileIndex, totalFiles) => {
+        // Increase chunk size for faster upload (e.g., 4MB)
+        const chunkSize = 4 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / chunkSize);
         const fileIdentifier = file.name;
-        // let temp = 0;
 
         const uploadedChunks = await checkUploadedChunks(fileIdentifier, localDirPath);
         console.log("Uploaded chunks:", uploadedChunks);
-        for (let index = uploadedChunks; index < totalChunks; index++) {
-            if (cancelUploadRef.current) {
-                break;
-            }
-            const chunk = file.slice(index * chunkSize, (index + 1) * chunkSize);
-            await uploadChunkWithoutTimeout(chunk, index, totalChunks, fileIdentifier, localDirPath)
-                .catch(error => {
-                console.error("Failed to upload chunk", index, error);
-                throw error; // Stop upload process if any chunk fails
+
+        // Sequential upload - upload one chunk at a time
+        for (let current = uploadedChunks; current < totalChunks; current++) {
+            if (cancelUploadRef.current) break;
+            
+            const chunk = file.slice(current * chunkSize, (current + 1) * chunkSize);
+            try {
+                await uploadChunkWithoutTimeout(chunk, current, totalChunks, fileIdentifier, localDirPath);
+                // Update progress considering multiple files
+                setProgress(prev => {
+                    // Calculate progress for this specific file
+                    const fileProgress = Math.min(current + 1, totalChunks) / totalChunks;
+                    // Calculate overall progress across all files
+                    const overallProgress = ((fileIndex + fileProgress) / totalFiles) * 100;
+                    return Math.round(overallProgress);
                 });
-
-            // Update progress here.
-            // temp = progress + (Math.round((((index + 1) / totalChunks) * 100))/uploadLength);
-            // setProgress(temp);
+            } catch (error) {
+                console.error("Failed to upload chunk", current, error);
+                throw error;
+            }
         }
-
     };
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
@@ -420,8 +425,7 @@ const FileUploadComponent = () => {
                                 const file = files.find((f) => f.name === filesToUpload[i]);
                                 
                                 if (selectedDataType === "binary") {
-                                    await uploadFileChunks(file, localDirPath, filesToUpload.length);
-                                    setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
                                     break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
