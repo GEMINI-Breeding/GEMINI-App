@@ -25,8 +25,11 @@ const PointPicker = ({ src }) => {
     );
 
     const saveData = async (imageList) => {
-        console.log("Saving Data");
-        console.log("Image List: ", imageList);
+        console.log("Saving GCP data with", imageList.length, "images");
+        
+        // Count points for logging
+        const pointCount = imageList.filter(img => img.pointX !== null && img.pointY !== null).length;
+        console.log(`Saving ${pointCount} GCP points out of ${imageList.length} images`);
 
         try {
             const response = await fetch(`${flaskUrl}save_array`, {
@@ -35,7 +38,7 @@ const PointPicker = ({ src }) => {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    array: imageList,
+                    array: imageList, // Send all images, including those with null points
                     platform: selectedPlatformGCP,
                     sensor: selectedSensorGCP
                 }),
@@ -44,13 +47,14 @@ const PointPicker = ({ src }) => {
             const result = await response.json();
 
             if (response.ok) {
-                console.log(result.message); // or handle the success message however you like
+                console.log("GCP data saved successfully:", result.message);
             } else {
-                console.error("Error saving data:", result.message); // or handle the error however you like
-                setSubmitError("Error saving data: ", result.message);
+                console.error("Error saving GCP data:", result.message);
+                setSubmitError("Error saving GCP data: " + result.message);
             }
         } catch (error) {
-            console.error("Network error:", error);
+            console.error("Network error while saving GCP data:", error);
+            setSubmitError("Network error: " + error.message);
         }
     };
 
@@ -77,29 +81,19 @@ const PointPicker = ({ src }) => {
         console.log("Natural Height: ", currentImage.naturalHeight);
     }, [imageIndex]);
 
-    useEffect(() => {
-        // If any image has a point, save the data
-        const hasPoint = imageList.some((image) => image.pointX && image.pointY);
-        if (hasPoint) {
-            //saveData(imageList);
-            const imageListCleaned = imageList
-                .map((image) => {
-                    // If the image contains null values, remove it from the list
-                    if (image.pointX === null || image.pointY === null) {
-                        return null;
-                    } else {
-                        return image;
-                    }
-                })
-                .filter((image) => image !== null);
-            saveData(imageListCleaned);
-        }
+    // useEffect(() => {
+    //     // Save data whenever imageList changes (including when points are removed)
+    //     // This ensures the backend knows about both additions and removals
+    //     saveData(imageList);
+    // }, [imageList]);
 
+    useEffect(() => {
+        // Update slider marks when imageList changes
         const marks = imageList.map((img, index) => {
             return {
                 value: index,
                 label:
-                    img.pointX && img.pointY ? (
+                    (img.pointX !== null && img.pointX !== undefined && img.pointY !== null && img.pointY !== undefined) ? (
                         <CustomMark color="red" style={{ width: 16, height: 16 }} />
                     ) : (
                         <CustomMark color="rgba(255,255,255,0)" />
@@ -107,8 +101,6 @@ const PointPicker = ({ src }) => {
             };
         });
         setSliderMarks(marks);
-
-        //console.log("Slider Marks: ", marks);
     }, [imageList]);
 
     const distanceBetween = (x1, y1, x2, y2) => {
@@ -124,6 +116,7 @@ const PointPicker = ({ src }) => {
         const originalX = Math.round(x * widthRatio);
         const originalY = Math.round(y * heightRatio);
 
+        console.log(`Adding GCP point to image ${imageIndex} at coordinates (${originalX}, ${originalY})`);
         const updatedImageList = [...imageList];
         updatedImageList[imageIndex].pointX = originalX;
         updatedImageList[imageIndex].pointY = originalY;
@@ -133,6 +126,9 @@ const PointPicker = ({ src }) => {
         const newX = (x / imgElement.width) * 100;
         const newY = (y / imgElement.height) * 100;
         setPointPosition({ x: newX, y: newY });
+
+        // update
+        saveData(updatedImageList);
     };
 
     const handleImageRightClick = (event) => {
@@ -156,11 +152,15 @@ const PointPicker = ({ src }) => {
 
         if (distance < allowableDistance) {
             // User right-clicked close to the point, so remove the point.
+            console.log(`Removing GCP point from image ${imageIndex}`);
             const updatedImageList = [...imageList];
             updatedImageList[imageIndex].pointX = null;
             updatedImageList[imageIndex].pointY = null;
             setImageList(updatedImageList);
             setPointPosition({ x: null, y: null });
+
+            // update
+            saveData(updatedImageList);
         }
     };
 
