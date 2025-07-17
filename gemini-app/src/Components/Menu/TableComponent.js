@@ -4,12 +4,14 @@ import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
+import { GroundPlotMarker } from './GroundPlotMarker';
 import ArticleIcon from '@mui/icons-material/Article'; // paper icon for reports
 import dataTypes from "../../uploadDataTypes.json";
 import { Tooltip } from '@mui/material';
 import ExploreIcon from '@mui/icons-material/Explore';
 import CSVDataTable from "../StatsMenu/CSVDataTable";
-// import { CSVPreviewer } from "./CSVPreview";
+import ActivityZoneIcon from '@mui/icons-material/Map';
+import AddLocationAltIcon from '@mui/icons-material/AddLocationAlt';
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
@@ -29,12 +31,13 @@ export const TableComponent = () => {
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [imagePreviewData, setImagePreviewData] = useState(null);
-    // const [csvPreviewData, setCSVPreviewData] = useState(null);
-    // const [csvPreviewOpen, setCSVPreviewOpen] = useState(false);
+    const [plotMarkerOpen, setPlotMarkerOpen] = useState(false);
+    const [plotMarkerData, setPlotMarkerData] = useState(null);
     const [reportDialogOpen, setReportDialogOpen] = useState(false);
     const [reportContent, setReportContent] = useState("");
     const [csvData, setCsvData] = useState([]);
     const [csvDialogOpen, setCsvDialogOpen] = useState(false);
+    const [selectedCameras, setSelectedCameras] = useState({});
 
     const {
         uploadedData
@@ -99,7 +102,7 @@ export const TableComponent = () => {
 
     const detectDataType = (row) => {
         if (row.sensor && (row.platform && row.platform !== "rover") && row.date) return "image";
-        if (row.platform === "rover" && row.camera !== "") return "binary";
+        if (row.platform === "rover" && row.cameras && row.cameras.length > 0) return "binary";
         if ((row.date && row.date !== "[object Object]") && (!row.platform || row.platform === "[object Object]")) return "weather";
         if ((!row.date || row.date === "[object Object]") && row.population) return "gcpLocations";
         if (row.sensor && (row.platform && row.platform !== "rover")) return "platformLogs";
@@ -120,7 +123,7 @@ export const TableComponent = () => {
                     date: row.date,
                     year: row.year,
                     experiment: row.experiment,
-                    camera: row.camera
+                    camera: selectedCameras[id] || row.cameras[0]
                 })
             });
     
@@ -220,7 +223,7 @@ export const TableComponent = () => {
                 experiment: row.experiment,
                 sensor: row.sensor,
                 platform: row.platform,
-                camera: row.camera
+                camera: selectedCameras[row.id] || (row.cameras ? row.cameras[0] : row.camera)
             };
             setImagePreviewData(obj);
             setImagePreviewOpen(true);
@@ -238,6 +241,15 @@ export const TableComponent = () => {
         //     setCSVPreviewOpen(true);
             
         // }
+    };
+
+    const handleMarkPlots = (id) => {
+        const row = procData.find((row) => row.id === id);
+        if (row) {
+            const plotData = { ...row, camera: selectedCameras[id] || 'top' };
+            setPlotMarkerData(plotData);
+            setPlotMarkerOpen(true);
+        }
     };
 
     const handleSave = () => {
@@ -306,24 +318,44 @@ export const TableComponent = () => {
     
     const transformNestedData = (nestedData) => {
         const flattenedPaths = convertToPath(nestedData);
-        return flattenedPaths.map((path, index) => {
+        const groupedData = {};
+    
+        flattenedPaths.forEach(path => {
             const parts = path.split(' > ');
-            let camera = '';
-            if (parts[5] === 'rover' && parts[7] === 'Images') { 
-                camera = parts[8];
+            const year = parts[0] || '';
+            const experiment = parts[1] || '';
+            const location = parts[2] || '';
+            const population = parts[3] || '';
+            const date = parts[4] || '';
+            const platform = parts[5] || '';
+            const sensor = parts[6] || '';
+    
+            const key = `${year}-${experiment}-${location}-${population}-${date}-${platform}-${sensor}`;
+    
+            if (platform === 'rover') {
+                if (!groupedData[key]) {
+                    groupedData[key] = {
+                        year, experiment, location, population, date, platform, sensor,
+                        cameras: [],
+                    };
+                }
+                const camera = parts[8];
+                if (camera && !groupedData[key].cameras.includes(camera) && ['top', 'left', 'right'].includes(camera)) {
+                    groupedData[key].cameras.push(camera);
+                }
+            } else {
+                // Keep non-rover data as individual entries
+                groupedData[path] = {
+                    year, experiment, location, population, date, platform, sensor,
+                    camera: ''
+                };
             }
-            return {
-                id: index,
-                year: parts[0] || '',
-                experiment: parts[1] || '',
-                location: parts[2] || '',
-                population: parts[3] || '',
-                date: parts[4] || '',
-                platform: parts[5] || '',
-                sensor: parts[6] || '',
-                camera: camera // for Amiga file viewing
-            };
         });
+    
+        return Object.values(groupedData).map((group, index) => ({
+            ...group,
+            id: index,
+        }));
     };
 
     const handleViewSyncedData = async (id) => {
@@ -359,59 +391,104 @@ export const TableComponent = () => {
             headerName: 'Actions',
             width: 180,
             
-            renderCell: (params) => (
-                <div style={{ display: 'flex', gap: '12px' }}>
-                {selectedDataType !== "binary" && (
-                    <>
-                    <Edit
-                        color="primary"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleEdit(params.id)}
-                    />
-                    <Delete
-                        color="error"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => handleDelete(params.id)}
-                    />
-                    </>
-                )}
-                {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && (
-                    <Tooltip title="View Image">
-                        <Visibility
-                            color="action"
+            renderCell: (params) => {
+                const selectedCamera = selectedCameras[params.id] || (params.row.cameras && params.row.cameras[0]);
+
+                return (
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                    {selectedDataType !== "binary" && (
+                        <>
+                        <Edit
+                            color="primary"
                             style={{ cursor: 'pointer' }}
-                            onClick={() => handleView(params.id)}
+                            onClick={() => handleEdit(params.id)}
                         />
-                    </Tooltip>
-                )}
-                {selectedDataType === "binary" && (
-                <>
-                    <Tooltip title="View Report">
-                        <ArticleIcon
-                            color="action"
+                        <Delete
+                            color="error"
                             style={{ cursor: 'pointer' }}
-                            onClick={() => handleViewReport(params.id)}
+                            onClick={() => handleDelete(params.id)}
                         />
+                        </>
+                    )}
+                    {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && (
+                        <Tooltip title="View Image">
+                            <Visibility
+                                color="action"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleView(params.id)}
+                            />
                         </Tooltip>
-                    <Tooltip title="View Synced Data">
-                        <ExploreIcon
-                            color="action"
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => handleViewSyncedData(params.id)}
-                        />
-                    </Tooltip>
-                </>
-                )}
-                </div>
-            ),
+                    )}
+                    {selectedDataType === "binary" && (
+                    <>
+                        <Tooltip title="View Report">
+                            <ArticleIcon
+                                color="action"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleViewReport(params.id)}
+                            />
+                            </Tooltip>
+                        <Tooltip title="View Synced Data">
+                            <ExploreIcon
+                                color="action"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleViewSyncedData(params.id)}
+                            />
+                        </Tooltip>
+                        {selectedCamera === 'top' && (
+                            <Tooltip title="Mark Plots">
+                                <AddLocationAltIcon
+                                    color="action"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => handleMarkPlots(params.id)}
+                                />
+                            </Tooltip>
+                        )}
+                    </>
+                    )}
+                    </div>
+                )
+            },
             }
         ];
         
-        return [
-            ...baseColumns,
-            ...(typeSpecificColumns[selectedDataType] || []),
-            ...actionsColumn
-        ];
+        const cameraColumn = {
+            field: 'camera',
+            headerName: 'Camera',
+            width: 150,
+            renderCell: (params) => {
+                if (params.row.cameras && params.row.cameras.length > 0) {
+                    return (
+                        <FormControl fullWidth size="small">
+                            <Select
+                                value={selectedCameras[params.id] || params.row.cameras[0]}
+                                onChange={(e) => {
+                                    setSelectedCameras(prev => ({ ...prev, [params.id]: e.target.value }));
+                                }}
+                            >
+                                {params.row.cameras.map(cam => (
+                                    <MenuItem key={cam} value={cam}>{cam}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                    );
+                }
+                return params.value;
+            }
+        };
+        
+        const currentTypeColumns = typeSpecificColumns[selectedDataType] || [];
+        const columns = [...baseColumns];
+
+        if (selectedDataType === 'binary') {
+            const binaryCols = currentTypeColumns.filter(c => c.field !== 'camera');
+            columns.push(...binaryCols, cameraColumn);
+        } else {
+            columns.push(...currentTypeColumns);
+        }
+
+        columns.push(...actionsColumn);
+        return columns;
     };
 
     if (loading) return <p>Loading...</p>;
@@ -486,6 +563,11 @@ export const TableComponent = () => {
                 obj={imagePreviewData}
                 onClose={() => setImagePreviewOpen(false)}
             /> 
+            <GroundPlotMarker
+                open={plotMarkerOpen}
+                obj={plotMarkerData}
+                onClose={() => setPlotMarkerOpen(false)}
+            />
             {/* <CSVPreviewer
                 open={csvPreviewOpen}
                 obj={csvPreviewData}
