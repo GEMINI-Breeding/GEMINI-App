@@ -340,7 +340,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                             {plotSelectionState === 'start' ? 'Start' : 'End'}
                         </Button>
                         {plotSelectionState === 'end' && (
-                            <Button variant="contained" onClick={handleCancel}>
+                            <Button variant="contained" onClick={handleCancel} style={{ backgroundColor: 'purple', color: 'white' }}>
                                 Cancel
                             </Button>
                         )}
