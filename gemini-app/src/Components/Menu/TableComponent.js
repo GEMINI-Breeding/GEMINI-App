@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
-import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button } from '@mui/material';
+import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button, LinearProgress, Box, Typography } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
 import { GroundPlotMarker } from './GroundPlotMarker';
 import ArticleIcon from '@mui/icons-material/Article'; // paper icon for reports
@@ -40,6 +40,8 @@ export const TableComponent = () => {
     const [csvDialogOpen, setCsvDialogOpen] = useState(false);
     const [selectedCameras, setSelectedCameras] = useState({});
     const [plotIndices, setPlotIndices] = useState({});
+    const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState(0);
 
     const {
         uploadedData
@@ -204,7 +206,10 @@ export const TableComponent = () => {
         const row = procData.find((row) => row.id === id);
         if (!row) return;
         const camera = selectedCameras[id] || 'top';
-        const date = row.date;
+    
+        setDownloadDialogOpen(true);
+        setDownloadProgress(0);
+    
         try {
             const response = await fetch(`${flaskUrl}download_amiga_images`, {
                 method: 'POST',
@@ -214,22 +219,64 @@ export const TableComponent = () => {
                     camera: camera
                 })
             });
-            if (response.ok) {
+    
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+    
+            const contentLength = response.headers.get('Content-Length');
+            if (!contentLength) {
+                console.warn("Content-Length header not found. Cannot track progress.");
+                // Fallback to old method without progress
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                a.download = `${date}-${camera}.zip`;
+                const zipFilename = `${row.year}_${row.experiment}_${row.location}_${row.population}_${row.date}_Amiga_RGB.zip`;
+                a.download = zipFilename;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-            } else {
-                console.error("Failed to download images");
+                setDownloadDialogOpen(false);
+                return;
             }
+    
+            const totalSize = parseInt(contentLength, 10);
+            let loadedSize = 0;
+            const reader = response.body.getReader();
+            const chunks = [];
+    
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break;
+                }
+                chunks.push(value);
+                loadedSize += value.length;
+                const progress = Math.round((loadedSize / totalSize) * 100);
+                setDownloadProgress(progress);
+            }
+    
+            const blob = new Blob(chunks);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            const zipFilename = `${row.year}_${row.experiment}_${row.location}_${row.population}_${row.date}_Amiga_RGB.zip`;
+            a.download = zipFilename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+    
         } catch (error) {
             console.error("Error downloading images:", error);
+            alert(`An error occurred while trying to download images: ${error.message}`);
+        } finally {
+            setDownloadDialogOpen(false);
         }
     };
 
@@ -671,6 +718,15 @@ export const TableComponent = () => {
                 <DialogActions>
                     <Button onClick={() => setCsvDialogOpen(false)}>Close</Button>
                 </DialogActions>
+            </Dialog>
+            <Dialog open={downloadDialogOpen} aria-labelledby="download-dialog-title">
+                <DialogTitle id="download-dialog-title">Downloading Images</DialogTitle>
+                <DialogContent>
+                    <Box sx={{ width: '100%', mr: 1, minWidth: 300 }}>
+                        <Typography variant="body2" color="text.secondary" align="center">{`${downloadProgress}%`}</Typography>
+                        <LinearProgress variant="determinate" value={downloadProgress} />
+                    </Box>
+                </DialogContent>
             </Dialog>
             <Dialog
                 open={reportDialogOpen}
