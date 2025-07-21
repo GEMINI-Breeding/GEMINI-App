@@ -12,6 +12,7 @@ import ExploreIcon from '@mui/icons-material/Explore';
 import CSVDataTable from "../StatsMenu/CSVDataTable";
 import ActivityZoneIcon from '@mui/icons-material/Map';
 import AddLocationAltIcon from '@mui/icons-material/AddLocationAlt';
+import DownloadIcon from '@mui/icons-material/Download';
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
@@ -38,6 +39,7 @@ export const TableComponent = () => {
     const [csvData, setCsvData] = useState([]);
     const [csvDialogOpen, setCsvDialogOpen] = useState(false);
     const [selectedCameras, setSelectedCameras] = useState({});
+    const [plotIndices, setPlotIndices] = useState({});
 
     const {
         uploadedData
@@ -49,16 +51,16 @@ export const TableComponent = () => {
     
     const baseColumns = [
         { field: 'year', headerName: 'Year', width: 100 },
-        { field: 'experiment', headerName: 'Experiment', width: 150 },
-        { field: 'location', headerName: 'Location', width: 150 },
-        { field: 'population', headerName: 'Population', width: 150 },
+        { field: 'experiment', headerName: 'Experiment', flex: 1 },
+        { field: 'location', headerName: 'Location', flex: 1 },
+        { field: 'population', headerName: 'Population', flex: 1 },
     ];
     
     const typeSpecificColumns = {
         image: [
             { field: 'date', headerName: 'Date', width: 150 },
-            { field: 'platform', headerName: 'Platform', width: 150 },
-            { field: 'sensor', headerName: 'Sensor', width: 150 },
+            { field: 'platform', headerName: 'Platform', flex: 1 },
+            { field: 'sensor', headerName: 'Sensor', flex: 1 },
         ],
         binary: [
             { field: 'date', headerName: 'Date', width: 150 },
@@ -70,8 +72,8 @@ export const TableComponent = () => {
         gcpLocations: [],
         platformLogs: [
             { field: 'date', headerName: 'Date', width: 150 },
-            { field: 'platform', headerName: 'Platform', width: 150 },
-            { field: 'sensor', headerName: 'Sensor', width: 150 },
+            { field: 'platform', headerName: 'Platform', flex: 1 },
+            { field: 'sensor', headerName: 'Sensor', flex: 1 },
         ],
     };
 
@@ -198,6 +200,39 @@ export const TableComponent = () => {
             });
     };
 
+    const handleDownloadImages = async (id) => {
+        const row = procData.find((row) => row.id === id);
+        if (!row) return;
+        const camera = selectedCameras[id] || 'top';
+        const date = row.date;
+        try {
+            const response = await fetch(`${flaskUrl}download_amiga_images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...row,
+                    camera: camera
+                })
+            });
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `${date}-${camera}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } else {
+                console.error("Failed to download images");
+            }
+        } catch (error) {
+            console.error("Error downloading images:", error);
+        }
+    };
+
     const handleDialogClose = () => {
         setDialogOpen(false);
     };
@@ -223,7 +258,7 @@ export const TableComponent = () => {
                 experiment: row.experiment,
                 sensor: row.sensor,
                 platform: row.platform,
-                camera: selectedCameras[row.id] || (row.cameras ? row.cameras[0] : row.camera)
+                camera: selectedCameras[row.id] || 'top'
             };
             setImagePreviewData(obj);
             setImagePreviewOpen(true);
@@ -243,13 +278,55 @@ export const TableComponent = () => {
         // }
     };
 
-    const handleMarkPlots = (id) => {
+    const handleMarkPlots = async (id) => {
         const row = procData.find((row) => row.id === id);
         if (row) {
-            const plotData = { ...row, camera: selectedCameras[id] || 'top' };
-            setPlotMarkerData(plotData);
+            const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
+            let directory;
+            if (row.platform === 'rover') {
+                directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/RGB/Images/${camera}/`;
+            } else {
+                directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}/Images/`;
+            }
+
+            try {
+                const response = await fetch(`${flaskUrl}get_max_plot_index`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ directory }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    const nextIndex = data.max_plot_index > -1 ? data.max_plot_index + 1 : 0;
+                    setPlotIndices(prev => ({ ...prev, [row.id]: nextIndex }));
+                } else {
+                    console.error("Failed to fetch max plot index:", data.error);
+                    // Fallback to 0 if there's an error
+                    setPlotIndices(prev => ({ ...prev, [row.id]: 0 }));
+                }
+            } catch (error) {
+                console.error("Error fetching max plot index:", error);
+                setPlotIndices(prev => ({ ...prev, [row.id]: 0 }));
+            }
+
+            const obj = {
+                location: row.location,
+                population: row.population,
+                year: row.year,
+                experiment: row.experiment,
+                date: row.date,
+                platform: row.platform,
+                sensor: row.sensor,
+                camera: camera,
+                id: row.id
+            };
+            setPlotMarkerData(obj);
             setPlotMarkerOpen(true);
         }
+    };
+
+    const handlePlotIndexChange = (id, newIndex) => {
+        setPlotIndices(prev => ({ ...prev, [id]: newIndex }));
     };
 
     const handleSave = () => {
@@ -389,10 +466,11 @@ export const TableComponent = () => {
             {
             field: 'actions',
             headerName: 'Actions',
-            width: 180,
+            width: 240,
             
             renderCell: (params) => {
-                const selectedCamera = selectedCameras[params.id] || (params.row.cameras && params.row.cameras[0]);
+                const defaultValue = params.row.cameras && params.row.cameras.includes('top') ? 'top' : (params.row.cameras && params.row.cameras[0]);
+                const selectedCamera = selectedCameras[params.id] || defaultValue;
 
                 return (
                     <div style={{ display: 'flex', gap: '12px' }}>
@@ -444,6 +522,13 @@ export const TableComponent = () => {
                                 />
                             </Tooltip>
                         )}
+                        <Tooltip title="Download Images">
+                            <DownloadIcon
+                                color="action"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleDownloadImages(params.id)}
+                            />
+                        </Tooltip>
                     </>
                     )}
                     </div>
@@ -458,10 +543,11 @@ export const TableComponent = () => {
             width: 150,
             renderCell: (params) => {
                 if (params.row.cameras && params.row.cameras.length > 0) {
+                    const defaultValue = params.row.cameras.includes('top') ? 'top' : params.row.cameras[0];
                     return (
                         <FormControl fullWidth size="small">
                             <Select
-                                value={selectedCameras[params.id] || params.row.cameras[0]}
+                                value={selectedCameras[params.id] || defaultValue}
                                 onChange={(e) => {
                                     setSelectedCameras(prev => ({ ...prev, [params.id]: e.target.value }));
                                 }}
@@ -567,6 +653,8 @@ export const TableComponent = () => {
                 open={plotMarkerOpen}
                 obj={plotMarkerData}
                 onClose={() => setPlotMarkerOpen(false)}
+                plotIndex={plotMarkerData ? plotIndices[plotMarkerData.id] || 0 : 0}
+                onPlotIndexChange={(newIndex) => plotMarkerData && handlePlotIndexChange(plotMarkerData.id, newIndex)}
             />
             {/* <CSVPreviewer
                 open={csvPreviewOpen}

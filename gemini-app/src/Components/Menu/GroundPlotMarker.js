@@ -8,12 +8,17 @@ import {
     CircularProgress,
     Box,
     Slider,
-    Typography
+    Typography,
+    DialogActions,
+    Select,
+    MenuItem,
+    FormControl,
+    InputLabel
 } from '@mui/material';
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { useDataState } from "../../DataContext";
 
-export const GroundPlotMarker = ({ open, obj, onClose }) => {
+export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotIndex, onPlotIndexChange }) => {
     const [imageIndex, setImageIndex] = useState(0);
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
@@ -22,10 +27,20 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
     const [imageLoading, setImageLoading] = useState(false);
     const [plotSelectionState, setPlotSelectionState] = useState('start');
     const imageRef = React.useRef(null);
-    const [plotIndex, setPlotIndex] = useState(0);
+    const [plotIndex, setPlotIndex] = useState(initialPlotIndex);
+    const [stitchDirectionDialogOpen, setStitchDirectionDialogOpen] = useState(false);
+    const [stitchDirection, setStitchDirection] = useState('');
+    const [currentImagePlotIndex, setCurrentImagePlotIndex] = useState(null);
+
+    useEffect(() => {
+        if (open) {
+            setPlotIndex(initialPlotIndex);
+        }
+    }, [open, initialPlotIndex]);
 
     useEffect(() => {
         if (open && obj) {
+            setImageIndex(0);
             if(obj.platform === 'rover'){
                 const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
                 setDirectory(newDirectory);
@@ -43,7 +58,42 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
         }
     }, [directory]);
 
+    useEffect(() => {
+        if (imageList.length > 0 && directory) {
+            fetchImagePlotIndex();
+        }
+    }, [imageIndex, imageList, directory]);
+
     const API_ENDPOINT = `${flaskUrl}files`;
+
+    const fetchImagePlotIndex = async () => {
+        const imageName = imageList[imageIndex];
+        if (!imageName) return;
+
+        try {
+            const response = await fetch(`${flaskUrl}get_image_plot_index`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    directory: directory,
+                    image_name: imageName,
+                }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setCurrentImagePlotIndex(data.plot_index);
+                console.log("Current Image Plot Index:", data.plot_index);
+            } else {
+                console.error("Failed to fetch plot index:", data.error);
+                setCurrentImagePlotIndex(null);
+            }
+        } catch (error) {
+            console.error("Error fetching plot index:", error);
+            setCurrentImagePlotIndex(null);
+        }
+    };
 
     const fetchImages = async () => {
         try {
@@ -82,10 +132,39 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
 
     const handlePlotSelection = async () => {
         const imageName = imageList[imageIndex];
-        const endpoint = plotSelectionState === 'start' ? 'mark_plot_start' : 'mark_plot_end';
-
+        // const endpoint = plotSelectionState === 'start' ? 'mark_plot_start' : 'mark_plot_end';
         try {
-            const response = await fetch(`${flaskUrl}${endpoint}`, {
+            const response = await fetch(`${flaskUrl}mark_plot_start`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    directory: directory || {},
+                    image_name: imageName || {},
+                    plot_index: plotIndex || 0,
+                    camera: obj.camera || {},
+                }),
+            });
+
+            if (response.ok) {
+                // if (plotSelectionState === 'start') {
+                setPlotSelectionState('end');
+                // } else {
+                //     // This part is now handled in handleStitchDirectionSelection
+                // }
+            } else {
+                console.error("Failed to mark plot:", response.statusText);
+            }
+        } catch (error) {
+            console.error("Error marking plot:", error);
+        }
+    };
+
+    const handleStitchDirectionSelection = async (direction) => {
+        const imageName = imageList[imageIndex];
+        try {
+            const response = await fetch(`${flaskUrl}mark_plot_end`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -95,22 +174,22 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                     image_name: imageName,
                     plot_index: plotIndex,
                     camera: obj.camera,
+                    stitch_direction: direction,
                 }),
             });
 
             if (response.ok) {
-                if (plotSelectionState === 'start') {
-                    setPlotSelectionState('end');
-                } else {
-                    setPlotIndex(plotIndex + 1);
-                    setPlotSelectionState('start');
-                }
+                const newPlotIndex = plotIndex + 1;
+                setPlotIndex(newPlotIndex);
+                onPlotIndexChange(newPlotIndex);
+                setPlotSelectionState('start');
             } else {
-                console.error("Failed to mark plot");
+                console.error("Failed to mark plot end with stitch direction");
             }
         } catch (error) {
-            console.error("Error marking plot:", error);
+            console.error("Error marking plot end:", error);
         }
+        setStitchDirectionDialogOpen(false);
     };
 
     useEffect(() => {
@@ -182,8 +261,11 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                     >
                         <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
                     </IconButton>
+                    <Typography variant="h6" style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}>
+                        Plot Index: {plotIndex}
+                    </Typography>
                 </DialogTitle>
-                <DialogContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+                <DialogContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexGrow: 1, minHeight: 0 }}>
                     <Typography variant="h6" style={{ marginBottom: '10px' }}>
                         Match the mid line with the start / end of the plot.
                     </Typography>
@@ -194,7 +276,7 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                             sx={{
                                 position: 'relative',
                                 width: '100%',
-                                height: '400px',
+                                flexGrow: 1,
                                 overflow: 'hidden',
                             }}
                         >
@@ -223,8 +305,19 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                                 borderLeft: '2px dashed white',
                                 transform: 'translateX(-50%)'
                             }} />
+                            <div style={{
+                                position: 'absolute',
+                                left: 0,
+                                right: 0,
+                                top: '50%',
+                                borderTop: '2px dashed white',
+                                transform: 'translateY(-50%)'
+                            }} />
                         </Box>
                     )}
+                    <Typography>
+                        Image Plot Index: {currentImagePlotIndex === -1 || currentImagePlotIndex === null ? "None" : currentImagePlotIndex}
+                    </Typography>
                     <Typography>Image {imageIndex + 1} of {imageList.length}</Typography>
                     <Box sx={{ width: '80%', mt: 2, position: 'relative' }}>
                         <Slider
@@ -245,7 +338,13 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                         <Button
                             variant="contained"
                             style={{ backgroundColor: plotSelectionState === 'start' ? 'green' : 'red', color: 'white' }}
-                            onClick={handlePlotSelection}
+                            onClick={() => {
+                                if (plotSelectionState === 'start') {
+                                    handlePlotSelection();
+                                } else {
+                                    setStitchDirectionDialogOpen(true);
+                                }
+                            }}
                         >
                             {plotSelectionState === 'start' ? 'Start' : 'End'}
                         </Button>
@@ -253,6 +352,32 @@ export const GroundPlotMarker = ({ open, obj, onClose }) => {
                     </Box>
                 </DialogContent>
             </div>
+            <Dialog open={stitchDirectionDialogOpen} onClose={() => setStitchDirectionDialogOpen(false)}>
+                <DialogTitle>Select Plot Stitch Direction</DialogTitle>
+                <DialogContent>
+                    <Typography>Please select the direction of the plot stitching.</Typography>
+                    <FormControl fullWidth sx={{ mt: 2 }}>
+                        <InputLabel id="stitch-direction-label">Direction</InputLabel>
+                        <Select
+                            labelId="stitch-direction-label"
+                            value={stitchDirection}
+                            label="Direction"
+                            onChange={(e) => setStitchDirection(e.target.value)}
+                        >
+                            <MenuItem value="Up">Up</MenuItem>
+                            <MenuItem value="Down">Down</MenuItem>
+                            <MenuItem value="Left">Left</MenuItem>
+                            <MenuItem value="Right">Right</MenuItem>
+                        </Select>
+                    </FormControl>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setStitchDirectionDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={() => handleStitchDirectionSelection(stitchDirection)} color="primary" disabled={!stitchDirection}>
+                        Confirm
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Dialog>
     );
 };
