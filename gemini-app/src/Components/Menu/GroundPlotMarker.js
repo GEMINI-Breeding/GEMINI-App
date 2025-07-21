@@ -31,6 +31,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const [stitchDirectionDialogOpen, setStitchDirectionDialogOpen] = useState(false);
     const [stitchDirection, setStitchDirection] = useState('');
     const [currentImagePlotIndex, setCurrentImagePlotIndex] = useState(null);
+    const [startImageName, setStartImageName] = useState(null);
 
     useEffect(() => {
         if (open) {
@@ -130,48 +131,31 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         setImageLoading(false);
     };
 
+    const handleCancel = () => {
+        setPlotSelectionState('start');
+        setStartImageName(null);
+    };
+
     const handlePlotSelection = async () => {
         const imageName = imageList[imageIndex];
-        // const endpoint = plotSelectionState === 'start' ? 'mark_plot_start' : 'mark_plot_end';
-        try {
-            const response = await fetch(`${flaskUrl}mark_plot_start`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    directory: directory || {},
-                    image_name: imageName || {},
-                    plot_index: plotIndex || 0,
-                    camera: obj.camera || {},
-                }),
-            });
-
-            if (response.ok) {
-                // if (plotSelectionState === 'start') {
-                setPlotSelectionState('end');
-                // } else {
-                //     // This part is now handled in handleStitchDirectionSelection
-                // }
-            } else {
-                console.error("Failed to mark plot:", response.statusText);
-            }
-        } catch (error) {
-            console.error("Error marking plot:", error);
+        if (plotSelectionState === 'start') {
+            setStartImageName(imageName);
+            setPlotSelectionState('end');
         }
     };
 
     const handleStitchDirectionSelection = async (direction) => {
-        const imageName = imageList[imageIndex];
+        const endImageName = imageList[imageIndex];
         try {
-            const response = await fetch(`${flaskUrl}mark_plot_end`, {
+            const response = await fetch(`${flaskUrl}mark_plot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     directory: directory,
-                    image_name: imageName,
+                    start_image_name: startImageName,
+                    end_image_name: endImageName,
                     plot_index: plotIndex,
                     camera: obj.camera,
                     stitch_direction: direction,
@@ -183,6 +167,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 setPlotIndex(newPlotIndex);
                 onPlotIndexChange(newPlotIndex);
                 setPlotSelectionState('start');
+                setStartImageName(null);
             } else {
                 console.error("Failed to mark plot end with stitch direction");
             }
@@ -211,6 +196,12 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 if (newIndex !== imageIndex) {
                     setImageIndex(newIndex);
                     setImageLoading(true);
+                }
+            } else if (e.key === 'Enter') {
+                if (plotSelectionState === 'start') {
+                    handlePlotSelection();
+                } else {
+                    setStitchDirectionDialogOpen(true);
                 }
             }
         };
@@ -348,6 +339,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                         >
                             {plotSelectionState === 'start' ? 'Start' : 'End'}
                         </Button>
+                        {plotSelectionState === 'end' && (
+                            <Button variant="contained" onClick={handleCancel}>
+                                Cancel
+                            </Button>
+                        )}
                         <Button variant="contained" onClick={handleNext} disabled={imageIndex === imageList.length - 1}>Next</Button>
                     </Box>
                 </DialogContent>
