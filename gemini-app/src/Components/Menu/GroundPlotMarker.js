@@ -195,6 +195,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     plot_index: plotIndex,
                     camera: obj.camera,
                     stitch_direction: direction,
+                    original_plot_index: originalPlotIndex,
                 }),
             });
 
@@ -243,7 +244,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         console.log("Image Index:", imageIdx, "Plot Index:", plot.plot_index);
         if (imageIdx !== -1) {
             if (originalPlotIndex === null) {
-                setOriginalPlotIndex(plotIndex);
+                setOriginalPlotIndex(plot.plot_index);
+                console.log("Original Plot Index set to:", plot.plot_index);
             }
             setPlotIndex(plot.plot_index);
             setImageIndex(imageIdx);
