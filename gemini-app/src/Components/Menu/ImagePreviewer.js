@@ -26,6 +26,7 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
 
     useEffect(() => {
         if (open) {
+            setImageIndex(0);
             if(obj.platform === 'rover'){
                 const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
                 setDirectory(newDirectory);

@@ -14,10 +14,11 @@ import {
     LinearProgress,
     IconButton
 } from "@mui/material";
+import dedent from "dedent";
 import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
 
-const OrthoModal = () => {
+const OrthoModal = ( {selectedOrthoMethod} ) => {
     const {
         orthoSetting,
         orthoCustomValue,
@@ -43,13 +44,30 @@ const OrthoModal = () => {
         setIsOrthoProcessing, 
         setOrthoServerStatus,
         setIsImageViewerOpen,
-        setProcessRunning
+        setProcessRunning,
+        setImageViewerLoading
     } = useDataSetters();
 
     const [submitError, setSubmitError] = useState("");
     // Process sliderMarks to check the label value for pointX and pointY
     const labeledGcpImages = sliderMarks.filter((mark) => mark.label.props.color !== "rgba(255,255,255,0)");
     const labeledGcpImagesCount = labeledGcpImages.length;
+
+    useEffect(() => {
+        if (
+            selectedOrthoMethod === "STITCH"
+        ) {
+            setOrthoCustomValue(
+                dedent(`
+                    stitching_direction: RIGHT
+                    mask: [0, 0, 0, 0]
+                    forward_limit: 8
+                    max_reprojection_error: 3.0
+                    save_full_resolution: True
+                `)
+            );
+        }
+    }, [orthoSetting, selectedOrthoMethod]);
 
     /*
     Python args for ODM:
@@ -81,7 +99,13 @@ const OrthoModal = () => {
             reconstruction_quality: orthoSetting,
             custom_options: orthoCustomValue ? orthoCustomValue : [],
         };
-        fetch(`${flaskUrl}run_odm`, {
+        const endpoint = selectedOrthoMethod === "STITCH" ? "run_stitch" : "run_odm";
+
+        // global variable to find ortho method and data
+        window.selectedOrthoMethod = selectedOrthoMethod;
+        window.orthoData = data;
+
+        fetch(`${flaskUrl}${endpoint}`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -97,11 +121,13 @@ const OrthoModal = () => {
             .then((data) => {
                 console.log("Success:", data);
                 setOrthoServerStatus("Success!");
+                setImageViewerLoading(false);
             })
             .catch((error) => {
                 console.error("Error:", error);
                 setOrthoServerStatus("Error generating ortho");
                 setSubmitError("Error starting ortho generation.")
+                setImageViewerLoading(false);
 
                 alert("Error starting ortho generation. Please try again.");
             });
@@ -135,13 +161,15 @@ const OrthoModal = () => {
                     {orthoSetting === "Custom" && (
                         <Grid item>
                             <TextField
-                                label="Custom Settings"
-                                value={orthoCustomValue}
-                                onChange={(e) => setOrthoCustomValue(e.target.value)}
-                                fullWidth // Using full width for consistent layout
+                            label="Custom Settings"
+                            value={orthoCustomValue}
+                            onChange={(e) => setOrthoCustomValue(e.target.value)}
+                            fullWidth
+                            multiline
+                            minRows={4} // or however many lines you want by default
                             />
                             <Typography align="center" color="error" style={{ marginTop: 8 }}>
-                                OpenDroneMap args. Only use if you know what you're doing!
+                            Only use if you know what you're doing!
                             </Typography>
                         </Grid>
                     )}
@@ -200,7 +228,13 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
             const fetchLogs = async () => {
                 setLoadingLogs(true);
                 try {
-                    const response = await fetch(`${flaskUrl}get_odm_logs`);
+                    const response = await fetch(`${flaskUrl}get_odm_logs`,{
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({method: window.selectedOrthoMethod, orthoData: window.orthoData}),
+                    });
                     const data = await response.json();
                     if (response.ok) {
                         console.log("Logs:", data);
