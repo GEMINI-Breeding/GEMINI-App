@@ -503,7 +503,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     </TableContainer>
                 </Drawer>
             </Box>
-            <Dialog open={stitchDirectionDialogOpen} onClose={() => setStitchDirectionDialogOpen(false)}>
+            <Dialog open={stitchDirectionDialogOpen} onClose={() => setStitchDirectionDialogOpen(false)} onKeyDown={(e) => {
+                if (e.key === 'Enter' && stitchDirection) {
+                    handleStitchDirectionSelection(stitchDirection);
+                }
+            }}>
                 <DialogTitle>Select Plot Stitch Direction</DialogTitle>
                 <DialogContent>
                     <Typography>Please select the direction of the plot stitching.</Typography>
