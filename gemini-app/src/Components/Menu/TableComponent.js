@@ -328,6 +328,26 @@ export const TableComponent = () => {
     const handleMarkPlots = async (id) => {
         const row = procData.find((row) => row.id === id);
         if (row) {
+            try {
+                const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        year: row.year,
+                        experiment: row.experiment,
+                        location: row.location,
+                        population: row.population,
+                        date: row.date,
+                    }),
+                });
+                if (!filterResponse.ok) {
+                    const errorData = await filterResponse.json().catch(() => null); // Avoid crashing if body is not json
+                    console.warn('Could not pre-populate plot markings.', errorData?.error);
+                }
+            } catch (error) {
+                console.error("Error pre-populating plot markings:", error);
+            }
+
             const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
             let directory;
             if (row.platform === 'rover') {
