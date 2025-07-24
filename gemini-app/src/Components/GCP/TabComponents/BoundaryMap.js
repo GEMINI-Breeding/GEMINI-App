@@ -45,6 +45,7 @@ function BoundaryMap({ task }) {
         selectedYearGCP,
         selectedExperimentGCP,
         prepOrthoImagePath,
+        prepAgRowStitchPlotPaths,
         cursorStyle,
         featureCollectionPop,
         featureCollectionPlot,
@@ -58,6 +59,7 @@ function BoundaryMap({ task }) {
             : [featureCollectionPlot, setFeatureCollectionPlot];
 
     const [prepOrthoTileLayer, setPrepOrthoTileLayer] = useState(null);
+    const [agRowStitchTileLayers, setAgRowStitchTileLayers] = useState([]);
     const [hoverInfoGCP, setHoverInfoGCP] = useState(null);
     
     useEffect(() => {
@@ -96,6 +98,47 @@ function BoundaryMap({ task }) {
 
         setPrepOrthoTileLayer(newPrepOrthoTileLayer);
     }, [prepOrthoImagePath]);
+
+    // Handle AgRowStitch plot paths
+    useEffect(() => {
+        if (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) {
+            const newTileLayers = prepAgRowStitchPlotPaths.map((plot, index) => {
+                return new TileLayer({
+                    id: `agrowstitch-plot-${index}`,
+                    minZoom: 10,
+                    maxZoom: 48,
+                    tileSize: 256,
+                    data: TILE_URL_TEMPLATE.replace(
+                        "${FILE_PATH}",
+                        encodeURIComponent(`${flaskUrl}files/${plot.fullPath}`)
+                    ),
+                    renderSubLayers: (props) => {
+                        const {
+                            bbox: { west, south, east, north },
+                        } = props.tile;
+
+                        return new BitmapLayer(props, {
+                            data: null,
+                            image: props.data,
+                            bounds: [west, south, east, north],
+                        });
+                    },
+                });
+            });
+            
+            setAgRowStitchTileLayers(newTileLayers);
+            
+            // Set bounds URL for the first plot to get initial extent
+            if (prepAgRowStitchPlotPaths[0]) {
+                const firstPlotPath = "files/" + prepAgRowStitchPlotPaths[0].fullPath;
+                const encodedPath = encodeURIComponent(`${flaskUrl}${firstPlotPath}`);
+                setBoundsUrl(INITIAL_BOUNDS_URL.replace("${FILE_PATH}", encodedPath));
+                setSelectedTilePath(firstPlotPath);
+            }
+        } else {
+            setAgRowStitchTileLayers([]);
+        }
+    }, [prepAgRowStitchPlotPaths]);
 
     const extentBounds = useExtentFromBounds(boundsUrl);
 
@@ -283,7 +326,9 @@ function BoundaryMap({ task }) {
                 initialViewState={viewState}
                 controller={controller}
                 layers={
-                    mode === selectionMode ? [prepOrthoTileLayer, layer, selectionLayer] : [prepOrthoTileLayer, layer]
+                    mode === selectionMode ? 
+                        [prepOrthoTileLayer, ...agRowStitchTileLayers, layer, selectionLayer].filter(Boolean) : 
+                        [prepOrthoTileLayer, ...agRowStitchTileLayers, layer].filter(Boolean)
                 }
                 onViewStateChange={({ viewState }) => setViewState(viewState)}
                 getCursor={() => cursorStyle}
@@ -308,6 +353,22 @@ function BoundaryMap({ task }) {
             {task === "plot_boundary" && <PlotProposalSwitcher />}
             {showTooltipGCP && (
                 <GeoJsonTooltip hoverInfo={hoverInfoGCP} selectedMetric={["row", "column", "plot", "accession"]} />
+            )}
+            {task === "plot_boundary" && prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0 && (
+                <div style={{
+                    position: 'absolute',
+                    top: 10,
+                    right: 10,
+                    background: 'rgba(76, 175, 80, 0.9)',
+                    color: 'white',
+                    padding: '8px 12px',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                    zIndex: 1000
+                }}>
+                    AgRowStitch plots available ({prepAgRowStitchPlotPaths.length})
+                </div>
             )}
         </div>
     );

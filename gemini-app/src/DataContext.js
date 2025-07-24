@@ -114,6 +114,7 @@ export const DataProvider = ({ children }) => {
     const [prepGcpFilePath, setPrepGcpFilePath] = useState("");
     const [prepDroneImagePath, setPrepDroneImagePath] = useState("");
     const [prepOrthoImagePath, setPrepOrthoImagePath] = useState("");
+    const [prepAgRowStitchPlotPaths, setPrepAgRowStitchPlotPaths] = useState([]);
     const [activeStepBoundaryPrep, setActiveStepBoundaryPrep] = useState(0);
     const [selectedTabPrep, setSelectedTabPrep] = useState(0);
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
@@ -282,6 +283,7 @@ export const DataProvider = ({ children }) => {
                 prepGcpFilePath,
                 prepDroneImagePath,
                 prepOrthoImagePath,
+                prepAgRowStitchPlotPaths,
                 activeStepBoundaryPrep,
                 selectedTabPrep,
                 featureCollectionPop,
@@ -431,6 +433,7 @@ export const DataProvider = ({ children }) => {
                     setPrepGcpFilePath,
                     setPrepDroneImagePath,
                     setPrepOrthoImagePath,
+                    setPrepAgRowStitchPlotPaths,
                     setActiveStepBoundaryPrep,
                     setSelectedTabPrep,
                     setFeatureCollectionPop,

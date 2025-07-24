@@ -11,17 +11,29 @@ import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
 import DataImporter from "./DataImporter";
+import AgRowStitchPlotLabeler from "./AgRowStitchPlotLabeler";
 
 import useTrackComponent from "../../../useTrackComponent";
 
 function PlotBoundaryPrep() {
     useTrackComponent("PlotBoundaryPrep");
 
-    const { imageList, isImageViewerOpen, activeStepBoundaryPrep } = useDataState();
+    const { 
+        imageList, 
+        isImageViewerOpen, 
+        activeStepBoundaryPrep,
+        prepAgRowStitchPlotPaths 
+    } = useDataState();
     const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 
     const handleProcessImages = useHandleProcessImages();
-    const steps = ["Import Data", "Population Boundary", "Plot Boundary"]; // Adjust as needed
+    
+    // Conditionally include AgRowStitch Labeling step based on whether AgRowStitch data is selected
+    const isAgRowStitchSelected = prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0;
+    const baseSteps = ["Import Data", "Population Boundary", "Plot Boundary"];
+    const steps = isAgRowStitchSelected 
+        ? [...baseSteps, "AgRowStitch Labeling"] 
+        : baseSteps;
 
     const largerIconStyle = {
         fontSize: "2rem", // Adjust for desired size
@@ -40,6 +52,10 @@ function PlotBoundaryPrep() {
     };
 
     const handleReturnClick = (index) => {
+        // Prevent navigation to AgRowStitch step if no AgRowStitch data is selected
+        if (index === 3 && !isAgRowStitchSelected) {
+            return;
+        }
         // If the active step is greater than the index, go back to the index
         // if (activeStepBoundaryPrep > index) {
         //     setActiveStepBoundaryPrep(index);
@@ -56,6 +72,15 @@ function PlotBoundaryPrep() {
             setActiveStepBoundaryPrep(0);
         }
     }, [isImageViewerOpen]);
+
+    // Effect to handle step adjustment when AgRowStitch selection changes
+    useEffect(() => {
+        // If currently on AgRowStitch step (step 3) but AgRowStitch is no longer selected,
+        // move back to step 2 (Plot Boundary)
+        if (activeStepBoundaryPrep === 3 && !isAgRowStitchSelected) {
+            setActiveStepBoundaryPrep(2);
+        }
+    }, [isAgRowStitchSelected, activeStepBoundaryPrep, setActiveStepBoundaryPrep]);
 
     return (
         <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
@@ -98,6 +123,14 @@ function PlotBoundaryPrep() {
             {activeStepBoundaryPrep === 2 && (
                 <Grid item container justifyContent="center" spacing={2}>
                     <BoundaryMap task={"plot_boundary"} />
+                </Grid>
+            )}
+
+            {activeStepBoundaryPrep === 3 && isAgRowStitchSelected && (
+                <Grid item container justifyContent="center" spacing={2}>
+                    <Grid item xs={12}>
+                        <AgRowStitchPlotLabeler />
+                    </Grid>
                 </Grid>
             )}
         </Grid>

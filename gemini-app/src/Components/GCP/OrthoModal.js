@@ -59,7 +59,6 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
         ) {
             setOrthoCustomValue(
                 dedent(`
-                    stitching_direction: RIGHT
                     mask: [0, 0, 0, 0]
                     forward_limit: 8
                     max_reprojection_error: 3.0

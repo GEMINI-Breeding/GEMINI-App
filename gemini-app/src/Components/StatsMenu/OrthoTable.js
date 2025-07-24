@@ -166,22 +166,41 @@ const OrthoTable = () => {
     };
 
     const handleDeleteOrtho = async (row) => {
-        if (window.confirm(`Are you sure you want to delete the ortho for ${row.date}?`)) {
+        const deleteMessage = row.isPlotBased 
+            ? `Are you sure you want to delete the ${row.type} for ${row.date}?`
+            : `Are you sure you want to delete the ortho for ${row.date}?`;
+            
+        if (window.confirm(deleteMessage)) {
             try {
+                const deletePayload = {
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: row.date,
+                    platform: row.platform,
+                    sensor: row.sensor,
+                };
+
+                // For AgRowStitch entries, include the specific version directory
+                if (row.isPlotBased) {
+                    deletePayload.agrowstitchDir = row.agrowstitchDir; // Use the correct AgRowStitch directory name
+                    deletePayload.deleteType = 'agrowstitch';
+                    console.log(`Deleting AgRowStitch directory: ${row.agrowstitchDir}`);
+                } else {
+                    deletePayload.fileName = row.fileName; // This should be the specific file like "2023-06-15-RGB-Pyramid.tif"
+                    deletePayload.deleteType = 'ortho';
+                    console.log(`Deleting orthomosaic file: ${row.fileName}`);
+                }
+
+                console.log('Delete payload:', deletePayload);
+
                 const response = await fetch(`${flaskUrl}delete_ortho`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        year: selectedYearGCP,
-                        experiment: selectedExperimentGCP,
-                        location: selectedLocationGCP,
-                        population: selectedPopulationGCP,
-                        date: row.date,
-                        platform: row.platform,
-                        sensor: row.sensor,
-                    }),
+                    body: JSON.stringify(deletePayload),
                 });
 
                 if (!response.ok) {

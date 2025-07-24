@@ -791,6 +791,9 @@ const FileUploadComponent = () => {
                             <Typography>
                                 {extractingBinary ? "Extracting Binary File..." : "Uploading..."} {`${Math.round(progress)}%`}
                             </Typography>
+                            <Typography variant="body2" color="warning.main" sx={{ mt: 1, fontWeight: 'bold' }}>
+                                ⚠️ Do not leave this page and keep your computer on during the upload process
+                            </Typography>
                             <LinearProgress variant="determinate" value={progress} />
                             <Button
                                 variant="contained"

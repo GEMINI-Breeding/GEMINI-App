@@ -43,14 +43,28 @@ function mergeCsvDataWithGeoJson(featureCollection, csvData) {
         const csvRow = csvData.find((data) => data.row == row && data.col == column);
 
         if (csvRow) {
-            // Assuming the data from the CSV might need transformation if keys differ
-            // Adjust as necessary based on actual CSV and GeoJSON structure
+            // Map CSV data to GeoJSON properties, prioritizing standard field names
             for (const key in csvRow) {
                 if (key !== "row" && key !== "col") {
                     feature.properties[key] = csvRow[key];
                 }
             }
+            
+            // Ensure standard properties are set for AgRowStitch compatibility
+            if (csvRow.plot && !feature.properties.plot) {
+                feature.properties.plot = csvRow.plot;
+            }
+            if (csvRow.Plot && !feature.properties.Plot) {
+                feature.properties.Plot = csvRow.Plot;
+            }
+            if (csvRow.accession && !feature.properties.accession) {
+                feature.properties.accession = csvRow.accession;
+            }
+            if (csvRow.Accession && !feature.properties.Accession) {
+                feature.properties.Accession = csvRow.Accession;
+            }
         } else {
+            // Set default values for features without CSV matches
             for (const key of csvKeys) {
                 if (key !== "row" && key !== "col") {
                     feature.properties[key] = null;
@@ -60,6 +74,10 @@ function mergeCsvDataWithGeoJson(featureCollection, csvData) {
                     feature.properties[key] = column;
                 }
             }
+            
+            // Set default plot identifier based on row/column for AgRowStitch
+            feature.properties.plot = feature.properties.plot || `${row}_${column}`;
+            feature.properties.Plot = feature.properties.Plot || `${row}_${column}`;
         }
     });
 }
@@ -141,18 +159,77 @@ function PlotProposalSwitcher() {
     const { setFeatureCollectionPlot } = useDataSetters();
     const [options, setOptions] = useState(polygonProposalOptions);
     const [fieldDesign, setFieldDesign] = useState(null);
+    const [agrowstitchAvailable, setAgrowstitchAvailable] = useState(false);
 
     useEffect(() => {
-        getAndParseFieldDesign(
-            flaskUrl,
-            selectedYearGCP,
-            selectedExperimentGCP,
-            selectedLocationGCP,
-            selectedPopulationGCP
-        ).then((data) => {
-            setFieldDesign(data);
-        });
+        if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
+            getAndParseFieldDesign(
+                flaskUrl,
+                selectedYearGCP,
+                selectedExperimentGCP,
+                selectedLocationGCP,
+                selectedPopulationGCP
+            ).then((data) => {
+                setFieldDesign(data);
+            }).catch((error) => {
+                console.log("No field design found, continuing without CSV data");
+                setFieldDesign(null);
+            });
+            
+            // Check for AgRowStitch availability
+            checkAgrowstitchAvailability();
+        }
     }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+
+    const checkAgrowstitchAvailability = async () => {
+        try {
+            const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+            const response = await fetch(`${flaskUrl}list_dirs/${basePath}`);
+            const dates = await response.json();
+            
+            let hasAgrowstitch = false;
+            for (const date of dates) {
+                if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    // Check if this date has AgRowStitch data
+                    try {
+                        const platformResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}`);
+                        const platforms = await platformResponse.json();
+                        
+                        for (const platform of platforms) {
+                            try {
+                                const sensorResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}`);
+                                const sensors = await sensorResponse.json();
+                                
+                                for (const sensor of sensors) {
+                                    try {
+                                        const dirResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
+                                        const dirs = await dirResponse.json();
+                                        
+                                        if (dirs.some(dir => dir.startsWith('AgRowStitch_v'))) {
+                                            hasAgrowstitch = true;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        continue;
+                                    }
+                                }
+                                if (hasAgrowstitch) break;
+                            } catch (e) {
+                                continue;
+                            }
+                        }
+                        if (hasAgrowstitch) break;
+                    } catch (e) {
+                        continue;
+                    }
+                }
+            }
+            setAgrowstitchAvailable(hasAgrowstitch);
+        } catch (error) {
+            console.log("Error checking AgRowStitch availability:", error);
+            setAgrowstitchAvailable(false);
+        }
+    };
 
     const applyUpdatedOptions = useCallback(
         (updatedOptions) => {
@@ -239,6 +316,16 @@ function PlotProposalSwitcher() {
                     </Button>
                     <Box sx={{ margin: 0 }}>
                         <Typography variant="h6">Rectangle Options</Typography>
+                        {agrowstitchAvailable && (
+                            <Typography variant="caption" color="success.main" sx={{ display: 'block', mb: 1 }}>
+                                ✓ AgRowStitch data detected - plot labeling available
+                            </Typography>
+                        )}
+                        {fieldDesign && (
+                            <Typography variant="caption" color="info.main" sx={{ display: 'block', mb: 1 }}>
+                                ✓ Field design data loaded ({fieldDesign.length} entries)
+                            </Typography>
+                        )}
                         <TextField
                             label="Width (m)"
                             name="width"
