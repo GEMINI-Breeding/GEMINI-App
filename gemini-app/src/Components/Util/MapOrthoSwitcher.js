@@ -115,10 +115,13 @@ export const MapOrthoSwitcher = () => {
                                         const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
                                         if (agrowstitchDirs.length === 0) return false;
 
-                                        // Check if any AgRowStitch version has UTM TIF files
+                                        // Check if any AgRowStitch version has combined mosaic OR UTM TIF files
                                         const versionChecks = agrowstitchDirs.map((agrowstitchDir) =>
                                             fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`)
-                                                .then((files) => files.some((file) => file.includes("_utm.tif")))
+                                                .then((files) => 
+                                                    files.some((file) => file === "combined_mosaic_utm.tif") ||
+                                                    files.some((file) => file.includes("_utm.tif"))
+                                                )
                                                 .catch(() => false)
                                         );
 
@@ -127,13 +130,13 @@ export const MapOrthoSwitcher = () => {
                                     .catch(() => false)
                             );
 
-                            // Return true if any sensor contains AgRowStitch UTM TIF files
+                            // Return true if any sensor contains AgRowStitch files
                             return Promise.all(sensorChecks).then((results) => results.some((res) => res));
                         })
                         .catch(() => false)
                 );
 
-                // Return true if any platform contains valid AgRowStitch UTM TIF files
+                // Return true if any platform contains valid AgRowStitch files
                 return Promise.all(platformChecks).then((results) => results.some((res) => res));
             })
             .catch(() => false);
@@ -195,25 +198,43 @@ export const MapOrthoSwitcher = () => {
                         
                         for (const agrowstitchDir of agrowstitchDirs) {
                             const agrowstitchFiles = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
-                            const utmFiles = agrowstitchFiles.filter(file => file.includes("_utm.tif"));
                             
-                            if (utmFiles.length > 0) {
+                            // First, check for combined mosaic
+                            const hasCombinedMosaic = agrowstitchFiles.some(file => file === "combined_mosaic_utm.tif");
+                            
+                            if (hasCombinedMosaic) {
+                                // Use combined mosaic
                                 orthoTypes.push({
-                                    type: 'agrowstitch',
-                                    label: `${agrowstitchDir} (${platform}/${sensor})`,
-                                    path: `${basePath}/${platform}/${sensor}/${agrowstitchDir}`,
+                                    type: 'agrowstitch_combined',
+                                    label: `${agrowstitchDir} - Combined Mosaic (${platform}/${sensor})`,
+                                    path: `${basePath}/${platform}/${sensor}/${agrowstitchDir}/combined_mosaic_utm.tif`,
                                     platform,
                                     sensor,
                                     version: agrowstitchDir,
-                                    plots: utmFiles.map(file => {
-                                        const match = file.match(/georeferenced_plot_(\d+)_utm\.tif/);
-                                        return {
-                                            plotNumber: match ? match[1] : 'unknown',
-                                            filename: file,
-                                            fullPath: `${basePath}/${platform}/${sensor}/${agrowstitchDir}/${file}`
-                                        };
-                                    })
+                                    combinedMosaic: true
                                 });
+                            } else {
+                                // Fall back to individual plots if no combined mosaic
+                                const utmFiles = agrowstitchFiles.filter(file => file.includes("_utm.tif"));
+                                
+                                if (utmFiles.length > 0) {
+                                    orthoTypes.push({
+                                        type: 'agrowstitch',
+                                        label: `${agrowstitchDir} - Individual Plots (${platform}/${sensor})`,
+                                        path: `${basePath}/${platform}/${sensor}/${agrowstitchDir}`,
+                                        platform,
+                                        sensor,
+                                        version: agrowstitchDir,
+                                        plots: utmFiles.map(file => {
+                                            const match = file.match(/georeferenced_plot_(\d+)_utm\.tif/);
+                                            return {
+                                                plotNumber: match ? match[1] : 'unknown',
+                                                filename: file,
+                                                fullPath: `${basePath}/${platform}/${sensor}/${agrowstitchDir}/${file}`
+                                            };
+                                        })
+                                    });
+                                }
                             }
                         }
                     } catch (error) {
@@ -237,8 +258,12 @@ export const MapOrthoSwitcher = () => {
             // For drone orthomosaics, set the path directly and clear AgRowStitch paths
             setPrepOrthoImagePath(orthoType.path);
             setPrepAgRowStitchPlotPaths([]);
+        } else if (orthoType.type === 'agrowstitch_combined') {
+            // For AgRowStitch combined mosaic, treat it like a single orthomosaic
+            setPrepOrthoImagePath(orthoType.path);
+            setPrepAgRowStitchPlotPaths([]);
         } else if (orthoType.type === 'agrowstitch') {
-            // For AgRowStitch, set all plot paths and clear single orthomosaic
+            // For AgRowStitch individual plots, set all plot paths and clear single orthomosaic
             setPrepOrthoImagePath('');
             setPrepAgRowStitchPlotPaths(orthoType.plots || []);
         }
@@ -316,11 +341,12 @@ export const MapOrthoSwitcher = () => {
                         <Typography variant="caption" style={{ marginTop: "5px", fontSize: "0.7rem" }}>
                             {selectedOrthoType.type === 'drone' ? 
                                 'Using drone orthomosaic' : 
-                                `Using ${selectedOrthoType.version} - All ${selectedOrthoType.plots?.length || 0} plots displayed`
+                                selectedOrthoType.type === 'agrowstitch_combined' ?
+                                    'Using AgRowStitch combined mosaic' :
+                                    `Using ${selectedOrthoType.version} - Individual plots (${selectedOrthoType.plots?.length || 0} plots)`
                             }
                         </Typography>
                     )}
-                    
                     <Button
                         onClick={toggleMinimize}
                         style={{

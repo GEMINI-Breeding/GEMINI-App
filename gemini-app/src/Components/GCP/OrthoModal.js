@@ -63,6 +63,7 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                     forward_limit: 8
                     max_reprojection_error: 3.0
                     save_full_resolution: True
+                    save_resized_resolution: False
                 `)
             );
         }

@@ -48,9 +48,9 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
                 `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}`
             );
 
-            // Filter for plot image files
+            // Filter for plot image files (include both PNG and TIFF)
             const plotImages = plotFiles
-                .filter(file => file.startsWith('full_res_mosaic_temp_plot_') && file.endsWith('.png'))
+                .filter(file => file.startsWith('full_res_mosaic_temp_plot_') && (file.endsWith('.png') || file.endsWith('.tif')))
                 .sort((a, b) => {
                     // Sort by plot number
                     const plotNumA = parseInt(a.match(/plot_(\d+)/)?.[1] || 0);
@@ -61,12 +61,12 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
             setPlotImages(plotImages);
             setCurrentPlotIndex(0);
             setLoading(false);
-            
+
             // Load the first image
             if (plotImages.length > 0) {
                 loadPlotImage(plotImages[0], date, platform, sensor, agrowstitchDir);
             }
-            
+
         } catch (error) {
             console.error('Error fetching plot images:', error);
             setLoading(false);
@@ -81,6 +81,21 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
             }
 
             const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}/${fileName}`;
+            // If TIFF, request server to convert it to PNG
+            if (fileName.endsWith('.tif')) {
+                const response = await fetch(`${flaskUrl}get_tif_to_png`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: imagePath })
+                });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    setCurrentImageUrl(url);
+                    return;
+                }
+            }
+
             console.log('Loading image path:', imagePath);
             
             // Try the existing /files/ endpoint first
