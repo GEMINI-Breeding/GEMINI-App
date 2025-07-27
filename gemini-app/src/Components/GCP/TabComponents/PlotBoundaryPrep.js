@@ -22,17 +22,20 @@ function PlotBoundaryPrep() {
         imageList, 
         isImageViewerOpen, 
         activeStepBoundaryPrep,
-        prepAgRowStitchPlotPaths 
+        prepAgRowStitchPlotPaths,
+        prepOrthoImagePath 
     } = useDataState();
     const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 
     const handleProcessImages = useHandleProcessImages();
     
     // Conditionally include AgRowStitch Labeling step based on whether AgRowStitch data is selected
-    const isAgRowStitchSelected = prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0;
+    // This includes both individual plot paths OR a combined AgRowStitch mosaic
+    const isAgRowStitchSelected = (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) || 
+                                  (prepOrthoImagePath && prepOrthoImagePath.includes('AgRowStitch'));
     const baseSteps = ["Import Data", "Population Boundary", "Plot Boundary"];
     const steps = isAgRowStitchSelected 
-        ? [...baseSteps, "AgRowStitch Labeling"] 
+        ? [...baseSteps, "Assign Plot Labels"] 
         : baseSteps;
 
     const largerIconStyle = {

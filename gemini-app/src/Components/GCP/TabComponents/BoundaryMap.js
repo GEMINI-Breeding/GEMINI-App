@@ -300,6 +300,8 @@ function BoundaryMap({ task }) {
                 // When hovering over a feature in translate mode, select it
                 setSelectedFeatureIndexes([index]);
             }
+            
+            // Update hoverInfoGCP state to show tooltip info
             setHoverInfoGCP({ object: object, x: x, y: y });
         },
     });
@@ -318,6 +320,8 @@ function BoundaryMap({ task }) {
 
     const controller = {
         doubleClickZoom: !(mode === drawPolygonMode || mode === modifyMode),
+        dragPan: !(mode === translateMode), // Disable map panning when in translate mode
+        dragRotate: !(mode === translateMode), // Disable map rotation when in translate mode
     };
 
     return (
@@ -347,6 +351,7 @@ function BoundaryMap({ task }) {
                 setMode={setMode}
                 task={task}
                 featureCollection={featureCollection}
+                selectedFeatureIndexes={selectedFeatureIndexes}
                 setSelectedFeatureIndexes={setSelectedFeatureIndexes}
             />
             <MapOrthoSwitcher />
@@ -359,7 +364,7 @@ function BoundaryMap({ task }) {
                     position: 'absolute',
                     top: 10,
                     right: 10,
-                    background: 'rgba(76, 175, 80, 0.9)',
+                    background: 'rgba(49, 28, 188, 0.9)',
                     color: 'white',
                     padding: '8px 12px',
                     borderRadius: '4px',

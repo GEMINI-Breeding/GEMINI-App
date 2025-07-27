@@ -219,12 +219,12 @@ function AgRowStitchPlotLabeler() {
             <CardContent>
                 <Box display="flex" alignItems="center" mb={2}>
                     <Assignment sx={{ mr: 1 }} />
-                    <Typography variant="h6">AgRowStitch Plot Labeling</Typography>
+                    <Typography variant="h6">Plot Labeling</Typography>
                 </Box>
 
                 <Typography variant="body2" color="text.secondary" mb={3}>
                     Associate stitched plots with plot boundaries to add plot labels to your dataset.
-                    This will update the msgs_synced.csv file with plot and accession information.
+                    This will update the plot_borders.csv file with Plot and Accession information.
                 </Typography>
 
                 {/* Date Selection */}
