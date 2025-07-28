@@ -7,6 +7,7 @@ import { useDataState, useDataSetters } from "../../DataContext";
 
 import PlotBoundaryPrep from "./TabComponents/PlotBoundaryPrep";
 import AerialDataPrep from "./TabComponents/AerialDataPrep";
+import Processing from "./TabComponents/Processing";
 
 import useTrackComponent from "../../useTrackComponent";
 import RoverPrepTabs from "./TabComponents/Processing/RoverPrepTabs";
@@ -61,6 +62,7 @@ function TabbedPrepUI() {
                     <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
                         <Tab label="Orthomosaic Generation" style={titleStyle} />
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
+                        <Tab label="Processing" style={titleStyle} />
                         <Tab label="Aerial Processing" style={titleStyle} />
                         <Tab label="Ground Processing" style={titleStyle} />
                     </Tabs>
@@ -70,8 +72,9 @@ function TabbedPrepUI() {
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
                     {selectedTabPrep === 0 && <AerialDataPrep />}
                     {selectedTabPrep === 1 && <PlotBoundaryPrep />}
-                    {selectedTabPrep === 2 && <AerialPrepTabs />}
-                    {selectedTabPrep === 3 && <RoverPrepTabs />}
+                    {selectedTabPrep === 2 && <Processing />}
+                    {selectedTabPrep === 3 && <AerialPrepTabs />}
+                    {selectedTabPrep === 4 && <RoverPrepTabs />}
                 </Grid>
             )}
         </Grid>

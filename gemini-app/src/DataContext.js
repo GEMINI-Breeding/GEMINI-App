@@ -116,6 +116,7 @@ export const DataProvider = ({ children }) => {
     const [prepOrthoImagePath, setPrepOrthoImagePath] = useState("");
     const [prepAgRowStitchPlotPaths, setPrepAgRowStitchPlotPaths] = useState([]);
     const [activeStepBoundaryPrep, setActiveStepBoundaryPrep] = useState(0);
+    const [activeStepProcessing, setActiveStepProcessing] = useState(0);
     const [selectedTabPrep, setSelectedTabPrep] = useState(0);
     const [featureCollectionPop, setFeatureCollectionPop] = useState(null);
     const [featureCollectionPlot, setFeatureCollectionPlot] = useState(null);
@@ -285,6 +286,7 @@ export const DataProvider = ({ children }) => {
                 prepOrthoImagePath,
                 prepAgRowStitchPlotPaths,
                 activeStepBoundaryPrep,
+                activeStepProcessing,
                 selectedTabPrep,
                 featureCollectionPop,
                 featureCollectionPlot,
@@ -435,6 +437,7 @@ export const DataProvider = ({ children }) => {
                     setPrepOrthoImagePath,
                     setPrepAgRowStitchPlotPaths,
                     setActiveStepBoundaryPrep,
+                    setActiveStepProcessing,
                     setSelectedTabPrep,
                     setFeatureCollectionPop,
                     setFeatureCollectionPlot,

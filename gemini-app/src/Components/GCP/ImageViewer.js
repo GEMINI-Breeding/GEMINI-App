@@ -322,7 +322,20 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                         overflow: "auto",
                         // padding: "10px",
                     }}>
-                        {imageViewerLoading && imageList.length == 0 && <CircularProgress />}
+                        {imageViewerLoading && imageList.length == 0 && (
+                            <div style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                alignItems: 'center', 
+                                justifyContent: 'center',
+                                gap: '16px'
+                            }}>
+                                <CircularProgress />
+                                <Typography variant="body2" color="textSecondary">
+                                    Loading GCP candidate images...
+                                </Typography>
+                            </div>
+                        )}
                         {imageList.length > 0 && (
                             <PointPicker
                                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
