@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Box, Button, Slider, TextField, Typography } from "@mui/material";
+import { 
+    Box, 
+    Button, 
+    Slider, 
+    TextField, 
+    Typography, 
+    FormGroup, 
+    FormControlLabel, 
+    Checkbox, 
+    FormControl, 
+    InputLabel, 
+    Select, 
+    MenuItem 
+} from "@mui/material";
 import DashboardCustomizeIcon from "@mui/icons-material/DashboardCustomize";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
@@ -34,32 +47,30 @@ function getAndParseFieldDesign(
         });
 }
 
+// Merge CSV data with GeoJSON data correctly and ensure field design is updated.
 function mergeCsvDataWithGeoJson(featureCollection, csvData) {
     const csvKeys = Object.keys(csvData[0]);
 
     featureCollection.features.forEach((feature) => {
         const { row, column } = feature.properties;
-
         const csvRow = csvData.find((data) => data.row == row && data.col == column);
 
         if (csvRow) {
-            // Assuming the data from the CSV might need transformation if keys differ
-            // Adjust as necessary based on actual CSV and GeoJSON structure
+            // Merge CSV data into the feature's properties
             for (const key in csvRow) {
                 if (key !== "row" && key !== "col") {
                     feature.properties[key] = csvRow[key];
                 }
             }
         } else {
-            for (const key of csvKeys) {
-                if (key !== "row" && key !== "col") {
-                    feature.properties[key] = null;
-                } else if (key === "row") {
-                    feature.properties[key] = row;
-                } else if (key === "col") {
-                    feature.properties[key] = column;
-                }
-            }
+            // Default values for unmatched features
+            feature.properties = {
+                ...feature.properties,
+                row,
+                column,
+                plot: `${row}_${column}`,
+                Plot: `${row}_${column}`,
+            };
         }
     });
 }
@@ -141,18 +152,152 @@ function PlotProposalSwitcher() {
     const { setFeatureCollectionPlot } = useDataSetters();
     const [options, setOptions] = useState(polygonProposalOptions);
     const [fieldDesign, setFieldDesign] = useState(null);
+    const [agrowstitchAvailable, setAgrowstitchAvailable] = useState(false);
+    
+    // Undo system
+    const [history, setHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+
+    // Add current state to history
+    const addToHistory = useCallback((newFeatureCollection, newOptions) => {
+        const newHistoryItem = {
+            featureCollection: JSON.parse(JSON.stringify(newFeatureCollection)),
+            options: { ...newOptions },
+            timestamp: Date.now()
+        };
+        
+        setHistory(prev => {
+            // Remove any history after current index (when we're not at the end)
+            const newHistory = prev.slice(0, historyIndex + 1);
+            newHistory.push(newHistoryItem);
+            
+            // Keep only last 20 items to prevent memory issues
+            if (newHistory.length > 20) {
+                return newHistory.slice(-20);
+            }
+            return newHistory;
+        });
+        
+        setHistoryIndex(prev => {
+            const newIndex = Math.min(prev + 1, 19); // Cap at 19 (0-indexed)
+            return newIndex;
+        });
+    }, [historyIndex]);
+
+    // Undo function
+    const undo = useCallback(() => {
+        if (historyIndex > 0) {
+            const newIndex = historyIndex - 1;
+            const historyItem = history[newIndex];
+            
+            setHistoryIndex(newIndex);
+            setOptions(historyItem.options);
+            setFeatureCollectionPlot(historyItem.featureCollection);
+        }
+    }, [history, historyIndex, setFeatureCollectionPlot]);
+
+    // Redo function
+    const redo = useCallback(() => {
+        if (historyIndex < history.length - 1) {
+            const newIndex = historyIndex + 1;
+            const historyItem = history[newIndex];
+            
+            setHistoryIndex(newIndex);
+            setOptions(historyItem.options);
+            setFeatureCollectionPlot(historyItem.featureCollection);
+        }
+    }, [history, historyIndex, setFeatureCollectionPlot]);
+
+    // Keyboard shortcuts for undo/redo
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            // Only handle shortcuts if not typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                undo();
+            } else if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                e.preventDefault();
+                redo();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [undo, redo]);
 
     useEffect(() => {
-        getAndParseFieldDesign(
-            flaskUrl,
-            selectedYearGCP,
-            selectedExperimentGCP,
-            selectedLocationGCP,
-            selectedPopulationGCP
-        ).then((data) => {
-            setFieldDesign(data);
-        });
+        if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
+            getAndParseFieldDesign(
+                flaskUrl,
+                selectedYearGCP,
+                selectedExperimentGCP,
+                selectedLocationGCP,
+                selectedPopulationGCP
+            ).then((data) => {
+                setFieldDesign(data);
+            }).catch((error) => {
+                console.log("No field design found, continuing without CSV data");
+                setFieldDesign(null);
+            });
+            
+            // Check for AgRowStitch availability
+            checkAgrowstitchAvailability();
+        }
     }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+
+    const checkAgrowstitchAvailability = async () => {
+        try {
+            const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+            const response = await fetch(`${flaskUrl}list_dirs/${basePath}`);
+            const dates = await response.json();
+            
+            let hasAgrowstitch = false;
+            for (const date of dates) {
+                if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    // Check if this date has AgRowStitch data
+                    try {
+                        const platformResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}`);
+                        const platforms = await platformResponse.json();
+                        
+                        for (const platform of platforms) {
+                            try {
+                                const sensorResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}`);
+                                const sensors = await sensorResponse.json();
+                                
+                                for (const sensor of sensors) {
+                                    try {
+                                        const dirResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
+                                        const dirs = await dirResponse.json();
+                                        
+                                        if (dirs.some(dir => dir.startsWith('AgRowStitch_v'))) {
+                                            hasAgrowstitch = true;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        continue;
+                                    }
+                                }
+                                if (hasAgrowstitch) break;
+                            } catch (e) {
+                                continue;
+                            }
+                        }
+                        if (hasAgrowstitch) break;
+                    } catch (e) {
+                        continue;
+                    }
+                }
+            }
+            setAgrowstitchAvailable(hasAgrowstitch);
+        } catch (error) {
+            console.log("Error checking AgRowStitch availability:", error);
+            setAgrowstitchAvailable(false);
+        }
+    };
 
     const applyUpdatedOptions = useCallback(
         (updatedOptions) => {
@@ -162,9 +307,16 @@ function PlotProposalSwitcher() {
             if (fieldDesign) {
                 mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
             }
+            
+            // Save current state to history before applying changes
+            if (featureCollectionPlot && featureCollectionPlot.features && featureCollectionPlot.features.length > 0) {
+                addToHistory(featureCollectionPlot, options);
+            }
+            
+            // Set the rectangles without transformation first
             setFeatureCollectionPlot(newRectangles);
         },
-        [fieldDesign, featureCollectionPop.features, setFeatureCollectionPlot]
+        [fieldDesign, featureCollectionPop.features, setFeatureCollectionPlot, featureCollectionPlot, options, addToHistory]
     );
 
     const handleChange = (event) => {
@@ -185,134 +337,167 @@ function PlotProposalSwitcher() {
     const toggleMinimize = () => setIsMinimized(!isMinimized);
 
     return (
-        <div
-            style={
-                isMinimized
-                    ? {
-                          position: "absolute",
-                          bottom: 10,
-                          left: 10, // Adjust positioning as needed
-                          zIndex: 1,
-                          backgroundColor: "rgba(255, 255, 255, 0.2)",
-                          borderRadius: "8px",
-                          padding: "10px",
-                          width: "40px",
-                          height: "40px",
-                          display: "flex",
-                          justifyContent: "center",
-                          alignItems: "center",
-                      }
-                    : {
-                          position: "absolute",
-                          bottom: 10,
-                          left: 10, // Adjust positioning as needed
-                          zIndex: 1,
-                          backgroundColor: "rgba(255, 255, 255, 0.7)",
-                          borderRadius: "8px",
-                          padding: "20px",
-                          display: "flex",
-                          flexDirection: "column",
-                          width: "300px", // Adjust width as needed for your content
-                      }
-            }
-        >
-            {isMinimized ? (
-                <Button onClick={toggleMinimize} style={{ padding: 0, minWidth: "auto" }}>
-                    <DashboardCustomizeIcon fontSize="large" />
-                </Button>
-            ) : (
-                <>
-                    <Button
-                        onClick={toggleMinimize}
-                        style={{
-                            position: "absolute", // Absolute position for the button
-                            top: -8, // Top right corner
-                            right: -10,
-                            zIndex: 1000, // High z-index to float above other elements
-                            backgroundColor: "transparent", // Set default background
-                            "&:hover": {
-                                backgroundColor: "transparent", // Keep background transparent on hover
-                            },
-                        }}
-                    >
-                        <VisibilityIcon name="minimize" />
+        <>
+            <div
+                style={
+                    isMinimized
+                        ? {
+                              position: "absolute",
+                              bottom: 10,
+                              left: 10, // Adjust positioning as needed
+                              zIndex: 1,
+                              backgroundColor: "rgba(255, 255, 255, 0.2)",
+                              borderRadius: "8px",
+                              padding: "10px",
+                              width: "40px",
+                              height: "40px",
+                              display: "flex",
+                              justifyContent: "center",
+                              alignItems: "center",
+                          }
+                        : {
+                              position: "absolute",
+                              bottom: 10,
+                              left: 10, // Adjust positioning as needed
+                              zIndex: 1,
+                              backgroundColor: "rgba(255, 255, 255, 0.7)",
+                              borderRadius: "8px",
+                              padding: "20px",
+                              display: "flex",
+                              flexDirection: "column",
+                              width: "300px", // Adjust width as needed for your content
+                          }
+                }
+            >
+                {isMinimized ? (
+                    <Button onClick={toggleMinimize} style={{ padding: 0, minWidth: "auto" }}>
+                        <DashboardCustomizeIcon fontSize="large" />
                     </Button>
-                    <Box sx={{ margin: 0 }}>
-                        <Typography variant="h6">Rectangle Options</Typography>
-                        <TextField
-                            label="Width (m)"
-                            name="width"
-                            value={options.width}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Length (m)"
-                            name="length"
-                            value={options.length}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Rows"
-                            name="rows"
-                            value={options.rows}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Columns"
-                            name="columns"
-                            value={options.columns}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Vertical Spacing (m)"
-                            name="verticalSpacing"
-                            value={options.verticalSpacing}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Horizontal Spacing (m)"
-                            name="horizontalSpacing"
-                            value={options.horizontalSpacing}
-                            onChange={handleChange}
-                            type="number"
-                            sx={{ my: 0.5 }}
-                        />
-                        <TextField
-                            label="Angle (deg)"
-                            name="angle"
-                            value={options.angle}
-                            onChange={handleChange}
-                            type="number"
-                            inputProps={{ step: 0.1, min: 0, max: 90 }}
-                            sx={{ my: 0.5 }}
-                        />
-                        <Typography align="center">Angle Slider</Typography>
-                        <Slider
-                            value={typeof options.angle === "number" ? options.angle : 0}
-                            onChange={handleSliderChange("angle")}
-                            step={0.1}
-                            min={0}
-                            max={360}
-                            sx={{ my: 0.5 }}
-                        />
-
-                        <Button variant="contained" color="primary" onClick={applyOptions}>
-                            Apply
+                ) : (
+                    <>
+                        <Button
+                            onClick={toggleMinimize}
+                            style={{
+                                position: "absolute", // Absolute position for the button
+                                top: -8, // Top right corner
+                                right: -10,
+                                zIndex: 1000, // High z-index to float above other elements
+                                backgroundColor: "transparent", // Set default background
+                                "&:hover": {
+                                    backgroundColor: "transparent", // Keep background transparent on hover
+                                },
+                            }}
+                        >
+                            <VisibilityIcon name="minimize" />
                         </Button>
-                    </Box>
-                </>
-            )}
-        </div>
+                        <Box sx={{ margin: 0 }}>
+                            <Typography variant="h6">Rectangle Options</Typography>
+                            {agrowstitchAvailable && (
+                                <Typography variant="caption" color="success.main" sx={{ display: 'block', mb: 1 }}>
+                                    ✓ AgRowStitch data detected - plot labeling available
+                                </Typography>
+                            )}
+                            {fieldDesign && (
+                                <Typography variant="caption" color="info.main" sx={{ display: 'block', mb: 1 }}>
+                                    ✓ Field design data loaded ({fieldDesign.length} entries)
+                                </Typography>
+                            )}
+                            <TextField
+                                label="Width (m)"
+                                name="width"
+                                value={options.width}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Length (m)"
+                                name="length"
+                                value={options.length}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Rows"
+                                name="rows"
+                                value={options.rows}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Columns"
+                                name="columns"
+                                value={options.columns}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Vertical Spacing (m)"
+                                name="verticalSpacing"
+                                value={options.verticalSpacing}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Horizontal Spacing (m)"
+                                name="horizontalSpacing"
+                                value={options.horizontalSpacing}
+                                onChange={handleChange}
+                                type="number"
+                                sx={{ my: 0.5 }}
+                            />
+                            <TextField
+                                label="Angle (deg)"
+                                name="angle"
+                                value={options.angle}
+                                onChange={handleChange}
+                                type="number"
+                                inputProps={{ step: 0.1, min: 0, max: 90 }}
+                                sx={{ my: 0.5 }}
+                            />
+                            <Typography align="center">Angle Slider</Typography>
+                            <Slider
+                                value={typeof options.angle === "number" ? options.angle : 0}
+                                onChange={handleSliderChange("angle")}
+                                step={0.1}
+                                min={0}
+                                max={360}
+                                sx={{ my: 0.5 }}
+                            />
+
+                            <Button variant="contained" color="primary" onClick={applyOptions}>
+                                Apply
+                            </Button>
+                            
+                            <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                                <Button 
+                                    variant="outlined" 
+                                    size="small" 
+                                    onClick={undo}
+                                    disabled={historyIndex <= 0}
+                                    sx={{ flex: 1 }}
+                                >
+                                    Undo (⌘Z)
+                                </Button>
+                                <Button 
+                                    variant="outlined" 
+                                    size="small" 
+                                    onClick={redo}
+                                    disabled={historyIndex >= history.length - 1}
+                                    sx={{ flex: 1 }}
+                                >
+                                    Redo (⌘Y)
+                                </Button>
+                            </Box>
+                        </Box>
+                    </>
+                )}
+            </div>
+        </>
     );
 }
 

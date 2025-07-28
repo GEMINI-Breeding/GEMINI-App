@@ -10,21 +10,20 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
         if (Array.isArray(selectedMetric)) {
             return selectedMetric.map((metric, index) => (
                 <div key={index} style={{ marginBottom: "5px" }}>
-                    {" "}
-                    {/* Use div instead of span */}
                     <b>{capitalizeFirstLetter(metric)}:</b>{" "}
-                    {(hoverInfo.object.properties[metric] !== null && hoverInfo.object.properties[metric] !== undefined) ? hoverInfo.object.properties[metric] : "No Data"}
-                    {"\n"}
-                </div> // Each metric will now appear on a new line
+                    {(hoverInfo.object.properties[metric] !== null && hoverInfo.object.properties[metric] !== undefined)
+                        ? hoverInfo.object.properties[metric]
+                        : "No Data"}
+                </div>
             ));
         } else {
             return (
-                <span style={{ marginRight: "5px" }}>
+                <div style={{ marginBottom: "5px" }}>
                     <b>{selectedMetric}:</b>{" "}
                     {(hoverInfo.object.properties[selectedMetric] !== null && hoverInfo.object.properties[selectedMetric] !== undefined)
                         ? hoverInfo.object.properties[selectedMetric].toFixed(2)
                         : "No Data"}
-                </span>
+                </div>
             );
         }
     };
@@ -48,21 +47,21 @@ const GeoJsonTooltip = ({ hoverInfo, selectedMetric }) => {
                     lineHeight: "1.6",
                     minWidth: "150px",
                     maxWidth: "300px",
-                    overflow: "hidden"
+                    overflow: "hidden",
                 }}
-                >
-                <div
-                    style={{ marginBottom: "5px", display: "flex", flexWrap: "wrap", justifyContent: "space-between" }}
-                >
+            >
+                <div style={{ marginBottom: "5px", display: "flex", flexWrap: "wrap", justifyContent: "space-between" }}>
                     {renderMetrics()}
                 </div>
                 <div style={{ marginBottom: "5px" }}>
-                    <b>Plot:</b> {hoverInfo.object.properties.plot !== null && hoverInfo.object.properties.plot !== undefined
+                    <b>Plot:</b>{" "}
+                    {hoverInfo.object.properties.plot !== null && hoverInfo.object.properties.plot !== undefined
                         ? hoverInfo.object.properties.plot
                         : "No Data"}
                 </div>
                 <div style={{ marginBottom: "5px" }}>
-                    <b>Accession:</b> {hoverInfo.object.properties.accession !== null && hoverInfo.object.properties.accession !== undefined
+                    <b>Accession:</b>{" "}
+                    {hoverInfo.object.properties.accession !== null && hoverInfo.object.properties.accession !== undefined
                         ? hoverInfo.object.properties.accession
                         : "No Data"}
                 </div>
