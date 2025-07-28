@@ -27,6 +27,91 @@ import {
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CloseIcon from "@mui/icons-material/Close";
 import { useDataState } from "../../DataContext";
+import Map, { Source, Layer } from 'react-map-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+const reactMapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+
+const GpsPlot = ({ gpsData, currentPoint, viewState, onViewStateChange }) => {
+    if (!gpsData || gpsData.length === 0) {
+        console.log("No GPS data available.");
+        return <Box sx={{ width: '100%', height: 400, border: '1px solid grey', p: 1, boxSizing: 'border-box' }}>No GPS data</Box>;
+    }
+    const validGpsData = gpsData.filter(p => typeof p.lon === 'number' && typeof p.lat === 'number' && !isNaN(p.lon) && !isNaN(p.lat));
+
+    const pathGeoJSON = {
+        type: 'Feature',
+        geometry: {
+            type: 'LineString',
+            coordinates: validGpsData.map(p => [p.lon, p.lat])
+        }
+    };
+    const currentPointGeoJSON = (currentPoint &&
+      typeof currentPoint.lon === 'number' &&
+      typeof currentPoint.lat === 'number' &&
+      !isNaN(currentPoint.lon) &&
+      !isNaN(currentPoint.lat))
+      ? {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [currentPoint.lon, currentPoint.lat]
+          }
+        }
+      : null;
+
+    const currentPointMessage = !currentPointGeoJSON
+      ? "No GPS data found for current image."
+      : null;
+    {currentPointMessage && (
+      <div style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          zIndex: 1,
+          backgroundColor: 'rgba(255, 255, 255, 0.8)',
+          padding: '8px',
+          borderRadius: '4px'
+      }}>
+          {currentPointMessage}
+      </div>
+    )}
+
+    return (
+        <Map
+            {...viewState}
+            onMove={evt => onViewStateChange(evt.viewState)}
+            style={{width: '100%', height: 500}}
+            mapStyle="mapbox://styles/mapbox/satellite-v9"
+            mapboxAccessToken={reactMapboxToken}
+        >
+            <Source id="gps-path" type="geojson" data={pathGeoJSON}>
+                <Layer
+                    id="path-layer"
+                    type="line"
+                    paint={{
+                        'line-color': '#007cbf',
+                        'line-width': 3
+                    }}
+                />
+            </Source>
+            {currentPointGeoJSON && (
+                <Source id="current-point" type="geojson" data={currentPointGeoJSON}>
+                    <Layer
+                        id="point-layer"
+                        type="circle"
+                        paint={{
+                            'circle-radius': 8,
+                            'circle-color': 'red',
+                            'circle-stroke-width': 2,
+                            'circle-stroke-color': 'white'
+                        }}
+                    />
+                </Source>
+            )}
+        </Map>
+    );
+};
+
 
 export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotIndex, onPlotIndexChange }) => {
     const [imageIndex, setImageIndex] = useState(0);
@@ -43,11 +128,21 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const [currentImagePlotIndex, setCurrentImagePlotIndex] = useState(null);
     const [startImageName, setStartImageName] = useState(null);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
+    const [isGpsPanelOpen, setIsGpsPanelOpen] = useState(false);
     const [markedPlots, setMarkedPlots] = useState([]);
     const [originalPlotIndex, setOriginalPlotIndex] = useState(null);
+    const [gpsData, setGpsData] = useState([]);
+    const [currentLatLon, setCurrentLatLon] = useState(null);
+    const [viewState, setViewState] = useState({
+        longitude: -121.777,
+        latitude: 38.536,
+        zoom: 14
+    });
+
 
     const theme = useTheme();
-    const drawerWidth = 400;
+    const drawerWidth = 200;
+    const gpsDrawerWidth = 400;
 
     useEffect(() => {
         if (open) {
@@ -69,10 +164,53 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
     }, [open, obj]);
 
+    const fetchGpsData = async () => {
+        if (!directory) return;
+        try {
+            const response = await fetch(`${flaskUrl}get_gps_data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setGpsData(data);
+                 if (data.length > 0) {
+                    const lons = data.map(p => p.lon).filter(l => typeof l === 'number' && !isNaN(l));
+                    const lats = data.map(p => p.lat).filter(l => typeof l === 'number' && !isNaN(l));
+                    if (lons.length > 0 && lats.length > 0) {
+                        setViewState({
+                            longitude: lons.reduce((a, b) => a + b, 0) / lons.length,
+                            latitude: lats.reduce((a, b) => a + b, 0) / lats.length,
+                            zoom: 20
+                        });
+                    }
+                }
+            } else {
+                console.error("Failed to fetch GPS data:", data.error);
+            }
+        } catch (error) {
+            console.error("Error fetching GPS data:", error);
+        }
+    };
+
+     useEffect(() => {
+        if (isGpsPanelOpen && currentLatLon) {
+             setViewState(prev => ({
+                ...prev,
+                longitude: currentLatLon.lon,
+                latitude: currentLatLon.lat,
+                zoom: 20
+            }));
+        }
+    }, [isGpsPanelOpen, currentLatLon]);
+
+
     useEffect(() => {
         if (directory) {
             fetchImages();
             fetchMarkedPlots();
+            fetchGpsData();
         }
     }, [directory]);
 
@@ -102,14 +240,20 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             const data = await response.json();
             if (response.ok) {
                 setCurrentImagePlotIndex(data.plot_index);
-                console.log("Current Image Plot Index:", data.plot_index);
+                if (data.lat !== null && data.lon !== null) {
+                    setCurrentLatLon({ lat: data.lat, lon: data.lon });
+                } else {
+                    setCurrentLatLon(null);
+                }
             } else {
                 console.error("Failed to fetch plot index:", data.error);
                 setCurrentImagePlotIndex(null);
+                setCurrentLatLon(null);
             }
         } catch (error) {
             console.error("Error fetching plot index:", error);
             setCurrentImagePlotIndex(null);
+            setCurrentLatLon(null);
         }
     };
 
@@ -251,7 +395,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             setImageIndex(imageIdx);
             setImageLoading(true);
             setPlotSelectionState('start');
-            setIsPanelOpen(false);
         } else {
             console.error("Start image for the plot not found in the image list.");
         }
@@ -259,7 +402,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     useEffect(() => {
         if (!open) return;
-        
+
         const handleKeyDown = (e) => {
             if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
                 handlePrevious();
@@ -292,7 +435,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [open, imageIndex, imageList.length, plotSelectionState]);
-
+    
     return (
         <Dialog
             open={open}
@@ -308,18 +451,65 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             }}
         >
             <Box sx={{ display: 'flex', height: '100%' }}>
+                <Drawer
+                    sx={{
+                        width: gpsDrawerWidth,
+                        flexShrink: 0,
+                        '& .MuiDrawer-paper': {
+                            width: gpsDrawerWidth,
+                            boxSizing: 'border-box',
+                        },
+                    }}
+                    variant="persistent"
+                    anchor="left"
+                    open={isGpsPanelOpen}
+                >
+                    <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="h6" gutterBottom component="div">
+                            GPS Data
+                        </Typography>
+                        <IconButton onClick={() => setIsGpsPanelOpen(false)}>
+                            <CloseIcon />
+                        </IconButton>
+                    </Box>
+                    <Box sx={{ px: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                         {gpsData.length > 0 && currentLatLon &&
+                            <GpsPlot 
+                                gpsData={gpsData} 
+                                currentPoint={currentLatLon}
+                                viewState={viewState}
+                                onViewStateChange={setViewState}
+                            />
+                        }
+                        {currentLatLon && (
+                            <Typography variant="caption" display="block" sx={{ mt: 1, textAlign: 'center' }}>
+                                Lat: {currentLatLon.lat.toFixed(6)}<br/>
+                                Lon: {currentLatLon.lon.toFixed(6)}
+                            </Typography>
+                        )}
+                    </Box>
+                </Drawer>
                 <Box
                     component="main"
                     sx={{
                         flexGrow: 1,
                         p: 3,
                         display: 'flex',
+                        height: '100%',
                         flexDirection: 'column',
                         transition: theme.transitions.create('margin', {
                             easing: theme.transitions.easing.sharp,
                             duration: theme.transitions.duration.leavingScreen,
                         }),
+                        marginLeft: `-${gpsDrawerWidth}px`,
                         marginRight: `-${drawerWidth}px`,
+                        ...(isGpsPanelOpen && {
+                            transition: theme.transitions.create('margin', {
+                                easing: theme.transitions.easing.easeOut,
+                                duration: theme.transitions.duration.enteringScreen,
+                            }),
+                            marginLeft: 0,
+                        }),
                         ...(isPanelOpen && {
                             transition: theme.transitions.create('margin', {
                                 easing: theme.transitions.easing.easeOut,
@@ -345,6 +535,20 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                         >
                             <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
                         </IconButton>
+                        
+                        <Button
+                            variant="contained"
+                            onClick={() => setIsGpsPanelOpen(true)}
+                            style={{
+                                position: "absolute",
+                                top: "60px",
+                                left: "10px",
+                                zIndex: 10,
+                            }}
+                        >
+                            View GPS Data
+                        </Button>
+
                         <Typography variant="h6" style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}>
                             Plot Index: {plotIndex}
                         </Typography>
@@ -353,7 +557,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                             onClick={() => setIsPanelOpen(true)}
                             style={{
                                 position: "absolute",
-                                top: "10px",
+                                top: "60px",
                                 right: "10px",
                                 zIndex: 10,
                             }}
@@ -412,7 +616,10 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                             </Box>
                         )}
                         <Typography>
-                            Image Plot Index: {currentImagePlotIndex === -1 || currentImagePlotIndex === null ? "None" : currentImagePlotIndex}
+                            {(currentImagePlotIndex === -1 || currentImagePlotIndex === null) ? 
+                                "" :
+                                <strong>Image Plot Index: {currentImagePlotIndex}</strong>
+                            }
                         </Typography>
                         <Typography>Image {imageIndex + 1} of {imageList.length}</Typography>
                         <Box sx={{ width: '80%', mt: 2, position: 'relative' }}>
