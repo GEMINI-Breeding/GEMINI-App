@@ -14,6 +14,10 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useDataState } from "../../../../DataContext";
 import InferenceTable from "../../../StatsMenu/InferenceTable";
 
@@ -31,9 +35,10 @@ function PredictStep() {
     } = useDataState();
 
     // Roboflow API configuration
-    const [apiUrl, setApiUrl] = useState("https://infer.roboflow.com");
+    const [apiUrl, setApiUrl] = useState("https://detect.roboflow.com");
     const [apiKey, setApiKey] = useState("");
     const [modelId, setModelId] = useState("");
+    const [showApiKey, setShowApiKey] = useState(false);
 
     // Data selection (using existing GCP selections for first 4, then additional dropdowns)
     const [dateOptions, setDateOptions] = useState([]);
@@ -51,6 +56,7 @@ function PredictStep() {
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [results, setResults] = useState(null);
+    const [inferenceRefreshTrigger, setInferenceRefreshTrigger] = useState(0);
 
     // Load dates when GCP selections are available
     useEffect(() => {
@@ -230,6 +236,7 @@ function PredictStep() {
                         setIsProcessing(false);
                         setResults(data.results);
                         setMessage("Inference completed successfully!");
+                        setInferenceRefreshTrigger(prev => prev + 1); // Trigger refresh of inference table
                         clearInterval(interval);
                     } else if (data.error) {
                         setError(data.error);
@@ -259,7 +266,7 @@ function PredictStep() {
                 <Grid item xs={12}>
                     <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                         <Typography variant="h5" gutterBottom align="center">
-                            Roboflow Inference on Plot Images
+                            Roboflow Inference
                         </Typography>
                         <Alert severity="warning" style={{ marginTop: "20px" }}>
                             <Typography variant="body2">
@@ -278,10 +285,10 @@ function PredictStep() {
             <Grid item xs={12}>
                 <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                     <Typography variant="h5" gutterBottom align="center">
-                        Roboflow Inference on Plot Images
+                        Roboflow Inference
                     </Typography>
                     <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
-                        Run inference on stitched plot images using your Roboflow trained models
+                        Run inference on plots using your Roboflow trained models
                     </Typography>
 
                     <Grid container spacing={3} style={{ marginTop: "20px" }}>
@@ -307,22 +314,33 @@ function PredictStep() {
                                 label="API URL"
                                 value={apiUrl}
                                 onChange={(e) => setApiUrl(e.target.value)}
-                                helperText="Default: https://infer.roboflow.com"
+                                helperText="Default: https://detect.roboflow.com"
                             />
                         </Grid>
                         
-                        <Grid item xs={12} md={4}>
-                            <TextField
-                                fullWidth
-                                label="API Key *"
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                helperText="Your Roboflow API key"
-                            />
-                        </Grid>
-                        
-                        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={4}>
+            <TextField
+                fullWidth
+                label="API Key *"
+                type={showApiKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                helperText="Your Roboflow API key"
+                InputProps={{
+                    endAdornment: (
+                        <InputAdornment position="end">
+                            <IconButton
+                                aria-label="toggle password visibility"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                edge="end"
+                            >
+                                {showApiKey ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                            </IconButton>
+                        </InputAdornment>
+                    ),
+                }}
+            />
+        </Grid>                        <Grid item xs={12} md={4}>
                             <TextField
                                 fullWidth
                                 label="Model ID *"
@@ -470,7 +488,7 @@ function PredictStep() {
             {/* Inference Results Table */}
             <Grid item xs={12}>
                 <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                    <InferenceTable />
+                    <InferenceTable refreshTrigger={inferenceRefreshTrigger} />
                 </Paper>
             </Grid>
         </Grid>

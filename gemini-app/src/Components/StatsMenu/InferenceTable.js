@@ -8,7 +8,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import InferenceResultsPreview from '../Menu/InferenceResultsPreview';
 import Download from "@mui/icons-material/Download";
 
-const InferenceTable = () => {
+const InferenceTable = ({ refreshTrigger }) => {
     const [inferenceData, setInferenceData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -49,7 +49,7 @@ const InferenceTable = () => {
         if (selectedLocationGCP && selectedPopulationGCP) {
             fetchInferenceData();
         }
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, refreshTrigger]);
 
     const handleViewInference = (row) => {
         if (row.plot_images_available) {
