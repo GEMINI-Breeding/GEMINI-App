@@ -57,7 +57,10 @@ const InferenceTable = ({ refreshTrigger }) => {
                 date: row.date,
                 platform: row.platform,
                 sensor: row.sensor,
-                agrowstitch_version: row.agrowstitch_version
+                agrowstitch_version: row.orthomosaic || row.agrowstitch_version, // Support both old and new field names
+                orthomosaic: row.orthomosaic,
+                model_id: row.model_id,
+                model_version: row.model_version
             });
             setIsInferencePreviewOpen(true);
         } else {
@@ -73,7 +76,7 @@ const InferenceTable = ({ refreshTrigger }) => {
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${row.date}_${row.platform}_${row.sensor}_${row.agrowstitch_version}_predictions.csv`;
+                a.download = `${row.date}_${row.platform}_${row.sensor}_${row.orthomosaic || row.agrowstitch_version}_predictions.csv`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -86,9 +89,54 @@ const InferenceTable = ({ refreshTrigger }) => {
     };
 
     const handleDeleteInference = async (row) => {
-        if (window.confirm(`Are you sure you want to delete the inference results for ${row.date} ${row.platform} ${row.sensor}?`)) {
-            // TODO: Implement delete functionality if needed
-            alert('Delete functionality not implemented yet');
+        const confirmMessage = `Are you sure you want to delete the inference results for ${row.date} ${row.platform} ${row.sensor}?\n\nThis will delete:\n- CSV predictions file\n- Detection data from traits GeoJSON (if exists)\n\nThis action cannot be undone.`;
+        
+        if (window.confirm(confirmMessage)) {
+            try {
+                setLoading(true);
+                
+                const response = await fetch(`${flaskUrl}delete_inference_results`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        year: selectedYearGCP,
+                        experiment: selectedExperimentGCP,
+                        location: selectedLocationGCP,
+                        population: selectedPopulationGCP,
+                        date: row.date,
+                        platform: row.platform,
+                        sensor: row.sensor,
+                        orthomosaic: row.orthomosaic || row.agrowstitch_version,
+                        delete_traits: true // Also clean up detection data from traits
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(`Successfully deleted inference results.\n\nDeleted files:\n${result.deleted_files.join('\n')}`);
+                    
+                    // Refresh the table by removing the deleted row
+                    setInferenceData(prevData => 
+                        prevData.filter(item => item.id !== row.id)
+                    );
+                    
+                    // Close any open preview dialogs for the deleted inference
+                    if (selectedInferenceData && selectedInferenceData.date === row.date && 
+                        selectedInferenceData.platform === row.platform && 
+                        selectedInferenceData.sensor === row.sensor) {
+                        setIsInferencePreviewOpen(false);
+                        setSelectedInferenceData(null);
+                    }
+                } else {
+                    const errorData = await response.json();
+                    alert(`Failed to delete inference results: ${errorData.error}`);
+                }
+            } catch (error) {
+                console.error('Error deleting inference results:', error);
+                alert('Failed to delete inference results. Please try again.');
+            } finally {
+                setLoading(false);
+            }
         }
     };
 
@@ -109,7 +157,8 @@ const InferenceTable = ({ refreshTrigger }) => {
         { field: 'date', headerName: 'Date', width: 120 },
         { field: 'platform', headerName: 'Platform', width: 100 },
         { field: 'sensor', headerName: 'Sensor', width: 100 },
-        { field: 'agrowstitch_version', headerName: 'Version', width: 150 },
+        { field: 'orthomosaic', headerName: 'Orthomosaic', width: 150 },
+        { field: 'model_id', headerName: 'Model ID', width: 200 },
         { 
             field: 'total_predictions', 
             headerName: 'Total Detections', 

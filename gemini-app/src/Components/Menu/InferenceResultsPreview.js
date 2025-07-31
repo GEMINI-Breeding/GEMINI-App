@@ -145,12 +145,14 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     const fetchPlotImages = async () => {
         if (!inferenceData) return;
         
-        const { date, platform, sensor, agrowstitch_version } = inferenceData;
+        const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+        // Use orthomosaic if available, otherwise fall back to agrowstitch_version for backward compatibility
+        const versionDir = orthomosaic || agrowstitch_version;
         setLoading(true);
         
         try {
             const plotFiles = await fetchData(
-                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitch_version}`
+                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
             );
 
             const plotImages = plotFiles
@@ -166,7 +168,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             setLoading(false);
 
             if (plotImages.length > 0) {
-                loadPlotImage(plotImages[0], date, platform, sensor, agrowstitch_version);
+                loadPlotImage(plotImages[0], date, platform, sensor, versionDir);
             }
             
         } catch (error) {
@@ -202,7 +204,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (!inferenceData || plotImages.length === 0) return;
         
         const currentFileName = plotImages[currentPlotIndex];
-        const { date, platform, sensor, agrowstitch_version } = inferenceData;
+        const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+        const versionDir = orthomosaic || agrowstitch_version;
         
         try {
             const response = await fetch(`${flaskUrl}get_plot_predictions`, {
@@ -216,7 +219,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     date,
                     platform,
                     sensor,
-                    agrowstitch_version,
+                    agrowstitch_version: versionDir, // Keep for backend compatibility
+                    orthomosaic: versionDir, // New parameter name
                     plot_filename: currentFileName
                 })
             });
@@ -237,13 +241,13 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         }
     };
 
-    const loadPlotImage = async (fileName, date, platform, sensor, agrowstitch_version) => {
+    const loadPlotImage = async (fileName, date, platform, sensor, versionDir) => {
         try {
             if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(currentImageUrl);
             }
 
-            const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitch_version}/${fileName}`;
+            const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}/${fileName}`;
             
             const directUrl = `${flaskUrl}files/${imagePath}`;
             
@@ -378,8 +382,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (currentPlotIndex > 0 && inferenceData) {
             const newIndex = currentPlotIndex - 1;
             setCurrentPlotIndex(newIndex);
-            const { date, platform, sensor, agrowstitch_version } = inferenceData;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, agrowstitch_version);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
         }
     };
 
@@ -387,8 +392,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (currentPlotIndex < plotImages.length - 1 && inferenceData) {
             const newIndex = currentPlotIndex + 1;
             setCurrentPlotIndex(newIndex);
-            const { date, platform, sensor, agrowstitch_version } = inferenceData;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, agrowstitch_version);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
         }
     };
 
@@ -426,8 +432,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         const newIndex = plotImages.findIndex(img => img === selectedFileName);
         if (newIndex !== -1 && inferenceData) {
             setCurrentPlotIndex(newIndex);
-            const { date, platform, sensor, agrowstitch_version } = inferenceData;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, agrowstitch_version);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
         }
     };
 
@@ -463,9 +470,19 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
             <DialogTitle>
                 <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="h6">
-                        Inference Results - {inferenceData.date} {inferenceData.platform} {inferenceData.sensor}
-                    </Typography>
+                    <Box>
+                        <Typography variant="h6">
+                            Inference Results - {inferenceData.date} {inferenceData.platform} {inferenceData.sensor}
+                        </Typography>
+                        {(inferenceData.model_id || inferenceData.model_version) && (
+                            <Typography variant="subtitle2" color="textSecondary">
+                                Model: {inferenceData.model_id || 'Unknown'} 
+                                {inferenceData.model_version && ` v${inferenceData.model_version}`}
+                                {(inferenceData.orthomosaic || inferenceData.agrowstitch_version) && 
+                                    ` • Orthomosaic: ${inferenceData.orthomosaic || inferenceData.agrowstitch_version}`}
+                            </Typography>
+                        )}
+                    </Box>
                     <IconButton onClick={onClose}>
                         <Close />
                     </IconButton>

@@ -454,9 +454,9 @@ function PredictStep() {
                                     <Typography variant="h6" gutterBottom>
                                         Inference Results
                                     </Typography>
-                                    <Typography variant="body2" gutterBottom>
+                                    {/* <Typography variant="body2" gutterBottom>
                                         CSV file saved to: {results.csvPath}
-                                    </Typography>
+                                    </Typography> */}
                                     <Typography variant="body2" gutterBottom>
                                         Total plots processed: {results.totalPlots}
                                     </Typography>
