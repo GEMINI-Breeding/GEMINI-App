@@ -35,6 +35,7 @@ function PredictStep() {
     } = useDataState();
 
     // Roboflow API configuration
+    const [inferenceMode, setInferenceMode] = useState("cloud"); // 'cloud' or 'local'
     const [apiUrl, setApiUrl] = useState("https://detect.roboflow.com");
     const [apiKey, setApiKey] = useState("");
     const [modelId, setModelId] = useState("");
@@ -186,12 +187,16 @@ function PredictStep() {
         setMessage("Starting inference...");
         setResults(null);
 
+        // Set API URL based on inference mode
+        let selectedApiUrl = inferenceMode === "local" ? "http://localhost:9001" : "https://detect.roboflow.com";
+
         try {
             const response = await fetch(`${flaskUrl}run_roboflow_inference`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    apiUrl,
+                    apiUrl: selectedApiUrl,
+                    inferenceMode,
                     apiKey,
                     modelId,
                     year: selectedYearGCP,
@@ -309,13 +314,23 @@ function PredictStep() {
                         </Grid>
                         
                         <Grid item xs={12} md={4}>
-                            <TextField
-                                fullWidth
-                                label="API URL"
-                                value={apiUrl}
-                                onChange={(e) => setApiUrl(e.target.value)}
-                                helperText="Default: https://detect.roboflow.com"
-                            />
+                            <FormControl fullWidth>
+                                <InputLabel id="inference-mode-label">Inference Mode</InputLabel>
+                                <Select
+                                    labelId="inference-mode-label"
+                                    label="Inference Mode"
+                                    value={inferenceMode}
+                                    onChange={(e) => setInferenceMode(e.target.value)}
+                                >
+                                    <MenuItem value="cloud">Remote (Cloud)</MenuItem>
+                                    <MenuItem value="local">Local</MenuItem>
+                                </Select>
+                                <Typography variant="caption" color="textSecondary">
+                                    {inferenceMode === "cloud"
+                                        ? "https://detect.roboflow.com"
+                                        : "http://localhost:9001 (requires local inference server)"}
+                                </Typography>
+                            </FormControl>
                         </Grid>
                         
         <Grid item xs={12} md={4}>
@@ -360,8 +375,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth>
-                                <InputLabel>Date *</InputLabel>
+                                <InputLabel id="date-label">Date *</InputLabel>
                                 <Select
+                                    labelId="date-label"
+                                    label="Date *"
                                     value={selectedDate}
                                     onChange={(e) => setSelectedDate(e.target.value)}
                                 >
@@ -374,8 +391,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedDate}>
-                                <InputLabel>Platform *</InputLabel>
+                                <InputLabel id="platform-label">Platform *</InputLabel>
                                 <Select
+                                    labelId="platform-label"
+                                    label="Platform *"
                                     value={selectedPlatform}
                                     onChange={(e) => setSelectedPlatform(e.target.value)}
                                 >
@@ -388,8 +407,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedPlatform}>
-                                <InputLabel>Sensor *</InputLabel>
+                                <InputLabel id="sensor-label">Sensor *</InputLabel>
                                 <Select
+                                    labelId="sensor-label"
+                                    label="Sensor *"
                                     value={selectedSensor}
                                     onChange={(e) => setSelectedSensor(e.target.value)}
                                 >
@@ -402,8 +423,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedSensor}>
-                                <InputLabel>Orthomosaic</InputLabel>
+                                <InputLabel id="orthomosaic-label">Orthomosaic</InputLabel>
                                 <Select
+                                    labelId="orthomosaic-label"
+                                    label="Orthomosaic"
                                     value={selectedAgrowstitch}
                                     onChange={(e) => setSelectedAgrowstitch(e.target.value)}
                                 >

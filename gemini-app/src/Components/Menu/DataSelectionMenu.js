@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Autocomplete, TextField, Snackbar } from "@mui/material";
-
 import { useDataState, useDataSetters, fetchData } from "../../DataContext";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
-
     const { setGenotypeOptions, setSelectedGenotypes, setMetricOptions } = useDataSetters();
 
     //////////////////////////////////////////
@@ -161,16 +159,25 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             let newGeoJsonPath;
             
             if (selectedVersionData) {
-                // Use the path provided by the backend
+                // GeoJSON path is the same for both versions
                 newGeoJsonPath = `${flaskUrl}${selectedVersionData.path}`;
-                
-                // Tile path is always the same regardless of version type
-                newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
-                
-                console.log(newGeoJsonPath);
+
+                // Check if the Orthomosaic Version contains "AgRowStitch"
+                if (selectedValues["version"].includes("AgRowStitch")) {
+                    // AgRowStitch tile path
+                    newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["version"]}/combined_mosaic_utm.tif`;
+                } else {
+                    // If not AgRowStitch, use the Drone path as fallback
+                    newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
+                }
+
+                console.log("New GeoJSON Path:", newGeoJsonPath);
+                console.log("New Tile Path:", newTilePath);
+
                 onTilePathChange(newTilePath);
                 onGeoJsonPathChange(newGeoJsonPath);
                 
+                // Fetch data for GeoJSON
                 fetchData(newGeoJsonPath)
                     .then((data) => {
                         const traitOutputLabels = data.features.map((f) => f.properties.accession);
@@ -188,6 +195,13 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                     })
                     .catch((error) => console.error("Error fetching genotypes:", error));
             }
+        } else {
+            // If no version is selected or no versions are available, default to Drone tile path
+            const newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
+            const newGeoJsonPath = null;
+
+            onTilePathChange(newTilePath);
+            onGeoJsonPathChange(newGeoJsonPath);
         }
 
         // Check if any key selection criteria is missing and reset the path if necessary
@@ -230,6 +244,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         availableVersions,
     ]);
 
+
     //////////////////////////////////////////
     // Dynamically render Autocomplete components
     //////////////////////////////////////////
@@ -237,9 +252,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     const autocompleteComponents = fieldsOrder.map((field, index) => {
         const label = field.charAt(0).toUpperCase() + field.slice(1); // Capitalize the first letter
         const options = getOptionsForField(field);
-
-        //////////////////////////////////////////
-        // Fetch geojson data for download
 
         return (
             <Autocomplete
@@ -303,7 +315,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                         } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
                             setGenotypeOptions((prevOptions) => prevOptions.filter((val) => val !== "All Genotypes"));
                         }
-                        // console.log("genotype options", genotypeOptions);
                         setSelectedGenotypes(newValue);
                     }}
                     renderInput={(params) => <TextField {...params} label="Genotype" />}
