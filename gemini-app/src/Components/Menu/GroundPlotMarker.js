@@ -636,12 +636,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         if (!pendingCropMask || !directory) return;
         
         try {
-            const response = await fetch(`${flaskUrl}save_stitch_boundary`, {
+            const response = await fetch(`${flaskUrl}save_stitch_mask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     directory: directory,
-                    
                     mask: pendingCropMask
                 }),
             });

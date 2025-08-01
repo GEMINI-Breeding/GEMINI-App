@@ -54,20 +54,74 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
     const labeledGcpImagesCount = labeledGcpImages.length;
 
     useEffect(() => {
-        if (
-            selectedOrthoMethod === "STITCH"
-        ) {
-            setOrthoCustomValue(
-                dedent(`
-                    mask: [0, 0, 0, 0]
-                    forward_limit: 8
-                    max_reprojection_error: 3.0
-                    save_full_resolution: True
-                    save_resized_resolution: False
-                `)
-            );
+        if (selectedOrthoMethod === "STITCH") {
+            // Check if all required parameters are available
+            if (!selectedYearGCP || !selectedExperimentGCP || !selectedLocationGCP || !selectedPopulationGCP) {
+                console.log("Not all required parameters available for mask check, using default mask");
+                setOrthoCustomValue(
+                    dedent(`
+                        mask: [0, 0, 0, 0]
+                        forward_limit: 8
+                        max_reprojection_error: 3.0
+                        save_full_resolution: True
+                        save_resized_resolution: False
+                    `)
+                );
+                return;
+            }
+
+            fetch(`${flaskUrl}check_mask`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                let maskValue = [0, 0, 0, 0]; // default mask
+                
+                if (data.mask && Array.isArray(data.mask) && data.mask.length === 4) {
+                    maskValue = data.mask;
+                    console.log("Using existing mask from backend:", maskValue);
+                } else {
+                    console.log("No existing mask found, using default:", maskValue);
+                }
+                
+                setOrthoCustomValue(
+                    dedent(`
+                        mask: [${maskValue.join(', ')}]
+                        forward_limit: 8
+                        max_reprojection_error: 3.0
+                        save_full_resolution: True
+                        save_resized_resolution: False
+                    `)
+                );
+            })
+            .catch(error => {
+                console.warn("Failed to fetch mask from backend, using default:", error);
+                setOrthoCustomValue(
+                    dedent(`
+                        mask: [0, 0, 0, 0]
+                        forward_limit: 8
+                        max_reprojection_error: 3.0
+                        save_full_resolution: True
+                        save_resized_resolution: False
+                    `)
+                );
+            });
         }
-    }, [orthoSetting, selectedOrthoMethod]);
+    }, [orthoSetting, selectedOrthoMethod, flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     /*
     Python args for ODM:
