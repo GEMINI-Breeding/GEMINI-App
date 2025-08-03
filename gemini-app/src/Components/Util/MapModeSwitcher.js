@@ -8,7 +8,7 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import Switch from "@mui/material/Switch";
 import FormControlLabel from "@mui/material/FormControlLabel";
 
-export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, setSelectedFeatureIndexes }) => {
+export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, selectedFeatureIndexes, setSelectedFeatureIndexes }) => {
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
@@ -19,6 +19,8 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         featureCollectionPop,
         featureCollectionPlot,
         showTooltipGCP,
+        prepAgRowStitchPlotPaths,
+        prepOrthoImagePath,
     } = useDataState();
     const {
         setActiveStepBoundaryPrep,
@@ -36,6 +38,39 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
     // Toggle function
     const toggleMinimize = () => setIsMinimized(!isMinimized);
 
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            // Only handle shortcuts if not typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            switch(e.key.toLowerCase()) {
+                case 'v':
+                    setMode(viewMode);
+                    break;
+                case 'd':
+                    setMode(drawPolygonMode);
+                    break;
+                case 'e':
+                    setMode(modifyMode);
+                    break;
+                case 's':
+                    setMode(selectionMode);
+                    break;
+                case 't':
+                    setMode(translateMode);
+                    break;
+                default:
+                    break;
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [setMode]);
+
     useEffect(() => {
         console.log("task", task);
         console.log("featureCollectionPop", featureCollectionPop);
@@ -45,6 +80,35 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
     const selectAllFeatures = () => {
         const allFeatureIndexes = featureCollection.features.map((_, index) => index);
         setSelectedFeatureIndexes(allFeatureIndexes);
+    };
+
+    const deleteSelectedFeatures = () => {
+        if (!selectedFeatureIndexes || selectedFeatureIndexes.length === 0) {
+            console.log("No features selected for deletion");
+            return;
+        }
+
+        // Create a new feature collection without the selected features
+        const newFeatures = featureCollection.features.filter((_, index) => 
+            !selectedFeatureIndexes.includes(index)
+        );
+
+        const newFeatureCollection = {
+            ...featureCollection,
+            features: newFeatures
+        };
+
+        // Update the feature collection based on the task
+        if (task === "plot_boundary") {
+            setFeatureCollectionPlot(newFeatureCollection);
+        } else if (task === "pop_boundary") {
+            setFeatureCollectionPop(newFeatureCollection);
+        }
+
+        // Clear the selection
+        setSelectedFeatureIndexes([]);
+        
+        console.log(`Deleted ${selectedFeatureIndexes.length} selected features`);
     };
 
     const saveFeatureCollection = async (fcIn) => {
@@ -105,9 +169,22 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                 setProceedButtonText("No Boundaries");
                 setTimeout(() => setProceedButtonText("Proceed"), 1500);
             }
-        } else {
+        } else if (task === "plot_boundary") {
             if (featureCollectionPlot.features.length > 0) {
-                saveFeatureCollection(featureCollectionPlot) && setSelectedTabPrep(1);
+                // Check if AgRowStitch is selected (either individual plots or combined mosaic)
+                const isAgRowStitchSelected = (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) || 
+                                              (prepOrthoImagePath && prepOrthoImagePath.includes('AgRowStitch'));
+                
+                if (isAgRowStitchSelected) {
+                    // If AgRowStitch is selected, go to step 4 (AgRowStitch Labeling)
+                    saveFeatureCollection(featureCollectionPlot) && setActiveStepBoundaryPrep(3);
+                } else {
+                    // Otherwise, go to tab 1 as before
+                    saveFeatureCollection(featureCollectionPlot) && setSelectedTabPrep(1);
+                }
+            } else {
+                setProceedButtonText("No Boundaries");
+                setTimeout(() => setProceedButtonText("Proceed"), 1500);
             }
         }
     };
@@ -193,6 +270,20 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                         <div style={{ marginBottom: "5px", marginTop: "5px" }}>
                             <Button fullWidth variant="contained" color="primary" onClick={() => selectAllFeatures()}>
                                 Select All
+                            </Button>
+                        </div>
+                    )}
+
+                    {task === "plot_boundary" && (
+                        <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                            <Button 
+                                fullWidth 
+                                variant="contained" 
+                                color="error" 
+                                onClick={() => deleteSelectedFeatures()}
+                                disabled={!selectedFeatureIndexes || selectedFeatureIndexes.length === 0}
+                            >
+                                Delete
                             </Button>
                         </div>
                     )}
