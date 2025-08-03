@@ -63,7 +63,9 @@ export function useHandleProcessImages() {
             console.log("Data selection error caught")
             return;
         }*/
-        // setImageViewerLoading(true);
+        // Start loading state
+        setImageViewerLoading(true);
+        setImageList([]); // Clear existing images to show loading spinner
         fetch(`${flaskUrl}get_gcp_selcted_images`, {
             method: "POST",
             headers: {
@@ -106,9 +108,14 @@ export function useHandleProcessImages() {
                         } else {
                             console.log("No GCP path found again");
                         }
+                        
+                        // End loading state
+                        setImageViewerLoading(false);
                     });
             }).catch ((error) => {
                 console.log("Error with data selection, "+ error);
+                // End loading state on error
+                setImageViewerLoading(false);
             });
         
 
@@ -140,6 +147,7 @@ export function useHandleGcpRefreshImages() {
         setGcpPath, 
         setSidebarCollapsed, 
         setTotalImages,
+        setImageViewerLoading,
     } = useDataSetters();
 
     const mergeLists = function (imageList, existingData) {
@@ -176,6 +184,9 @@ export function useHandleGcpRefreshImages() {
             platform: selectedPlatformGCP,
         };
         
+        // Start loading state
+        setImageViewerLoading(true);
+        setImageList([]); // Clear existing images to show loading spinner
 
         fetch(`${flaskUrl}refresh_gcp_selcted_images`, {
             method: "POST",
@@ -219,9 +230,14 @@ export function useHandleGcpRefreshImages() {
                         } else {
                             console.log("No GCP path found again");
                         }
+                        
+                        // End loading state
+                        setImageViewerLoading(false);
                     });
             }).catch ((error) => {
                 console.log("Error with data selection, "+ error);
+                // End loading state on error
+                setImageViewerLoading(false);
             });
         
 

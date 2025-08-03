@@ -20,6 +20,8 @@ function AerialDataPrep() {
         flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
+        selectedSensorGCP,
+        selectedPlatformGCP,
         aerialPrepTab,
         isGCPReady,
         prepGcpFilePath,
@@ -43,6 +45,8 @@ function AerialDataPrep() {
     const handleProcessImages = useHandleProcessImages();
     const selectedDateRef = useRef(selectedDateGCP);
     const selectedExperimentRef = useRef(selectedExperimentGCP);
+    const selectedSensorRef = useRef(selectedSensorGCP);
+    const selectedPlatformRef = useRef(selectedPlatformGCP);
     const [sensorData, setSensorData] = useState(null);
     const CustomComponent = {
         ortho: ImageViewer,
@@ -73,16 +77,31 @@ function AerialDataPrep() {
     }, [sensorData]);
 
     useEffect(() => {
-        if (selectedDateRef.current !== selectedDateGCP || selectedExperimentRef.current !== selectedExperimentGCP) {
-            setImageIndex(0); // Reset image index to 0,
+        if (selectedDateRef.current !== selectedDateGCP || 
+            selectedExperimentRef.current !== selectedExperimentGCP ||
+            selectedSensorRef.current !== selectedSensorGCP ||
+            selectedPlatformRef.current !== selectedPlatformGCP) {
+            
+            console.log("Selection changed - refreshing images:", {
+                dateChange: `${selectedDateRef.current} -> ${selectedDateGCP}`,
+                experimentChange: `${selectedExperimentRef.current} -> ${selectedExperimentGCP}`,
+                sensorChange: `${selectedSensorRef.current} -> ${selectedSensorGCP}`,
+                platformChange: `${selectedPlatformRef.current} -> ${selectedPlatformGCP}`
+            });
+            
+            setImageIndex(0); // Reset image index to 0
             setImageList([]);
             handleProcessImages();
+            
+            // Update all refs to current values
             selectedDateRef.current = selectedDateGCP;
             selectedExperimentRef.current = selectedExperimentGCP;
+            selectedSensorRef.current = selectedSensorGCP;
+            selectedPlatformRef.current = selectedPlatformGCP;
         } else {
-            console.log("Selected date has not changed, skipping image processing.");
+            console.log("No selection changes detected, skipping image processing.");
         }
-    }, [isImageViewerReady]);
+    }, [isImageViewerReady, selectedDateGCP, selectedExperimentGCP, selectedSensorGCP, selectedPlatformGCP]);
 
     const handleOptionClick = (sensor, option) => {
         if (option.completed !== 2) {

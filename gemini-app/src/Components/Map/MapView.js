@@ -85,6 +85,11 @@ export default function MapView() {
     );
 
     useEffect(() => {
+        console.log("[DEBUG] selectedTraitsGeoJsonPath:", selectedTraitsGeoJsonPath);
+        console.log("[DEBUG] selectedTilePath:", selectedTilePath);
+    }, [selectedTraitsGeoJsonPath, selectedTilePath]);
+
+    useEffect(() => {
         selectedMetricRef.current = selectedMetric;
     }, [selectedMetric]);
 

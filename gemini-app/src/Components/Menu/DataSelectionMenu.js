@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Autocomplete, TextField, Snackbar } from "@mui/material";
-
 import { useDataState, useDataSetters, fetchData } from "../../DataContext";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
-
     const { setGenotypeOptions, setSelectedGenotypes, setMetricOptions } = useDataSetters();
 
     //////////////////////////////////////////
@@ -13,6 +11,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     //////////////////////////////////////////
     const [nestedStructure, setNestedStructure] = useState({});
     const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [availableVersions, setAvailableVersions] = useState([]);
     const [selectedValues, setSelectedValues] = useState({
         year: "",
         experiment: "",
@@ -21,6 +20,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         date: "",
         platform: "",
         sensor: "",
+        version: "",
     });
 
     //////////////////////////////////////////
@@ -78,13 +78,67 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     };
 
     //////////////////////////////////////////
+    // Fetch orthomosaic versions
+    //////////////////////////////////////////
+    const fetchOrthomosaicVersions = async () => {
+        if (selectedValues["sensor"]) {
+            try {
+                const response = await fetch(`${flaskUrl}get_orthomosaic_versions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        year: selectedValues["year"],
+                        experiment: selectedValues["experiment"],
+                        location: selectedValues["location"],
+                        population: selectedValues["population"],
+                        date: selectedValues["date"],
+                        platform: selectedValues["platform"],
+                        sensor: selectedValues["sensor"],
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const data = await response.json();
+                setAvailableVersions(data);
+                
+                // Auto-select first version if only one available
+                if (data.length === 1) {
+                    setSelectedValues(prev => ({ ...prev, version: data[0].versionName }));
+                } else if (data.length === 0) {
+                    setSelectedValues(prev => ({ ...prev, version: "" }));
+                }
+            } catch (error) {
+                console.error('Error fetching orthomosaic versions:', error);
+                setAvailableVersions([]);
+            }
+        }
+    };
+
+    // Fetch versions when sensor changes
+    useEffect(() => {
+        if (selectedValues["sensor"]) {
+            fetchOrthomosaicVersions();
+        } else {
+            setAvailableVersions([]);
+            setSelectedValues(prev => ({ ...prev, version: "" }));
+        }
+    }, [selectedValues["sensor"], selectedValues["year"], selectedValues["experiment"], 
+        selectedValues["location"], selectedValues["population"], selectedValues["date"], 
+        selectedValues["platform"]]);
+
+    //////////////////////////////////////////
     // Handle selection change
     //////////////////////////////////////////
     const handleSelectionChange = (field, value) => {
         const newSelectedValues = { ...selectedValues, [field]: value };
 
         // Reset subsequent selections
-        const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
+        const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor", "version"];
         const currentIndex = fieldsOrder.indexOf(field);
         fieldsOrder.slice(currentIndex + 1).forEach((key) => {
             newSelectedValues[key] = "";
@@ -97,37 +151,57 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     // Fetch data and update options if all fields are selected
     //////////////////////////////////////////
     useEffect(() => {
-        if (selectedValues["platform"]) {
+        if (selectedValues["version"] && availableVersions.length > 0) {
+            // Find the selected version details
+            const selectedVersionData = availableVersions.find(v => v.versionName === selectedValues["version"]);
+            
             let newTilePath;
-            if (!selectedValues["sensor"]) {
-                newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/RGB/${selectedValues["date"]}-RGB-Pyramid.tif`;
-            } else {
-                newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
+            let newGeoJsonPath;
+            
+            if (selectedVersionData) {
+                // GeoJSON path is the same for both versions
+                newGeoJsonPath = `${flaskUrl}${selectedVersionData.path}`;
+
+                // Check if the Orthomosaic Version contains "AgRowStitch"
+                if (selectedValues["version"].includes("AgRowStitch")) {
+                    // AgRowStitch tile path
+                    newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["version"]}/combined_mosaic_utm.tif`;
+                } else {
+                    // If not AgRowStitch, use the Drone path as fallback
+                    newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
+                }
+
+                console.log("New GeoJSON Path:", newGeoJsonPath);
+                console.log("New Tile Path:", newTilePath);
+
+                onTilePathChange(newTilePath);
+                onGeoJsonPathChange(newGeoJsonPath);
+                
+                // Fetch data for GeoJSON
+                fetchData(newGeoJsonPath)
+                    .then((data) => {
+                        const traitOutputLabels = data.features.map((f) => f.properties.accession);
+                        const metricColumns = Object.keys(data.features[0].properties);
+                        const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat", "row", "column", "location", "plot", "population", "accession", "col"];
+                        const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
+                        console.log("metrics: ", metrics);
+                        setMetricOptions(metrics);
+                        const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
+                        uniqueTraitOutputLabels.unshift("All Genotypes");
+                        setGenotypeOptions(uniqueTraitOutputLabels);
+                        if (!selectedGenotypes) {
+                            setSelectedGenotypes(["All Genotypes"]);
+                        }
+                    })
+                    .catch((error) => console.error("Error fetching genotypes:", error));
             }
-            const newGeoJsonPath = `${flaskUrl}files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["date"]}-${selectedValues["platform"]}-${selectedValues["sensor"]}-Traits-WGS84.geojson`;
-            console.log(newGeoJsonPath)
+        } else {
+            // If no version is selected or no versions are available, default to Drone tile path
+            const newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/Drone/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
+            const newGeoJsonPath = null;
+
             onTilePathChange(newTilePath);
             onGeoJsonPathChange(newGeoJsonPath);
-            
-            fetchData(newGeoJsonPath)
-                .then((data) => {
-                    // console.log("map features: ", data.features);
-                    const traitOutputLabels = data.features.map((f) => f.properties.accession);
-                    // console.log("traitOutputLabels: ", traitOutputLabels);
-                    const metricColumns = Object.keys(data.features[0].properties);
-                    const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat", "row", "column", "location", "plot", "population", "accession", "col"];
-                    const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
-                    console.log("metrics: ", metrics);
-                    setMetricOptions(metrics);
-                    const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
-                    // console.log("uniqueTraitOutputLabels: ", uniqueTraitOutputLabels);
-                    uniqueTraitOutputLabels.unshift("All Genotypes");
-                    setGenotypeOptions(uniqueTraitOutputLabels);
-                    if (!selectedGenotypes) {
-                        setSelectedGenotypes(["All Genotypes"]);
-                    }
-                })
-                .catch((error) => console.error("Error fetching genotypes:", error));
         }
 
         // Check if any key selection criteria is missing and reset the path if necessary
@@ -138,7 +212,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             !selectedValues["population"] ||
             !selectedValues["date"] ||
             !selectedValues["platform"] ||
-            !selectedValues["sensor"]
+            !selectedValues["sensor"] ||
+            !selectedValues["version"]
         ) {
             onGeoJsonPathChange(null);
         }
@@ -154,7 +229,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             onTilePathChange(null);
         }
 
-        if (!selectedValues["sensor"]) {
+        if (!selectedValues["version"]) {
             setSelectedMetric(null);
         }
     }, [
@@ -165,7 +240,10 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         selectedValues["date"],
         selectedValues["platform"],
         selectedValues["sensor"],
+        selectedValues["version"],
+        availableVersions,
     ]);
+
 
     //////////////////////////////////////////
     // Dynamically render Autocomplete components
@@ -174,9 +252,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     const autocompleteComponents = fieldsOrder.map((field, index) => {
         const label = field.charAt(0).toUpperCase() + field.slice(1); // Capitalize the first letter
         const options = getOptionsForField(field);
-
-        //////////////////////////////////////////
-        // Fetch geojson data for download
 
         return (
             <Autocomplete
@@ -194,7 +269,17 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     return (
         <>
             {autocompleteComponents}
-            {selectedValues["sensor"] ? (
+            {selectedValues["sensor"] && availableVersions.length > 0 ? (
+                <Autocomplete
+                    id="version-combo-box"
+                    options={availableVersions.map(v => v.versionName)}
+                    value={selectedValues["version"]}
+                    onChange={(event, newValue) => handleSelectionChange("version", newValue)}
+                    renderInput={(params) => <TextField {...params} label="Orthomosaic Version" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
+            {selectedValues["version"] ? (
                 <Autocomplete
                     id="metric-combo-box"
                     options={metricOptions}
@@ -230,7 +315,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                         } else if (!newValue.includes("All Genotypes") && genotypeOptions.includes("All Genotypes")) {
                             setGenotypeOptions((prevOptions) => prevOptions.filter((val) => val !== "All Genotypes"));
                         }
-                        // console.log("genotype options", genotypeOptions);
                         setSelectedGenotypes(newValue);
                     }}
                     renderInput={(params) => <TextField {...params} label="Genotype" />}

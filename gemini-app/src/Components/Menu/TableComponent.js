@@ -42,6 +42,8 @@ export const TableComponent = () => {
     const [plotIndices, setPlotIndices] = useState({});
     const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
     const [downloadProgress, setDownloadProgress] = useState(0);
+    const [downloadCancelled, setDownloadCancelled] = useState(false);
+    const [abortController, setAbortController] = useState(null);
 
     const {
         uploadedData
@@ -209,6 +211,11 @@ export const TableComponent = () => {
     
         setDownloadDialogOpen(true);
         setDownloadProgress(0);
+        setDownloadCancelled(false);
+        
+        // Create new AbortController for this download
+        const controller = new AbortController();
+        setAbortController(controller);
     
         try {
             const response = await fetch(`${flaskUrl}download_amiga_images`, {
@@ -217,7 +224,8 @@ export const TableComponent = () => {
                 body: JSON.stringify({
                     ...row,
                     camera: camera
-                })
+                }),
+                signal: controller.signal
             });
     
             if (!response.ok) {
@@ -230,6 +238,12 @@ export const TableComponent = () => {
                 console.warn("Content-Length header not found. Cannot track progress.");
                 // Fallback to old method without progress
                 const blob = await response.blob();
+                
+                // Check if cancelled before proceeding
+                if (controller.signal.aborted) {
+                    throw new Error('Download cancelled');
+                }
+                
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
@@ -250,6 +264,12 @@ export const TableComponent = () => {
             const chunks = [];
     
             while (true) {
+                // Check if cancelled before each read
+                if (controller.signal.aborted) {
+                    reader.cancel();
+                    throw new Error('Download cancelled');
+                }
+                
                 const { done, value } = await reader.read();
                 if (done) {
                     break;
@@ -258,6 +278,11 @@ export const TableComponent = () => {
                 loadedSize += value.length;
                 const progress = Math.round((loadedSize / totalSize) * 100);
                 setDownloadProgress(progress);
+            }
+    
+            // Check if cancelled before creating blob
+            if (controller.signal.aborted) {
+                throw new Error('Download cancelled');
             }
     
             const blob = new Blob(chunks);
@@ -273,10 +298,23 @@ export const TableComponent = () => {
             document.body.removeChild(a);
     
         } catch (error) {
-            console.error("Error downloading images:", error);
-            alert(`An error occurred while trying to download images: ${error.message}`);
+            if (error.name === 'AbortError' || error.message === 'Download cancelled') {
+                console.log("Download cancelled by user");
+                // Don't show alert for cancelled downloads
+            } else {
+                console.error("Error downloading images:", error);
+                alert(`An error occurred while trying to download images: ${error.message}`);
+            }
         } finally {
             setDownloadDialogOpen(false);
+            setAbortController(null);
+        }
+    };
+
+    const handleCancelDownload = () => {
+        if (abortController) {
+            abortController.abort();
+            setDownloadCancelled(true);
         }
     };
 
@@ -328,6 +366,26 @@ export const TableComponent = () => {
     const handleMarkPlots = async (id) => {
         const row = procData.find((row) => row.id === id);
         if (row) {
+            try {
+                const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        year: row.year,
+                        experiment: row.experiment,
+                        location: row.location,
+                        population: row.population,
+                        date: row.date,
+                    }),
+                });
+                if (!filterResponse.ok) {
+                    const errorData = await filterResponse.json().catch(() => null); // Avoid crashing if body is not json
+                    console.warn('Could not pre-populate plot markings.', errorData?.error);
+                }
+            } catch (error) {
+                console.error("Error pre-populating plot markings:", error);
+            }
+
             const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
             let directory;
             if (row.platform === 'rover') {
@@ -546,9 +604,26 @@ export const TableComponent = () => {
                     )}
                     {selectedDataType === "binary" && (
                     <>
+            
+                        {selectedCamera === 'top' && (
+                            <Tooltip title="Mark Plots">
+                                <AddLocationAltIcon
+                                    color="success"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => handleMarkPlots(params.id)}
+                                />
+                            </Tooltip>
+                        )}
+                        <Tooltip title="Download Images">
+                            <DownloadIcon
+                                color="secondary"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleDownloadImages(params.id)}
+                            />
+                        </Tooltip>
                         <Tooltip title="View Report">
                             <ArticleIcon
-                                color="action"
+                                color="info"
                                 style={{ cursor: 'pointer' }}
                                 onClick={() => handleViewReport(params.id)}
                             />
@@ -558,22 +633,6 @@ export const TableComponent = () => {
                                 color="action"
                                 style={{ cursor: 'pointer' }}
                                 onClick={() => handleViewSyncedData(params.id)}
-                            />
-                        </Tooltip>
-                        {selectedCamera === 'top' && (
-                            <Tooltip title="Mark Plots">
-                                <AddLocationAltIcon
-                                    color="action"
-                                    style={{ cursor: 'pointer' }}
-                                    onClick={() => handleMarkPlots(params.id)}
-                                />
-                            </Tooltip>
-                        )}
-                        <Tooltip title="Download Images">
-                            <DownloadIcon
-                                color="action"
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => handleDownloadImages(params.id)}
                             />
                         </Tooltip>
                     </>
@@ -727,6 +786,11 @@ export const TableComponent = () => {
                         <LinearProgress variant="determinate" value={downloadProgress} />
                     </Box>
                 </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleCancelDownload} color="error">
+                        Cancel Download
+                    </Button>
+                </DialogActions>
             </Dialog>
             <Dialog
                 open={reportDialogOpen}
