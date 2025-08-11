@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTheme } from '@mui/material/styles';
 import {
     Dialog,
@@ -24,14 +24,53 @@ import {
     TableRow,
     Paper,
     Checkbox,
-    FormControlLabel
+    FormControlLabel,
+    Tooltip,
+    TextField
 } from '@mui/material';
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CloseIcon from "@mui/icons-material/Close";
+import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft';
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight';
+import CropIcon from '@mui/icons-material/Crop';
+import MapIcon from '@mui/icons-material/Map';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import PlayCircleFilledWhiteOutlinedIcon from '@mui/icons-material/PlayCircleFilledWhiteOutlined';
+import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import OpenWithIcon from '@mui/icons-material/OpenWith';
+import MoveDownIcon from '@mui/icons-material/MoveDown';
+import PlaceIcon from '@mui/icons-material/Place';
+import ArrowOutwardIcon from '@mui/icons-material/ArrowOutward';
+import UndoIcon from '@mui/icons-material/Undo';
+import AddIcon from '@mui/icons-material/Add';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { useDataState } from "../../DataContext";
-import Map, { Source, Layer } from 'react-map-gl';
+import ReactMapGL, { Source, Layer } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+
 const reactMapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+
+function useDebounce(value, delay) {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [value, delay]);
+    return debouncedValue;
+}
+
 
 const GpsPlot = ({ gpsData, currentPoint, viewState, onViewStateChange }) => {
     if (!gpsData || gpsData.length === 0) {
@@ -40,13 +79,19 @@ const GpsPlot = ({ gpsData, currentPoint, viewState, onViewStateChange }) => {
     }
     const validGpsData = gpsData.filter(p => typeof p.lon === 'number' && typeof p.lat === 'number' && !isNaN(p.lon) && !isNaN(p.lat));
 
-    const pathGeoJSON = {
-        type: 'Feature',
-        geometry: {
-            type: 'LineString',
-            coordinates: validGpsData.map(p => [p.lon, p.lat])
-        }
+    const subsampledGpsData = validGpsData.filter((point, index) => index % 10 === 0);
+
+    const gpsPointsGeoJSON = {
+        type: 'FeatureCollection',
+        features: subsampledGpsData.map(point => ({
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [point.lon, point.lat]
+            }
+        }))
     };
+
     const currentPointGeoJSON = (currentPoint &&
       typeof currentPoint.lon === 'number' &&
       typeof currentPoint.lat === 'number' &&
@@ -64,76 +109,96 @@ const GpsPlot = ({ gpsData, currentPoint, viewState, onViewStateChange }) => {
     const currentPointMessage = !currentPointGeoJSON
       ? "No GPS data found for current image."
       : null;
-    {currentPointMessage && (
-      <div style={{
-          position: 'absolute',
-          top: 10,
-          left: 10,
-          zIndex: 1,
-          backgroundColor: 'rgba(255, 255, 255, 0.8)',
-          padding: '8px',
-          borderRadius: '4px'
-      }}>
-          {currentPointMessage}
-      </div>
-    )}
 
     return (
-        <Map
-            {...viewState}
-            onMove={evt => onViewStateChange(evt.viewState)}
-            style={{width: '100%', height: 500}}
-            mapStyle="mapbox://styles/mapbox/satellite-v9"
-            mapboxAccessToken={reactMapboxToken}
-        >
-            <Source id="gps-path" type="geojson" data={pathGeoJSON}>
-                <Layer
-                    id="path-layer"
-                    type="line"
-                    paint={{
-                        'line-color': '#007cbf',
-                        'line-width': 3
-                    }}
-                />
-            </Source>
-            {currentPointGeoJSON && (
-                <Source id="current-point" type="geojson" data={currentPointGeoJSON}>
+        <Box sx={{ width: '100%', height: 500, position: 'relative' }}>
+            <ReactMapGL
+                {...viewState}
+                onMove={evt => onViewStateChange(evt.viewState)}
+                style={{width: '100%', height: '100%'}}
+                mapStyle="mapbox://styles/mapbox/satellite-v9"
+                mapboxAccessToken={reactMapboxToken}
+            >
+                <Source id="gps-points" type="geojson" data={gpsPointsGeoJSON}>
                     <Layer
-                        id="point-layer"
+                        id="points-layer"
                         type="circle"
                         paint={{
-                            'circle-radius': 8,
-                            'circle-color': 'red',
-                            'circle-stroke-width': 2,
-                            'circle-stroke-color': 'white'
+                            'circle-radius': 3,
+                            'circle-color': '#007cbf',
+                            'circle-stroke-width': 0,
+                            'circle-opacity': 0.7
                         }}
                     />
                 </Source>
+                {currentPointGeoJSON && (
+                    <Source id="current-point" type="geojson" data={currentPointGeoJSON}>
+                        <Layer
+                            id="point-layer"
+                            type="circle"
+                            paint={{
+                                'circle-radius': 8,
+                                'circle-color': 'red',
+                                'circle-stroke-width': 2,
+                                'circle-stroke-color': 'white'
+                            }}
+                        />
+                    </Source>
+                )}
+            </ReactMapGL>
+            {currentPointMessage && (
+                <Box sx={{
+                    position: 'absolute',
+                    bottom: 10,
+                    left: 10,
+                    right: 10,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    padding: 1,
+                    borderRadius: 1,
+                    textAlign: 'center'
+                }}>
+                    <Typography variant="caption" color="text.secondary">
+                        {currentPointMessage}
+                    </Typography>
+                </Box>
             )}
-        </Map>
+        </Box>
     );
 };
 
 
 export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotIndex, onPlotIndexChange }) => {
-    const [imageIndex, setImageIndex] = useState(0);
+    const [visualIndex, setVisualIndex] = useState(0); 
+    const debouncedIndex = useDebounce(visualIndex, 50); // Reduced from 200ms to 50ms for better responsiveness
+    const [imageIndex, setImageIndex] = useState(0); 
+    const [displayedIndex, setDisplayedIndex] = useState(0);
+    const [isTransitioning, setIsTransitioning] = useState(false);
+    const [overlayStyle, setOverlayStyle] = useState({});
+
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
+
+    // NEW: granular loading states + overall initial loading overlay
+    const [initialLoading, setInitialLoading] = useState(false);
+    const [gpsDataLoading, setGpsDataLoading] = useState(false);
+    const [markedPlotsLoading, setMarkedPlotsLoading] = useState(false);
     const {flaskUrl} = useDataState();
     const [directory, setDirectory] = useState("");
-    const [imageLoading, setImageLoading] = useState(false);
     const [plotSelectionState, setPlotSelectionState] = useState('start');
     const imageRef = React.useRef(null);
     const [plotIndex, setPlotIndex] = useState(initialPlotIndex);
     const [stitchDirectionDialogOpen, setStitchDirectionDialogOpen] = useState(false);
     const [stitchDirection, setStitchDirection] = useState('');
     const [shiftAll, setShiftAll] = useState(false);
+    const [currentStitchDirection, setCurrentStitchDirection] = useState('');
+    const [shiftAllDialogOpen, setShiftAllDialogOpen] = useState(false);
     const [currentImagePlotIndex, setCurrentImagePlotIndex] = useState(null);
+    const [currentPlotName, setCurrentPlotName] = useState(null);
+    const [currentAccession, setCurrentAccession] = useState(null);
     const [startImageName, setStartImageName] = useState(null);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
     const [isGpsPanelOpen, setIsGpsPanelOpen] = useState(false);
     const [markedPlots, setMarkedPlots] = useState([]);
-    const [originalPlotIndex, setOriginalPlotIndex] = useState(null);
     const [gpsData, setGpsData] = useState([]);
     const [currentLatLon, setCurrentLatLon] = useState(null);
     const [viewState, setViewState] = useState({
@@ -149,11 +214,219 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const [resizeHandle, setResizeHandle] = useState(null);
     const [cropBoundaryDialogOpen, setCropBoundaryDialogOpen] = useState(false);
     const [pendingCropMask, setPendingCropMask] = useState(null);
+
+    const preloadedImagesRef = useRef(new Map());
+    const [gpsCache, setGpsCache] = useState(new Map());
+
+    const [isEditingPlotIndex, setIsEditingPlotIndex] = useState(false);
+    const [editingPlotIndexValue, setEditingPlotIndexValue] = useState('');
+
+    const [gpsReference, setGpsReference] = useState(null);
+    const [hasGpsShift, setHasGpsShift] = useState(false);
+    const [gpsShiftOperation, setGpsShiftOperation] = useState(null);
+    const [gpsOperationLoading, setGpsOperationLoading] = useState(false);
+
+    const [plotMode, setPlotMode] = useState('mark'); 
+    const [sortBy, setSortBy] = useState('plot_index'); 
+    const [sortOrder, setSortOrder] = useState('asc'); 
+
     const imageContainerRef = React.useRef(null);
 
     const theme = useTheme();
-    const drawerWidth = 200;
+    const drawerWidth = 400;
     const gpsDrawerWidth = 400;
+
+    const calculateOverlayStyle = useCallback(() => {
+        const container = imageContainerRef.current;
+        const img = imageRef.current;
+        if (img && container && img.naturalWidth > 0) {
+            const containerWidth = container.offsetWidth;
+            const containerHeight = container.offsetHeight;
+            const imageRatio = img.naturalWidth / img.naturalHeight;
+            const containerRatio = containerWidth / containerHeight;
+    
+            let newStyle = {};
+            if (imageRatio > containerRatio) {
+                const renderedHeight = containerWidth / imageRatio;
+                newStyle = {
+                    width: `${containerWidth}px`,
+                    height: `${renderedHeight}px`,
+                    top: `${(containerHeight - renderedHeight) / 2}px`,
+                    left: '0px',
+                };
+            } else {
+                const renderedWidth = containerHeight * imageRatio;
+                newStyle = {
+                    width: `${renderedWidth}px`,
+                    height: `${containerHeight}px`,
+                    top: '0px',
+                    left: `${(containerWidth - renderedWidth) / 2}px`,
+                };
+            }
+            setOverlayStyle(newStyle);
+        }
+    }, []);
+
+    useEffect(() => {
+        const container = imageContainerRef.current;
+        if (!container) return;
+
+        const observer = new ResizeObserver(() => {
+            calculateOverlayStyle();
+        });
+        observer.observe(container);
+
+        return () => observer.disconnect();
+    }, [calculateOverlayStyle]);
+    
+    const handleVisibleImageLoad = () => {
+        calculateOverlayStyle();
+    };
+
+    useEffect(() => {
+        setImageIndex(debouncedIndex);
+    }, [debouncedIndex]);
+
+    useEffect(() => {
+        if (imageIndex !== displayedIndex) {
+            setIsTransitioning(true);
+        }
+    }, [imageIndex, displayedIndex]);
+
+    const handleNewImageLoad = () => {
+        setDisplayedIndex(imageIndex);
+        setIsTransitioning(false);
+    };
+
+    const fetchMarkedPlots = async () => {
+        if (!directory) return;
+        try {
+            const response = await fetch(`${flaskUrl}get_plot_data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory }),
+            });
+            const data = await response.json();
+            console.log("DEBUG: get_plot_data response:", data);
+            
+            if (response.ok) {
+                const sortedPlots = data.sort((a, b) => a.plot_index - b.plot_index);
+                
+                const enhancedPlots = await Promise.all(sortedPlots.map(async (plot) => {
+                    try {
+                        const imageName = plot.image_name ? plot.image_name.split('/').pop() : null;
+                        if (!imageName) {
+                            return plot;
+                        }
+                        
+                        const plotResponse = await fetch(`${flaskUrl}get_image_plot_index`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                directory: directory,
+                                image_name: imageName,
+                            }),
+                        });
+                        const plotData = await plotResponse.json();
+                        if (plotResponse.ok) {
+                            return {
+                                ...plot,
+                                plot_name: plotData.plot_name,
+                                accession: plotData.accession
+                            };
+                        } else {
+                            return plot;
+                        }
+                    } catch (error) {
+                        console.error("Error fetching plot metadata for plot", plot.plot_index, ":", error);
+                    }
+                    return plot;
+                }));
+                
+                setMarkedPlots(enhancedPlots);
+            } else {
+                console.error("Failed to fetch marked plots:", data.error || data);
+                setMarkedPlots([]);
+            }
+        } catch (error) {
+            console.error("Error fetching marked plots:", error);
+            setMarkedPlots([]);
+        }
+    };
+
+    const sortMarkedPlots = (plots, sortBy, sortOrder) => {
+        return [...plots].sort((a, b) => {
+            let aValue, bValue;
+            
+            switch (sortBy) {
+                case 'plot_index':
+                    aValue = a.plot_index;
+                    bValue = b.plot_index;
+                    break;
+                case 'plot_name':
+                    aValue = a.plot_name || '';
+                    bValue = b.plot_name || '';
+                    break;
+                case 'accession':
+                    aValue = a.accession || '';
+                    bValue = b.accession || '';
+                    break;
+                default:
+                    aValue = a.plot_index;
+                    bValue = b.plot_index;
+            }
+            
+            if (sortBy === 'plot_name') {
+                const aStr = aValue.toString();
+                const bStr = bValue.toString();
+                if (aStr === '' && bStr !== '') return 1;
+                if (bStr === '' && aStr !== '') return -1;
+                if (aStr === '' && bStr === '') return 0;
+                const aHasUnderscore = aStr.includes('_');
+                const bHasUnderscore = bStr.includes('_');
+                if (aHasUnderscore && !bHasUnderscore) return 1;
+                if (bHasUnderscore && !aHasUnderscore) return -1;
+                const comparison = aStr.localeCompare(bStr);
+                return sortOrder === 'asc' ? comparison : -comparison;
+            }
+            if (sortBy === 'accession') {
+                const aStr = aValue.toString();
+                const bStr = bValue.toString();
+                if (aStr === '' && bStr !== '') return 1;
+                if (bStr === '' && aStr !== '') return -1;
+                if (aStr === '' && bStr === '') return 0;
+                const comparison = aStr.localeCompare(bStr);
+                return sortOrder === 'asc' ? comparison : -comparison;
+            }
+            if (sortBy === 'plot_index') {
+                return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+            } else {
+                const comparison = aValue.toString().localeCompare(bValue.toString());
+                return sortOrder === 'asc' ? comparison : -comparison;
+            }
+        });
+    };
+    const sortedMarkedPlots = sortMarkedPlots(markedPlots, sortBy, sortOrder);
+    const handleSortChange = (newSortBy) => {
+        if (newSortBy === sortBy) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortBy(newSortBy);
+            setSortOrder('asc');
+        }
+    };
+
+    useEffect(() => {
+        if (open && obj) {
+            let newDirectory = "";
+            if(obj.platform === 'Amiga' || obj.platform === 'rover') {
+                newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
+            } else {
+                newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
+            }
+            setDirectory(newDirectory);
+        }
+    }, [open, obj]);
 
     useEffect(() => {
         if (open) {
@@ -162,18 +435,26 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     }, [open, initialPlotIndex]);
 
     useEffect(() => {
-        if (open && obj) {
-            setImageIndex(0);
-            if(obj.platform === 'rover'){
-                const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
-                setDirectory(newDirectory);
-            }
-            else {
-                const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
-                setDirectory(newDirectory);
-            }
+        if (open && directory) {
+            fetchMarkedPlots();
         }
-    }, [open, obj]);
+    }, [open, directory]);
+
+    useEffect(() => {
+        if (directory) {
+            setVisualIndex(0);
+            setImageIndex(0);
+            setDisplayedIndex(0);
+            setPlotIndex(initialPlotIndex);
+            fetchImages();
+            fetchMarkedPlots();
+            fetchGpsData();
+            fetchStitchDirection();
+            fetchGpsReference();
+            checkGpsShiftStatus();
+        }
+    }, [directory]);
+
 
     const fetchGpsData = async () => {
         if (!directory) return;
@@ -216,18 +497,189 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
     }, [isGpsPanelOpen, currentLatLon]);
 
-
-    useEffect(() => {
-        if (directory) {
-            fetchImages();
-            fetchMarkedPlots();
-            fetchGpsData();
+    const fetchStitchDirection = async () => {
+        if (!directory) return;
+        try {
+            const response = await fetch(`${flaskUrl}get_stitch_direction`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory }),
+            });
+            const data = await response.json();
+            if (response.ok && data.stitch_direction) {
+                setCurrentStitchDirection(data.stitch_direction);
+                setStitchDirection(data.stitch_direction);
+            }
+        } catch (error) {
+            console.error("Error fetching stitch direction:", error);
         }
-    }, [directory]);
+    };
 
+    const fetchGpsReference = async () => {
+        if (!directory) return;
+        try {
+            const response = await fetch(`${flaskUrl}get_gps_reference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                if (data.reference_lat !== null && data.reference_lon !== null) {
+                    setGpsReference({ lat: data.reference_lat, lon: data.reference_lon });
+                } else {
+                    setGpsReference(null);
+                }
+            }
+        } catch (error) {
+            console.error("Error fetching GPS reference:", error);
+        }
+    };
+
+    const checkGpsShiftStatus = async () => {
+        if (!directory) return;
+        try {
+            const response = await fetch(`${flaskUrl}check_gps_shift_status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory }),
+            });
+            
+            const data = await response.json();
+            if (response.ok) {
+                setHasGpsShift(data.has_shift);
+                setGpsShiftOperation(data.shift_applied);
+                console.log(`GPS shift status: ${data.has_shift ? 'Applied' : 'None'}`);
+            }
+        } catch (error) {
+            console.error("Error checking GPS shift status:", error);
+            setHasGpsShift(false);
+            setGpsShiftOperation(null);
+        }
+    };
+
+    const handleMarkGpsReference = async () => {
+        if (!currentLatLon) {
+            console.error("No current GPS coordinates available");
+            return;
+        }
+
+        try {
+            const response = await fetch(`${flaskUrl}set_gps_reference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    directory: directory,
+                    lat: currentLatLon.lat,
+                    lon: currentLatLon.lon
+                }),
+            });
+
+            if (response.ok) {
+                setGpsReference({ lat: currentLatLon.lat, lon: currentLatLon.lon });
+                console.log(`GPS reference set to: ${currentLatLon.lat}, ${currentLatLon.lon}`);
+            } else {
+                console.error("Failed to set GPS reference");
+            }
+        } catch (error) {
+            console.error("Error setting GPS reference:", error);
+        }
+    };
+
+    const handleShiftGps = async () => {
+        if (!currentLatLon || !gpsReference) {
+            console.error("Missing current coordinates or GPS reference");
+            return;
+        }
+
+        setGpsOperationLoading(true);
+        try {
+            const response = await fetch(`${flaskUrl}shift_gps`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    directory: directory,
+                    current_lat: currentLatLon.lat,
+                    current_lon: currentLatLon.lon
+                }),
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                setHasGpsShift(true);
+                setGpsShiftOperation(data.shift_applied);
+                setGpsCache(new Map());
+                await handleRefilterPlots();
+                
+            } else {
+                console.error("Failed to shift GPS:", data.error);
+            }
+        } catch (error) {
+            console.error("Error shifting GPS:", error);
+        } finally {
+            setGpsOperationLoading(false);
+        }
+    };
+
+    const handleUndoGpsShift = async () => {
+        setGpsOperationLoading(true);
+        try {
+            const response = await fetch(`${flaskUrl}undo_gps_shift`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory: directory }),
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                setHasGpsShift(false);
+                setGpsShiftOperation(null);
+                setGpsCache(new Map());
+                await handleRefilterPlots();
+                
+            } else {
+                console.error("Failed to undo GPS shift:", data.error);
+            }
+        } catch (error) {
+            console.error("Error undoing GPS shift:", error);
+        } finally {
+            setGpsOperationLoading(false);
+        }
+    };
+
+    const handleRefilterPlots = async () => {
+        setGpsOperationLoading(true);
+        try {
+            setGpsCache(new Map());
+            await fetchGpsData();
+            await fetchMarkedPlots();
+            await fetchImagePlotIndex();
+            if (isGpsPanelOpen && currentLatLon) {
+                setViewState(prev => ({
+                    ...prev,
+                    longitude: currentLatLon.lon,
+                    latitude: currentLatLon.lat,
+                    zoom: 20
+                }));
+            }
+        } catch (error) {
+            console.error("Error refiltering plots:", error);
+        } finally {
+            setGpsOperationLoading(false);
+        }
+    };
+    
     useEffect(() => {
         if (imageList.length > 0 && directory) {
             fetchImagePlotIndex();
+        }
+    }, [imageIndex, imageList, directory]);
+    useEffect(() => {
+        if (imageList.length > 0 && directory) {
+            const timeoutId = setTimeout(() => {
+                prefetchPlotData();
+            }, 100);
+            return () => clearTimeout(timeoutId);
         }
     }, [imageIndex, imageList, directory]);
 
@@ -236,6 +688,16 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchImagePlotIndex = async () => {
         const imageName = imageList[imageIndex];
         if (!imageName) return;
+
+        const cacheKey = `${directory}${imageName}`;
+        if (gpsCache.has(cacheKey)) {
+            const cached = gpsCache.get(cacheKey);
+            setCurrentImagePlotIndex(cached.plot_index);
+            setCurrentLatLon(cached.latLon);
+            setCurrentPlotName(cached.plot_name);
+            setCurrentAccession(cached.accession);
+            return;
+        }
 
         try {
             const response = await fetch(`${flaskUrl}get_image_plot_index`, {
@@ -250,41 +712,105 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             });
             const data = await response.json();
             if (response.ok) {
-                setCurrentImagePlotIndex(data.plot_index);
-                if (data.lat !== null && data.lon !== null) {
-                    setCurrentLatLon({ lat: data.lat, lon: data.lon });
-                } else {
-                    setCurrentLatLon(null);
-                }
+                const result = {
+                    plot_index: data.plot_index,
+                    latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
+                    plot_name: data.plot_name,
+                    accession: data.accession
+                };
+
+                setGpsCache(prev => {
+                    const newCache = new Map(prev);
+                    newCache.set(cacheKey, result);
+                    if (newCache.size > 50) {
+                        const entries = Array.from(newCache.entries());
+                        const limitedEntries = entries.slice(-50);
+                        return new Map(limitedEntries);
+                    }
+                    
+                    return newCache;
+                });
+
+                setCurrentImagePlotIndex(result.plot_index);
+                setCurrentLatLon(result.latLon);
+                setCurrentPlotName(result.plot_name);
+                setCurrentAccession(result.accession);
             } else {
-                console.error("Failed to fetch plot index:", data.error);
+                console.error("Failed to fetch plot index:", response.status, data);
                 setCurrentImagePlotIndex(null);
                 setCurrentLatLon(null);
+                setCurrentPlotName(null);
+                setCurrentAccession(null);
             }
         } catch (error) {
-            console.error("Error fetching plot index:", error);
+            console.error("Error fetching plot index for image", imageName, ":", error);
             setCurrentImagePlotIndex(null);
             setCurrentLatLon(null);
+            setCurrentPlotName(null);
+            setCurrentAccession(null);
         }
     };
 
-    const fetchMarkedPlots = async () => {
-        if (!directory) return;
-        try {
-            const response = await fetch(`${flaskUrl}get_plot_data`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                setMarkedPlots(data.sort((a, b) => a.plot_index - b.plot_index));
-            } else {
-                console.error("Failed to fetch marked plots:", data.error);
-            }
-        } catch (error) {
-            console.error("Error fetching marked plots:", error);
+    const prefetchPlotData = async () => {
+        if (!imageList.length || !directory) return;
+
+        const indicesToPrefetch = new Set();
+        const maxIndex = imageList.length - 1;
+        for (let i = 1; i <= 3; i++) {
+            const prevIndex = imageIndex - i;
+            const nextIndex = imageIndex + i;
+            if (prevIndex >= 0) indicesToPrefetch.add(prevIndex);
+            if (nextIndex <= maxIndex) indicesToPrefetch.add(nextIndex);
         }
+        const jumpNext = imageIndex + 10;
+        const jumpPrev = imageIndex - 10;
+        if (jumpNext <= maxIndex) indicesToPrefetch.add(jumpNext);
+        if (jumpPrev >= 0) indicesToPrefetch.add(jumpPrev);
+        window.requestIdleCallback(() => {
+            indicesToPrefetch.forEach(async (index) => {
+                const imageName = imageList[index];
+                if (!imageName) return;
+
+                const cacheKey = `${directory}${imageName}`;
+                if (gpsCache.has(cacheKey)) return; // Already cached
+
+                try {
+                    const response = await fetch(`${flaskUrl}get_image_plot_index`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            directory: directory,
+                            image_name: imageName,
+                        }),
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        const result = {
+                            plot_index: data.plot_index,
+                            latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
+                            plot_name: data.plot_name,
+                            accession: data.accession
+                        };
+
+                        setGpsCache(prev => {
+                            const newCache = new Map(prev);
+                            newCache.set(cacheKey, result);
+                            if (newCache.size > 50) {
+                                const entries = Array.from(newCache.entries());
+                                const limitedEntries = entries.slice(-50);
+                                return new Map(limitedEntries);
+                            }
+                            
+                            return newCache;
+                        });
+                    }
+                } catch (error) {
+                    // Silently fail for prefetch to avoid console spam
+                }
+            });
+        });
     };
 
     const fetchImages = async () => {
@@ -321,26 +847,137 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
     };
 
+    const handleRefreshPlotIndex = async () => {
+        const maxPlotIndex = await fetchMaxPlotIndex();
+        const nextPlotIndex = maxPlotIndex + 1;
+        setPlotIndex(nextPlotIndex);
+        onPlotIndexChange(nextPlotIndex);
+    };
+
+    const handlePlotIndexEdit = () => {
+        setIsEditingPlotIndex(true);
+        if (plotMode === 'mark') {
+            setEditingPlotIndexValue(plotIndex.toString());
+        } else {
+            setEditingPlotIndexValue(currentImagePlotIndex !== null ? currentImagePlotIndex.toString() : '');
+        }
+    };
+
+    const handlePlotIndexSave = () => {
+        const newValue = parseInt(editingPlotIndexValue, 10);
+        if (!isNaN(newValue) && newValue >= 0) {
+            if (plotMode === 'mark') {
+                setPlotIndex(newValue);
+                onPlotIndexChange(newValue);
+            } else if (plotMode === 'view') {
+                const targetPlot = markedPlots.find(plot => plot.plot_index === newValue);
+                if (targetPlot) {
+                    handleJumpToPlot(targetPlot);
+                }
+            }
+        }
+        setIsEditingPlotIndex(false);
+        setEditingPlotIndexValue('');
+    };
+
+    const handlePlotIndexCancel = () => {
+        setIsEditingPlotIndex(false);
+        setEditingPlotIndexValue('');
+    };
+
+    const handlePlotModeToggle = () => {
+        setPlotMode(plotMode === 'mark' ? 'view' : 'mark');
+    };
+
+    const handlePlotIndexKeyPress = (e) => {
+        if (e.key === 'Enter') {
+            handlePlotIndexSave();
+        } else if (e.key === 'Escape') {
+            handlePlotIndexCancel();
+        }
+    };
+
+    useEffect(() => {
+        if (!imageList.length || !directory) return;
+    
+        const handle = window.requestIdleCallback(() => {
+            const indicesToPreload = new Set();
+            const maxIndex = imageList.length - 1;
+    
+            for (let i = 1; i <= 3; i++) {
+                const prevIndex = imageIndex - i;
+                const nextIndex = imageIndex + i;
+                if (prevIndex >= 0) indicesToPreload.add(prevIndex);
+                if (nextIndex <= maxIndex) indicesToPreload.add(nextIndex);
+            }
+    
+            for (let i = 1; i <= 3; i++) {
+                const jumpIndex = imageIndex + i * 10;
+                if (jumpIndex <= maxIndex) {
+                    indicesToPreload.add(jumpIndex);
+                } else {
+                    break; 
+                }
+            }
+    
+            for (let i = 1; i <= 3; i++) {
+                const jumpIndex = imageIndex - i * 10;
+                if (jumpIndex >= 0) {
+                    indicesToPreload.add(jumpIndex);
+                } else {
+                    break;
+                }
+            }
+    
+            for (const index of indicesToPreload) {
+                if (index === imageIndex) continue; 
+    
+                const imageName = imageList[index];
+                const imageUrl = `${API_ENDPOINT}/${directory}${imageName}`;
+                
+                if (!preloadedImagesRef.current.has(imageUrl)) {
+                    preloadedImagesRef.current.set(imageUrl, true);
+                    const img = new Image();
+                    img.src = imageUrl;
+                }
+            }
+        });
+    
+        return () => window.cancelIdleCallback(handle);
+    
+    }, [imageIndex, imageList, directory, API_ENDPOINT]);
+
+
     const handlePrevious = () => {
-        if (imageIndex > 0) {
-            setImageIndex(imageIndex - 1);
-            setImageLoading(true);
+        if (visualIndex > 0) {
+            const newIndex = visualIndex - 1;
+            setVisualIndex(newIndex);
+            setImageIndex(newIndex);
         }
     };
 
     const handleNext = () => {
-        if (imageIndex < imageList.length - 1) {
-            setImageIndex(imageIndex + 1);
-            setImageLoading(true);
+        if (visualIndex < imageList.length - 1) {
+            const newIndex = visualIndex + 1;
+            setVisualIndex(newIndex);
+            setImageIndex(newIndex);
         }
+    };
+
+    const handleJumpBack = () => {
+        const newIndex = Math.max(0, visualIndex - 10);
+        setVisualIndex(newIndex);
+        setImageIndex(newIndex);
+    };
+
+    const handleJumpForward = () => {
+        const newIndex = Math.min(imageList.length - 1, visualIndex + 10);
+        setVisualIndex(newIndex);
+        setImageIndex(newIndex);
     };
 
     const handleBackButton = () => {
         onClose();
-    };
-
-    const handleImageLoadEnd = () => {
-        setImageLoading(false);
     };
 
     const handleCancel = () => {
@@ -349,7 +986,12 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     };
 
     const handlePlotSelection = async () => {
-        const imageName = imageList[imageIndex];
+        const currentIndex = visualIndex;
+        if (currentIndex !== imageIndex) {
+            setImageIndex(currentIndex);
+        }
+        
+        const imageName = imageList[currentIndex];
         if (plotSelectionState === 'start') {
             setStartImageName(imageName);
             setPlotSelectionState('end');
@@ -357,27 +999,15 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     };
 
     const handleStitchDirectionSelection = async (direction) => {
-        const endImageName = imageList[imageIndex];
-        let shiftAmount = 0;
-        let originalStartImageIndex = null;
-        
-        // Calculate shift amount if this is a modification (originalPlotIndex exists) and shiftAll is checked
-        if (originalPlotIndex !== null && shiftAll) {
-            // Get the current start image index
-            const currentStartImageIndex = imageList.findIndex(img => img === startImageName);
-            
-            // Find the original start image index from markedPlots
-            const originalPlot = markedPlots.find(plot => plot.plot_index === originalPlotIndex);
-            if (originalPlot) {
-                const originalStartImageName = originalPlot.image_name.split("/").pop();
-                originalStartImageIndex = imageList.findIndex(img => img === originalStartImageName);
-                
-                if (originalStartImageIndex !== -1 && currentStartImageIndex !== -1) {
-                    shiftAmount = originalStartImageIndex - currentStartImageIndex;
-                }
-            }
+        const currentIndex = visualIndex;
+        if (currentIndex !== imageIndex) {
+            setImageIndex(currentIndex);
         }
         
+        const endImageName = imageList[currentIndex];
+        let shiftAmount = 0;
+        let originalStartImageIndex = null;
+
         try {
             const response = await fetch(`${flaskUrl}mark_plot`, {
                 method: 'POST',
@@ -391,7 +1021,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     plot_index: plotIndex,
                     camera: obj.camera,
                     stitch_direction: direction,
-                    original_plot_index: originalPlotIndex,
                     shift_all: shiftAll,
                     shift_amount: shiftAmount,
                     original_start_image_index: originalStartImageIndex
@@ -399,22 +1028,16 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             });
 
             if (response.ok) {
-                fetchMarkedPlots(); // Refresh plot list
-                if (originalPlotIndex !== null) {
-                    // After completing a "change" request, fetch the max plot index to set the correct next value
-                    const maxPlotIndex = await fetchMaxPlotIndex();
-                    const nextPlotIndex = maxPlotIndex + 1;
-                    setPlotIndex(nextPlotIndex);
-                    onPlotIndexChange(nextPlotIndex);
-                    setOriginalPlotIndex(null);
-                } else {
-                    const newPlotIndex = plotIndex + 1;
-                    setPlotIndex(newPlotIndex);
-                    onPlotIndexChange(newPlotIndex);
-                }
+                fetchMarkedPlots();
+                setCurrentStitchDirection(direction);
+                setGpsCache(new Map());
+                const nextPlotIndex = plotIndex + 1;
+                setPlotIndex(nextPlotIndex);
+                onPlotIndexChange(nextPlotIndex);
+                
                 setPlotSelectionState('start');
                 setStartImageName(null);
-                setShiftAll(false); // Reset shift all checkbox
+                setShiftAll(false);
             } else {
                 console.error("Failed to mark plot end with stitch direction");
             }
@@ -422,6 +1045,19 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             console.error("Error marking plot end:", error);
         }
         setStitchDirectionDialogOpen(false);
+        setShiftAllDialogOpen(false);
+    };
+
+    const handleMarkPlotEnd = () => {
+        if (markedPlots.length === 0 || !currentStitchDirection) {
+            setStitchDirectionDialogOpen(true);
+        } else {
+            handleStitchDirectionSelection(currentStitchDirection);
+        }
+    };
+
+    const handleStitchDirectionButtonClick = () => {
+        setStitchDirectionDialogOpen(true);
     };
 
     const handleDeletePlot = async (plotIndexToDelete) => {
@@ -432,7 +1068,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 body: JSON.stringify({ directory, plot_index: plotIndexToDelete }),
             });
             if (response.ok) {
-                fetchMarkedPlots(); // Refresh plot list
+                fetchMarkedPlots();
+                setGpsCache(new Map());
             } else {
                 console.error("Failed to delete plot");
             }
@@ -442,19 +1079,23 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     };
 
     const handleChangePlot = (plot) => {
-        console.log("Start image for plot: ", plot.image_name);
-        const image = plot.image_name.split(["/"]).pop();
+        const image = plot.image_name.split("/").pop();
         const imageIdx = imageList.findIndex(img => img === image);
-        console.log("Image Index:", imageIdx, "Plot Index:", plot.plot_index);
         if (imageIdx !== -1) {
-            if (originalPlotIndex === null) {
-                setOriginalPlotIndex(plot.plot_index);
-                console.log("Original Plot Index set to:", plot.plot_index);
-            }
             setPlotIndex(plot.plot_index);
-            setImageIndex(imageIdx);
-            setImageLoading(true);
+            setVisualIndex(imageIdx);
             setPlotSelectionState('start');
+        } else {
+            console.error("Start image for the plot not found in the image list.");
+        }
+    };
+
+    const handleJumpToPlot = (plot) => {
+        const image = plot.image_name.split("/").pop();
+        const imageIdx = imageList.findIndex(img => img === image);
+        if (imageIdx !== -1) {
+            setVisualIndex(imageIdx);
+            setIsPanelOpen(false);
         } else {
             console.error("Start image for the plot not found in the image list.");
         }
@@ -467,7 +1108,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleCropButtonClick = () => {
         if (!cropMode) {
-            // Initialize crop box in center of image container
             const bounds = getImageContainerBounds();
             if (bounds) {
                 const size = Math.min(bounds.width, bounds.height) * 0.3;
@@ -487,13 +1127,13 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const handleMouseDown = (e) => {
         if (!cropMode || !cropBox) return;
         e.preventDefault();
-        
+
         const bounds = getImageContainerBounds();
         if (!bounds) return;
-        
+
         const x = e.clientX - bounds.left;
         const y = e.clientY - bounds.top;
-    
+
         const handleSize = 10;
         const handles = [
             { name: 'nw', x: cropBox.x, y: cropBox.y },
@@ -505,7 +1145,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             { name: 'e', x: cropBox.x + cropBox.width, y: cropBox.y + cropBox.height / 2 },
             { name: 'w', x: cropBox.x, y: cropBox.y + cropBox.height / 2 }
         ];
-        
+
         for (let handle of handles) {
             if (Math.abs(x - handle.x) <= handleSize && Math.abs(y - handle.y) <= handleSize) {
                 setIsResizing(true);
@@ -523,15 +1163,15 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleMouseMove = (e) => {
         if (!cropMode || !dragStart) return;
-        
+
         const bounds = getImageContainerBounds();
         if (!bounds) return;
-        
+
         const x = e.clientX - bounds.left;
         const y = e.clientY - bounds.top;
         const deltaX = x - dragStart.x;
         const deltaY = y - dragStart.y;
-        
+
         if (isDragging) {
             setCropBox({
                 x: Math.max(0, Math.min(bounds.width - dragStart.cropBox.width, dragStart.cropBox.x + deltaX)),
@@ -541,7 +1181,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             });
         } else if (isResizing && resizeHandle) {
             let newBox = { ...dragStart.cropBox };
-            
+
             switch (resizeHandle) {
                 case 'nw':
                     newBox.width = Math.max(20, newBox.width - deltaX);
@@ -578,14 +1218,14 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     newBox.x = Math.max(0, newBox.x + deltaX);
                     break;
             }
-            
+
             if (newBox.x + newBox.width > bounds.width) {
                 newBox.width = bounds.width - newBox.x;
             }
             if (newBox.y + newBox.height > bounds.height) {
                 newBox.height = bounds.height - newBox.y;
             }
-            
+
             setCropBox(newBox);
         }
     };
@@ -599,30 +1239,30 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleConfirmCrop = () => {
         if (!cropBox) return;
-        
+
         const bounds = getImageContainerBounds();
         if (!bounds || !imageRef.current) return;
-        
+
         const imageRect = imageRef.current.getBoundingClientRect();
         const imageWidth = imageRect.width;
         const imageHeight = imageRect.height;
-        
+
         const scaleX = imageRef.current.naturalWidth / imageWidth;
         const scaleY = imageRef.current.naturalHeight / imageHeight;
-        
+
         const imageLeft = (imageRect.left - bounds.left);
         const imageTop = (imageRect.top - bounds.top);
-        
+
         const cropLeftOnImage = (cropBox.x - imageLeft) * scaleX;
         const cropTopOnImage = (cropBox.y - imageTop) * scaleY;
         const cropRightOnImage = (cropBox.x + cropBox.width - imageLeft) * scaleX;
         const cropBottomOnImage = (cropBox.y + cropBox.height - imageTop) * scaleY;
-    
+
         const leftMask = Math.max(0, Math.round(cropLeftOnImage));
         const rightMask = Math.max(0, Math.round(imageRef.current.naturalWidth - cropRightOnImage));
         const topMask = Math.max(0, Math.round(cropTopOnImage));
         const bottomMask = Math.max(0, Math.round(imageRef.current.naturalHeight - cropBottomOnImage));
-        
+
         setPendingCropMask([leftMask, rightMask, topMask, bottomMask]);
         setCropBoundaryDialogOpen(true);
     };
@@ -634,7 +1274,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleConfirmCropBoundary = async () => {
         if (!pendingCropMask || !directory) return;
-        
+
         try {
             const response = await fetch(`${flaskUrl}save_stitch_mask`, {
                 method: 'POST',
@@ -644,7 +1284,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     mask: pendingCropMask
                 }),
             });
-            
+
             if (response.ok) {
                 console.log("Stitch boundary saved successfully:", pendingCropMask);
             } else {
@@ -672,26 +1312,19 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 handlePrevious();
             } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
                 handleNext();
-            } else if (e.key === 'ArrowUp') {
-                const newIndex = Math.min(imageList.length - 1, imageIndex + 10);
-                if (newIndex !== imageIndex) {
-                    setImageIndex(newIndex);
-                    setImageLoading(true);
-                }
-            } else if (e.key === 'ArrowDown') {
-                const newIndex = Math.max(0, imageIndex - 10);
-                if (newIndex !== imageIndex) {
-                    setImageIndex(newIndex);
-                    setImageLoading(true);
-                }
+            } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                handleJumpForward();
+            } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+                handleJumpBack();
             } else if (e.key === 'Enter') {
-                if (plotSelectionState === 'start') {
-                    handlePlotSelection();
-                } else {
-                    setStitchDirectionDialogOpen(true);
+                if (plotMode !== 'view') {
+                    if (plotSelectionState === 'start') {
+                        handlePlotSelection();
+                    } else {
+                        handleMarkPlotEnd();
+                    }
                 }
             } else if (e.key === 'Escape') {
-                // Cancel crop mode if active
                 if (cropMode) {
                     setCropBox(null);
                     setCropMode(false);
@@ -704,8 +1337,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
         };
-    }, [open, imageIndex, imageList.length, plotSelectionState]);
-    
+    }, [open, visualIndex, imageList.length, plotSelectionState, cropMode, plotMode]);
+
     return (
         <Dialog
             open={open}
@@ -738,24 +1371,102 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                         <Typography variant="h6" gutterBottom component="div">
                             GPS Data
                         </Typography>
-                        <IconButton onClick={() => setIsGpsPanelOpen(false)}>
-                            <CloseIcon />
-                        </IconButton>
+                        <Tooltip title="Close GPS Panel" arrow>
+                            <IconButton onClick={() => setIsGpsPanelOpen(false)}>
+                                <CloseIcon />
+                            </IconButton>
+                        </Tooltip>
                     </Box>
                     <Box sx={{ px: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                         {gpsData.length > 0 && currentLatLon &&
-                            <GpsPlot 
-                                gpsData={gpsData} 
+                         {gpsData.length > 0 &&
+                            <GpsPlot
+                                gpsData={gpsData}
                                 currentPoint={currentLatLon}
                                 viewState={viewState}
                                 onViewStateChange={setViewState}
                             />
                         }
                         {currentLatLon && (
-                            <Typography variant="caption" display="block" sx={{ mt: 1, textAlign: 'center' }}>
-                                Lat: {currentLatLon.lat.toFixed(6)}<br/>
-                                Lon: {currentLatLon.lon.toFixed(6)}
-                            </Typography>
+                            <>
+                                <Typography variant="caption" display="block" sx={{ mt: 1, textAlign: 'center' }}>
+                                    Lat: {currentLatLon.lat.toFixed(6)}<br/>
+                                    Lon: {currentLatLon.lon.toFixed(6)}
+                                </Typography>
+                                
+                                <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1, width: '100%' }}>
+                                    <Button
+                                        variant="outlined"
+                                        size="small"
+                                        startIcon={<PlaceIcon />}
+                                        onClick={handleMarkGpsReference}
+                                        disabled={gpsOperationLoading}
+                                        fullWidth
+                                    >
+                                        Mark as GPS Reference
+                                    </Button>
+                                    
+                                    {gpsReference && (
+                                        <Typography variant="caption" display="block" sx={{ textAlign: 'center', color: 'text.secondary' }}>
+                                            Reference: {gpsReference.lat.toFixed(6)}, {gpsReference.lon.toFixed(6)}
+                                        </Typography>
+                                    )}
+                                    
+                                    <Button
+                                        variant="contained"
+                                        size="small"
+                                        startIcon={gpsOperationLoading ? <CircularProgress size={16} /> : <ArrowOutwardIcon />}
+                                        onClick={handleShiftGps}
+                                        disabled={!gpsReference || gpsOperationLoading}
+                                        fullWidth
+                                    >
+                                        {gpsOperationLoading ? 'Applying Shift...' : 'Shift GPS'}
+                                    </Button>
+                                    
+                                    <Tooltip 
+                                        title="Re-filter and update plot boundaries based on current GPS coordinates. Use after applying GPS shifts to update plot locations."
+                                        placement="bottom"
+                                    >
+                                        <span>
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                startIcon={gpsOperationLoading ? <CircularProgress size={16} /> : <RefreshIcon />}
+                                                onClick={handleRefilterPlots}
+                                                disabled={gpsOperationLoading}
+                                                fullWidth
+                                                color="primary"
+                                            >
+                                                {gpsOperationLoading ? 'Updating...' : 'Re-filter Plots'}
+                                            </Button>
+                                        </span>
+                                    </Tooltip>
+                                    
+                                    {hasGpsShift && (
+                                        <>
+                                            <Typography variant="caption" display="block" sx={{ textAlign: 'center', color: 'warning.main' }}>
+                                                GPS shift applied
+                                                {gpsShiftOperation && (
+                                                    <>
+                                                        <br/>Δ Lat: {gpsShiftOperation.lat_shift.toFixed(6)}
+                                                        <br/>Δ Lon: {gpsShiftOperation.lon_shift.toFixed(6)}
+                                                    </>
+                                                )}
+                                            </Typography>
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                startIcon={gpsOperationLoading ? <CircularProgress size={16} /> : <UndoIcon />}
+                                                onClick={handleUndoGpsShift}
+                                                disabled={gpsOperationLoading}
+                                                fullWidth
+                                                color="warning"
+                                            >
+                                                {gpsOperationLoading ? 'Undoing...' : 'Undo Shift'}
+                                            </Button>
+                                        </>
+                                    )}
+                                </Box>
+                            </>
                         )}
                     </Box>
                 </Drawer>
@@ -790,50 +1501,162 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     }}
                 >
                     <DialogTitle>
-                        <IconButton
-                            onClick={handleBackButton}
-                            style={{
-                                position: "absolute",
-                                top: "10px",
-                                left: "10px",
-                                zIndex: 10,
-                                width: '40px',
-                                height: '40px',
-                                backgroundColor: '#3874cb',
-                            }}
-                            size="large"
-                        >
-                            <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
-                        </IconButton>
-                        
-                        <Button
-                            variant="contained"
-                            onClick={() => setIsGpsPanelOpen(true)}
-                            style={{
-                                position: "absolute",
-                                top: "60px",
-                                left: "10px",
-                                zIndex: 10,
-                            }}
-                        >
-                            View GPS Data
-                        </Button>
+                        <Tooltip title="Go Back" arrow>
+                            <IconButton
+                                onClick={handleBackButton}
+                                style={{
+                                    position: "absolute",
+                                    top: "10px",
+                                    left: "10px",
+                                    zIndex: 10,
+                                    width: '40px',
+                                    height: '40px',
+                                    backgroundColor: '#3874cb',
+                                }}
+                                size="large"
+                            >
+                                <ArrowBackIcon style={{ color: "white", fontSize: '2rem' }} />
+                            </IconButton>
+                        </Tooltip>
 
-                        <Typography variant="h6" style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}>
-                            Next Plot Index: {plotIndex}
-                        </Typography>
-                        <Button
-                            variant="contained"
-                            onClick={() => setIsPanelOpen(true)}
-                            style={{
-                                position: "absolute",
-                                top: "60px",
-                                right: "10px",
-                                zIndex: 10,
-                            }}
-                        >
-                            Marked Plots
-                        </Button>
+                        <Tooltip title="View GPS Data" arrow>
+                            <IconButton
+                                onClick={() => setIsGpsPanelOpen(true)}
+                                style={{
+                                    position: "absolute",
+                                    top: "60px",
+                                    left: "10px",
+                                    zIndex: 10,
+                                    width: '40px',
+                                    height: '40px',
+                                    backgroundColor: '#3874cb',
+                                }}
+                                size="large"
+                            >
+                                <MapIcon style={{ color: "white", fontSize: '2rem' }} />
+                            </IconButton>
+                        </Tooltip>
+
+                        <Box sx={{
+                            position: 'absolute',
+                            top: '10px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            zIndex: 10,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                            marginLeft: `calc(${isGpsPanelOpen ? `${gpsDrawerWidth / 2}px` : '0px'} - ${isPanelOpen ? `${drawerWidth / 2}px` : '0px'})`,
+                            transition: theme.transitions.create(['margin-left'], {
+                                easing: theme.transitions.easing.sharp,
+                                duration: theme.transitions.duration.enteringScreen,
+                            })
+                        }}>
+
+                            <Typography variant="h6" sx={{ margin: 0, whiteSpace: 'nowrap' }}>
+                                {plotMode === 'mark' ? 'Marking Plot Index:' : 'Viewing Plot:'}
+                            </Typography>
+                            {isEditingPlotIndex ? (
+                                <TextField
+                                    value={editingPlotIndexValue}
+                                    onChange={(e) => setEditingPlotIndexValue(e.target.value)}
+                                    onKeyDown={handlePlotIndexKeyPress}
+                                    onBlur={handlePlotIndexSave}
+                                    type="number"
+                                    size="small"
+                                    autoFocus
+                                    sx={{
+                                        width: '80px',
+                                        '& .MuiInputBase-root': {
+                                            height: '32px',
+                                            fontSize: '1.25rem',
+                                            fontWeight: 'bold'
+                                        }
+                                    }}
+                                />
+                            ) : (
+                                <Tooltip title={plotMode === 'mark' ? "Click to edit plot index" : "Click to jump to plot"} arrow>
+                                    <Typography
+                                        variant="h6"
+                                        onClick={handlePlotIndexEdit}
+                                        sx={{
+                                            margin: 0,
+                                            cursor: 'pointer',
+                                            padding: '4px 8px',
+                                            borderRadius: '4px',
+                                            backgroundColor: 'primary.main',
+                                            color: 'white',
+                                            fontWeight: 'bold',
+                                            '&:hover': {
+                                                backgroundColor: 'primary.dark'
+                                            }
+                                        }}
+                                    >
+                                        {plotMode === 'mark' ? plotIndex : (currentImagePlotIndex !== null && currentImagePlotIndex !== -1 ? currentImagePlotIndex : 'N/A')}
+                                    </Typography>
+                                </Tooltip>
+                            )}
+                            
+                            <Tooltip title={plotMode === 'mark' ? "View Plots" : "Mark Plots"} arrow>
+                                <IconButton
+                                    onClick={handlePlotModeToggle}
+                                    size="small"
+                                    sx={{
+                                        backgroundColor: 'success.main',
+                                        color: 'white',
+                                        width: '32px',
+                                        height: '32px',
+                                        '&:hover': {
+                                            backgroundColor: 'success.dark'
+                                        }
+                                    }}
+                                >
+                                    {plotMode === 'mark' ? <VisibilityIcon fontSize="small" /> : <AddIcon fontSize="small" />}
+                                </IconButton>
+                            </Tooltip>
+                            
+                            {plotMode === 'mark' && (
+                                <Tooltip title="Refresh to next available plot index" arrow>
+                                    <IconButton
+                                        onClick={handleRefreshPlotIndex}
+                                        size="small"
+                                        sx={{
+                                            backgroundColor: 'secondary.main',
+                                            color: 'white',
+                                            width: '32px',
+                                            height: '32px',
+                                            '&:hover': {
+                                                backgroundColor: 'secondary.dark'
+                                            }
+                                        }}
+                                    >
+                                        <RefreshIcon fontSize="small" />
+                                    </IconButton>
+                                </Tooltip>
+                            )}
+                        </Box>
+
+                        <Tooltip title="View Marked Plots" arrow>
+                            <IconButton
+                                onClick={() => setIsPanelOpen(true)}
+                                style={{
+                                    position: "absolute",
+                                    top: "60px",
+                                    right: "10px",
+                                    zIndex: 10,
+                                    width: '40px',
+                                    height: '40px',
+                                    backgroundColor: '#3874cb',
+                                }}
+                                size="large"
+                            >
+                                <ListAltIcon style={{ color: "white", fontSize: '2rem' }} />
+                            </IconButton>
+                        </Tooltip>
                     </DialogTitle>
                     <DialogContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexGrow: 1, minHeight: 0 }}>
 
@@ -855,22 +1678,57 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                 onMouseLeave={handleMouseUp}
                             >
                                 {imageList.length > 0 && (
-                                    <img
-                                        ref={imageRef}
-                                        src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
-                                        alt={`Image ${imageIndex + 1}`}
-                                        style={{
-                                            position: 'absolute',
-                                            width: `100%`,
-                                            height: `100%`,
-                                            objectFit: "contain",
-                                            pointerEvents: 'none',
-                                            display: imageLoading ? 'none' : 'block'
-                                        }}
-                                        hidden={imageLoading}
-                                        onLoad={handleImageLoadEnd}
-                                    />
+                                    <>
+                                        <img
+                                            ref={imageRef}
+                                            src={`${API_ENDPOINT}/${directory}${imageList[displayedIndex]}`}
+                                            alt={`Image ${displayedIndex + 1}`}
+                                            onLoad={handleVisibleImageLoad}
+                                            style={{
+                                                position: 'absolute',
+                                                width: `100%`,
+                                                height: `100%`,
+                                                objectFit: "contain",
+                                                pointerEvents: 'none'
+                                            }}
+                                        />
+                                        {isTransitioning && (
+                                            <img
+                                                src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
+                                                onLoad={handleNewImageLoad}
+                                                style={{ display: 'none' }}
+                                                alt="Preloading"
+                                            />
+                                        )}
+                                    </>
                                 )}
+
+                                {(currentImagePlotIndex !== null && currentImagePlotIndex !== -1) && overlayStyle.width && (
+                                    <Box sx={{
+                                        position: 'absolute',
+                                        bottom: `calc(${overlayStyle.top || '0px'} + 10px)`,
+                                        left: `calc(${overlayStyle.left || '0px'} + 10px)`,
+                                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                                        color: 'white',
+                                        padding: '10px 14px',
+                                        borderRadius: '6px',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 'bold',
+                                        zIndex: 15,
+                                        boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
+                                        backdropFilter: 'blur(4px)',
+                                        border: '1px solid rgba(255, 255, 255, 0.2)'
+                                    }}>
+                                        <div>Plot Index: {currentImagePlotIndex}</div>
+                                        {currentPlotName && (
+                                            <div>Plot: {currentPlotName}</div>
+                                        )}
+                                        {currentAccession && (
+                                            <div>Accession: {currentAccession}</div>
+                                        )}
+                                    </Box>
+                                )}
+
                                 <div style={{
                                     position: 'absolute',
                                     top: 0,
@@ -887,25 +1745,62 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                     borderTop: '2px dashed white',
                                     transform: 'translateY(-50%)'
                                 }} />
-                            
-                                <Button
-                                    variant="contained"
-                                    onClick={handleCropButtonClick}
-                                    sx={{
+                               
+                                {isTransitioning && (
+                                    <Box sx={{
                                         position: 'absolute',
-                                        top: 10,
-                                        left: '50%',
-                                        transform: 'translateX(-50%)',
-                                        zIndex: 20,
-                                        backgroundColor: cropMode ? 'rgba(244, 67, 54, 0.8)' : 'rgba(33, 150, 243, 0.75)',
-                                        '&:hover': {
-                                            backgroundColor: cropMode ? 'rgba(211, 47, 47, 0.9)' : 'rgba(25, 118, 210, 0.9)'
-                                        }
-                                    }}
-                                >
-                                    {cropMode ? '' : 'Crop'}
-                                </Button>
-                            
+                                        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        pointerEvents: 'none',
+                                        ...overlayStyle
+                                    }}>
+                                        <CircularProgress color="inherit" sx={{color: 'white'}}/>
+                                    </Box>
+                                )}
+
+                                <Tooltip title={cropMode ? "Exit Crop Mode" : "Enter Crop Mode"} arrow>
+                                    <IconButton
+                                        onClick={handleCropButtonClick}
+                                        sx={{
+                                            position: 'absolute',
+                                            top: 10,
+                                            right: 'calc(50% + 20px)',
+                                            zIndex: 20,
+                                            width: '40px',
+                                            height: '40px',
+                                            backgroundColor: cropMode ? 'rgba(244, 67, 54, 0.8)' : 'rgba(33, 150, 243, 0.8)',
+                                            '&:hover': {
+                                                backgroundColor: cropMode ? 'rgba(211, 47, 47, 0.9)' : 'rgba(25, 118, 210, 0.9)'
+                                            }
+                                        }}
+                                    >
+                                        <CropIcon style={{ color: "white", fontSize: '1.5rem' }} />
+                                    </IconButton>
+                                </Tooltip>
+
+                                <Tooltip title="Change Stitch Direction" arrow>
+                                    <IconButton
+                                        onClick={handleStitchDirectionButtonClick}
+                                        sx={{
+                                            position: 'absolute',
+                                            top: 10,
+                                            left: 'calc(50% + 20px)',
+                                            zIndex: 20,
+                                            width: '40px',
+                                            height: '40px',
+                                            backgroundColor: 'rgba(33, 150, 243, 0.8)',
+                                            '&:hover': {
+                                                backgroundColor: 'rgba(33, 150, 243, 0.9)'
+                                            }
+                                        }}
+                                    >
+                                        <OpenWithIcon style={{ color: "white", fontSize: '1.5rem' }} />
+                                    </IconButton>
+                                </Tooltip>
+
                                 {cropBox && (
                                     <div
                                         style={{
@@ -926,11 +1821,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                                 height: '10px',
                                                 backgroundColor: 'red',
                                                 border: '1px solid white',
-                                                cursor: handle.includes('n') || handle.includes('s') ? 
+                                                cursor: handle.includes('n') || handle.includes('s') ?
                                                     (handle.includes('w') || handle.includes('e') ? 'nwse-resize' : 'ns-resize') :
                                                     'ew-resize'
                                             };
-                                            
+
                                             switch(handle) {
                                                 case 'nw': style = {...style, top: '-5px', left: '-5px', cursor: 'nw-resize'}; break;
                                                 case 'ne': style = {...style, top: '-5px', right: '-5px', cursor: 'ne-resize'}; break;
@@ -940,11 +1835,12 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                                 case 's': style = {...style, bottom: '-5px', left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize'}; break;
                                                 case 'e': style = {...style, top: '50%', right: '-5px', transform: 'translateY(-50%)', cursor: 'ew-resize'}; break;
                                                 case 'w': style = {...style, top: '50%', left: '-5px', transform: 'translateY(-50%)', cursor: 'ew-resize'}; break;
+                                                default: break;
                                             }
-                                            
+
                                             return <div key={handle} style={style} />;
                                         })}
-                            
+
                                         <Box sx={{
                                             position: 'absolute',
                                             bottom: 5,
@@ -975,20 +1871,13 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                 )}
                             </Box>
                         )}
-                        <Typography>
-                            {(currentImagePlotIndex === -1 || currentImagePlotIndex === null) ? 
-                                "" :
-                                <strong>Image Plot Index: {currentImagePlotIndex}</strong>
-                            }
-                        </Typography>
-                        <Typography>Image {imageIndex + 1} of {imageList.length}</Typography>
+                        <Typography>Image {visualIndex + 1} of {imageList.length}</Typography>
                         <Box sx={{ width: '80%', mt: 2, position: 'relative' }}>
                             <Slider
-                                value={imageIndex}
+                                value={visualIndex}
                                 onChange={(e, newValue) => {
-                                    if (newValue !== imageIndex) {
-                                        setImageIndex(newValue);
-                                        setImageLoading(true);
+                                    if (newValue !== visualIndex) {
+                                        setVisualIndex(newValue);
                                     }
                                 }}
                                 aria-labelledby="image-slider"
@@ -996,27 +1885,121 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                 max={imageList.length > 0 ? imageList.length - 1 : 0}
                             />
                         </Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', mt: 4 }}>
-                            <Button variant="contained" onClick={handlePrevious} disabled={imageIndex === 0}>Previous</Button>
-                            <Button
-                                variant="contained"
-                                style={{ backgroundColor: plotSelectionState === 'start' ? 'green' : 'red', color: 'white' }}
-                                onClick={() => {
-                                    if (plotSelectionState === 'start') {
-                                        handlePlotSelection();
-                                    } else {
-                                        setStitchDirectionDialogOpen(true);
-                                    }
-                                }}
-                            >
-                                {plotSelectionState === 'start' ? 'Start' : 'End'}
-                            </Button>
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', mt: 4 }}>
+                            <Tooltip title="Jump Back 10 Images" arrow>
+                                <span>
+                                    <IconButton
+                                        onClick={handleJumpBack}
+                                        disabled={visualIndex < 10}
+                                        size="large"
+                                        sx={{
+                                            backgroundColor: 'primary.main',
+                                            color: 'white',
+                                            '&:hover': { backgroundColor: 'primary.dark' },
+                                            '&:disabled': { backgroundColor: 'grey.300', color: 'grey.500' }
+                                        }}
+                                    >
+                                        <KeyboardDoubleArrowLeftIcon />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                            <Tooltip title="Previous Image" arrow>
+                                <span>
+                                    <IconButton
+                                        onClick={handlePrevious}
+                                        disabled={visualIndex === 0}
+                                        size="large"
+                                        sx={{
+                                            backgroundColor: 'primary.main',
+                                            color: 'white',
+                                            '&:hover': { backgroundColor: 'primary.dark' },
+                                            '&:disabled': { backgroundColor: 'grey.300', color: 'grey.500' }
+                                        }}
+                                    >
+                                        <KeyboardArrowLeftIcon />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                            
+                            <Tooltip title={plotMode === 'view' ? 'Switch to Mark mode to mark plots' : (plotSelectionState === 'start' ? 'Mark Plot Start' : 'Mark Plot End')} arrow>
+                                <span>
+                                    <IconButton
+                                        onClick={plotSelectionState === 'start' ? handlePlotSelection : handleMarkPlotEnd}
+                                        disabled={plotMode === 'view'}
+                                        size='large'
+                                        sx={{
+                                            backgroundColor: plotMode === 'view' ? 'grey.300' : (plotSelectionState === 'start' ? 'success.main' : 'error.main'),
+                                            color: plotMode === 'view' ? 'grey.500' : 'white',
+                                            '&:hover': {
+                                                backgroundColor: plotMode === 'view' ? 'grey.300' : (plotSelectionState === 'start' ? 'success.dark' : 'error.dark'),
+                                            },
+                                            '&:disabled': {
+                                                backgroundColor: 'grey.300',
+                                                color: 'grey.500'
+                                            }
+                                        }}
+                                    >
+                                        {plotSelectionState === 'start' ? (
+                                            <PlayCircleFilledWhiteOutlinedIcon />
+                                        ) : (
+                                            <StopCircleOutlinedIcon />
+                                        )}
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+
                             {plotSelectionState === 'end' && (
-                                <Button variant="contained" onClick={handleCancel} style={{ backgroundColor: 'purple', color: 'white' }}>
-                                    Cancel
-                                </Button>
+                                <Tooltip title="Cancel Plot Marking" arrow>
+                                    <IconButton
+                                        onClick={handleCancel}
+                                        size='large'
+                                        sx={{
+                                            backgroundColor: 'secondary.main',
+                                            color: 'white',
+                                             '&:hover': {
+                                                backgroundColor: 'secondary.dark',
+                                            }
+                                        }}
+                                    >
+                                        <CancelOutlinedIcon />
+                                    </IconButton>
+                                </Tooltip>
                             )}
-                            <Button variant="contained" onClick={handleNext} disabled={imageIndex === imageList.length - 1}>Next</Button>
+
+                            <Tooltip title="Next Image" arrow>
+                                <span>
+                                    <IconButton
+                                        onClick={handleNext}
+                                        disabled={visualIndex === imageList.length - 1}
+                                        size="large"
+                                        sx={{
+                                            backgroundColor: 'primary.main',
+                                            color: 'white',
+                                            '&:hover': { backgroundColor: 'primary.dark' },
+                                            '&:disabled': { backgroundColor: 'grey.300', color: 'grey.500' }
+                                        }}
+                                    >
+                                        <KeyboardArrowRightIcon />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                            <Tooltip title="Jump Forward 10 Images" arrow>
+                                <span>
+                                    <IconButton
+                                        onClick={handleJumpForward}
+                                        disabled={visualIndex >= imageList.length - 10}
+                                        size="large"
+                                        sx={{
+                                            backgroundColor: 'primary.main',
+                                            color: 'white',
+                                            '&:hover': { backgroundColor: 'primary.dark' },
+                                            '&:disabled': { backgroundColor: 'grey.300', color: 'grey.500' }
+                                        }}
+                                    >
+                                        <KeyboardDoubleArrowRightIcon />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
                         </Box>
                     </DialogContent>
                 </Box>
@@ -1037,31 +2020,118 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                         <Typography variant="h6" gutterBottom component="div">
                             Marked Plots
                         </Typography>
-                        <IconButton onClick={() => setIsPanelOpen(false)}>
-                            <CloseIcon />
-                        </IconButton>
+                        <Tooltip title="Close Marked Plots Panel" arrow>
+                            <IconButton onClick={() => setIsPanelOpen(false)}>
+                                <CloseIcon />
+                            </IconButton>
+                        </Tooltip>
                     </Box>
-                    <TableContainer component={Paper}>
-                        <Table>
+                    <TableContainer 
+                        component={Paper} 
+                        sx={{ 
+                            maxHeight: 'calc(100vh - 150px)', 
+                            overflow: 'auto',
+                            flexGrow: 1
+                        }}
+                    >
+                        <Table stickyHeader>
                             <TableHead>
                                 <TableRow>
-                                    <TableCell>Plot Index</TableCell>
+                                    <TableCell 
+                                        sx={{ cursor: 'pointer', userSelect: 'none' }}
+                                        onClick={() => handleSortChange('plot_index')}
+                                    >
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            Plot Index
+                                            {sortBy === 'plot_index' && (
+                                                sortOrder === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                                            )}
+                                        </Box>
+                                    </TableCell>
+                                    {sortedMarkedPlots.some(plot => plot.plot_name) && (
+                                        <TableCell 
+                                            sx={{ cursor: 'pointer', userSelect: 'none' }}
+                                            onClick={() => handleSortChange('plot_name')}
+                                        >
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                Plot
+                                                {sortBy === 'plot_name' && (
+                                                    sortOrder === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                                                )}
+                                            </Box>
+                                        </TableCell>
+                                    )}
+                                    {sortedMarkedPlots.some(plot => plot.accession) && (
+                                        <TableCell 
+                                            sx={{ cursor: 'pointer', userSelect: 'none' }}
+                                            onClick={() => handleSortChange('accession')}
+                                        >
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                Accession
+                                                {sortBy === 'accession' && (
+                                                    sortOrder === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                                                )}
+                                            </Box>
+                                        </TableCell>
+                                    )}
                                     <TableCell align="right">Actions</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
-                                {markedPlots.map((plot) => (
+                                {sortedMarkedPlots.map((plot) => (
                                     <TableRow key={plot.plot_index}>
                                         <TableCell component="th" scope="row">
                                             {plot.plot_index}
                                         </TableCell>
+                                        {sortedMarkedPlots.some(p => p.plot_name) && (
+                                            <TableCell>
+                                                {plot.plot_name || '-'}
+                                            </TableCell>
+                                        )}
+                                        {sortedMarkedPlots.some(p => p.accession) && (
+                                            <TableCell>
+                                                {plot.accession || '-'}
+                                            </TableCell>
+                                        )}
                                         <TableCell align="right">
-                                            <Button size="small" onClick={() => handleChangePlot(plot)}>
-                                                Change
-                                            </Button>
-                                            <Button size="small" color="secondary" onClick={() => handleDeletePlot(plot.plot_index)}>
-                                                Delete
-                                            </Button>
+                                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                                                <Tooltip title="Jump to Plot Start" arrow>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => handleJumpToPlot(plot)}
+                                                        sx={{
+                                                            color: 'secondary.main',
+                                                            '&:hover': { backgroundColor: 'secondary.light', color: 'white' }
+                                                        }}
+                                                    >
+                                                        <MoveDownIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Tooltip>
+                                                <Tooltip title="Edit Plot" arrow>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => handleChangePlot(plot)}
+                                                        sx={{
+                                                            color: 'primary.main',
+                                                            '&:hover': { backgroundColor: 'primary.light', color: 'white' }
+                                                        }}
+                                                    >
+                                                        <EditIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Tooltip>
+                                                <Tooltip title="Delete Plot" arrow>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => handleDeletePlot(plot.plot_index)}
+                                                        sx={{
+                                                            color: 'error.main',
+                                                            '&:hover': { backgroundColor: 'error.light', color: 'white' }
+                                                        }}
+                                                    >
+                                                        <DeleteForeverIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            </Box>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -1078,7 +2148,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     </Typography>
                     {pendingCropMask && (
                         <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-                            Crop mask: [{pendingCropMask.join(', ')}] 
+                            Crop mask: [{pendingCropMask.join(', ')}]
                         </Typography>
                     )}
                 </DialogContent>
@@ -1091,7 +2161,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             </Dialog>
             <Dialog open={stitchDirectionDialogOpen} onClose={() => {
                 setStitchDirectionDialogOpen(false);
-                setShiftAll(false);
             }} onKeyDown={(e) => {
                 if (e.key === 'Enter' && stitchDirection) {
                     handleStitchDirectionSelection(stitchDirection);
@@ -1099,7 +2168,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             }}>
                 <DialogTitle>Select Plot Stitch Direction</DialogTitle>
                 <DialogContent>
-                    <Typography>Please select the direction of the plot stitching.</Typography>
+                    <Typography>Please select the direction of the plot stitching for this dataset.</Typography>
                     <FormControl fullWidth sx={{ mt: 2 }}>
                         <InputLabel id="stitch-direction-label">Direction</InputLabel>
                         <Select
@@ -1114,25 +2183,44 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                             <MenuItem value="Right">Right</MenuItem>
                         </Select>
                     </FormControl>
-                    {originalPlotIndex !== null && (
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    checked={shiftAll}
-                                    onChange={(e) => setShiftAll(e.target.checked)}
-                                />
-                            }
-                            label="Shift All"
-                            sx={{ mt: 2 }}
-                        />
-                    )}
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => {
                         setStitchDirectionDialogOpen(false);
-                        setShiftAll(false);
                     }}>Cancel</Button>
                     <Button onClick={() => handleStitchDirectionSelection(stitchDirection)} color="primary" disabled={!stitchDirection}>
+                        Confirm
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={shiftAllDialogOpen} onClose={() => {
+                setShiftAllDialogOpen(false);
+                setShiftAll(false);
+            }}>
+                <DialogTitle>Modify Plot</DialogTitle>
+                <DialogContent>
+                    <Typography>You are modifying an existing plot.</Typography>
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                checked={shiftAll}
+                                onChange={(e) => setShiftAll(e.target.checked)}
+                            />
+                        }
+                        label="Shift All"
+                        sx={{ mt: 2 }}
+                    />
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                        Check "Shift All" to adjust all other plots when this plot is modified.
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => {
+                        setShiftAllDialogOpen(false);
+                        setShiftAll(false);
+                    }}>Cancel</Button>
+                    <Button onClick={() => handleStitchDirectionSelection(currentStitchDirection)} color="primary">
                         Confirm
                     </Button>
                 </DialogActions>
