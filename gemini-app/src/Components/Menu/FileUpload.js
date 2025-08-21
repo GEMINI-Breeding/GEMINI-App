@@ -417,7 +417,7 @@ const FileUploadComponent = () => {
                         (selectedDataType != "image") && 
                         selectedDataType !== "platformLogs" &&
                         selectedDataType !== "binary" &&
-                        (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
+                        ('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType)
                     {
                         bFT = true;
                         setBadFileType(true);
@@ -514,6 +514,11 @@ const FileUploadComponent = () => {
             
             // Process each file
             for (const file of fileArray) {
+// Skip collections.json file
+                if (file.name === 'collections.json') {
+                    continue;
+                }
+                
                 // Check if this file is from a folder (contains path separator)
                 const pathParts = file.path ? file.path.split('/') : file.webkitRelativePath ? file.webkitRelativePath.split('/') : null;
                 
@@ -523,6 +528,12 @@ const FileUploadComponent = () => {
                     const folderParts = pathParts.slice(0, pathParts.length - 1);
                     const folderPath = folderParts.join('_');
                     const originalFileName = pathParts[pathParts.length - 1];
+
+                    // Skip collections.json file even when in folders
+                    if (originalFileName === 'collections.json') {
+                        continue;
+                    }
+                    
                     const newFileName = `${folderPath}_${originalFileName}`;
                     
                     // Create a new file object with the renamed filename
