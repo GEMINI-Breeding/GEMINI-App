@@ -1106,14 +1106,37 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         return imageContainerRef.current.getBoundingClientRect();
     };
 
+    const getImageBounds = () => {
+        if (!imageRef.current || !imageContainerRef.current) return null;
+        
+        const containerBounds = imageContainerRef.current.getBoundingClientRect();
+        const img = imageRef.current;
+        
+        const imgRect = img.getBoundingClientRect();
+        
+        const scaleX = img.naturalWidth / imgRect.width;
+        const scaleY = img.naturalHeight / imgRect.height;
+        
+        return {
+            left: imgRect.left - containerBounds.left,
+            top: imgRect.top - containerBounds.top,
+            width: imgRect.width,
+            height: imgRect.height,
+            scaleX,
+            scaleY,
+            naturalWidth: img.naturalWidth,
+            naturalHeight: img.naturalHeight
+        };
+    };
+
     const handleCropButtonClick = () => {
         if (!cropMode) {
             const bounds = getImageContainerBounds();
             if (bounds) {
                 const size = Math.min(bounds.width, bounds.height) * 0.3;
                 setCropBox({
-                    x: (bounds.width - size) / 2,
-                    y: (bounds.height - size) / 2,
+                    x: imgBounds.left + (imgBounds.width - size) / 2,
+                    y: imgBounds.top + (imgBounds.height - size) / 2,
                     width: size,
                     height: size
                 });
@@ -1165,6 +1188,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         if (!cropMode || !dragStart) return;
 
         const bounds = getImageContainerBounds();
+
         if (!bounds) return;
 
         const x = e.clientX - bounds.left;
@@ -1174,8 +1198,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
         if (isDragging) {
             setCropBox({
-                x: Math.max(0, Math.min(bounds.width - dragStart.cropBox.width, dragStart.cropBox.x + deltaX)),
-                y: Math.max(0, Math.min(bounds.height - dragStart.cropBox.height, dragStart.cropBox.y + deltaY)),
+                x: Math.max(imgBounds.left, Math.min(imgBounds.left + imgBounds.width - dragStart.cropBox.width, dragStart.cropBox.x + deltaX)),
+                y: Math.max(imgBounds.top, Math.min(imgBounds.top + imgBounds.height - dragStart.cropBox.height, dragStart.cropBox.y + deltaY)),
                 width: dragStart.cropBox.width,
                 height: dragStart.cropBox.height
             });
@@ -1186,18 +1210,18 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 case 'nw':
                     newBox.width = Math.max(20, newBox.width - deltaX);
                     newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
+                    newBox.x = Math.max(imgBounds.left, newBox.x + deltaX);
+                    newBox.y = Math.max(imgBounds.top, newBox.y + deltaY);
                     break;
                 case 'ne':
                     newBox.width = Math.max(20, newBox.width + deltaX);
                     newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
+                    newBox.y = Math.max(imgBounds.top, newBox.y + deltaY);
                     break;
                 case 'sw':
                     newBox.width = Math.max(20, newBox.width - deltaX);
                     newBox.height = Math.max(20, newBox.height + deltaY);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
+                    newBox.x = Math.max(imgBounds.left, newBox.x + deltaX);
                     break;
                 case 'se':
                     newBox.width = Math.max(20, newBox.width + deltaX);
@@ -1205,7 +1229,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     break;
                 case 'n':
                     newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
+                    newBox.y = Math.max(imgBounds.top, newBox.y + deltaY);
                     break;
                 case 's':
                     newBox.height = Math.max(20, newBox.height + deltaY);
@@ -1215,15 +1239,15 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                     break;
                 case 'w':
                     newBox.width = Math.max(20, newBox.width - deltaX);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
+                    newBox.x = Math.max(imgBounds.left, newBox.x + deltaX);
                     break;
             }
 
             if (newBox.x + newBox.width > bounds.width) {
                 newBox.width = bounds.width - newBox.x;
             }
-            if (newBox.y + newBox.height > bounds.height) {
-                newBox.height = bounds.height - newBox.y;
+            if (newBox.y + newBox.height > imgBounds.top + imgBounds.height) {
+                newBox.height = imgBounds.top + imgBounds.height - newBox.y;
             }
 
             setCropBox(newBox);
@@ -1258,9 +1282,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         const cropRightOnImage = (cropBox.x + cropBox.width - imageLeft) * scaleX;
         const cropBottomOnImage = (cropBox.y + cropBox.height - imageTop) * scaleY;
 
+
         const leftMask = Math.max(0, Math.round(cropLeftOnImage));
-        const rightMask = Math.max(0, Math.round(imageRef.current.naturalWidth - cropRightOnImage));
+        const rightMask = Math.max(0, Math.round(imgBounds.naturalWidth - cropRightOnImage));
         const topMask = Math.max(0, Math.round(cropTopOnImage));
+
         const bottomMask = Math.max(0, Math.round(imageRef.current.naturalHeight - cropBottomOnImage));
 
         setPendingCropMask([leftMask, rightMask, topMask, bottomMask]);
