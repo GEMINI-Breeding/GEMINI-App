@@ -43,11 +43,14 @@ const TableViewTab = () => {
 
     // Columns to render or send data to the nested section
     let tableColumns = [
-        { label: "Date", field: "date",showColumn: true},
-        { label: "Table", field: "isGeojsonExist", actionType: "loadTable", actionLabel: "Load",showColumn: true},
-        { label: "Graph", field: "isGeojsonExist", actionType: "loadGraph", actionLabel: "Load",showColumn: true},
+        { label: "Date", field: "date", showColumn: true},
+        { label: "Orthomosaic", field: "versionName", showColumn: true},
+        { label: "Table", field: "isGeojsonExist", actionType: "loadTable", actionLabel: "Load", showColumn: true},
+        { label: "Graph", field: "isGeojsonExist", actionType: "loadGraph", actionLabel: "Load", showColumn: true},
         // { label: "Download", field: "enableDownload", actionType: "loadDownload", actionLabel: "Download",showColumn: true},
-        { label: "FileName", field: "geoJsonFile",showColumn: false},
+        { label: "FileName", field: "geoJsonFile", showColumn: false},
+        { label: "VersionType", field: "versionType", showColumn: false},
+        { label: "Version", field: "version", showColumn: false},
     ];
 
     // row data for nested section
@@ -79,32 +82,77 @@ const TableViewTab = () => {
             updatedData[platform][sensor] = [];
         }
         let geoJsonFile = "";
-        // check for Sensors folder
+        
+        // Check for orthomosaic versions using the new endpoint
         try {
-            const processedFiles = await fetchData(
-                constructUrl('list_files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor)
-            );
-            for (const file of processedFiles) {
-                //console.log("file:", file);
-                if (file.endsWith(".geojson")) {
-                    isGeojsonExist = true;
-                    enableDownload = true;
-                    // Make full path
-                    geoJsonFile = constructUrl('files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor, file);
-                    if(isGeojsonExist==true){
-                        // add entry with the determined 'ortho' status
-                        updatedData[platform][sensor].push({date, isGeojsonExist, isGeojsonExist, enableDownload, geoJsonFile: geoJsonFile});
+            const response = await fetch(`${flaskUrl}/get_orthomosaic_versions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date,
+                    platform,
+                    sensor
+                })
+            });
+            
+            if (response.ok) {
+                const versionsResponse = await response.json();
+                
+                if (versionsResponse && versionsResponse.length > 0) {
+                    // Add each version as a separate entry
+                    for (const version of versionsResponse) {
+                        isGeojsonExist = true;
+                        enableDownload = true;
+                        geoJsonFile = `${flaskUrl}${version.path}`;
+                        
+                        updatedData[platform][sensor].push({
+                            date, 
+                            isGeojsonExist, 
+                            enableDownload, 
+                            geoJsonFile: geoJsonFile,
+                            versionName: version.versionName,
+                            versionType: version.versionType,
+                            version: version.version
+                        });
                     }
                 }
             }
         } catch (error) {
-            // if there's an error fetching processed files, or no .tif files found
-            console.warn(
-                `Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}:`,
-                error
-            );
-            isGeojsonExist = false; // there are images, but no processed .tif files
-            setSubmitError(`Processed data not found or error fetching processed data for date ${date} and sensor ${sensor}`)
+            console.warn(`No orthomosaic versions found for ${date} ${platform} ${sensor}:`, error);
+            
+            // Fallback: check for traditional geojson files in sensor directory
+            try {
+                const processedFiles = await fetchData(
+                    constructUrl('list_files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor)
+                );
+                for (const file of processedFiles) {
+                    if (file.endsWith(".geojson")) {
+                        isGeojsonExist = true;
+                        enableDownload = true;
+                        geoJsonFile = constructUrl('files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor, file);
+                        
+                        updatedData[platform][sensor].push({
+                            date, 
+                            isGeojsonExist, 
+                            enableDownload, 
+                            geoJsonFile: geoJsonFile,
+                            versionName: 'Main',
+                            versionType: 'legacy',
+                            version: 'main'
+                        });
+                    }
+                }
+            } catch (fallbackError) {
+                console.warn(`No processed files found for ${date} ${platform} ${sensor}:`, fallbackError);
+                isGeojsonExist = false;
+                setSubmitError(`Processed data not found for date ${date} and sensor ${sensor}`)
+            }
         }
     }
 

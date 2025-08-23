@@ -29,6 +29,10 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     const [currentImageUrl, setCurrentImageUrl] = useState('');
     const [loading, setLoading] = useState(false);
     const [zoom, setZoom] = useState(1);
+    const [panX, setPanX] = useState(0);
+    const [panY, setPanY] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
     const [isImageLoaded, setIsImageLoaded] = useState(false);
     const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
@@ -70,6 +74,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         
         if (open) {
             setZoom(1);
+            setPanX(0);
+            setPanY(0);
             setIsImageLoaded(false);
             setShowBoundingBoxes(true);
             setConfidenceThreshold(0.5);
@@ -103,17 +109,50 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (isImageLoaded && showBoundingBoxes) {
             drawBoundingBoxes();
         }
-    }, [isImageLoaded, showBoundingBoxes, predictions, confidenceThreshold, selectedClasses, classColors, zoom]);
+    }, [isImageLoaded, showBoundingBoxes, predictions, confidenceThreshold, selectedClasses, classColors, zoom, panX, panY]);
+
+    useEffect(() => {
+        // Set up ResizeObserver to update canvas when image size changes
+        let resizeObserver;
+        
+        if (imageRef.current) {
+            resizeObserver = new ResizeObserver(() => {
+                if (isImageLoaded && showBoundingBoxes) {
+                    drawBoundingBoxes();
+                }
+            });
+            
+            resizeObserver.observe(imageRef.current);
+        }
+        
+        // Also listen for window resize events
+        const handleWindowResize = () => {
+            if (isImageLoaded && showBoundingBoxes) {
+                setTimeout(() => drawBoundingBoxes(), 100); // Small delay to ensure layout is updated
+            }
+        };
+        
+        window.addEventListener('resize', handleWindowResize);
+        
+        return () => {
+            if (resizeObserver) {
+                resizeObserver.disconnect();
+            }
+            window.removeEventListener('resize', handleWindowResize);
+        };
+    }, [imageRef.current, isImageLoaded, showBoundingBoxes]);
 
     const fetchPlotImages = async () => {
         if (!inferenceData) return;
         
-        const { date, platform, sensor, agrowstitch_version } = inferenceData;
+        const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+        // Use orthomosaic if available, otherwise fall back to agrowstitch_version for backward compatibility
+        const versionDir = orthomosaic || agrowstitch_version;
         setLoading(true);
         
         try {
             const plotFiles = await fetchData(
-                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitch_version}`
+                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
             );
 
             const plotImages = plotFiles
@@ -129,7 +168,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             setLoading(false);
 
             if (plotImages.length > 0) {
-                loadPlotImage(plotImages[0], date, platform, sensor, agrowstitch_version);
+                loadPlotImage(plotImages[0], date, platform, sensor, versionDir);
             }
             
         } catch (error) {
@@ -165,7 +204,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (!inferenceData || plotImages.length === 0) return;
         
         const currentFileName = plotImages[currentPlotIndex];
-        const { date, platform, sensor, agrowstitch_version } = inferenceData;
+        const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+        const versionDir = orthomosaic || agrowstitch_version;
         
         try {
             const response = await fetch(`${flaskUrl}get_plot_predictions`, {
@@ -179,7 +219,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     date,
                     platform,
                     sensor,
-                    agrowstitch_version,
+                    agrowstitch_version: versionDir, // Keep for backend compatibility
+                    orthomosaic: versionDir, // New parameter name
                     plot_filename: currentFileName
                 })
             });
@@ -200,13 +241,13 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         }
     };
 
-    const loadPlotImage = async (fileName, date, platform, sensor, agrowstitch_version) => {
+    const loadPlotImage = async (fileName, date, platform, sensor, versionDir) => {
         try {
             if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(currentImageUrl);
             }
 
-            const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitch_version}/${fileName}`;
+            const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}/${fileName}`;
             
             const directUrl = `${flaskUrl}files/${imagePath}`;
             
@@ -251,21 +292,16 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         });
         setIsImageLoaded(true);
         
-        // Setup canvas
-        if (canvasRef.current) {
-            const canvas = canvasRef.current;
-            const rect = img.getBoundingClientRect();
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-            canvas.style.position = 'absolute';
-            canvas.style.top = '0';
-            canvas.style.left = '0';
-            canvas.style.pointerEvents = 'none';
-        }
+        // Setup canvas to match image display size and position
+        setTimeout(() => {
+            if (canvasRef.current && imageContainerRef.current) {
+                drawBoundingBoxes();
+            }
+        }, 100); // Small delay to ensure image is fully rendered
     };
 
     const drawBoundingBoxes = () => {
-        if (!canvasRef.current || !imageRef.current || !isImageLoaded) return;
+        if (!canvasRef.current || !imageRef.current || !isImageLoaded || !imageContainerRef.current) return;
         
         const canvas = canvasRef.current;
         const img = imageRef.current;
@@ -276,14 +312,48 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         
         if (!showBoundingBoxes) return;
         
-        // Get current image display dimensions
-        const rect = img.getBoundingClientRect();
-        canvas.width = rect.width;
-        canvas.height = rect.height;
+        // Get container and image rectangles
+        const containerRect = imageContainerRef.current.getBoundingClientRect();
+        const imgRect = img.getBoundingClientRect();
         
-        // Calculate scale factors
-        const scaleX = rect.width / imageDimensions.width;
-        const scaleY = rect.height / imageDimensions.height;
+        // Calculate the actual size the image should take up when zoomed
+        const containerWidth = containerRect.width;
+        const containerHeight = containerRect.height;
+        
+        // Calculate the displayed size based on object-fit: contain
+        const imageAspectRatio = imageDimensions.width / imageDimensions.height;
+        const containerAspectRatio = containerWidth / containerHeight;
+        
+        let displayWidth, displayHeight;
+        if (imageAspectRatio > containerAspectRatio) {
+            // Image is wider - fit to width
+            displayWidth = containerWidth;
+            displayHeight = containerWidth / imageAspectRatio;
+        } else {
+            // Image is taller - fit to height
+            displayHeight = containerHeight;
+            displayWidth = containerHeight * imageAspectRatio;
+        }
+        
+        // Apply zoom
+        const zoomedWidth = displayWidth * zoom;
+        const zoomedHeight = displayHeight * zoom;
+        
+        // Calculate position (image is centered in container with pan offset)
+        const imageLeft = (containerWidth - zoomedWidth) / 2 + panX;
+        const imageTop = (containerHeight - zoomedHeight) / 2 + panY;
+        
+        // Set canvas size and position
+        canvas.width = zoomedWidth;
+        canvas.height = zoomedHeight;
+        canvas.style.top = `${imageTop}px`;
+        canvas.style.left = `${imageLeft}px`;
+        canvas.style.width = `${zoomedWidth}px`;
+        canvas.style.height = `${zoomedHeight}px`;
+        
+        // Calculate scale factors for coordinates
+        const scaleX = zoomedWidth / imageDimensions.width;
+        const scaleY = zoomedHeight / imageDimensions.height;
         
         // Filter predictions based on confidence and selected classes
         const filteredPredictions = predictions.filter(pred => 
@@ -301,23 +371,10 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             const width = pred.width * scaleX;
             const height = pred.height * scaleY;
             
-            // Draw bounding box
+            // Draw bounding box only (no labels)
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.strokeRect(x, y, width, height);
-            
-            // Draw label background
-            const label = `${pred.class} (${(pred.confidence * 100).toFixed(1)}%)`;
-            ctx.font = '12px Arial';
-            const textMetrics = ctx.measureText(label);
-            const textHeight = 16;
-            
-            ctx.fillStyle = color;
-            ctx.fillRect(x, y - textHeight, textMetrics.width + 8, textHeight);
-            
-            // Draw label text
-            ctx.fillStyle = 'white';
-            ctx.fillText(label, x + 4, y - 4);
         });
     };
 
@@ -325,8 +382,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (currentPlotIndex > 0 && inferenceData) {
             const newIndex = currentPlotIndex - 1;
             setCurrentPlotIndex(newIndex);
-            const { date, platform, sensor, agrowstitch_version } = inferenceData;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, agrowstitch_version);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
         }
     };
 
@@ -334,8 +392,49 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (currentPlotIndex < plotImages.length - 1 && inferenceData) {
             const newIndex = currentPlotIndex + 1;
             setCurrentPlotIndex(newIndex);
-            const { date, platform, sensor, agrowstitch_version } = inferenceData;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, agrowstitch_version);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
+        }
+    };
+
+    const handleMouseDown = (e) => {
+        if (zoom > 1) {
+            setIsDragging(true);
+            setDragStart({ x: e.clientX - panX, y: e.clientY - panY });
+        }
+    };
+
+    const handleMouseMove = (e) => {
+        if (isDragging && zoom > 1) {
+            const newPanX = e.clientX - dragStart.x;
+            const newPanY = e.clientY - dragStart.y;
+            setPanX(newPanX);
+            setPanY(newPanY);
+        }
+    };
+
+    const handleMouseUp = () => {
+        setIsDragging(false);
+    };
+
+    const handleZoomChange = (e, newValue) => {
+        setZoom(newValue);
+        // Reset pan when zoom changes to 1
+        if (newValue === 1) {
+            setPanX(0);
+            setPanY(0);
+        }
+    };
+
+    const handlePlotSelection = (event) => {
+        const selectedFileName = event.target.value;
+        const newIndex = plotImages.findIndex(img => img === selectedFileName);
+        if (newIndex !== -1 && inferenceData) {
+            setCurrentPlotIndex(newIndex);
+            const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+            const versionDir = orthomosaic || agrowstitch_version;
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
         }
     };
 
@@ -371,9 +470,19 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
             <DialogTitle>
                 <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="h6">
-                        Inference Results - {inferenceData.date} {inferenceData.platform} {inferenceData.sensor}
-                    </Typography>
+                    <Box>
+                        <Typography variant="h6">
+                            Inference Results - {inferenceData.date} {inferenceData.platform} {inferenceData.sensor}
+                        </Typography>
+                        {(inferenceData.model_id || inferenceData.model_version) && (
+                            <Typography variant="subtitle2" color="textSecondary">
+                                Model: {inferenceData.model_id || 'Unknown'} 
+                                {inferenceData.model_version && ` v${inferenceData.model_version}`}
+                                {(inferenceData.orthomosaic || inferenceData.agrowstitch_version) && 
+                                    ` • Orthomosaic: ${inferenceData.orthomosaic || inferenceData.agrowstitch_version}`}
+                            </Typography>
+                        )}
+                    </Box>
                     <IconButton onClick={onClose}>
                         <Close />
                     </IconButton>
@@ -394,25 +503,44 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                             <Paper elevation={2} sx={{ p: 2 }}>
                                 {/* Navigation Controls */}
                                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                                    <Box display="flex" alignItems="center" gap={1}>
-                                        <IconButton 
-                                            onClick={handlePreviousPlot} 
-                                            disabled={currentPlotIndex === 0}
-                                        >
-                                            <ArrowBack />
-                                        </IconButton>
-                                        
-                                        <Typography variant="body1">
-                                            {getPlotDisplayName(plotImages[currentPlotIndex])} 
-                                            ({currentPlotIndex + 1} of {plotImages.length})
-                                        </Typography>
-                                        
-                                        <IconButton 
-                                            onClick={handleNextPlot} 
-                                            disabled={currentPlotIndex === plotImages.length - 1}
-                                        >
-                                            <ArrowForward />
-                                        </IconButton>
+                                    <Box display="flex" alignItems="center" gap={2}>
+                                        {/* Previous/Next Navigation */}
+                                        <Box display="flex" alignItems="center" gap={1}>
+                                            <IconButton 
+                                                onClick={handlePreviousPlot} 
+                                                disabled={currentPlotIndex === 0}
+                                            >
+                                                <ArrowBack />
+                                            </IconButton>
+                                            
+                                            <Typography variant="body1">
+                                                {getPlotDisplayName(plotImages[currentPlotIndex])} 
+                                                ({currentPlotIndex + 1} of {plotImages.length})
+                                            </Typography>
+                                            
+                                            <IconButton 
+                                                onClick={handleNextPlot} 
+                                                disabled={currentPlotIndex === plotImages.length - 1}
+                                            >
+                                                <ArrowForward />
+                                            </IconButton>
+                                        </Box>
+
+                                        {/* Plot Selection Dropdown */}
+                                        <FormControl size="small" sx={{ minWidth: 200 }}>
+                                            <InputLabel>Select Plot</InputLabel>
+                                            <Select
+                                                value={plotImages[currentPlotIndex] || ''}
+                                                onChange={handlePlotSelection}
+                                                label="Select Plot"
+                                            >
+                                                {plotImages.map((fileName, index) => (
+                                                    <MenuItem key={fileName} value={fileName}>
+                                                        {getPlotDisplayName(fileName)}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
                                     </Box>
                                     
                                     <FormControlLabel
@@ -448,18 +576,21 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                                     maxWidth: '100%',
                                                     maxHeight: '100%',
                                                     objectFit: 'contain',
-                                                    transform: `scale(${zoom})`,
+                                                    transform: `scale(${zoom}) translate(${panX / zoom}px, ${panY / zoom}px)`,
+                                                    cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
                                                 }}
                                                 onLoad={handleImageLoad}
+                                                onMouseDown={handleMouseDown}
+                                                onMouseMove={handleMouseMove}
+                                                onMouseUp={handleMouseUp}
+                                                onMouseLeave={handleMouseUp}
                                             />
                                             <canvas
                                                 ref={canvasRef}
                                                 style={{
                                                     position: 'absolute',
-                                                    top: '50%',
-                                                    left: '50%',
-                                                    transform: `translate(-50%, -50%) scale(${zoom})`,
                                                     pointerEvents: 'none',
+                                                    zIndex: 10
                                                 }}
                                             />
                                         </>
@@ -469,9 +600,14 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                 {/* Zoom Controls */}
                                 <Box mt={2}>
                                     <Typography gutterBottom>Zoom: {Math.round(zoom * 100)}%</Typography>
+                                    {zoom > 1 && (
+                                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                                            Click and drag to pan around the image
+                                        </Typography>
+                                    )}
                                     <Slider
                                         value={zoom}
-                                        onChange={(e, newValue) => setZoom(newValue)}
+                                        onChange={handleZoomChange}
                                         min={0.1}
                                         max={3}
                                         step={0.1}

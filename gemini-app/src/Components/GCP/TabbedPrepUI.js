@@ -10,7 +10,6 @@ import AerialDataPrep from "./TabComponents/AerialDataPrep";
 import Processing from "./TabComponents/Processing";
 
 import useTrackComponent from "../../useTrackComponent";
-import RoverPrepTabs from "./TabComponents/Processing/RoverPrepTabs";
 import AerialPrepTabs from "./TabComponents/Processing/AerialPrepTabs";
 
 function TabbedPrepUI() {
@@ -64,7 +63,6 @@ function TabbedPrepUI() {
                         <Tab label="Plot Boundary Preparation" style={titleStyle} />
                         <Tab label="Processing" style={titleStyle} />
                         <Tab label="Aerial Processing" style={titleStyle} />
-                        <Tab label="Ground Processing" style={titleStyle} />
                     </Tabs>
                 </Grid>
             )}
@@ -74,7 +72,6 @@ function TabbedPrepUI() {
                     {selectedTabPrep === 1 && <PlotBoundaryPrep />}
                     {selectedTabPrep === 2 && <Processing />}
                     {selectedTabPrep === 3 && <AerialPrepTabs />}
-                    {selectedTabPrep === 4 && <RoverPrepTabs />}
                 </Grid>
             )}
         </Grid>

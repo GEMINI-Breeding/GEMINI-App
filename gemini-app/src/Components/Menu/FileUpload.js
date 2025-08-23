@@ -365,7 +365,14 @@ const FileUploadComponent = () => {
             let localDirPath = "";
             for (const field of dataTypes[selectedDataType].fields) {
                 if (values[field]) {
-                    localDirPath += localDirPath ? `/${values[field]}` : values[field];
+                    // Sanitize field values to remove hidden Unicode characters
+                    const sanitizedValue = values[field]
+                        .normalize('NFKD')  // Normalize Unicode
+                        .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')  // Remove control characters
+                        .replace(/[^\x20-\x7E]/g, '')  // Keep only ASCII printable characters
+                        .trim();  // Remove leading/trailing whitespace
+                    
+                    localDirPath += localDirPath ? `/${sanitizedValue}` : sanitizedValue;
                 }
             }
             if(selectedDataType === "binary"){
@@ -378,6 +385,7 @@ const FileUploadComponent = () => {
                 localDirPath += "/Metadata";
             }
             console.log("Directory path on submit:", localDirPath);
+            console.log("Original form values:", values);
             setDirPath(localDirPath);
 
             // Step 1: Check which files need to be uploaded

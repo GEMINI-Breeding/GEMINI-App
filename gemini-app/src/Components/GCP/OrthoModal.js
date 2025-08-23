@@ -61,8 +61,8 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                 setOrthoCustomValue(
                     dedent(`
                         mask: [0, 0, 0, 0]
-                        forward_limit: 8
-                        max_reprojection_error: 3.0
+                        forward_limit: 3
+                        max_reprojection_error: 1.0
                         save_full_resolution: True
                         save_resized_resolution: False
                     `)
@@ -101,8 +101,8 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                 setOrthoCustomValue(
                     dedent(`
                         mask: [${maskValue.join(', ')}]
-                        forward_limit: 8
-                        max_reprojection_error: 3.0
+                        forward_limit: 3
+                        max_reprojection_error: 1.0
                         save_full_resolution: True
                         save_resized_resolution: False
                     `)

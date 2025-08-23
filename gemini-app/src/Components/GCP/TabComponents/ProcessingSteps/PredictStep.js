@@ -14,6 +14,10 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useDataState } from "../../../../DataContext";
 import InferenceTable from "../../../StatsMenu/InferenceTable";
 
@@ -31,9 +35,11 @@ function PredictStep() {
     } = useDataState();
 
     // Roboflow API configuration
-    const [apiUrl, setApiUrl] = useState("https://infer.roboflow.com");
+    const [inferenceMode, setInferenceMode] = useState("cloud"); // 'cloud' or 'local'
+    const [apiUrl, setApiUrl] = useState("https://detect.roboflow.com");
     const [apiKey, setApiKey] = useState("");
     const [modelId, setModelId] = useState("");
+    const [showApiKey, setShowApiKey] = useState(false);
 
     // Data selection (using existing GCP selections for first 4, then additional dropdowns)
     const [dateOptions, setDateOptions] = useState([]);
@@ -51,6 +57,7 @@ function PredictStep() {
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [results, setResults] = useState(null);
+    const [inferenceRefreshTrigger, setInferenceRefreshTrigger] = useState(0);
 
     // Load dates when GCP selections are available
     useEffect(() => {
@@ -180,12 +187,16 @@ function PredictStep() {
         setMessage("Starting inference...");
         setResults(null);
 
+        // Set API URL based on inference mode
+        let selectedApiUrl = inferenceMode === "local" ? "http://localhost:9001" : "https://detect.roboflow.com";
+
         try {
             const response = await fetch(`${flaskUrl}run_roboflow_inference`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    apiUrl,
+                    apiUrl: selectedApiUrl,
+                    inferenceMode,
                     apiKey,
                     modelId,
                     year: selectedYearGCP,
@@ -230,6 +241,7 @@ function PredictStep() {
                         setIsProcessing(false);
                         setResults(data.results);
                         setMessage("Inference completed successfully!");
+                        setInferenceRefreshTrigger(prev => prev + 1); // Trigger refresh of inference table
                         clearInterval(interval);
                     } else if (data.error) {
                         setError(data.error);
@@ -259,7 +271,7 @@ function PredictStep() {
                 <Grid item xs={12}>
                     <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                         <Typography variant="h5" gutterBottom align="center">
-                            Roboflow Inference on Plot Images
+                            Roboflow Inference
                         </Typography>
                         <Alert severity="warning" style={{ marginTop: "20px" }}>
                             <Typography variant="body2">
@@ -278,10 +290,10 @@ function PredictStep() {
             <Grid item xs={12}>
                 <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                     <Typography variant="h5" gutterBottom align="center">
-                        Roboflow Inference on Plot Images
+                        Roboflow Inference
                     </Typography>
                     <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
-                        Run inference on stitched plot images using your Roboflow trained models
+                        Run inference on plots using your Roboflow trained models
                     </Typography>
 
                     <Grid container spacing={3} style={{ marginTop: "20px" }}>
@@ -302,27 +314,48 @@ function PredictStep() {
                         </Grid>
                         
                         <Grid item xs={12} md={4}>
-                            <TextField
-                                fullWidth
-                                label="API URL"
-                                value={apiUrl}
-                                onChange={(e) => setApiUrl(e.target.value)}
-                                helperText="Default: https://infer.roboflow.com"
-                            />
+                            <FormControl fullWidth>
+                                <InputLabel id="inference-mode-label">Inference Mode</InputLabel>
+                                <Select
+                                    labelId="inference-mode-label"
+                                    label="Inference Mode"
+                                    value={inferenceMode}
+                                    onChange={(e) => setInferenceMode(e.target.value)}
+                                >
+                                    <MenuItem value="cloud">Remote (Cloud)</MenuItem>
+                                    <MenuItem value="local">Local</MenuItem>
+                                </Select>
+                                <Typography variant="caption" color="textSecondary">
+                                    {inferenceMode === "cloud"
+                                        ? "https://detect.roboflow.com"
+                                        : "http://localhost:9001 (requires local inference server)"}
+                                </Typography>
+                            </FormControl>
                         </Grid>
                         
-                        <Grid item xs={12} md={4}>
-                            <TextField
-                                fullWidth
-                                label="API Key *"
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                helperText="Your Roboflow API key"
-                            />
-                        </Grid>
-                        
-                        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={4}>
+            <TextField
+                fullWidth
+                label="API Key *"
+                type={showApiKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                helperText="Your Roboflow API key"
+                InputProps={{
+                    endAdornment: (
+                        <InputAdornment position="end">
+                            <IconButton
+                                aria-label="toggle password visibility"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                edge="end"
+                            >
+                                {showApiKey ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                            </IconButton>
+                        </InputAdornment>
+                    ),
+                }}
+            />
+        </Grid>                        <Grid item xs={12} md={4}>
                             <TextField
                                 fullWidth
                                 label="Model ID *"
@@ -342,8 +375,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth>
-                                <InputLabel>Date *</InputLabel>
+                                <InputLabel id="date-label">Date *</InputLabel>
                                 <Select
+                                    labelId="date-label"
+                                    label="Date *"
                                     value={selectedDate}
                                     onChange={(e) => setSelectedDate(e.target.value)}
                                 >
@@ -356,8 +391,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedDate}>
-                                <InputLabel>Platform *</InputLabel>
+                                <InputLabel id="platform-label">Platform *</InputLabel>
                                 <Select
+                                    labelId="platform-label"
+                                    label="Platform *"
                                     value={selectedPlatform}
                                     onChange={(e) => setSelectedPlatform(e.target.value)}
                                 >
@@ -370,8 +407,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedPlatform}>
-                                <InputLabel>Sensor *</InputLabel>
+                                <InputLabel id="sensor-label">Sensor *</InputLabel>
                                 <Select
+                                    labelId="sensor-label"
+                                    label="Sensor *"
                                     value={selectedSensor}
                                     onChange={(e) => setSelectedSensor(e.target.value)}
                                 >
@@ -384,8 +423,10 @@ function PredictStep() {
 
                         <Grid item xs={12} md={3}>
                             <FormControl fullWidth disabled={!selectedSensor}>
-                                <InputLabel>Orthomosaic</InputLabel>
+                                <InputLabel id="orthomosaic-label">Orthomosaic</InputLabel>
                                 <Select
+                                    labelId="orthomosaic-label"
+                                    label="Orthomosaic"
                                     value={selectedAgrowstitch}
                                     onChange={(e) => setSelectedAgrowstitch(e.target.value)}
                                 >
@@ -436,9 +477,9 @@ function PredictStep() {
                                     <Typography variant="h6" gutterBottom>
                                         Inference Results
                                     </Typography>
-                                    <Typography variant="body2" gutterBottom>
+                                    {/* <Typography variant="body2" gutterBottom>
                                         CSV file saved to: {results.csvPath}
-                                    </Typography>
+                                    </Typography> */}
                                     <Typography variant="body2" gutterBottom>
                                         Total plots processed: {results.totalPlots}
                                     </Typography>
@@ -470,7 +511,7 @@ function PredictStep() {
             {/* Inference Results Table */}
             <Grid item xs={12}>
                 <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                    <InferenceTable />
+                    <InferenceTable refreshTrigger={inferenceRefreshTrigger} />
                 </Paper>
             </Grid>
         </Grid>
