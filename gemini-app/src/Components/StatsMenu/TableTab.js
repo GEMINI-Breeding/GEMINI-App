@@ -46,7 +46,7 @@ const TableViewTab = () => {
         { label: "Date", field: "date", showColumn: true},
         { label: "Orthomosaic", field: "versionName", showColumn: true},
         { label: "Table", field: "isGeojsonExist", actionType: "loadTable", actionLabel: "Load", showColumn: true},
-        { label: "Graph", field: "isGeojsonExist", actionType: "loadGraph", actionLabel: "Load", showColumn: true},
+        // { label: "Graph", field: "isGeojsonExist", actionType: "loadGraph", actionLabel: "Load", showColumn: true},
         // { label: "Download", field: "enableDownload", actionType: "loadDownload", actionLabel: "Download",showColumn: true},
         { label: "FileName", field: "geoJsonFile", showColumn: false},
         { label: "VersionType", field: "versionType", showColumn: false},
@@ -110,7 +110,9 @@ const TableViewTab = () => {
                         isGeojsonExist = true;
                         enableDownload = true;
                         geoJsonFile = `${flaskUrl}${version.path}`;
-                        
+                        if (version.versionName === undefined){
+                            continue;
+                        }
                         updatedData[platform][sensor].push({
                             date, 
                             isGeojsonExist, 
@@ -215,7 +217,7 @@ const TableViewTab = () => {
                 </Typography>
             ) : (
                 <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
-                    Please select a population to view statistics
+                    Use the ☰ button to select a dataset
                 </Typography>
             )} 
 

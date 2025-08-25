@@ -17,6 +17,8 @@ import {
     Tabs,
     Tab,
 } from "@mui/material";
+import FileUploadIcon from '@mui/icons-material/FileUpload';
+import BuildIcon from '@mui/icons-material/Build';
 import { useDropzone } from "react-dropzone";
 import { useFormik } from "formik";
 import { useDataState, useDataSetters } from "../../DataContext";
@@ -32,16 +34,72 @@ const getFileTypeDescription = (fileType) => {
         ".csv": "CSV files",
         ".txt": "Text files",
         ".bin/*": "Binary files",
+        ".tif": "TIFF files",
         "*": "All files",
         // Add more mappings as needed
     };
     return typeMap[fileType] || fileType;
 };
 
+// Helper function to validate orthomosaic files
+const validateOrthomosaicFiles = (files, date) => {
+    const fileNames = files.map(file => file.name);
+    const demFiles = fileNames.filter(name => name.endsWith('-DEM.tif'));
+    const rgbFiles = fileNames.filter(name => name.endsWith('-RGB.tif'));
+    
+    // Check if we have at least one pair
+    if (demFiles.length === 0 || rgbFiles.length === 0) {
+        return {
+            isValid: false,
+            message: "Orthomosaic upload requires both -DEM.tif and -RGB.tif files"
+        };
+    }
+    
+    // Check if we have equal numbers of DEM and RGB files
+    if (demFiles.length !== rgbFiles.length) {
+        return {
+            isValid: false,
+            message: "Number of DEM files must match number of RGB files"
+        };
+    }
+    
+    // Check if each DEM file has a corresponding RGB file
+    for (const demFile of demFiles) {
+        const baseName = demFile.replace('-DEM.tif', '');
+        const correspondingRgb = baseName + '-RGB.tif';
+        if (!rgbFiles.includes(correspondingRgb)) {
+            return {
+                isValid: false,
+                message: `Missing corresponding RGB file for ${demFile}. Expected: ${correspondingRgb}`
+            };
+        }
+    }
+    
+    // Additional validation: Check that we have proper date format if provided
+    if (date) {
+        // Validate that we'll be able to rename the files properly
+        const expectedDemName = `${date}-DEM.tif`;
+        const expectedRgbName = `${date}-RGB.tif`;
+        console.log(`Files will be renamed to: ${expectedDemName}, ${expectedRgbName}`);
+    }
+    
+    return { isValid: true };
+};
+
+// Helper function to generate renamed orthomosaic filenames based on date
+const getRenamedOrthomosaicFileName = (originalFileName, date) => {
+    if (originalFileName.endsWith('-DEM.tif')) {
+        return `${date}-DEM.tif`;
+    } else if (originalFileName.endsWith('-RGB.tif')) {
+        return `${date}-RGB.tif`;
+    }
+    return originalFileName; // Return original if it doesn't match expected pattern
+};
+
 /**
  * FileUploadComponent - React component for file uploading with form fields.
  */
-const FileUploadComponent = () => {
+const FileUploadComponent = ({ actionType = null }) => {
     useTrackComponent("FileUploadComponent");
 
     // State hooks for various component states
@@ -55,13 +113,16 @@ const FileUploadComponent = () => {
     const [isFinishedUploading, setIsFinishedUploading] = useState(false);
     const [noFilesToUpload, setNoFilesToUpload] = useState(true);
     const [badFileType, setBadFileType] = useState(false);
+    const [badOrthomosaicFiles, setBadOrthomosaicFiles] = useState(false);
+    const [orthomosaicErrorMessage, setOrthomosaicErrorMessage] = useState("");
+    const [isCreatingPyramids, setIsCreatingPyramids] = useState(false);
     const [failedUpload, setFailedUpload] = useState(false);
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
     const [currentInputValues, setCurrentInputValues] = useState({});
     const [dirPath, setDirPath] = useState("");
-    const [actionType, setActionType] = useState('upload');
+    const [internalActionType, setInternalActionType] = useState(actionType || 'upload');
     const {
         uploadedData
     } = useDataState();
@@ -78,8 +139,8 @@ const FileUploadComponent = () => {
         if (extractingBinary) {
         
             const intervalId = setInterval(async () => {
-                    const processedFilesCount = await getBinaryProgress(dirPath);
-                    let prog_calc = Math.round((processedFilesCount / files.length) * 100);
+                    const pct = await getBinaryProgress(dirPath);
+                    let prog_calc = Math.round(pct);
                     setProgress(prog_calc);
 
                     if (prog_calc >= 100) {
@@ -143,11 +204,14 @@ const FileUploadComponent = () => {
     };
 
     // Function to upload a file with a timeout
-    const uploadFileWithTimeout = async (file, localDirPath, dataType, timeout = 30000) => {
+    const uploadFileWithTimeout = async (file, localDirPath, dataType, timeout = 30000, renamedFileName = null) => {
         const formData = new FormData();
         formData.append("files", file);
         formData.append("dirPath", localDirPath);
         formData.append("dataType", dataType);
+        if (renamedFileName) {
+            formData.append("renamedFileName", renamedFileName);
+        }
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
 
@@ -167,12 +231,12 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadChunkWithoutTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath) => {
+    const uploadChunkWithoutTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath, renamedFileName = null) => {
         const formData = new FormData();
         formData.append("fileChunk", chunk);
         formData.append("chunkIndex", index);
         formData.append("totalChunks", totalChunks);
-        formData.append("fileIdentifier", fileIdentifier);
+        formData.append("fileIdentifier", renamedFileName || fileIdentifier);
         formData.append("dirPath", localDirPath);
 
         try {
@@ -199,7 +263,16 @@ const FileUploadComponent = () => {
             );
           if (response.ok) {
             const data = await response.json();
-            return data.progress;
+            // backend may now return fractional progress (files completed + fraction within current file)
+            const raw = data.progress; // could be float or int
+            const totalFiles = files.length || 1;
+            let pct = 0;
+            if (typeof raw === 'number') {
+                // If raw >= totalFiles treat as all done
+                const capped = Math.min(raw, totalFiles);
+                pct = (capped / totalFiles) * 100;
+            }
+            return pct;
           } else {
             console.error("Failed to fetch progress");
             return 0;
@@ -242,11 +315,11 @@ const FileUploadComponent = () => {
         }
     };
 
-    const uploadFileChunks = async (file, localDirPath, uploadLength, fileIndex, totalFiles) => {
+    const uploadFileChunks = async (file, localDirPath, uploadLength, fileIndex, totalFiles, renamedFileName = null) => {
         // Increase chunk size for faster upload (e.g., 4MB)
         const chunkSize = 4 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / chunkSize);
-        const fileIdentifier = file.name;
+        const fileIdentifier = renamedFileName || file.name;
 
         const uploadedChunks = await checkUploadedChunks(fileIdentifier, localDirPath);
         console.log("Uploaded chunks:", uploadedChunks);
@@ -257,7 +330,7 @@ const FileUploadComponent = () => {
             
             const chunk = file.slice(current * chunkSize, (current + 1) * chunkSize);
             try {
-                await uploadChunkWithoutTimeout(chunk, current, totalChunks, fileIdentifier, localDirPath);
+                await uploadChunkWithoutTimeout(chunk, current, totalChunks, file.name, localDirPath, renamedFileName);
                 // Update progress considering multiple files
                 setProgress(prev => {
                     // Calculate progress for this specific file
@@ -361,31 +434,55 @@ const FileUploadComponent = () => {
             cancelUploadRef.current = false;
             // setProgress(0);
             setBadFileType(false);
+            setBadOrthomosaicFiles(false);
+            setOrthomosaicErrorMessage("");
+            setIsCreatingPyramids(false);
             // Construct directory path based on data type and form values
             let localDirPath = "";
-            for (const field of dataTypes[selectedDataType].fields) {
-                if (values[field]) {
-                    // Sanitize field values to remove hidden Unicode characters
-                    const sanitizedValue = values[field]
-                        .normalize('NFKD')  // Normalize Unicode
-                        .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')  // Remove control characters
-                        .replace(/[^\x20-\x7E]/g, '')  // Keep only ASCII printable characters
-                        .trim();  // Remove leading/trailing whitespace
-                    
-                    localDirPath += localDirPath ? `/${sanitizedValue}` : sanitizedValue;
+            
+            if (selectedDataType === "ortho") {
+                // For orthomosaic files, build path directly for Processed directory
+                localDirPath = "Processed";
+                for (const field of dataTypes[selectedDataType].fields) {
+                    if (values[field]) {
+                        // Sanitize field values to remove hidden Unicode characters
+                        const sanitizedValue = values[field]
+                            .normalize('NFKD')  // Normalize Unicode
+                            .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')  // Remove control characters
+                            .replace(/[^\x20-\x7E]/g, '')  // Keep only ASCII printable characters
+                            .trim();  // Remove leading/trailing whitespace
+                        
+                        localDirPath += `/${sanitizedValue}`;
+                    }
                 }
-            }
-            if(selectedDataType === "binary"){
-                localDirPath += "/rover";
-            }
-            if (selectedDataType === "image") {
-                localDirPath += "/Images";
-            }
-            if (selectedDataType === "platformLogs") {
-                localDirPath += "/Metadata";
+            } else {
+                // For other data types, use the standard Raw directory structure
+                for (const field of dataTypes[selectedDataType].fields) {
+                    if (values[field]) {
+                        // Sanitize field values to remove hidden Unicode characters
+                        const sanitizedValue = values[field]
+                            .normalize('NFKD')  // Normalize Unicode
+                            .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')  // Remove control characters
+                            .replace(/[^\x20-\x7E]/g, '')  // Keep only ASCII printable characters
+                            .trim();  // Remove leading/trailing whitespace
+                        
+                        localDirPath += localDirPath ? `/${sanitizedValue}` : sanitizedValue;
+                    }
+                }
+                
+                if(selectedDataType === "binary"){
+                    localDirPath += "/Amiga";
+                }
+                if (selectedDataType === "image") {
+                    localDirPath += "/Images";
+                }
+                if (selectedDataType === "platformLogs") {
+                    localDirPath += "/Metadata";
+                }
             }
             console.log("Directory path on submit:", localDirPath);
             console.log("Original form values:", values);
+            
             setDirPath(localDirPath);
 
             // Step 1: Check which files need to be uploaded
@@ -394,6 +491,18 @@ const FileUploadComponent = () => {
                 fileTypes[file.name] = file.type;
             });
             const fileList = files.map((file) => file.name);
+            
+            // Validate orthomosaic files if applicable
+            if (selectedDataType === "ortho") {
+                const validation = validateOrthomosaicFiles(files, values.date);
+                if (!validation.isValid) {
+                    setBadOrthomosaicFiles(true);
+                    setOrthomosaicErrorMessage(validation.message);
+                    setIsUploading(false);
+                    return;
+                }
+            }
+            
             const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, localDirPath) : fileList;
             console.log("Number of files to upload: ", filesToUpload.length)
 
@@ -417,7 +526,14 @@ const FileUploadComponent = () => {
                         (selectedDataType != "image") && 
                         selectedDataType !== "platformLogs" &&
                         selectedDataType !== "binary" &&
-                        (('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType))
+                        selectedDataType !== "ortho" &&
+                        ('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType)
+                    {
+                        bFT = true;
+                        setBadFileType(true);
+                        break;
+                    }
+                    else if(selectedDataType === "ortho" && !filesToUpload[i].endsWith('.tif'))
                     {
                         bFT = true;
                         setBadFileType(true);
@@ -434,6 +550,24 @@ const FileUploadComponent = () => {
                                 
                                 if (selectedDataType === "binary") {
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
+                                    break;
+                                } else if (selectedDataType === "ortho") {
+                                    // Generate renamed filename for orthomosaic files
+                                    const renamedFileName = getRenamedOrthomosaicFileName(file.name, values.date);
+                                    
+                                    // Set pyramid creation state for this file
+                                    if (file.name.endsWith('.tif')) {
+                                        setIsCreatingPyramids(true);
+                                    }
+                                    
+                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length, renamedFileName);
+                                    
+                                    // Pyramid creation is complete when upload finishes (it's done synchronously on backend)
+                                    if (file.name.endsWith('.tif')) {
+                                        setIsCreatingPyramids(false);
+                                    }
+                                    
+                                    setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                                     break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
@@ -619,7 +753,17 @@ const FileUploadComponent = () => {
     // Function to clear the files from the dropzone
     const clearFiles = () => {
         setFiles([]);
+        setIsCreatingPyramids(false);
     };
+
+    const titleStyle = {
+        fontSize: "1.25rem", // Adjust for desired size
+        fontWeight: "normal",
+        textAlign: "center",
+    };
+
+    // Use the effective action type (either prop or internal state)
+    const effectiveActionType = actionType || internalActionType;
 
     // Component render
     return (
@@ -627,23 +771,33 @@ const FileUploadComponent = () => {
         <Grid
             container
             justifyContent="center"
-            alignItems="center"
+            alignItems="flex-start"
             direction="row"
-            style={{ width: "100%", height: "100%", paddingTop: "20px" }}
+            style={{ width: "100%", minHeight: "100%", padding: "30px" }}
         >
-            <Grid item xs={10}>
-                <Typography variant="h4" component="h2" align="center" style={{ marginBottom: "20px" }}>
-                    File Upload
-                </Typography>
-            </Grid>
-            <Grid item xs={8}>
-                <Tabs value={actionType} onChange={(event, newValue) => setActionType(newValue)} aria-label="action type tabs" sx={{ marginBottom: 2 }}>
-                    <Tab value="upload" label="Upload Files" />
-                    <Tab value="manage" label="Manage Files" />
-                </Tabs>
-            </Grid>
+            {/* Show tabs only when no specific actionType is provided (main Prepare tab) */}
+            {!actionType && (
+                <Grid item alignItems="center" alignSelf="center" style={{ width: "80%", paddingTop: "20px" }}>
+                    <Tabs value={internalActionType} onChange={(event, newValue) => setInternalActionType(newValue)} aria-label="action type tabs" sx={{ marginBottom: 2 }} centered variant="fullWidth">
+                        <Tab 
+                            value="upload" 
+                            label="Upload Files" 
+                            style={titleStyle}
+                            icon={<FileUploadIcon />}
+                            iconPosition="start"
+                        />
+                        <Tab 
+                            value="manage" 
+                            label="Manage Files" 
+                            style={titleStyle}
+                            icon={<BuildIcon />}
+                            iconPosition="start"
+                        />
+                    </Tabs>
+                </Grid>
+            )}
 
-            {actionType === 'upload' && (
+            {effectiveActionType === 'upload' && (
                 <>
                 <Grid item xs={8}>
                 <FormControl fullWidth>
@@ -794,10 +948,31 @@ const FileUploadComponent = () => {
                         </Button>
                     </Paper>
                     )}
-                    {isUploading && !noFilesToUpload && !badFileType && (
+                    {badOrthomosaicFiles && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
+                        <Typography>
+                            <b>{orthomosaicErrorMessage}</b>
+                        </Typography>
+                        <Button
+                            variant="contained"
+                            color="error"
+                            sx={{ mt: 2 }}
+                            onClick={() => {
+                                setBadOrthomosaicFiles(false);
+                                setOrthomosaicErrorMessage("");
+                                setFiles([]);
+                            }}
+                        >
+                            Return
+                        </Button>
+                    </Paper>
+                    )}
+                    {isUploading && !noFilesToUpload && !badFileType && !badOrthomosaicFiles && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
                             <Typography>
-                                {extractingBinary ? "Extracting Binary File..." : "Uploading..."} {`${Math.round(progress)}%`}
+                                {extractingBinary ? "Extracting Binary File..." : 
+                                 isCreatingPyramids ? "Creating Pyramid Files..." : 
+                                 "Uploading..."} {`${Math.round(progress)}%`}
                             </Typography>
                             <Typography variant="body2" color="warning.main" sx={{ mt: 1, fontWeight: 'bold' }}>
                                 ⚠️ Do not leave this page and keep your computer on during the upload process
@@ -815,6 +990,8 @@ const FileUploadComponent = () => {
                                     setIsFinishedUploading(false);
                                     setFiles([]);
                                     setProgress(0);
+                                    setBadOrthomosaicFiles(false);
+                                    setOrthomosaicErrorMessage("");
                                     
                                     handleCancelExtraction(); // Cancel extraction if in progress
                                     clearDirPath();   // deletes any files already landed in the dir
@@ -828,7 +1005,9 @@ const FileUploadComponent = () => {
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
                             <Typography>
                                 {!failedUpload ? (
-                                    extractingBinary ? <b>Extraction Successful</b> : <b>Upload Successful</b>
+                                    extractingBinary ? <b>Extraction Successful</b> : 
+                                    isCreatingPyramids ? <b>Creating Pyramid Files...</b> :
+                                    <b>Upload Successful</b>
                                 ) : (
                                     <b>Upload has been stopped.</b>
                                 )}
@@ -848,6 +1027,8 @@ const FileUploadComponent = () => {
                                     setFiles([]);
                                     setProgress(0);
                                     setExtractingBinary(false);
+                                    setBadOrthomosaicFiles(false);
+                                    setOrthomosaicErrorMessage("");
                                     
                                     if (failedUpload) {
                                         clearDirPath();
@@ -865,12 +1046,12 @@ const FileUploadComponent = () => {
             </Grid>
                 </>)
             }
-            {actionType === 'manage' && uploadedData && (
+            {effectiveActionType === 'manage' && uploadedData && (
                 <Grid item xs={8}>
                     <TableComponent />
                 </Grid>
         )} 
-            {actionType === 'manage' && !uploadedData && (
+            {effectiveActionType === 'manage' && !uploadedData && (
                 <Grid item xs={8}>
                     <b>Uploaded data must be present to manage files.</b>
                 </Grid>

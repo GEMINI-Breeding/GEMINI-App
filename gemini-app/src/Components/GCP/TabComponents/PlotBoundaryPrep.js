@@ -12,6 +12,7 @@ import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import { CircularProgress, Typography } from "@mui/material";
 import DataImporter from "./DataImporter";
 import AgRowStitchPlotLabeler from "./AgRowStitchPlotLabeler";
+import PlotImageExtractor from "./PlotImageExtractor";
 
 import useTrackComponent from "../../../useTrackComponent";
 
@@ -23,7 +24,8 @@ function PlotBoundaryPrep() {
         isImageViewerOpen, 
         activeStepBoundaryPrep,
         prepAgRowStitchPlotPaths,
-        prepOrthoImagePath 
+        prepOrthoImagePath,
+        featureCollectionPlot
     } = useDataState();
     const { setIsImageViewerOpen, setActiveStepBoundaryPrep } = useDataSetters();
 
@@ -33,10 +35,29 @@ function PlotBoundaryPrep() {
     // This includes both individual plot paths OR a combined AgRowStitch mosaic
     const isAgRowStitchSelected = (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) || 
                                   (prepOrthoImagePath && prepOrthoImagePath.includes('AgRowStitch'));
-    const baseSteps = ["Import Data", "Population Boundary", "Plot Boundary"];
-    const steps = isAgRowStitchSelected 
-        ? [...baseSteps, "Assign Plot Labels"] 
-        : baseSteps;
+    
+    console.log("PlotBoundaryPrep render:", {
+        isAgRowStitchSelected,
+        prepAgRowStitchPlotPaths: prepAgRowStitchPlotPaths?.length || 0,
+        prepOrthoImagePath,
+        activeStepBoundaryPrep
+    });
+    
+    // Check if plot boundaries have been created
+    const hasPlotBoundaries = featureCollectionPlot && 
+                             featureCollectionPlot.features && 
+                             Array.isArray(featureCollectionPlot.features) && 
+                             featureCollectionPlot.features.length > 0;
+    
+    let steps = ["Import Data", "Population Boundary", "Plot Boundary"];
+    
+    // Add conditional steps based on data availability
+    if (isAgRowStitchSelected) {
+        steps.push("Assign Plot Labels");
+    }
+    else if (prepOrthoImagePath){
+        steps.push("Get Plot Images");
+    }
 
     const largerIconStyle = {
         fontSize: "2rem", // Adjust for desired size
@@ -55,14 +76,24 @@ function PlotBoundaryPrep() {
     };
 
     const handleReturnClick = (index) => {
-        // Prevent navigation to AgRowStitch step if no AgRowStitch data is selected
-        if (index === 3 && !isAgRowStitchSelected) {
+        // For step 3: if AgRowStitch is selected, show AgRowStitch labeling
+        // if not selected, show Get Plot Images
+        if (index === 3) {
+            if (isAgRowStitchSelected) {
+                // Allow navigation to AgRowStitch step only if AgRowStitch is selected
+                setActiveStepBoundaryPrep(3);
+            } else {
+                // Allow navigation to Get Plot Images only if plot boundaries exist
+                if (hasPlotBoundaries) {
+                    setActiveStepBoundaryPrep(3);
+                } else {
+                    return; // Don't allow navigation if no plot boundaries
+                }
+            }
             return;
         }
-        // If the active step is greater than the index, go back to the index
-        // if (activeStepBoundaryPrep > index) {
-        //     setActiveStepBoundaryPrep(index);
-        // }
+        
+        // For all other steps, allow normal navigation
         setActiveStepBoundaryPrep(index);
     };
 
@@ -78,12 +109,26 @@ function PlotBoundaryPrep() {
 
     // Effect to handle step adjustment when AgRowStitch selection changes
     useEffect(() => {
-        // If currently on AgRowStitch step (step 3) but AgRowStitch is no longer selected,
-        // move back to step 2 (Plot Boundary)
-        if (activeStepBoundaryPrep === 3 && !isAgRowStitchSelected) {
-            setActiveStepBoundaryPrep(2);
+        console.log("PlotBoundaryPrep effect triggered:", {
+            activeStepBoundaryPrep,
+            isAgRowStitchSelected,
+            hasPlotBoundaries,
+            featureCount: featureCollectionPlot?.features?.length || 0
+        });
+        
+        // Only adjust if we're on step 3 and conditions don't match
+        if (activeStepBoundaryPrep === 3) {
+            // If on step 3 without AgRowStitch selected, ensure we have plot boundaries for Get Plot Images
+            if (!isAgRowStitchSelected && !hasPlotBoundaries) {
+                console.log("PlotBoundaryPrep: Moving back to step 2 - no plot boundaries for Get Plot Images");
+                setActiveStepBoundaryPrep(2);
+            } else {
+                console.log("PlotBoundaryPrep: Staying on step 3 - conditions are valid");
+            }
+            // If on step 3 with AgRowStitch selected, this is correct (Assign Plot Labels)
+            // If on step 3 without AgRowStitch and we have boundaries, this is correct (Get Plot Images)
         }
-    }, [isAgRowStitchSelected, activeStepBoundaryPrep, setActiveStepBoundaryPrep]);
+    }, [activeStepBoundaryPrep, isAgRowStitchSelected, hasPlotBoundaries]);
 
     return (
         <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
@@ -129,10 +174,20 @@ function PlotBoundaryPrep() {
                 </Grid>
             )}
 
+            {/* Step 3 content - conditional based on AgRowStitch availability */}
             {activeStepBoundaryPrep === 3 && isAgRowStitchSelected && (
                 <Grid item container justifyContent="center" spacing={2}>
                     <Grid item xs={12}>
                         <AgRowStitchPlotLabeler />
+                    </Grid>
+                </Grid>
+            )}
+
+            {/* Get Plot Images step - only for non-AgRowStitch (drone orthomosaics) */}
+            {activeStepBoundaryPrep === 3 && !isAgRowStitchSelected && (
+                <Grid item container justifyContent="center" spacing={2}>
+                    <Grid item xs={12}>
+                        <PlotImageExtractor />
                     </Grid>
                 </Grid>
             )}
