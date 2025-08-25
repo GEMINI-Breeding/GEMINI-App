@@ -175,12 +175,21 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                 const isAgRowStitchSelected = (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) || 
                                               (prepOrthoImagePath && prepOrthoImagePath.includes('AgRowStitch'));
                 
+                console.log("MapModeSwitcher proceed - isAgRowStitchSelected:", isAgRowStitchSelected);
+                console.log("MapModeSwitcher proceed - prepAgRowStitchPlotPaths:", prepAgRowStitchPlotPaths);
+                console.log("MapModeSwitcher proceed - prepOrthoImagePath:", prepOrthoImagePath);
+                
+                // Save feature collection and then proceed to next step
+                saveFeatureCollection(featureCollectionPlot);
+                
                 if (isAgRowStitchSelected) {
-                    // If AgRowStitch is selected, go to step 4 (AgRowStitch Labeling)
-                    saveFeatureCollection(featureCollectionPlot) && setActiveStepBoundaryPrep(3);
+                    // If AgRowStitch is selected, go to step 3 (AgRowStitch Labeling)
+                    console.log("MapModeSwitcher: Going to step 3 (AgRowStitch Labeling)");
+                    setActiveStepBoundaryPrep(3);
                 } else {
-                    // Otherwise, go to tab 1 as before
-                    saveFeatureCollection(featureCollectionPlot) && setSelectedTabPrep(1);
+                    // Otherwise, go to step 3 (Get Plot Images for drone orthomosaics)
+                    console.log("MapModeSwitcher: Going to step 3 (Get Plot Images)");
+                    setActiveStepBoundaryPrep(3);
                 }
             } else {
                 setProceedButtonText("No Boundaries");

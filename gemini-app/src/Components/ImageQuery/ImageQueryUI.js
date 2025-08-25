@@ -9,15 +9,15 @@ const ImageQueryUI = () => {
     useTrackComponent("ImageQueryUI");
 
     return (
-        <Grid container direction={"row"}>
-            <Grid item xs={1} style={{ height: "100vh" }}>
+        <Grid container direction={"row"} style={{ paddingTop: "40px" }}>
+            <Grid item xs={1} style={{ minHeight: "100%" }}>
                 <div></div>
             </Grid>
-            <Grid item xs={3} style={{ height: "100vh", overflow: "auto" }}>
+            <Grid item xs={3} style={{ minHeight: "100%", overflow: "auto" }}>
                 {/* Pass the handleImageSelection function as a prop to ImageSelection if needed */}
                 <ImageSelection />
             </Grid>
-            <Grid item xs={8} style={{ height: "100vh", overflow: "auto" }}>
+            <Grid item xs={8} style={{ minHeight: "100%", overflow: "auto" }}>
                 {/* Pass the selected image paths to ImageViewerComponent */}
                 <ImageQueryViewer />
             </Grid>

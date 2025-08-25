@@ -20,7 +20,7 @@ import {
     Chip,
     Grid
 } from '@mui/material';
-import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen, Download } from '@mui/icons-material';
+import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen} from '@mui/icons-material';
 import { fetchData, useDataState } from "../../DataContext";
 
 const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
@@ -36,6 +36,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
     const [isImageLoaded, setIsImageLoaded] = useState(false);
     const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
+    const [showMasks, setShowMasks] = useState(true); // new: toggle for masks
+    const [hasSegmentation, setHasSegmentation] = useState(false); // new: whether any prediction has segmentation points
     const [predictions, setPredictions] = useState([]);
     const [classCounts, setClassCounts] = useState({});
     const [confidenceThreshold, setConfidenceThreshold] = useState(0.5);
@@ -48,7 +50,6 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     
     const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
 
-    // Generate distinct colors for different classes
     const generateClassColors = (classes) => {
         const colors = [
             '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
@@ -101,15 +102,89 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             const classes = [...new Set(predictions.map(p => p.class))];
             setClassColors(generateClassColors(classes));
             setSelectedClasses(new Set(classes)); // Show all classes by default
+            // detect segmentation
+            const seg = predictions.some(p => (p.points && p.points.length >= 3) || (p.segments && p.segments.length));
+            setHasSegmentation(seg);
+            if (!seg) setShowMasks(false); else setShowMasks(true);
+        } else {
+            setHasSegmentation(false);
+            setShowMasks(false);
         }
     }, [predictions]);
 
     useEffect(() => {
-        // Redraw bounding boxes when relevant state changes
-        if (isImageLoaded && showBoundingBoxes) {
-            drawBoundingBoxes();
+        // Redraw bounding boxes / masks when relevant state changes
+        if (isImageLoaded && (showBoundingBoxes || (showMasks && hasSegmentation))) {
+            drawDetections();
+        } else if (canvasRef.current) {
+            const ctx = canvasRef.current.getContext('2d');
+            ctx && ctx.clearRect(0,0,canvasRef.current.width, canvasRef.current.height);
         }
-    }, [isImageLoaded, showBoundingBoxes, predictions, confidenceThreshold, selectedClasses, classColors, zoom, panX, panY]);
+    }, [isImageLoaded, showBoundingBoxes, showMasks, hasSegmentation, predictions, confidenceThreshold, selectedClasses, classColors, zoom, panX, panY]);
+
+    useEffect(() => {
+        // Keyboard navigation
+        const handleKeyDown = (e) => {
+            if (!open) return;
+            
+            switch (e.key) {
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    handlePreviousPlot();
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    handleNextPlot();
+                    break;
+                case 'Escape':
+                    e.preventDefault();
+                    onClose();
+                    break;
+                case '+':
+                case '=':
+                    e.preventDefault();
+                    handleZoomIn();
+                    break;
+                case '-':
+                    e.preventDefault();
+                    handleZoomOut();
+                    break;
+                case '0':
+                    e.preventDefault();
+                    handleFitScreen();
+                    break;
+            }
+        };
+
+        // Mouse wheel zoom
+        const handleWheel = (e) => {
+            if (!open) return;
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            const newZoom = Math.max(0.1, Math.min(3, zoom + delta));
+            setZoom(newZoom);
+            if (newZoom === 1) {
+                setPanX(0);
+                setPanY(0);
+            }
+        };
+
+        if (open) {
+            document.addEventListener('keydown', handleKeyDown);
+            const imageContainer = imageContainerRef.current;
+            if (imageContainer) {
+                imageContainer.addEventListener('wheel', handleWheel, { passive: false });
+            }
+        }
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            const imageContainer = imageContainerRef.current;
+            if (imageContainer) {
+                imageContainer.removeEventListener('wheel', handleWheel);
+            }
+        };
+    }, [open, currentPlotIndex, plotImages.length, zoom, onClose]);
 
     useEffect(() => {
         // Set up ResizeObserver to update canvas when image size changes
@@ -117,8 +192,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         
         if (imageRef.current) {
             resizeObserver = new ResizeObserver(() => {
-                if (isImageLoaded && showBoundingBoxes) {
-                    drawBoundingBoxes();
+                if (isImageLoaded && (showBoundingBoxes || (showMasks && hasSegmentation))) {
+                    drawDetections();
                 }
             });
             
@@ -127,8 +202,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         
         // Also listen for window resize events
         const handleWindowResize = () => {
-            if (isImageLoaded && showBoundingBoxes) {
-                setTimeout(() => drawBoundingBoxes(), 100); // Small delay to ensure layout is updated
+            if (isImageLoaded && (showBoundingBoxes || (showMasks && hasSegmentation))) {
+                setTimeout(() => drawDetections(), 100); // Small delay to ensure layout is updated
             }
         };
         
@@ -140,7 +215,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             }
             window.removeEventListener('resize', handleWindowResize);
         };
-    }, [imageRef.current, isImageLoaded, showBoundingBoxes]);
+    }, [imageRef.current, isImageLoaded, showBoundingBoxes, showMasks, hasSegmentation]);
 
     const fetchPlotImages = async () => {
         if (!inferenceData) return;
@@ -151,24 +226,47 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         setLoading(true);
         
         try {
-            const plotFiles = await fetchData(
-                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
-            );
+            let plotFiles = [];
+            let isPlotImages = false;
+            
+            // Check if this is Plot_Images format
+            if (versionDir === 'Plot_Images') {
+                isPlotImages = true;
+                // Look in Intermediate directory for Plot_Images
+                plotFiles = await fetchData(
+                    `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/plot_images/${date}`
+                );
+                
+                // Filter for plot images from split_orthomosaics
+                plotFiles = plotFiles
+                    .filter(file => file.startsWith('plot_') && file.endsWith('.png'))
+                    .sort((a, b) => {
+                        const plotNumA = parseInt(a.match(/plot_(\d+)_/)?.[1] || 0);
+                        const plotNumB = parseInt(b.match(/plot_(\d+)_/)?.[1] || 0);
+                        return plotNumA - plotNumB;
+                    });
+            } else {
+                // Traditional AgRowStitch format
+                plotFiles = await fetchData(
+                    `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
+                );
 
-            const plotImages = plotFiles
-                .filter(file => file.startsWith('full_res_mosaic_temp_plot_') && file.endsWith('.png'))
-                .sort((a, b) => {
-                    const plotNumA = parseInt(a.match(/plot_(\d+)/)?.[1] || 0);
-                    const plotNumB = parseInt(b.match(/plot_(\d+)/)?.[1] || 0);
-                    return plotNumA - plotNumB;
-                });
+                // Filter for AgRowStitch plot images
+                plotFiles = plotFiles
+                    .filter(file => file.startsWith('full_res_mosaic_temp_plot_') && file.endsWith('.png'))
+                    .sort((a, b) => {
+                        const plotNumA = parseInt(a.match(/plot_(\d+)/)?.[1] || 0);
+                        const plotNumB = parseInt(b.match(/plot_(\d+)/)?.[1] || 0);
+                        return plotNumA - plotNumB;
+                    });
+            }
 
-            setPlotImages(plotImages);
+            setPlotImages(plotFiles);
             setCurrentPlotIndex(0);
             setLoading(false);
 
-            if (plotImages.length > 0) {
-                loadPlotImage(plotImages[0], date, platform, sensor, versionDir);
+            if (plotFiles.length > 0) {
+                loadPlotImage(plotFiles[0], date, platform, sensor, versionDir, isPlotImages);
             }
             
         } catch (error) {
@@ -204,7 +302,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         if (!inferenceData || plotImages.length === 0) return;
         
         const currentFileName = plotImages[currentPlotIndex];
-        const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
+        const { date, platform, sensor, agrowstitch_version, orthomosaic, model_task } = inferenceData;
         const versionDir = orthomosaic || agrowstitch_version;
         
         try {
@@ -221,7 +319,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     sensor,
                     agrowstitch_version: versionDir, // Keep for backend compatibility
                     orthomosaic: versionDir, // New parameter name
-                    plot_filename: currentFileName
+                    plot_filename: currentFileName,
+                    model_task: model_task || 'detection' // Pass model task to get correct predictions
                 })
             });
 
@@ -241,13 +340,21 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         }
     };
 
-    const loadPlotImage = async (fileName, date, platform, sensor, versionDir) => {
+    const loadPlotImage = async (fileName, date, platform, sensor, versionDir, isPlotImages = false) => {
         try {
             if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(currentImageUrl);
             }
 
-            const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}/${fileName}`;
+            // Determine the correct path based on whether this is Plot_Images or AgRowStitch
+            let imagePath;
+            if (isPlotImages || versionDir === 'Plot_Images') {
+                // Plot_Images are stored in Intermediate/.../ plot_images/date/
+                imagePath = `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/plot_images/${date}/${fileName}`;
+            } else {
+                // AgRowStitch images are stored in Processed/.../date/platform/sensor/versionDir/
+                imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}/${fileName}`;
+            }
             
             const directUrl = `${flaskUrl}files/${imagePath}`;
             
@@ -300,82 +407,107 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         }, 100); // Small delay to ensure image is fully rendered
     };
 
-    const drawBoundingBoxes = () => {
+    const drawDetections = () => {
         if (!canvasRef.current || !imageRef.current || !isImageLoaded || !imageContainerRef.current) return;
-        
         const canvas = canvasRef.current;
         const img = imageRef.current;
         const ctx = canvas.getContext('2d');
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        if (!showBoundingBoxes) return;
-        
-        // Get container and image rectangles
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        // container metrics
         const containerRect = imageContainerRef.current.getBoundingClientRect();
-        const imgRect = img.getBoundingClientRect();
-        
-        // Calculate the actual size the image should take up when zoomed
         const containerWidth = containerRect.width;
         const containerHeight = containerRect.height;
-        
-        // Calculate the displayed size based on object-fit: contain
         const imageAspectRatio = imageDimensions.width / imageDimensions.height;
         const containerAspectRatio = containerWidth / containerHeight;
-        
         let displayWidth, displayHeight;
         if (imageAspectRatio > containerAspectRatio) {
-            // Image is wider - fit to width
             displayWidth = containerWidth;
             displayHeight = containerWidth / imageAspectRatio;
         } else {
-            // Image is taller - fit to height
             displayHeight = containerHeight;
             displayWidth = containerHeight * imageAspectRatio;
         }
-        
-        // Apply zoom
         const zoomedWidth = displayWidth * zoom;
         const zoomedHeight = displayHeight * zoom;
-        
-        // Calculate position (image is centered in container with pan offset)
         const imageLeft = (containerWidth - zoomedWidth) / 2 + panX;
         const imageTop = (containerHeight - zoomedHeight) / 2 + panY;
-        
-        // Set canvas size and position
         canvas.width = zoomedWidth;
         canvas.height = zoomedHeight;
         canvas.style.top = `${imageTop}px`;
         canvas.style.left = `${imageLeft}px`;
         canvas.style.width = `${zoomedWidth}px`;
         canvas.style.height = `${zoomedHeight}px`;
-        
-        // Calculate scale factors for coordinates
         const scaleX = zoomedWidth / imageDimensions.width;
         const scaleY = zoomedHeight / imageDimensions.height;
-        
-        // Filter predictions based on confidence and selected classes
-        const filteredPredictions = predictions.filter(pred => 
-            pred.confidence >= confidenceThreshold && 
-            selectedClasses.has(pred.class)
-        );
-        
-        // Draw bounding boxes
+        const filteredPredictions = predictions.filter(pred => pred.confidence >= confidenceThreshold && selectedClasses.has(pred.class));
         filteredPredictions.forEach(pred => {
             const color = classColors[pred.class] || '#FF0000';
-            
-            // Convert center-based coordinates to corner-based
-            const x = (pred.x - pred.width / 2) * scaleX;
-            const y = (pred.y - pred.height / 2) * scaleY;
-            const width = pred.width * scaleX;
-            const height = pred.height * scaleY;
-            
-            // Draw bounding box only (no labels)
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x, y, width, height);
+            // draw mask/polygon first (under box)
+            if (showMasks && hasSegmentation) {
+                // Roboflow polygon points: pred.points = [{x,y},...]
+                let pts = [];
+                if (pred.points && pred.points.length >= 3) {
+                    pts = pred.points;
+                } else if (pred.segments && pred.segments.length) {
+                    // optional: segments as array of numbers [x1,y1,x2,y2,...]
+                    const seg = pred.segments[0];
+                    for (let i=0;i<seg.length;i+=2) pts.push({x:seg[i], y:seg[i+1]});
+                }
+                if (pts.length >= 3) {
+                    ctx.beginPath();
+                    pts.forEach((pt, idx) => {
+                        const px = pt.x * scaleX;
+                        const py = pt.y * scaleY;
+                        if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                    });
+                    ctx.closePath();
+                    ctx.fillStyle = hexToRgba(color, 0.25);
+                    ctx.fill();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = color;
+                    ctx.stroke();
+                }
+            }
+            if (showBoundingBoxes && !hasSegmentation) {
+                const x = (pred.x - pred.width / 2) * scaleX;
+                const y = (pred.y - pred.height / 2) * scaleY;
+                const width = pred.width * scaleX;
+                const height = pred.height * scaleY;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, width, height);
+            }
         });
+    };
+    // helper to convert hex to rgba
+    const hexToRgba = (hex, alpha) => {
+        let c = hex.replace('#','');
+        if (c.length === 3) c = c.split('').map(ch => ch+ch).join('');
+        const num = parseInt(c,16);
+        const r = (num>>16)&255, g=(num>>8)&255, b=num&255;
+        return `rgba(${r},${g},${b},${alpha})`;
+    };
+    
+    const drawBoundingBoxes = () => drawDetections();
+
+    const handleZoomIn = () => {
+        const newZoom = Math.min(3, zoom + 0.2);
+        setZoom(newZoom);
+    };
+
+    const handleZoomOut = () => {
+        const newZoom = Math.max(0.1, zoom - 0.2);
+        setZoom(newZoom);
+        if (newZoom === 1) {
+            setPanX(0);
+            setPanY(0);
+        }
+    };
+
+    const handleFitScreen = () => {
+        setZoom(1);
+        setPanX(0);
+        setPanY(0);
     };
 
     const handlePreviousPlot = () => {
@@ -384,7 +516,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             setCurrentPlotIndex(newIndex);
             const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
             const versionDir = orthomosaic || agrowstitch_version;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
+            const isPlotImages = versionDir === 'Plot_Images';
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir, isPlotImages);
+            handleFitScreen(); // Reset zoom and pan when changing plot
         }
     };
 
@@ -394,7 +528,9 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             setCurrentPlotIndex(newIndex);
             const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
             const versionDir = orthomosaic || agrowstitch_version;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
+            const isPlotImages = versionDir === 'Plot_Images';
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir, isPlotImages);
+            handleFitScreen(); // Reset zoom and pan when changing plot
         }
     };
 
@@ -434,7 +570,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             setCurrentPlotIndex(newIndex);
             const { date, platform, sensor, agrowstitch_version, orthomosaic } = inferenceData;
             const versionDir = orthomosaic || agrowstitch_version;
-            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir);
+            const isPlotImages = versionDir === 'Plot_Images';
+            loadPlotImage(plotImages[newIndex], date, platform, sensor, versionDir, isPlotImages);
         }
     };
 
@@ -472,7 +609,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                 <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Box>
                         <Typography variant="h6">
-                            Inference Results - {inferenceData.date} {inferenceData.platform} {inferenceData.sensor}
+                            Inference Results - {inferenceData.date}
                         </Typography>
                         {(inferenceData.model_id || inferenceData.model_version) && (
                             <Typography variant="subtitle2" color="textSecondary">
@@ -514,8 +651,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                             </IconButton>
                                             
                                             <Typography variant="body1">
-                                                {getPlotDisplayName(plotImages[currentPlotIndex])} 
-                                                ({currentPlotIndex + 1} of {plotImages.length})
+                                                {currentPlotIndex + 1} of {plotImages.length}
                                             </Typography>
                                             
                                             <IconButton 
@@ -543,15 +679,43 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                         </FormControl>
                                     </Box>
                                     
-                                    <FormControlLabel
-                                        control={
-                                            <Switch
-                                                checked={showBoundingBoxes}
-                                                onChange={(e) => setShowBoundingBoxes(e.target.checked)}
+                                    <Box display="flex" alignItems="center" gap={1}>
+                                        {/* Zoom Controls */}
+                                        <IconButton onClick={handleZoomOut} disabled={zoom <= 0.1} title="Zoom Out">
+                                            <ZoomOut />
+                                        </IconButton>
+                                        <IconButton onClick={handleFitScreen} title="Fit to Screen">
+                                            <FitScreen />
+                                        </IconButton>
+                                        <IconButton onClick={handleZoomIn} disabled={zoom >= 3} title="Zoom In">
+                                            <ZoomIn />
+                                        </IconButton>
+                                    
+                                        
+                                        {/* Toggle Controls */}
+                                        {!hasSegmentation && (
+                                            <FormControlLabel
+                                                control={
+                                                    <Switch
+                                                        checked={showBoundingBoxes}
+                                                        onChange={(e) => setShowBoundingBoxes(e.target.checked)}
+                                                    />
+                                                }
+                                                label="Show Boxes"
                                             />
-                                        }
-                                        label="Show Bounding Boxes"
-                                    />
+                                        )}   
+                                        {hasSegmentation && (
+                                            <FormControlLabel
+                                                control={
+                                                    <Switch
+                                                        checked={showMasks}
+                                                        onChange={(e) => setShowMasks(e.target.checked)}
+                                                    />
+                                                }
+                                                label="Show Masks"
+                                            />
+                                        )}
+                                    </Box>
                                 </Box>
                                 
                                 {/* Image Container */}
@@ -595,28 +759,6 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                             />
                                         </>
                                     )}
-                                </Box>
-                                
-                                {/* Zoom Controls */}
-                                <Box mt={2}>
-                                    <Typography gutterBottom>Zoom: {Math.round(zoom * 100)}%</Typography>
-                                    {zoom > 1 && (
-                                        <Typography variant="body2" color="textSecondary" gutterBottom>
-                                            Click and drag to pan around the image
-                                        </Typography>
-                                    )}
-                                    <Slider
-                                        value={zoom}
-                                        onChange={handleZoomChange}
-                                        min={0.1}
-                                        max={3}
-                                        step={0.1}
-                                        marks={[
-                                            { value: 0.5, label: '50%' },
-                                            { value: 1, label: '100%' },
-                                            { value: 2, label: '200%' }
-                                        ]}
-                                    />
                                 </Box>
                             </Paper>
                         </Grid>
@@ -690,9 +832,36 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                                 <Typography variant="body2">
                                     Classes: {Object.keys(classCounts).length}
                                 </Typography>
+                                {/* Zoom Controls */}
+                                <Box mt={2}>
+                                    <Typography gutterBottom>Zoom: {Math.round(zoom * 100)}%</Typography>
+                                    {zoom > 1 && (
+                                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                                            Click and drag to pan around the image
+                                        </Typography>
+                                    )}
+                                    <Slider
+                                        value={zoom}
+                                        onChange={handleZoomChange}
+                                        min={0.1}
+                                        max={3}
+                                        step={0.1}
+                                        marks={[
+                                            { value: 0.5, label: '50%' },
+                                            { value: 1, label: '100%' },
+                                            { value: 2, label: '200%' }
+                                        ]}
+                                    />
+                                    
+                                    {/* Keyboard Shortcuts Help */}
+                                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                                        <strong>Keyboard shortcuts:</strong> ← → (navigate), +/- (zoom), 0 (fit), ESC (close), Mouse wheel (zoom)
+                                    </Typography>
+                                </Box>
                             </Paper>
                         </Grid>
                     </Grid>
+                    
                 )}
                 
                 {!loading && plotImages.length === 0 && (

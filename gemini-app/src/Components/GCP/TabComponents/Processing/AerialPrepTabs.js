@@ -171,17 +171,6 @@ export default function AerialPrepTabs() {
                         height: "auto",
                     }}
                 >
-                    <FolderTabs
-                        value={aerialPrepTab}
-                        onChange={handleChange}
-                        aria-label="styled tabs example"
-                        variant="fullWidth"
-                        scrollButtons="auto"
-                        centered
-                    >
-                        <FolderTab label="Aerial Traits" />
-                        <FolderTab label="Teach Traits" />
-                    </FolderTabs>
                 </Box>
                 <Grid item container justifyContent="center">
                     <Box sx={{ width: "100%" }}>

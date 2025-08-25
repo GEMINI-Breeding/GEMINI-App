@@ -261,8 +261,8 @@ export default function MapView() {
             padding: "10px",
             boxShadow: "0 4px 8px rgba(0, 0, 0, 0.2)",
             zIndex: 1001,
-            height: "35px",
-            width: "250px",
+            height: "65px",
+            width: "275px",
             paddingTop: "20px",
         }}>
             <button 
