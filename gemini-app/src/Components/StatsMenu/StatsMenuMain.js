@@ -95,7 +95,7 @@ const StatsMenuMain = () => {
         /*
         Option 2: Use the following code snippet to render the StatsMenuMain component
         */
-        <Grid container direction="column" style={{ width: "100%", height: "100%" }}>
+        <Grid container direction="column" style={{ width: "100%", minHeight: "100%", paddingTop: "20px" }}>
             <TableViewTab />
         </Grid>
     );

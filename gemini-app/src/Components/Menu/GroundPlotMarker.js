@@ -487,14 +487,14 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     };
 
      useEffect(() => {
-        if (isGpsPanelOpen && currentLatLon) {
-             setViewState(prev => ({
-                ...prev,
-                longitude: currentLatLon.lon,
-                latitude: currentLatLon.lat,
-                zoom: 20
-            }));
-        }
+         if (isGpsPanelOpen && currentLatLon) {
+              setViewState(prev => ({
+                  ...prev,
+                  longitude: currentLatLon.lon,
+                  latitude: currentLatLon.lat,
+                  zoom: 20
+              }));
+         }
     }, [isGpsPanelOpen, currentLatLon]);
 
     const fetchStitchDirection = async () => {
@@ -650,6 +650,29 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const handleRefilterPlots = async () => {
         setGpsOperationLoading(true);
         try {
+            // Call filter_plot_borders endpoint first, similar to TableComponent
+            if (obj) {
+                try {
+                    const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            year: obj.year,
+                            experiment: obj.experiment,
+                            location: obj.location,
+                            population: obj.population,
+                            date: obj.date,
+                        }),
+                    });
+                    if (!filterResponse.ok) {
+                        const errorData = await filterResponse.json().catch(() => null);
+                        console.warn('Could not filter plot borders during refilter.', errorData?.error);
+                    }
+                } catch (error) {
+                    console.error("Error filtering plot borders during refilter:", error);
+                }
+            }
+
             setGpsCache(new Map());
             await fetchGpsData();
             await fetchMarkedPlots();
@@ -1106,14 +1129,37 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         return imageContainerRef.current.getBoundingClientRect();
     };
 
+    const getImageBounds = () => {
+        if (!imageRef.current || !imageContainerRef.current) return null;
+        
+        const containerBounds = imageContainerRef.current.getBoundingClientRect();
+        const img = imageRef.current;
+        
+        const imgRect = img.getBoundingClientRect();
+        
+        const scaleX = img.naturalWidth / imgRect.width;
+        const scaleY = img.naturalHeight / imgRect.height;
+        
+        return {
+            left: imgRect.left - containerBounds.left,
+            top: imgRect.top - containerBounds.top,
+            width: imgRect.width,
+            height: imgRect.height,
+            scaleX,
+            scaleY,
+            naturalWidth: img.naturalWidth,
+            naturalHeight: img.naturalHeight
+        };
+    };
+
     const handleCropButtonClick = () => {
         if (!cropMode) {
-            const bounds = getImageContainerBounds();
-            if (bounds) {
-                const size = Math.min(bounds.width, bounds.height) * 0.3;
+            const imgBounds = getImageBounds();
+            if (imgBounds) {
+                const size = Math.min(imgBounds.width, imgBounds.height) * 0.3;
                 setCropBox({
-                    x: (bounds.width - size) / 2,
-                    y: (bounds.height - size) / 2,
+                    x: imgBounds.left + (imgBounds.width - size) / 2,
+                    y: imgBounds.top + (imgBounds.height - size) / 2,
                     width: size,
                     height: size
                 });
@@ -1163,70 +1209,64 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleMouseMove = (e) => {
         if (!cropMode || !dragStart) return;
-
+    
         const bounds = getImageContainerBounds();
-        if (!bounds) return;
-
+        const imgBounds = getImageBounds();
+    
+        if (!bounds || !imgBounds) return;
+    
         const x = e.clientX - bounds.left;
         const y = e.clientY - bounds.top;
         const deltaX = x - dragStart.x;
         const deltaY = y - dragStart.y;
-
+    
         if (isDragging) {
             setCropBox({
-                x: Math.max(0, Math.min(bounds.width - dragStart.cropBox.width, dragStart.cropBox.x + deltaX)),
-                y: Math.max(0, Math.min(bounds.height - dragStart.cropBox.height, dragStart.cropBox.y + deltaY)),
+                x: Math.max(imgBounds.left, Math.min(imgBounds.left + imgBounds.width - dragStart.cropBox.width, dragStart.cropBox.x + deltaX)),
+                y: Math.max(imgBounds.top, Math.min(imgBounds.top + imgBounds.height - dragStart.cropBox.height, dragStart.cropBox.y + deltaY)),
                 width: dragStart.cropBox.width,
                 height: dragStart.cropBox.height
             });
         } else if (isResizing && resizeHandle) {
             let newBox = { ...dragStart.cropBox };
-
-            switch (resizeHandle) {
-                case 'nw':
-                    newBox.width = Math.max(20, newBox.width - deltaX);
-                    newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
-                    break;
-                case 'ne':
-                    newBox.width = Math.max(20, newBox.width + deltaX);
-                    newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
-                    break;
-                case 'sw':
-                    newBox.width = Math.max(20, newBox.width - deltaX);
-                    newBox.height = Math.max(20, newBox.height + deltaY);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
-                    break;
-                case 'se':
-                    newBox.width = Math.max(20, newBox.width + deltaX);
-                    newBox.height = Math.max(20, newBox.height + deltaY);
-                    break;
-                case 'n':
-                    newBox.height = Math.max(20, newBox.height - deltaY);
-                    newBox.y = Math.max(0, newBox.y + deltaY);
-                    break;
-                case 's':
-                    newBox.height = Math.max(20, newBox.height + deltaY);
-                    break;
-                case 'e':
-                    newBox.width = Math.max(20, newBox.width + deltaX);
-                    break;
-                case 'w':
-                    newBox.width = Math.max(20, newBox.width - deltaX);
-                    newBox.x = Math.max(0, newBox.x + deltaX);
-                    break;
+    
+            let finalX = newBox.x;
+            let finalY = newBox.y;
+            let finalWidth = newBox.width;
+            let finalHeight = newBox.height;
+    
+            if (resizeHandle.includes('e')) {
+                finalWidth = Math.max(20, dragStart.cropBox.width + deltaX);
             }
-
-            if (newBox.x + newBox.width > bounds.width) {
-                newBox.width = bounds.width - newBox.x;
+            if (resizeHandle.includes('w')) {
+                finalWidth = Math.max(20, dragStart.cropBox.width - deltaX);
+                finalX = dragStart.cropBox.x + deltaX;
             }
-            if (newBox.y + newBox.height > bounds.height) {
-                newBox.height = bounds.height - newBox.y;
+            if (resizeHandle.includes('s')) {
+                finalHeight = Math.max(20, dragStart.cropBox.height + deltaY);
             }
-
-            setCropBox(newBox);
+            if (resizeHandle.includes('n')) {
+                finalHeight = Math.max(20, dragStart.cropBox.height - deltaY);
+                finalY = dragStart.cropBox.y + deltaY;
+            }
+    
+            // Constrain to image boundaries
+            if (finalX < imgBounds.left) {
+                finalWidth += finalX - imgBounds.left;
+                finalX = imgBounds.left;
+            }
+            if (finalY < imgBounds.top) {
+                finalHeight += finalY - imgBounds.top;
+                finalY = imgBounds.top;
+            }
+            if (finalX + finalWidth > imgBounds.left + imgBounds.width) {
+                finalWidth = imgBounds.left + imgBounds.width - finalX;
+            }
+            if (finalY + finalHeight > imgBounds.top + imgBounds.height) {
+                finalHeight = imgBounds.top + imgBounds.height - finalY;
+            }
+    
+            setCropBox({ x: finalX, y: finalY, width: Math.max(20, finalWidth), height: Math.max(20, finalHeight) });
         }
     };
 
@@ -1238,31 +1278,25 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     };
 
     const handleConfirmCrop = () => {
-        if (!cropBox) return;
-
-        const bounds = getImageContainerBounds();
-        if (!bounds || !imageRef.current) return;
-
-        const imageRect = imageRef.current.getBoundingClientRect();
-        const imageWidth = imageRect.width;
-        const imageHeight = imageRect.height;
-
-        const scaleX = imageRef.current.naturalWidth / imageWidth;
-        const scaleY = imageRef.current.naturalHeight / imageHeight;
-
-        const imageLeft = (imageRect.left - bounds.left);
-        const imageTop = (imageRect.top - bounds.top);
-
+        const imgBounds = getImageBounds();
+        if (!cropBox || !imgBounds) return;
+    
+        const scaleX = imgBounds.naturalWidth / imgBounds.width;
+        const scaleY = imgBounds.naturalHeight / imgBounds.height;
+    
+        const imageLeft = imgBounds.left;
+        const imageTop = imgBounds.top;
+    
         const cropLeftOnImage = (cropBox.x - imageLeft) * scaleX;
         const cropTopOnImage = (cropBox.y - imageTop) * scaleY;
         const cropRightOnImage = (cropBox.x + cropBox.width - imageLeft) * scaleX;
         const cropBottomOnImage = (cropBox.y + cropBox.height - imageTop) * scaleY;
-
+    
         const leftMask = Math.max(0, Math.round(cropLeftOnImage));
-        const rightMask = Math.max(0, Math.round(imageRef.current.naturalWidth - cropRightOnImage));
+        const rightMask = Math.max(0, Math.round(imgBounds.naturalWidth - cropRightOnImage));
         const topMask = Math.max(0, Math.round(cropTopOnImage));
-        const bottomMask = Math.max(0, Math.round(imageRef.current.naturalHeight - cropBottomOnImage));
-
+        const bottomMask = Math.max(0, Math.round(imgBounds.naturalHeight - cropBottomOnImage));
+    
         setPendingCropMask([leftMask, rightMask, topMask, bottomMask]);
         setCropBoundaryDialogOpen(true);
     };
@@ -1745,7 +1779,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                     borderTop: '2px dashed white',
                                     transform: 'translateY(-50%)'
                                 }} />
-                               
+                                
                                 {isTransitioning && (
                                     <Box sx={{
                                         position: 'absolute',

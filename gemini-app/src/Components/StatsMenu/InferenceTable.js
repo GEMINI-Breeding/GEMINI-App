@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DataGrid } from '@mui/x-data-grid';
 import { fetchData, useDataState } from "../../DataContext";
 import { Box, Typography, Alert, Chip } from '@mui/material';
@@ -15,37 +15,76 @@ const InferenceTable = ({ refreshTrigger }) => {
     const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
     const [isInferencePreviewOpen, setIsInferencePreviewOpen] = useState(false);
     const [selectedInferenceData, setSelectedInferenceData] = useState(null);
+    const [inferenceStatus, setInferenceStatus] = useState(null);
+    const pollingRef = useRef(null);
 
     useEffect(() => {
-        const fetchInferenceData = async () => {
-            setLoading(true);
+        let timer;
+        const pollStatus = async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_inference_results`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        year: selectedYearGCP,
-                        experiment: selectedExperimentGCP,
-                        location: selectedLocationGCP,
-                        population: selectedPopulationGCP
-                    })
-                });
-
+                const response = await fetch(`${flaskUrl}get_inference_progress`);
                 if (response.ok) {
-                    const data = await response.json();
-                    setInferenceData(data.results || []);
-                } else {
-                    const errorData = await response.json();
-                    setError(errorData.error || 'Failed to fetch inference results');
+                    const status = await response.json();
+                    setInferenceStatus(status);
+                    if (status.running) {
+                        timer = setTimeout(pollStatus, 2000);
+                    } else {
+                        setTimeout(() => fetchInferenceData(), 1000);
+                    }
                 }
-                setLoading(false);
-            } catch (error) {
-                console.error('Error fetching inference data:', error);
-                setError('Failed to fetch inference results');
-                setLoading(false);
+            } catch (e) {
             }
         };
+        pollStatus();
+        return () => clearTimeout(timer);
+    }, [flaskUrl, refreshTrigger]);
 
+    const fetchInferenceData = async () => {
+        setLoading(true);
+        try {
+            const response = await fetch(`${flaskUrl}get_inference_results`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Group results by date/platform/sensor/orthomosaic/model_task
+                const results = (data.results || []).map((row, index) => {
+                    // Infer model task from CSV filename
+                    let model_task = 'detection';
+                    if (row.csv_path && row.csv_path.includes('_segmentation')) model_task = 'segmentation';
+                    else if (row.csv_path && row.csv_path.includes('_detection')) model_task = 'detection';
+                    
+                    // Create unique ID using CSV path hash or fallback to index-based ID
+                    // This ensures consistent IDs that won't change between renders
+                    const baseId = `${row.date || ''}_${row.platform || ''}_${row.sensor || ''}_${row.orthomosaic || row.agrowstitch_version || ''}_${model_task}`;
+                    const uniqueId = row.csv_path ? 
+                        baseId + '_' + row.csv_path.split('/').pop().replace(/[^a-zA-Z0-9]/g, '_') : 
+                        baseId + '_' + index;
+                    
+                    return { ...row, model_task, id: uniqueId };
+                });
+                setInferenceData(results);
+            } else {
+                const errorData = await response.json();
+                setError(errorData.error || 'Failed to fetch inference results');
+            }
+            setLoading(false);
+        } catch (error) {
+            console.error('Error fetching inference data:', error);
+            setError('Failed to fetch inference results');
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         if (selectedLocationGCP && selectedPopulationGCP) {
             fetchInferenceData();
         }
@@ -60,7 +99,8 @@ const InferenceTable = ({ refreshTrigger }) => {
                 agrowstitch_version: row.orthomosaic || row.agrowstitch_version, // Support both old and new field names
                 orthomosaic: row.orthomosaic,
                 model_id: row.model_id,
-                model_version: row.model_version
+                model_version: row.model_version,
+                model_task: row.model_task // Pass model_task to enable segmentation display
             });
             setIsInferencePreviewOpen(true);
         } else {
@@ -70,17 +110,30 @@ const InferenceTable = ({ refreshTrigger }) => {
 
     const handleDownloadCSV = async (row) => {
         try {
-            const response = await fetch(row.csv_path);
+            const response = await fetch(`${flaskUrl}download_inference_csv`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    csv_path: row.csv_path
+                })
+            });
+            
             if (response.ok) {
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${row.date}_${row.platform}_${row.sensor}_${row.orthomosaic || row.agrowstitch_version}_predictions.csv`;
+               
+                const filename = `${row.date}_${row.platform}_${row.sensor}_${row.orthomosaic || 'predictions'}_${row.model_task || 'detection'}.csv`;
+                a.download = filename;
+                
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
+            } else {
+                const errorData = await response.json();
+                alert(`Failed to download CSV: ${errorData.error}`);
             }
         } catch (error) {
             console.error('Error downloading CSV:', error);
@@ -159,11 +212,17 @@ const InferenceTable = ({ refreshTrigger }) => {
         { field: 'sensor', headerName: 'Sensor', width: 100 },
         { field: 'orthomosaic', headerName: 'Orthomosaic', width: 150 },
         { field: 'model_id', headerName: 'Model ID', width: 200 },
-        { 
-            field: 'total_predictions', 
-            headerName: 'Total Detections', 
-            width: 130,
-            type: 'number'
+        {
+            field: 'classes_detected',
+            headerName: 'Detections',
+            width: 150,
+            // Sorting by total_predictions
+            valueGetter: (params) => params.row.total_predictions,
+            renderCell: (params) => (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {formatClassCounts(params.row.classes_detected || {})}
+                </Box>
+            )
         },
         { 
             field: 'plot_count', 
@@ -171,15 +230,16 @@ const InferenceTable = ({ refreshTrigger }) => {
             width: 80,
             type: 'number'
         },
-        {
-            field: 'classes_detected',
-            headerName: 'Classes Detected',
-            width: 300,
-            renderCell: (params) => (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                    {formatClassCounts(params.value || {})}
-                </Box>
-            )
+        { 
+            field: 'has_segmentation', 
+            headerName: 'Segmentation', 
+            width: 130,
+            renderCell: (params) => {
+                const isSegmentation = params.row.model_task === 'segmentation';
+                return isSegmentation ? 
+                    <Chip label="Yes" color="success" size="small" /> : 
+                    <Chip label="No" size="small" />;
+            }
         },
         {
             field: 'actions',
@@ -193,6 +253,7 @@ const InferenceTable = ({ refreshTrigger }) => {
                         onClick={() => handleViewInference(params.row)}
                         disabled={!params.row.plot_images_available}
                         title={params.row.plot_images_available ? "View inference results with bounding boxes" : "Plot images not available"}
+                        color="primary"
                     >
                         <VisibilityIcon />
                     </IconButton>
@@ -200,6 +261,7 @@ const InferenceTable = ({ refreshTrigger }) => {
                         size="small"
                         onClick={() => handleDownloadCSV(params.row)}
                         title="Download CSV results"
+                        color="secondary"
                     >
                         <Download />
                     </IconButton>

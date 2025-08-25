@@ -640,6 +640,11 @@ export const TableComponent = () => {
                                 onClick={() => handleViewSyncedData(params.id)}
                             />
                         </Tooltip>
+                        <Delete
+                            color="error"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleDelete(params.id)}
+                        />
                     </>
                     )}
                     </div>
@@ -688,14 +693,17 @@ export const TableComponent = () => {
         return columns;
     };
 
-    if (loading) return <p>Loading...</p>;
+    if (loading) return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+            <CircularProgress />
+        </div>
+    );
     if (error) return <p>Error: {error.message}</p>;
 
     return (
         <div>
             {showEditSuccess && <Alert severity="success">Successfully updated data.</Alert>}
             {showDeleteSuccess && <Alert severity="success">Successfully deleted data.</Alert>}
-            <h2>Data Table</h2>
             <FormControl fullWidth style={{ marginBottom: '20px' }}>
                 <InputLabel>Data Type</InputLabel>
                 <Select
@@ -790,7 +798,9 @@ export const TableComponent = () => {
                 <DialogTitle id="download-dialog-title">Downloading Images</DialogTitle>
                 <DialogContent>
                     <Box sx={{ width: '100%', mr: 1, minWidth: 300 }}>
-                        <Typography variant="body2" color="text.secondary" align="center">{`${downloadProgress}%`}</Typography>
+                        <Typography variant="body2" color="text.secondary" align="center">
+                            {downloadProgress === 0 ? "Zipping files..." : `${downloadProgress}%`}
+                        </Typography>
                         <LinearProgress variant="determinate" value={downloadProgress} />
                     </Box>
                 </DialogContent>

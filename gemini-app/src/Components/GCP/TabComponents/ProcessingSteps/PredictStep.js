@@ -1,5 +1,5 @@
 // PredictStep.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, version } from "react";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
@@ -18,8 +18,9 @@ import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import { useDataState } from "../../../../DataContext";
+import { useDataState, fetchData } from "../../../../DataContext";
 import InferenceTable from "../../../StatsMenu/InferenceTable";
+import AerialPrepTabs from "../Processing/AerialPrepTabs";
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -31,7 +32,8 @@ function PredictStep() {
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,
-        selectedPopulationGCP
+        selectedPopulationGCP,
+        isGCPReady
     } = useDataState();
 
     // Roboflow API configuration
@@ -51,6 +53,10 @@ function PredictStep() {
     const [agrowstitchOptions, setAgrowstitchOptions] = useState([]);
     const [selectedAgrowstitch, setSelectedAgrowstitch] = useState("");
 
+    // New states for model task and segmentation masks
+    const [modelTask, setModelTask] = useState('detection'); // 'detection' | 'segmentation'
+    const [includeMasks, setIncludeMasks] = useState(true);
+
     // Processing state
     const [isProcessing, setIsProcessing] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -59,12 +65,102 @@ function PredictStep() {
     const [results, setResults] = useState(null);
     const [inferenceRefreshTrigger, setInferenceRefreshTrigger] = useState(0);
 
-    // Load dates when GCP selections are available
-    useEffect(() => {
+    // State for showing/hiding sections
+    const [showAerialPrep, setShowAerialPrep] = useState(false);
+
+    // Helper functions for date filtering (must be defined before use)
+    const checkDroneFolder = async (date) => {
+        const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
+        try {
+            const platforms = await fetchData(`${flaskUrl}list_dirs/${basePath}`);
+            for (const platform of platforms) {
+                const sensors = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                for (const sensor of sensors) {
+                    const files = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}`);
+                    // if (files.some((file) => file.includes("-RGB.tif"))) {
+                    if (files.some((file) => file.includes("Pyramid.tif"))) {
+                        return true;
+                    }
+                }
+            }
+        } catch (e) {}
+        return false;
+    };
+
+    const checkAgRowStitchFolder = async (date) => {
+        const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
+        try {
+            const platforms = await fetchData(`${flaskUrl}list_dirs/${basePath}`);
+            for (const platform of platforms) {
+                const sensors = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                for (const sensor of sensors) {
+                    const subDirs = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}/${sensor}`);
+                    const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
+                    for (const agrowstitchDir of agrowstitchDirs) {
+                        const agrowstitchFiles = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
+                        if (agrowstitchFiles.some((file) => file === "combined_mosaic_utm.tif") || agrowstitchFiles.some((file) => file.includes("_utm.tif"))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (e) {}
+        return false;
+    };
+
+    // Check if there are drone orthomosaics available for processing
+    const checkForDroneOrthomosaics = async () => {
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
-            loadDates();
+            try {
+                const dates = await fetchData(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+                let hasDroneData = false;
+                
+                for (const date of dates) {
+                    const hasDronePyramid = await checkDroneFolder(date);
+                    if (hasDronePyramid) {
+                        hasDroneData = true;
+                        break;
+                    }
+                }
+                
+                setShowAerialPrep(hasDroneData);
+            } catch (error) {
+                setShowAerialPrep(false);
+            }
+        } else {
+            setShowAerialPrep(false);
         }
-    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+    };
+
+    // Check for drone orthomosaics when GCP selections change
+    useEffect(() => {
+        checkForDroneOrthomosaics();
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+
+    // Only use filtered dates (with stitch)
+    useEffect(() => {
+        const fetchDatesWithStitch = async () => {
+            if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
+                try {
+                    const dates = await fetchData(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+                    const filteredDates = [];
+                    for (const date of dates) {
+                        const hasDronePyramid = await checkDroneFolder(date);
+                        const hasAgRowStitch = await checkAgRowStitchFolder(date);
+                        if (hasDronePyramid || hasAgRowStitch) {
+                            filteredDates.push(date);
+                        }
+                    }
+                    setDateOptions(filteredDates);
+                } catch (error) {
+                    setDateOptions([]);
+                }
+            } else {
+                setDateOptions([]);
+            }
+        };
+        fetchDatesWithStitch();
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
 
     useEffect(() => {
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP && selectedDate) {
@@ -83,27 +179,6 @@ function PredictStep() {
             loadAgrowstitchVersions();
         }
     }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, selectedDate, selectedPlatform, selectedSensor]);
-
-    const loadDates = async () => {
-        try {
-            const response = await fetch(`${flaskUrl}get_dates`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP
-                })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                setDateOptions(data.dates || []);
-            }
-        } catch (error) {
-            console.error("Error loading dates:", error);
-        }
-    };
 
     const loadPlatforms = async () => {
         try {
@@ -152,7 +227,7 @@ function PredictStep() {
 
     const loadAgrowstitchVersions = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_agrowstitch_versions`, {
+            const response = await fetch(`${flaskUrl}get_orthomosaic_versions`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
@@ -167,10 +242,22 @@ function PredictStep() {
             });
             if (response.ok) {
                 const data = await response.json();
-                setAgrowstitchOptions(data.versions || []);
+                const versions = []
+                console.log("AgRowStitch versions data:", data);
+                for (let i = 0; i < data.length; i++) {
+                    if (data[i].AGR_version !== undefined  && data[i].AGR_version.startsWith('AgRowStitch_v')) {
+                        versions.push(data[i].AGR_version);
+                    }
+                }
+                setAgrowstitchOptions(versions || []);
+                console.log("AgRowStitch versions:", versions);
+                // Auto-select Plot_Images if available
+                if (versions && versions.includes('Plot_Images')) {
+                    setSelectedAgrowstitch('Plot_Images');
+                }
             }
         } catch (error) {
-            console.error("Error loading AgRowStitch versions:", error);
+            console.error("Error loading orthomosaic versions:", error);
         }
     };
 
@@ -189,6 +276,9 @@ function PredictStep() {
 
         // Set API URL based on inference mode
         let selectedApiUrl = inferenceMode === "local" ? "http://localhost:9001" : "https://detect.roboflow.com";
+        
+        // Always include masks for segmentation tasks
+        const finalIncludeMasks = modelTask === 'segmentation' ? true : includeMasks;
 
         try {
             const response = await fetch(`${flaskUrl}run_roboflow_inference`, {
@@ -199,6 +289,8 @@ function PredictStep() {
                     inferenceMode,
                     apiKey,
                     modelId,
+                    modelTask,
+                    includeMasks: finalIncludeMasks,
                     year: selectedYearGCP,
                     experiment: selectedExperimentGCP,
                     location: selectedLocationGCP,
@@ -267,7 +359,7 @@ function PredictStep() {
 
     if (!hasGCPSelections) {
         return (
-            <Grid container justifyContent="center" spacing={2}>
+            <Grid container spacing={2} sx={{ maxWidth: "100%", width: "100%" }}>
                 <Grid item xs={12}>
                     <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                         <Typography variant="h5" gutterBottom align="center">
@@ -286,17 +378,35 @@ function PredictStep() {
     }
 
     return (
-        <Grid container justifyContent="center" spacing={2}>
-            <Grid item xs={12}>
-                <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                    <Typography variant="h5" gutterBottom align="center">
-                        Roboflow Inference
-                    </Typography>
-                    <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
-                        Run inference on plots using your Roboflow trained models
-                    </Typography>
+        <Box sx={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
+            <Grid container spacing={2} sx={{ maxWidth: "100%", width: "100%" }}>
+                {/* Aerial Prep Section - Only show if drone orthomosaics are available */}
+                {showAerialPrep && isGCPReady && (
+                    <Grid item xs={12}>
+                        <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
+                            <Typography variant="h5" gutterBottom align="center">
+                                Aerial Data Processing
+                            </Typography>
+                            <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
+                                Extract aerial-specific traits from drone imagery
+                            </Typography>
+                            <Divider style={{ margin: "20px 0" }} />
+                            <AerialPrepTabs />
+                        </Paper>
+                    </Grid>
+                )}
 
-                    <Grid container spacing={3} style={{ marginTop: "20px" }}>
+                {/* Roboflow Inference Section */}
+                <Grid item xs={12}>
+                    <Paper elevation={3} sx={{ padding: 2, margin: "10px 0", maxWidth: "100%", boxSizing: "border-box" }}>
+                        <Typography variant="h5" gutterBottom align="center">
+                            Trait Extraction
+                        </Typography>
+                        <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
+                            Run inference on plots using Roboflow trained models
+                        </Typography>
+
+                        <Grid container spacing={2} sx={{ marginTop: 2, maxWidth: "100%" }}>
                         {/* Current Dataset Info */}
                         {/* <Grid item xs={12}>
                             <Alert severity="info" style={{ marginBottom: "20px" }}>
@@ -313,7 +423,7 @@ function PredictStep() {
                             </Typography>
                         </Grid>
                         
-                        <Grid item xs={12} md={4}>
+                        <Grid item xs={12} sm={6} md={4}>
                             <FormControl fullWidth>
                                 <InputLabel id="inference-mode-label">Inference Mode</InputLabel>
                                 <Select
@@ -333,7 +443,7 @@ function PredictStep() {
                             </FormControl>
                         </Grid>
                         
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} sm={6} md={4}>
             <TextField
                 fullWidth
                 label="API Key *"
@@ -355,7 +465,7 @@ function PredictStep() {
                     ),
                 }}
             />
-        </Grid>                        <Grid item xs={12} md={4}>
+        </Grid>                        <Grid item xs={12} sm={6} md={4}>
                             <TextField
                                 fullWidth
                                 label="Model ID *"
@@ -373,7 +483,7 @@ function PredictStep() {
                             </Typography>
                         </Grid>
 
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} sm={6} lg={3}>
                             <FormControl fullWidth>
                                 <InputLabel id="date-label">Date *</InputLabel>
                                 <Select
@@ -389,7 +499,7 @@ function PredictStep() {
                             </FormControl>
                         </Grid>
 
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} sm={6} lg={3}>
                             <FormControl fullWidth disabled={!selectedDate}>
                                 <InputLabel id="platform-label">Platform *</InputLabel>
                                 <Select
@@ -405,7 +515,7 @@ function PredictStep() {
                             </FormControl>
                         </Grid>
 
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} sm={6} lg={3}>
                             <FormControl fullWidth disabled={!selectedPlatform}>
                                 <InputLabel id="sensor-label">Sensor *</InputLabel>
                                 <Select
@@ -421,18 +531,64 @@ function PredictStep() {
                             </FormControl>
                         </Grid>
 
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} sm={6} lg={3}>
                             <FormControl fullWidth disabled={!selectedSensor}>
-                                <InputLabel id="orthomosaic-label">Orthomosaic</InputLabel>
+                                <InputLabel id="orthomosaic-label">Image Source *</InputLabel>
                                 <Select
                                     labelId="orthomosaic-label"
-                                    label="Orthomosaic"
+                                    label="Image Source *"
                                     value={selectedAgrowstitch}
                                     onChange={(e) => setSelectedAgrowstitch(e.target.value)}
                                 >
                                     {agrowstitchOptions.map((version) => (
-                                        <MenuItem key={version} value={version}>{version}</MenuItem>
+                                        <MenuItem key={version} value={version}>
+                                            {version === 'Plot_Images' ? 'Plot Images (from Get Plot Images)' :
+                                             version === 'ODM_Direct' ? 'ODM Orthomosaic (Direct)' :
+                                             version}
+                                        </MenuItem>
                                     ))}
+                                </Select>
+                                <Typography variant="caption" color="textSecondary">
+                                    {selectedAgrowstitch === 'Plot_Images' 
+                                        ? "Uses individual plot images created by 'Get Plot Images'"
+                                        : selectedAgrowstitch === 'ODM_Direct'
+                                        ? "Uses ODM orthomosaic directly"
+                                        : selectedAgrowstitch !== "" ? "Uses AgRowStitch processed images" : ""}
+                                </Typography>
+                            </FormControl>
+                        </Grid>
+
+                        {/* Additional Information */}
+                        {selectedAgrowstitch === 'Plot_Images' && (
+                            <Grid item xs={12}>
+                                <Alert severity="info" style={{ marginTop: "10px" }}>
+                                    <Typography variant="body2">
+                                        <strong>Plot Images Mode:</strong> Inference will be run on individual plot images 
+                                        created by the "Get Plot Images" functionality. Each plot will be processed separately 
+                                        and results will include plot and accession information.
+                                    </Typography>
+                                </Alert>
+                            </Grid>
+                        )}
+
+                        {/* Model Task */}
+                        <Grid item xs={12}>
+                            <Typography variant="h6" gutterBottom style={{ marginTop: "20px" }}>
+                                Model Task
+                            </Typography>
+                        </Grid>
+
+                        <Grid item xs={12} sm={6} md={6}>
+                            <FormControl fullWidth>
+                                <InputLabel id="model-task-label">Model Task</InputLabel>
+                                <Select
+                                    labelId="model-task-label"
+                                    label="Model Task"
+                                    value={modelTask}
+                                    onChange={(e)=> setModelTask(e.target.value)}
+                                >
+                                    <MenuItem value="detection">Object Detection</MenuItem>
+                                    <MenuItem value="segmentation">Instance Segmentation</MenuItem>
                                 </Select>
                             </FormControl>
                         </Grid>
@@ -477,9 +633,9 @@ function PredictStep() {
                                     <Typography variant="h6" gutterBottom>
                                         Inference Results
                                     </Typography>
-                                    {/* <Typography variant="body2" gutterBottom>
+                                    <Typography variant="body2" gutterBottom>
                                         CSV file saved to: {results.csvPath}
-                                    </Typography> */}
+                                    </Typography>
                                     <Typography variant="body2" gutterBottom>
                                         Total plots processed: {results.totalPlots}
                                     </Typography>
@@ -515,6 +671,7 @@ function PredictStep() {
                 </Paper>
             </Grid>
         </Grid>
+        </Box>
     );
 }
 

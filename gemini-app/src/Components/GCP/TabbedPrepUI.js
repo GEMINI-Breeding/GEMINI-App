@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import Grid from "@mui/material/Grid";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
+import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
+import EditRoadIcon from '@mui/icons-material/EditRoad';
+import QueryStatsIcon from '@mui/icons-material/QueryStats';
 
 import { useDataState, useDataSetters } from "../../DataContext";
 
@@ -12,7 +15,7 @@ import Processing from "./TabComponents/Processing";
 import useTrackComponent from "../../useTrackComponent";
 import AerialPrepTabs from "./TabComponents/Processing/AerialPrepTabs";
 
-function TabbedPrepUI() {
+function TabbedPrepUI({ selectedTab = null }) {
     useTrackComponent("TabbedPrepUI");
 
     const {
@@ -44,8 +47,14 @@ function TabbedPrepUI() {
         setSelectedTabPrep,
     } = useDataSetters();
 
+    // Use the selectedTab prop if provided, otherwise use the context state
+    const activeTab = selectedTab !== null ? selectedTab : selectedTabPrep;
+
     const handleChange = (event, newValue) => {
-        setSelectedTabPrep(newValue);
+        // Only update the context state if no selectedTab prop is provided
+        if (selectedTab === null) {
+            setSelectedTabPrep(newValue);
+        }
     };
 
     const titleStyle = {
@@ -55,23 +64,38 @@ function TabbedPrepUI() {
     };
 
     return (
-        <Grid container direction="column" style={{ width: "100%", height: "100%" }}>
-            {isPrepInitiated && (
-                <Grid item alignItems="center" alignSelf="center" style={{ width: "80%" }}>
-                    <Tabs value={selectedTabPrep} onChange={handleChange} centered variant="fullWidth">
-                        <Tab label="Orthomosaic Generation" style={titleStyle} />
-                        <Tab label="Plot Boundary Preparation" style={titleStyle} />
-                        <Tab label="Processing" style={titleStyle} />
-                        <Tab label="Aerial Processing" style={titleStyle} />
+        <Grid container direction="column" style={{ width: "100%", minHeight: "100%", paddingTop: "20px" }}>
+            {/* Only show tabs when selectedTab prop is not provided (legacy mode) */}
+            {isPrepInitiated && selectedTab === null && (
+                <Grid item alignItems="center" alignSelf="center" style={{ width: "80%", paddingTop: "0px" }}>
+                    <Tabs value={activeTab} onChange={handleChange} centered variant="fullWidth">
+                        <Tab 
+                            label="Mosaic Generation" 
+                            style={titleStyle} 
+                            icon={<DynamicFeedIcon />}
+                            iconPosition="start"
+                        />
+                        <Tab 
+                            label="Plot Association" 
+                            style={titleStyle} 
+                            icon={<EditRoadIcon />}
+                            iconPosition="start"
+                        />
+                        <Tab 
+                            label="Processing" 
+                            style={titleStyle} 
+                            icon={<QueryStatsIcon />}
+                            iconPosition="start"
+                        />
                     </Tabs>
                 </Grid>
             )}
-            {isPrepInitiated && (
+            {/* Show content when isPrepInitiated OR when selectedTab is provided from sidebar */}
+            {(isPrepInitiated || selectedTab !== null) && (
                 <Grid item container style={{ flexGrow: 1, overflow: "auto" }}>
-                    {selectedTabPrep === 0 && <AerialDataPrep />}
-                    {selectedTabPrep === 1 && <PlotBoundaryPrep />}
-                    {selectedTabPrep === 2 && <Processing />}
-                    {selectedTabPrep === 3 && <AerialPrepTabs />}
+                    {activeTab === 0 && <AerialDataPrep />}
+                    {activeTab === 1 && <PlotBoundaryPrep />}
+                    {activeTab === 2 && <Processing />}
                 </Grid>
             )}
         </Grid>
