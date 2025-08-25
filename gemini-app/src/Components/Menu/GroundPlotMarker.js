@@ -1237,13 +1237,16 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     
             if (resizeHandle.includes('e')) {
                 finalWidth = Math.max(20, dragStart.cropBox.width + deltaX);
+
             }
             if (resizeHandle.includes('w')) {
                 finalWidth = Math.max(20, dragStart.cropBox.width - deltaX);
                 finalX = dragStart.cropBox.x + deltaX;
             }
+
             if (resizeHandle.includes('s')) {
                 finalHeight = Math.max(20, dragStart.cropBox.height + deltaY);
+
             }
             if (resizeHandle.includes('n')) {
                 finalHeight = Math.max(20, dragStart.cropBox.height - deltaY);
