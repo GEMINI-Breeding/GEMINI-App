@@ -432,7 +432,7 @@ const FileUploadComponent = () => {
                                 }
                                 const file = files.find((f) => f.name === filesToUpload[i]);
                                 
-                                if (selectedDataType === "binary") {
+                                if (selectedDataType === "binary" && selectedDataType !== "platformLogs") {
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
                                     break;
                                 } else {
@@ -514,7 +514,7 @@ const FileUploadComponent = () => {
             
             // Process each file
             for (const file of fileArray) {
-// Skip collections.json file
+                // Skip collections.json file
                 if (file.name === 'collections.json') {
                     continue;
                 }

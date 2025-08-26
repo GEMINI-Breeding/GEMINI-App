@@ -3,7 +3,6 @@ clear
 
 # Print the startup message
 echo "Please wait while the app starts up..."
-echo "Please wait while the app starts up..."
 echo "To close the app, close this terminal window and the chrome tab!"
 
 # Load the user's environment to ensure npm is available
