@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Grid, Typography, Tabs, Tab, CircularProgress } from "@mui/material";
 import { NestedSection } from "./Processing/CamerasAccordion";
-import { FolderTab, FolderTabs } from "./Processing/CamerasAccordion";
 import OrthoTable from '../../StatsMenu/OrthoTable';
 import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
+import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
 
 import useTrackComponent from "../../../useTrackComponent";
 import Snackbar from "@mui/material/Snackbar";
@@ -213,6 +214,12 @@ function AerialDataPrep() {
         fetchDataAndUpdate();
     }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
 
+    const titleStyle = {
+        fontSize: "1.25rem", // Adjust for desired size
+        fontWeight: "normal",
+        textAlign: "center",
+    };
+
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
             {loading ? (
@@ -232,46 +239,58 @@ function AerialDataPrep() {
                 </Box>
             ) : (
                 <>
-                    <Box sx={{ width: '100%', bgcolor: 'background.paper', marginTop: 3 }}>
-                        <FolderTabs
-                            value={activeTab}
-                            onChange={handleTabChange}
-                            aria-label="styled tabs example"
+                    <Grid item alignItems="center" alignSelf="center" style={{ width: "80%", paddingTop: "0px" }}>
+                        <Tabs 
+                            value={activeTab} 
+                            onChange={handleTabChange} 
+                            aria-label="mosaic tabs" 
+                            sx={{ marginBottom: 2 }} 
+                            centered 
                             variant="fullWidth"
-                            scrollButtons="auto"
-                            centered
                         >
-                            <FolderTab label="Orthomosaic Generation" />
-                            <FolderTab label="Generated Orthomosaics" />
-                        </FolderTabs>
-                    </Box>
+                            <Tab 
+                                value={0}
+                                label="Generate Mosaics" 
+                                style={titleStyle}
+                                icon={<DynamicFeedIcon />}
+                                iconPosition="start"
+                            />
+                            <Tab 
+                                value={1}
+                                label="Manage Mosaics" 
+                                style={titleStyle}
+                                icon={<ViewModuleIcon />}
+                                iconPosition="start"
+                            />
+                        </Tabs>
+                    </Grid>
 
-                    {activeTab === 0 && (
-                        <>
-                            {sensorData && sensorData.length > 0 && isGCPReady && (
-                                sensorData.map((platformData) => (
-                                    <NestedSection
-                                        key={platformData.title}
-                                        title={platformData.title}
-                                        nestedData={platformData.nestedData.map((sensorData) => ({
-                                            summary: sensorData.summary,
-                                            data: sensorData.data,
-                                            columns: sensorData.columns,
-                                        }))}
-                                        activeTab={aerialPrepTab}
-                                        handleAction={null}
-                                        CustomComponent={CustomComponent}
-                                    />
-                                ))
-                            )}
-                        </>
-                    )}
+                    <Box sx={{ width: '100%', marginTop: 0.5 }}>
+                        {activeTab === 0 && (
+                            <>
+                                {sensorData && sensorData.length > 0 && isGCPReady && (
+                                    sensorData.map((platformData) => (
+                                        <NestedSection
+                                            key={platformData.title}
+                                            title={platformData.title}
+                                            nestedData={platformData.nestedData.map((sensorData) => ({
+                                                summary: sensorData.summary,
+                                                data: sensorData.data,
+                                                columns: sensorData.columns,
+                                            }))}
+                                            activeTab={aerialPrepTab}
+                                            handleAction={null}
+                                            CustomComponent={CustomComponent}
+                                        />
+                                    ))
+                                )}
+                            </>
+                        )}
 
-                    {activeTab === 1 && (
-                        <Box sx={{ width: '100%', marginTop: 3 }}>
+                        {activeTab === 1 && (
                             <OrthoTable />
-                        </Box>
-                    )}
+                        )}
+                    </Box>
                 </>
             )}
 

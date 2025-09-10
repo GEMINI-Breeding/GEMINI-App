@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
-import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button, LinearProgress, Box, Typography } from '@mui/material';
+import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button, LinearProgress, Box, Typography, CircularProgress } from '@mui/material';
 import { ImagePreviewer } from "./ImagePreviewer";
 import { GroundPlotMarker } from './GroundPlotMarker';
 import ArticleIcon from '@mui/icons-material/Article'; // paper icon for reports
@@ -34,6 +34,7 @@ export const TableComponent = () => {
     const [imagePreviewData, setImagePreviewData] = useState(null);
     const [plotMarkerOpen, setPlotMarkerOpen] = useState(false);
     const [plotMarkerData, setPlotMarkerData] = useState(null);
+    const [plotMarkerLoading, setPlotMarkerLoading] = useState(false);
     const [reportDialogOpen, setReportDialogOpen] = useState(false);
     const [reportContent, setReportContent] = useState("");
     const [csvData, setCsvData] = useState([]);
@@ -107,11 +108,11 @@ export const TableComponent = () => {
     }, [selectedDataType, procData]);
 
     const detectDataType = (row) => {
-        if (row.sensor && (row.platform && row.platform !== "rover") && row.date) return "image";
-        if (row.platform === "rover" && row.cameras && row.cameras.length > 0) return "binary";
+        if (row.sensor && (row.platform && row.platform !== "rover" && row.platform !== "Amiga" ) && row.date) return "image";
+        if ((row.platform === "rover" || row.platform === "Amiga") && row.cameras && row.cameras.length > 0) return "binary";
         if ((row.date && row.date !== "[object Object]") && (!row.platform || row.platform === "[object Object]")) return "weather";
         if ((!row.date || row.date === "[object Object]") && row.population) return "gcpLocations";
-        if (row.sensor && (row.platform && row.platform !== "rover")) return "platformLogs";
+        if (row.sensor && (row.platform && row.platform !== "rover" && row.platform !== "Amiga")) return "platformLogs";
         return "unknown";
     };
 
@@ -366,6 +367,9 @@ export const TableComponent = () => {
     const handleMarkPlots = async (id) => {
         const row = procData.find((row) => row.id === id);
         if (row) {
+            // Show loading popup
+            setPlotMarkerLoading(true);
+            
             try {
                 const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
                     method: 'POST',
@@ -379,7 +383,7 @@ export const TableComponent = () => {
                     }),
                 });
                 if (!filterResponse.ok) {
-                    const errorData = await filterResponse.json().catch(() => null); // Avoid crashing if body is not json
+                    const errorData = await filterResponse.json().catch(() => null);
                     console.warn('Could not pre-populate plot markings.', errorData?.error);
                 }
             } catch (error) {
@@ -388,7 +392,7 @@ export const TableComponent = () => {
 
             const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
             let directory;
-            if (row.platform === 'rover') {
+            if (row.platform === 'rover' || row.platform === 'Amiga') {
                 directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/RGB/Images/${camera}/`;
             } else {
                 directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}/Images/`;
@@ -406,7 +410,6 @@ export const TableComponent = () => {
                     setPlotIndices(prev => ({ ...prev, [row.id]: nextIndex }));
                 } else {
                     console.error("Failed to fetch max plot index:", data.error);
-                    // Fallback to 0 if there's an error
                     setPlotIndices(prev => ({ ...prev, [row.id]: 0 }));
                 }
             } catch (error) {
@@ -427,6 +430,8 @@ export const TableComponent = () => {
             };
             setPlotMarkerData(obj);
             setPlotMarkerOpen(true);
+            // Hide loading popup when plot marker opens
+            setPlotMarkerLoading(false);
         }
     };
 
@@ -514,7 +519,7 @@ export const TableComponent = () => {
     
             const key = `${year}-${experiment}-${location}-${population}-${date}-${platform}-${sensor}`;
     
-            if (platform === 'rover') {
+            if (platform === 'rover' || platform === 'Amiga') {
                 if (!groupedData[key]) {
                     groupedData[key] = {
                         year, experiment, location, population, date, platform, sensor,
@@ -593,7 +598,7 @@ export const TableComponent = () => {
                         />
                         </>
                     )}
-                    {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && (
+                    {selectedDataType !== "gcpLocations" && selectedDataType !== "weather" && selectedDataType !== "platformLogs" && selectedDataType !== "binary" && (
                         <Tooltip title="View Image">
                             <Visibility
                                 color="action"
@@ -635,6 +640,11 @@ export const TableComponent = () => {
                                 onClick={() => handleViewSyncedData(params.id)}
                             />
                         </Tooltip>
+                        <Delete
+                            color="error"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => handleDelete(params.id)}
+                        />
                     </>
                     )}
                     </div>
@@ -683,14 +693,17 @@ export const TableComponent = () => {
         return columns;
     };
 
-    if (loading) return <p>Loading...</p>;
+    if (loading) return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+            <CircularProgress />
+        </div>
+    );
     if (error) return <p>Error: {error.message}</p>;
 
     return (
         <div>
             {showEditSuccess && <Alert severity="success">Successfully updated data.</Alert>}
             {showDeleteSuccess && <Alert severity="success">Successfully deleted data.</Alert>}
-            <h2>Data Table</h2>
             <FormControl fullWidth style={{ marginBottom: '20px' }}>
                 <InputLabel>Data Type</InputLabel>
                 <Select
@@ -758,7 +771,10 @@ export const TableComponent = () => {
             <GroundPlotMarker
                 open={plotMarkerOpen}
                 obj={plotMarkerData}
-                onClose={() => setPlotMarkerOpen(false)}
+                onClose={() => {
+                    setPlotMarkerOpen(false);
+                    setPlotMarkerLoading(false); // Ensure loading is hidden when closed
+                }}
                 plotIndex={plotMarkerData ? plotIndices[plotMarkerData.id] || 0 : 0}
                 onPlotIndexChange={(newIndex) => plotMarkerData && handlePlotIndexChange(plotMarkerData.id, newIndex)}
             />
@@ -782,7 +798,9 @@ export const TableComponent = () => {
                 <DialogTitle id="download-dialog-title">Downloading Images</DialogTitle>
                 <DialogContent>
                     <Box sx={{ width: '100%', mr: 1, minWidth: 300 }}>
-                        <Typography variant="body2" color="text.secondary" align="center">{`${downloadProgress}%`}</Typography>
+                        <Typography variant="body2" color="text.secondary" align="center">
+                            {downloadProgress === 0 ? "Zipping files..." : `${downloadProgress}%`}
+                        </Typography>
                         <LinearProgress variant="determinate" value={downloadProgress} />
                     </Box>
                 </DialogContent>
@@ -819,6 +837,15 @@ export const TableComponent = () => {
                 <DialogActions>
                     <Button onClick={() => setReportDialogOpen(false)}>Close</Button>
                 </DialogActions>
+            </Dialog>
+            <Dialog open={plotMarkerLoading} aria-labelledby="plot-marker-loading-dialog">
+                <DialogTitle id="plot-marker-loading-dialog">Loading Plot Marker...</DialogTitle>
+                <DialogContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}>
+                        <CircularProgress size={24} />
+                        <Typography>Preparing plot marking interface...</Typography>
+                    </Box>
+                </DialogContent>
             </Dialog>
         </div>
     );

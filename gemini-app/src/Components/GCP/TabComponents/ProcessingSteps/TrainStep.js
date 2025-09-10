@@ -16,27 +16,22 @@ function TrainStep() {
             <Grid item xs={12}>
                 <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
                     <Typography variant="h5" gutterBottom align="center">
-                        Train Model
+                        Tune Extraction
                     </Typography>
                     <Typography variant="body1" align="center" color="textSecondary" gutterBottom>
-                        This step will handle model training functionality using labeled datasets.
+                        Augment collected data to better align with a pretrained model's training data or retrain model based on image color space differences.
                     </Typography>
                     
                     <Alert severity="info" style={{ marginTop: "20px" }}>
                         <Typography variant="body2">
                             <strong>Future Implementation:</strong>
                             <br />
-                            • Upload or connect to labeled datasets
+                            • Options to normalize input data before inference based on model training data LAB color space.
                             <br />
-                            • Configure model architecture and hyperparameters
+                            • Options to run AGILE to domain translate input data to match model training data.
                             <br />
-                            • Monitor training progress and metrics
+                            • Options to retrain model based on image color space differences.
                             <br />
-                            • Validate model performance
-                            <br />
-                            • Export trained models for inference
-                            <br />
-                            • Integration with cloud training platforms (Roboflow, Google AutoML, etc.)
                         </Typography>
                     </Alert>
                 </Paper>

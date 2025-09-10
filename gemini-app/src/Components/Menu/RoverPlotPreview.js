@@ -308,35 +308,30 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
             console.log('Response headers:', [...response.headers.entries()]);
 
             if (response.ok) {
-                // Get the filename from the response headers
-                const contentDisposition = response.headers.get('Content-Disposition');
-                let filename = currentFileName; // fallback
+                // Generate custom filename using plot metadata
+                const metadata = getCurrentPlotMetadata();
+                const fileExtension = currentFileName.endsWith('.png') ? '.png' : '.tif';
                 
-                console.log('Content-Disposition header:', contentDisposition);
-                console.log('All response headers:');
-                for (const [key, value] of response.headers.entries()) {
-                    console.log(`${key}: ${value}`);
-                }
-                
-                if (contentDisposition) {
-                    // Try multiple patterns for filename extraction
-                    let filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
-                    if (!filenameMatch) {
-                        filenameMatch = contentDisposition.match(/filename=([^;]+)/);
-                    }
-                    if (filenameMatch) {
-                        filename = filenameMatch[1].trim().replace(/['"]/g, '');
-                    }
+                let customFilename;
+                if (metadata.plotLabel && metadata.accession) {
+                    // Use the desired format: plot_{plot}_accession_{accession}
+                    customFilename = `plot_${metadata.plotLabel}_accession_${metadata.accession}${fileExtension}`;
+                } else if (metadata.plotLabel) {
+                    // Fallback if no accession
+                    customFilename = `plot_${metadata.plotLabel}${fileExtension}`;
+                } else {
+                    // Final fallback to plot number from filename
+                    customFilename = `plot_${metadata.plotNumber}${fileExtension}`;
                 }
 
-                console.log('Final download filename:', filename);
+                console.log('Custom download filename:', customFilename, 'based on metadata:', metadata);
 
                 // Create blob and download
                 const blob = await response.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = filename;
+                a.download = customFilename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);

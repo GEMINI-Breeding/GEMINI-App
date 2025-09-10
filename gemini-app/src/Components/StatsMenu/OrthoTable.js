@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DataGrid } from '@mui/x-data-grid';
 import { fetchData, useDataState } from "../../DataContext";
-import { Box, Typography, Alert } from '@mui/material';
+import { Box, Typography, Alert, CircularProgress } from '@mui/material';
 import { IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -18,6 +18,7 @@ const OrthoTable = () => {
     const [viewImageUrl, setViewImageUrl] = useState(null);
     const [isRoverPreviewOpen, setIsRoverPreviewOpen] = useState(false);
     const [selectedDatePlatformSensor, setSelectedDatePlatformSensor] = useState(null);
+    const [plotData, setPlotData] = useState({});
 
     useEffect(() => {
         const fetchOrthoData = async () => {
@@ -47,7 +48,7 @@ const OrthoTable = () => {
 
                             // Check for drone orthomosaics
                             const rgbFiles = orthoFiles.filter(file => 
-                                (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) || file === `${date}-RGB-Pyramid.tif`
+                                (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) || file === `${date}-RGB.tif`
                             );
 
                             // Process regular drone orthomosaics
@@ -142,10 +143,56 @@ const OrthoTable = () => {
             }
         };
 
+        const fetchPlotData = async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_plot_borders_data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        year: selectedYearGCP,
+                        experiment: selectedExperimentGCP,
+                        location: selectedLocationGCP,
+                        population: selectedPopulationGCP,
+                    }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setPlotData(data.plot_data || {});
+                } else {
+                    console.error('Error fetching plot data:', response.status);
+                    setPlotData({});
+                }
+            } catch (error) {
+                console.error('Error fetching plot data:', error);
+                setPlotData({});
+            }
+        };
+
         if (selectedLocationGCP && selectedPopulationGCP) {
             fetchOrthoData();
+            fetchPlotData();
         }
     }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl]);
+
+    const getPlotNumber = (fileName) => {
+        const match = fileName.match(/plot_(\d+)/);
+        return match ? match[1] : 'Unknown';
+    };
+
+    const getPlotMetadata = (fileName) => {
+        const plotNumber = getPlotNumber(fileName);
+        const plotIndex = parseInt(plotNumber);
+        const metadata = plotData[plotIndex] || {};
+        
+        return {
+            plotNumber,
+            plotLabel: metadata.plot,
+            accession: metadata.accession
+        };
+    };
 
     const handleViewOrtho = (row) => {
         if (row.isPlotBased) {
@@ -248,8 +295,8 @@ const OrthoTable = () => {
                 // Create a temporary anchor element and trigger the download
                 const a = document.createElement("a");
                 a.href = url;
-                // Set filename for the zip file
-                const fileName = `${row.date}-${row.platform}-${row.sensor}-${row.agrowstitchDir}-plots.zip`;
+                // Set filename for the zip file with more descriptive naming
+                const fileName = `${row.date}-${row.platform}-${row.sensor}-plots.zip`;
                 a.download = fileName;
                 document.body.appendChild(a);
                 a.click();
@@ -311,15 +358,13 @@ const OrthoTable = () => {
         { field: 'platform', headerName: 'Platform', width: 120 },
         { field: 'sensor', headerName: 'Sensor', width: 120 },
         { field: 'type', headerName: 'Type', width: 150 },
-        { field: 'quality', headerName: 'Quality', width: 120 },
         { field: 'fileName', headerName: 'Ortho File', width: 200 },
-        { field: 'timestamp', headerName: 'Timestamp', width: 180 },
         {
             field: 'view',
             headerName: 'View',
             width: 100,
             renderCell: (params) => (
-                <IconButton onClick={() => handleViewOrtho(params.row)}>
+                <IconButton onClick={() => handleViewOrtho(params.row)} color="primary">
                     <VisibilityIcon />
                 </IconButton>
             ),
@@ -329,7 +374,7 @@ const OrthoTable = () => {
             headerName: 'Delete',
             width: 100,
             renderCell: (params) => (
-                <IconButton onClick={() => handleDeleteOrtho(params.row)}>
+                <IconButton onClick={() => handleDeleteOrtho(params.row)} color = "error">
                     <DeleteIcon />
                 </IconButton>
             ),
@@ -339,21 +384,32 @@ const OrthoTable = () => {
             headerName: 'Download',
             width: 100,
             renderCell: (params) => (
-                <IconButton onClick={() => handleDownloadOrtho(params.row)}>
+                <IconButton onClick={() => handleDownloadOrtho(params.row)} color="secondary">
                     <Download />
                 </IconButton>
             ),
         }
     ];
 
-    if (loading) return <Typography>Loading...</Typography>;
+    if (loading) return (
+        <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            height: 400,
+            flexDirection: 'column',
+            gap: 2
+        }}>
+            <CircularProgress size={40} />
+            <Typography variant="body2" color="text.secondary">
+                Loading mosaic data...
+            </Typography>
+        </Box>
+    );
     if (error) return <Alert severity="error">Error: {error}</Alert>;
 
     return (
         <Box sx={{ height: 400, width: '100%' }}>
-            <Typography variant="h6" gutterBottom component="div">
-                Generated Orthomosaics
-            </Typography>
             {orthoData.length === 0 ? (
                 <Typography>No orthomosaic data available.</Typography>
             ) : (

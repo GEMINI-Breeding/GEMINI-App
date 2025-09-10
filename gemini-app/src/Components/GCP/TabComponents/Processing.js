@@ -22,7 +22,7 @@ function Processing() {
     } = useDataState();
     const { setActiveStepProcessing } = useDataSetters();
 
-    const steps = ["Label", "Train", "Predict"];
+    const steps = ["Select", "Tune", "Predict"];
 
     const largerIconStyle = {
         fontSize: "2rem", // Adjust for desired size
@@ -35,8 +35,16 @@ function Processing() {
     };
 
     return (
-        <Grid container direction="column" spacing={2} style={{ width: "80%", margin: "0 auto" }}>
-            <Grid item style={{ width: "100%" }}>
+        <Grid container direction="column" spacing={2} sx={{ 
+            width: "100%", 
+            overflowX: "hidden",
+            paddingLeft: { xs: 1, sm: 2, md: 3 },
+            paddingRight: { xs: 1, sm: 2, md: 3 },
+            marginLeft: "auto",
+            marginRight: "auto",
+            maxWidth: { xs: "100%", sm: "95%", md: "90%" }
+        }}>
+            <Grid item sx={{ width: "100%", maxWidth: "100%" }}>
                 <Stepper activeStep={activeStepProcessing} style={{ padding: "8px 0", background: "transparent" }}>
                     {steps.map((label, index) => (
                         <Step key={index} onClick={() => handleReturnClick(index)}>
@@ -47,7 +55,7 @@ function Processing() {
                     ))}
                 </Stepper>
             </Grid>
-            <Grid item>
+            <Grid item sx={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
                 {activeStepProcessing === 0 && <LabelStep />}
                 {activeStepProcessing === 1 && <TrainStep />}
                 {activeStepProcessing === 2 && <PredictStep />}

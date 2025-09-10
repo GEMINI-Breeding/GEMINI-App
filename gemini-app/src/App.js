@@ -7,7 +7,10 @@ import IconButton from "@mui/material/IconButton";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Snackbar from "@mui/material/Snackbar";
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 
+import { globalTheme } from './theme'; // Import the global theme
 import { useDataSetters, useDataState } from "./DataContext";
 import CollapsibleSidebar from "./Components/Menu/CollapsibleSidebar";
 
@@ -128,12 +131,37 @@ function App() {
             case 2:
                 return <StatsMenuMain />;
             case 3:
+                // Prepare main tab - show both tabs
                 return <FileUploadComponent />;
             case 4:
                 return <ImageQueryUI />;
             case 5:
+                // Mosaic Generation - set tab to 0 in TabbedPrepUI
+                if(!isGCPReady){
+                    setSidebarCollapsed(false);
+                }
+                return <TabbedPrepUI selectedTab={0} />;
+            case 6:
+                // Plot Association - set tab to 1 in TabbedPrepUI
+                if(!isGCPReady){
+                    setSidebarCollapsed(false);
+                }
+                return <TabbedPrepUI selectedTab={1} />;
+            case 7:
+                // Processing - set tab to 2 in TabbedPrepUI
+                if(!isGCPReady){
+                    setSidebarCollapsed(false);
+                }
+                return <TabbedPrepUI selectedTab={2} />;
+            case 8:
                 setSidebarCollapsed(true);
                 return <DocsFrame />;
+            case 9:
+                // Upload Files - show upload tab of FileUploadComponent
+                return <FileUploadComponent actionType="upload" />;
+            case 10:
+                // Manage Files - show manage tab of FileUploadComponent
+                return <FileUploadComponent actionType="manage" />;
             default:
                 setSidebarCollapsed(true);
                 return <DocsFrame />;
@@ -390,145 +418,148 @@ function App() {
     // FOR DRONE EXTRACT DONE
 
     return (
-        <ActiveComponentsProvider>
-            <div className="App">
-                <div className="sidebar">{sidebar}</div>
+        <ThemeProvider theme={globalTheme}>
+            <CssBaseline />
+            <ActiveComponentsProvider>
+                <div className="App">
+                    <div className="sidebar">{sidebar}</div>
 
-                <div className="content">{contentView}</div>
+                    <div className="content">{contentView}</div>
 
-                {/* training */}
-                {isTraining && (
-                    <Box
-                        sx={{
-                            position: "fixed",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            pointerEvents: "none", // allows clicks to pass through to the underlying content
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            zIndex: 1200, // ensures the overlay is on top
-                        }}
-                    >
-                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
-                            <TrainingProgressBar
-                                progress={progress}
-                                onStopTraining={handleStopTraining}
-                                trainingData={trainingData}
-                                epochs={epochs}
-                                chartData={chartData}
-                                currentEpoch={currentEpoch}
-                            />
+                    {/* training */}
+                    {isTraining && (
+                        <Box
+                            sx={{
+                                position: "fixed",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                pointerEvents: "none", // allows clicks to pass through to the underlying content
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                zIndex: 1200, // ensures the overlay is on top
+                            }}
+                        >
+                            <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                                <TrainingProgressBar
+                                    progress={progress}
+                                    onStopTraining={handleStopTraining}
+                                    trainingData={trainingData}
+                                    epochs={epochs}
+                                    chartData={chartData}
+                                    currentEpoch={currentEpoch}
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                )}
+                    )}
 
-                {/* locating */}
-                {isLocating && (
-                    <Box
-                        sx={{
-                            position: "fixed",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            pointerEvents: "none", // allows clicks to pass through to the underlying content
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            zIndex: 1200, // ensures the overlay is on top
-                        }}
-                    >
-                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
-                            <LocateProgressBar
-                                currentLocateProgress={currentLocateProgress}
-                                onStopLocating={handleStopLocating}
-                            />
+                    {/* locating */}
+                    {isLocating && (
+                        <Box
+                            sx={{
+                                position: "fixed",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                pointerEvents: "none", // allows clicks to pass through to the underlying content
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                zIndex: 1200, // ensures the overlay is on top
+                            }}
+                        >
+                            <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                                <LocateProgressBar
+                                    currentLocateProgress={currentLocateProgress}
+                                    onStopLocating={handleStopLocating}
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                )}
+                    )}
 
-                {/* extracting */}
-                {isExtracting && (
-                    <Box
-                        sx={{
-                            position: "fixed",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            pointerEvents: "none", // allows clicks to pass through to the underlying content
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            zIndex: 1200, // ensures the overlay is on top
-                        }}
-                    >
-                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
-                            <ExtractProgressBar
-                                currentExtractProgress={currentExtractProgress}
-                                onStopExtracting={handleStopExtracting}
-                                onDoneExtracting={handleDoneExtracting}
-                            />
+                    {/* extracting */}
+                    {isExtracting && (
+                        <Box
+                            sx={{
+                                position: "fixed",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                pointerEvents: "none", // allows clicks to pass through to the underlying content
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                zIndex: 1200, // ensures the overlay is on top
+                            }}
+                        >
+                            <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                                <ExtractProgressBar
+                                    currentExtractProgress={currentExtractProgress}
+                                    onStopExtracting={handleStopExtracting}
+                                    onDoneExtracting={handleDoneExtracting}
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                )}
+                    )}
 
-                {/* ortho */}
-                {isOrthoProcessing &&
-                    <Box
-                        sx={{
-                            position: "fixed",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            pointerEvents: "none", // allows clicks to pass through to the underlying content
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            zIndex: 1200, // ensures the overlay is on top
-                        }}
-                    >
-                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
-                            <OrthoProgressBar
-                                currentOrthoProgress={currentOrthoProgress}
-                                onStopOrtho={handleStopOrtho}
-                            />
+                    {/* ortho */}
+                    {isOrthoProcessing &&
+                        <Box
+                            sx={{
+                                position: "fixed",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                pointerEvents: "none", // allows clicks to pass through to the underlying content
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                zIndex: 1200, // ensures the overlay is on top
+                            }}
+                        >
+                            <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                                <OrthoProgressBar
+                                    currentOrthoProgress={currentOrthoProgress}
+                                    onStopOrtho={handleStopOrtho}
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                }
+                    }
 
-                {/* drone extract */}
-                {isDroneExtracting && (
-                    <Box
-                        sx={{
-                            position: "fixed",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            pointerEvents: "none", // allows clicks to pass through to the underlying content
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            zIndex: 1200, // ensures the overlay is on top
-                        }}
-                    >
-                        <Box sx={{ pointerEvents: "auto", width: "90%" }}>
-                            <DroneExtractProgressBar
-                                currentDroneExtractProgress={currentDroneExtractProgress}
-                                onDroneStopExtracting={handleStopDroneExtracting}
-                            />
+                    {/* drone extract */}
+                    {isDroneExtracting && (
+                        <Box
+                            sx={{
+                                position: "fixed",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                pointerEvents: "none", // allows clicks to pass through to the underlying content
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                zIndex: 1200, // ensures the overlay is on top
+                            }}
+                        >
+                            <Box sx={{ pointerEvents: "auto", width: "90%" }}>
+                                <DroneExtractProgressBar
+                                    currentDroneExtractProgress={currentDroneExtractProgress}
+                                    onDroneStopExtracting={handleStopDroneExtracting}
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                )}
+                    )}
 
-            </div>
-            <Snackbar
-                open={submitError !== ""}
-                autoHideDuration={6000}
-                onClose={() => setSubmitError("")}
-                message={submitError}
-            />
-        </ActiveComponentsProvider>
+                </div>
+                <Snackbar
+                    open={submitError !== ""}
+                    autoHideDuration={6000}
+                    onClose={() => setSubmitError("")}
+                    message={submitError}
+                />
+            </ActiveComponentsProvider>
+        </ThemeProvider>
     );
 }
 
