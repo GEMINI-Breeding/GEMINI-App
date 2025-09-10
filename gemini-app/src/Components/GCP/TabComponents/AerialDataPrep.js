@@ -148,27 +148,24 @@ function AerialDataPrep() {
                                 );
 
                                 if (imageFolders.includes("Images")) {
-                                    
-                                    // list folders inside the Images directory
-                                    const imageSubfolders = await fetchData(
-                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images`
-                                    );
+                                    // Check if there are any images without actually loading them
+                                    // const imageSubfolders = await fetchData(
+                                    //     `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images`
+                                    // );
 
-                                    // check if "top" folder exists inside Images
-                                    let images;
-                                    if (imageSubfolders.includes("top")) {
-                                    console.log(`Top folder exists for date ${date} and sensor ${sensor}. Only looking at top view.`);
-                                    images = await fetchData(
-                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images/top`
-                                    );
-                                    } else {
-                                    // fallback
-                                    images = await fetchData(
-                                        `${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Images`
-                                    );
-                                    }
+                                    // // Just check if top folder exists, don't load files yet
+                                    // let hasImages = false;
+                                    // if (imageSubfolders.includes("top")) {
+                                    //     console.log(`Top folder exists for date ${date} and sensor ${sensor}.`);
+                                    //     // We assume if top folder exists, it has images
+                                    //     hasImages = true;
+                                    // } else {
+                                    //     // Check if Images folder has any content (could be files or subfolders)
+                                    //     hasImages = imageSubfolders.length > 0;
+                                    // }
+                                    let hasImages = true;
 
-                                    if (images.length === 0) {
+                                    if (!hasImages) {
                                         console.warn(
                                             `No images found for date ${date} and sensor ${sensor}.`
                                         );
