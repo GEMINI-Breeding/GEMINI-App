@@ -154,7 +154,7 @@ const GCPPickerSelectionMenu = () => {
             ) : null}
 
             <Button variant="contained" color="primary" onClick={initiatePrep}>
-                Begin Data Preparation
+                Select Dataset
             </Button>
         </>
     );

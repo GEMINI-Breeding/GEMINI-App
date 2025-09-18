@@ -368,7 +368,7 @@ function PredictStep() {
                         <Alert severity="warning" style={{ marginTop: "20px" }}>
                             <Typography variant="body2">
                                 Please select Year, Experiment, Location, and Population from the GCP Picker menu first, 
-                                then click "Begin Data Preparation" to access the inference functionality.
+                                then click "Select Dataset" to access the inference functionality.
                             </Typography>
                         </Alert>
                     </Paper>
@@ -380,21 +380,6 @@ function PredictStep() {
     return (
         <Box sx={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
             <Grid container spacing={2} sx={{ maxWidth: "100%", width: "100%" }}>
-                {/* Aerial Prep Section - Only show if drone orthomosaics are available */}
-                {showAerialPrep && isGCPReady && (
-                    <Grid item xs={12}>
-                        <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                            <Typography variant="h5" gutterBottom align="center">
-                                Aerial Data Processing
-                            </Typography>
-                            <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
-                                Extract aerial-specific traits from drone imagery
-                            </Typography>
-                            <Divider style={{ margin: "20px 0" }} />
-                            <AerialPrepTabs />
-                        </Paper>
-                    </Grid>
-                )}
 
                 {/* Roboflow Inference Section */}
                 <Grid item xs={12}>
@@ -670,6 +655,21 @@ function PredictStep() {
                     <InferenceTable refreshTrigger={inferenceRefreshTrigger} />
                 </Paper>
             </Grid>
+            {/* Aerial Prep Section - Only show if drone orthomosaics are available */}
+                {showAerialPrep && isGCPReady && (
+                    <Grid item xs={12}>
+                        <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
+                            <Typography variant="h5" gutterBottom align="center">
+                                Aerial Data Processing
+                            </Typography>
+                            <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
+                                Extract aerial-specific traits from drone imagery
+                            </Typography>
+                            <Divider style={{ margin: "20px 0" }} />
+                            <AerialPrepTabs />
+                        </Paper>
+                    </Grid>
+                )}
         </Grid>
         </Box>
     );

@@ -14,7 +14,7 @@ import {
     Select,
     MenuItem
 } from "@mui/material";
-import { ImageOutlined, CropFree } from "@mui/icons-material";
+import { ImageOutlined, CropFree, Download } from "@mui/icons-material";
 import { useDataState } from "../../../DataContext";
 
 function PlotImageExtractor() {
@@ -27,12 +27,14 @@ function PlotImageExtractor() {
         flaskUrl
     } = useDataState();
 
-    const [loading, setLoading] = useState(false);
+    const [splittingLoading, setSplittingLoading] = useState(false);
+    const [downloadLoading, setDownloadLoading] = useState(false);
     const [availableDates, setAvailableDates] = useState([]);
     const [selectedDate, setSelectedDate] = useState('');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [plotCount, setPlotCount] = useState(0);
+    const [existingImages, setExistingImages] = useState({ exists: false, count: 0 });
 
     // Fetch available dates with ODM orthomosaics
     useEffect(() => {
@@ -45,6 +47,13 @@ function PlotImageExtractor() {
     useEffect(() => {
         setPlotCount(featureCollectionPlot.features?.length || 0);
     }, [featureCollectionPlot]);
+
+    // Check for existing plot images when date changes
+    useEffect(() => {
+        if (selectedDate && selectedLocationGCP && selectedPopulationGCP && selectedYearGCP && selectedExperimentGCP) {
+            checkExistingPlotImages();
+        }
+    }, [selectedDate, selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP]);
 
     const fetchAvailableDates = async () => {
         try {
@@ -64,6 +73,8 @@ function PlotImageExtractor() {
                 }
             }
             
+            // Sort dates in descending order (most recent first)
+            validDates.sort((a, b) => b.localeCompare(a));
             setAvailableDates(validDates);
             if (validDates.length > 0) {
                 setSelectedDate(validDates[0]);
@@ -114,6 +125,69 @@ function PlotImageExtractor() {
         }
     };
 
+    const checkExistingPlotImages = async () => {
+        try {
+            const response = await fetch(`${flaskUrl}check_plot_images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: selectedDate
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setExistingImages(data);
+            } else {
+                setExistingImages({ exists: false, count: 0 });
+            }
+        } catch (error) {
+            console.error('Error checking existing plot images:', error);
+            setExistingImages({ exists: false, count: 0 });
+        }
+    };
+
+    const handleDownloadPlotImages = async () => {
+        try {
+            setDownloadLoading(true);
+            const response = await fetch(`${flaskUrl}download_plot_images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: selectedDate
+                })
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `plot_images_${selectedYearGCP}_${selectedExperimentGCP}_${selectedLocationGCP}_${selectedPopulationGCP}_${selectedDate}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                setMessage(`Downloaded ${existingImages.count} plot images as ZIP file`);
+            } else {
+                const errorData = await response.json();
+                setError(errorData.error || 'Failed to download plot images');
+            }
+        } catch (error) {
+            setError('Error downloading plot images: ' + error.message);
+        } finally {
+            setDownloadLoading(false);
+        }
+    };
+
     const handleSplitOrthomosaics = async () => {
         if (!selectedDate || !featureCollectionPlot.features.length) {
             setError('Please ensure you have selected a date and have defined plot boundaries');
@@ -121,7 +195,7 @@ function PlotImageExtractor() {
         }
 
         try {
-            setLoading(true);
+            setSplittingLoading(true);
             setError('');
             setMessage('');
 
@@ -141,6 +215,8 @@ function PlotImageExtractor() {
             if (response.ok) {
                 const data = await response.json();
                 setMessage(`Successfully extracted ${data.plots_processed} plot images from orthomosaics`);
+                // Refresh the existing images check
+                checkExistingPlotImages();
             } else {
                 const errorData = await response.json();
                 setError(errorData.error || 'Failed to split orthomosaics');
@@ -148,7 +224,7 @@ function PlotImageExtractor() {
         } catch (error) {
             setError('Error splitting orthomosaics: ' + error.message);
         } finally {
-            setLoading(false);
+            setSplittingLoading(false);
         }
     };
 
@@ -190,6 +266,13 @@ function PlotImageExtractor() {
                     </Alert>
                 )}
 
+                {existingImages.exists && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                        Found {existingImages.count} existing plot images for {selectedDate}. 
+                        You can download them or re-extract from orthomosaics to update them.
+                    </Alert>
+                )}
+
                 {/* Status Display */}
                 <Box mb={2}>
                     <Stack direction="row" spacing={1} alignItems="center">
@@ -201,6 +284,12 @@ function PlotImageExtractor() {
                             label={selectedDate ? `Date: ${selectedDate}` : "No date selected"}
                             color={selectedDate ? "success" : "default"}
                         />
+                        {existingImages.exists && (
+                            <Chip 
+                                label={`${existingImages.count} existing plot images`}
+                                color="info"
+                            />
+                        )}
                     </Stack>
                 </Box>
 
@@ -209,12 +298,24 @@ function PlotImageExtractor() {
                     <Button
                         variant="contained"
                         onClick={handleSplitOrthomosaics}
-                        disabled={loading || !hasValidSetup}
-                        startIcon={loading ? <CircularProgress size={20} /> : <CropFree />}
+                        disabled={splittingLoading || downloadLoading || !hasValidSetup}
+                        startIcon={splittingLoading ? <CircularProgress size={20} /> : <CropFree />}
                         size="large"
                     >
-                        {loading ? 'Splitting Orthomosaics...' : 'Split Orthomosaics Based on Plot Boundaries'}
+                        {splittingLoading ? 'Splitting Orthomosaics...' : 'Split Orthomosaics Based on Plot Boundaries'}
                     </Button>
+                    
+                    {existingImages.exists && (
+                        <Button
+                            variant="outlined"
+                            onClick={handleDownloadPlotImages}
+                            disabled={splittingLoading || downloadLoading}
+                            startIcon={downloadLoading ? <CircularProgress size={20} /> : <Download />}
+                            size="large"
+                        >
+                            {downloadLoading ? 'Downloading...' : `Download Plot Images (${existingImages.count})`}
+                        </Button>
+                    )}
                 </Stack>
 
                 {/* Messages */}

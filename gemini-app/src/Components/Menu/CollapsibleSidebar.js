@@ -30,6 +30,7 @@ import DescriptionIcon from "@mui/icons-material/Description";
 import HelpIcon from '@mui/icons-material/Help';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import FolderIcon from '@mui/icons-material/Folder';
+import gitHubIcon from '../../github.png';
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
@@ -910,24 +911,31 @@ export default function CollapsibleSidebar({
                         zIndex: (theme) => theme.zIndex.fab,
                     }}
                 >
-                    <Tooltip title="Report a Bug" placement="left">
+                    <Tooltip title="Report an Issue" placement="left">
                         <IconButton
                             color="primary"
                             aria-label="bug-report"
                             onClick={handleReportBug}
                             sx={{
-                                backgroundColor: "error.main",
+                                backgroundColor: "#546d78",
                                 color: "white",
                                 width: 48,
                                 height: 48,
                                 boxShadow: 3,
                                 '&:hover': {
-                                    backgroundColor: "error.light",
+                                    backgroundColor: "error.main",
                                     boxShadow: 6,
                                 },
                             }}
                         >
-                            <BugReportIcon fontSize="large" />
+                            <img 
+                                src={gitHubIcon}
+                                alt="GitHub"
+                                style={{ 
+                                    width: '42px',
+                                    height: '42px',
+                                }} 
+                            />
                         </IconButton>
                     </Tooltip>
                 </Box>
