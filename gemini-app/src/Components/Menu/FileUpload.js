@@ -47,40 +47,48 @@ const validateOrthomosaicFiles = (files, date) => {
     const demFiles = fileNames.filter(name => name.endsWith('-DEM.tif'));
     const rgbFiles = fileNames.filter(name => name.endsWith('-RGB.tif'));
     
-    // Check if we have at least one pair
-    if (demFiles.length === 0 || rgbFiles.length === 0) {
+    // Check if we have at least one RGB or DEM file
+    if (demFiles.length === 0 && rgbFiles.length === 0) {
         return {
             isValid: false,
-            message: "Orthomosaic upload requires both -DEM.tif and -RGB.tif files"
+            message: "Orthomosaic upload requires -RGB.tif files (and optionally -DEM.tif files for plant height extraction)"
         };
     }
     
-    // Check if we have equal numbers of DEM and RGB files
-    if (demFiles.length !== rgbFiles.length) {
-        return {
-            isValid: false,
-            message: "Number of DEM files must match number of RGB files"
-        };
-    }
-    
-    // Check if each DEM file has a corresponding RGB file
-    for (const demFile of demFiles) {
-        const baseName = demFile.replace('-DEM.tif', '');
-        const correspondingRgb = baseName + '-RGB.tif';
-        if (!rgbFiles.includes(correspondingRgb)) {
+    // If we have both DEM and RGB files, validate pairing
+    if (demFiles.length > 0 && rgbFiles.length > 0) {
+        // Check if we have equal numbers of DEM and RGB files
+        if (demFiles.length !== rgbFiles.length) {
             return {
                 isValid: false,
-                message: `Missing corresponding RGB file for ${demFile}. Expected: ${correspondingRgb}`
+                message: "When uploading both file types, the number of DEM files must match the number of RGB files"
             };
+        }
+        
+        // Check if each DEM file has a corresponding RGB file
+        for (const demFile of demFiles) {
+            const baseName = demFile.replace('-DEM.tif', '');
+            const correspondingRgb = baseName + '-RGB.tif';
+            if (!rgbFiles.includes(correspondingRgb)) {
+                return {
+                    isValid: false,
+                    message: `Missing corresponding RGB file for ${demFile}. Expected: ${correspondingRgb}`
+                };
+            }
         }
     }
     
     // Additional validation: Check that we have proper date format if provided
     if (date) {
         // Validate that we'll be able to rename the files properly
-        const expectedDemName = `${date}-DEM.tif`;
-        const expectedRgbName = `${date}-RGB.tif`;
-        console.log(`Files will be renamed to: ${expectedDemName}, ${expectedRgbName}`);
+        if (rgbFiles.length > 0) {
+            const expectedRgbName = `${date}-RGB.tif`;
+            console.log(`RGB files will be renamed to: ${expectedRgbName}`);
+        }
+        if (demFiles.length > 0) {
+            const expectedDemName = `${date}-DEM.tif`;
+            console.log(`DEM files will be renamed to: ${expectedDemName}`);
+        }
     }
     
     return { isValid: true };
@@ -840,6 +848,22 @@ const FileUploadComponent = ({ actionType = null }) => {
                             {dataTypes[selectedDataType].fields.map((field) =>
                                 renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
                             ) } 
+                            {selectedDataType === "ortho" && (
+                                <Paper
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        mt: 2,
+                                        backgroundColor: "#f5f5f5",
+                                        borderLeft: "4px solid #2196f3"
+                                    }}
+                                >
+                                    <Typography variant="body2" color="primary" sx={{ fontWeight: 'medium' }}>
+                                        <strong>Note:</strong> You can upload RGB.tif files alone for most processing. 
+                                        DEM.tif files are required for plant height.
+                                    </Typography>
+                                </Paper>
+                            )}
                             <Paper
                                 variant="outlined"
                                 sx={{
