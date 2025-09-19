@@ -23,5 +23,10 @@
         "fields": ["year", "experiment", "location", "population", "date", "platform", "sensor"],
         "fileType": "*",
         "label": "Platform Logs"
+    },
+    "ortho": {
+        "fields": ["year", "experiment", "location", "population", "date", "platform", "sensor"],
+        "fileType": ".tif",
+        "label": "Orthomosaics"
     }
 }
