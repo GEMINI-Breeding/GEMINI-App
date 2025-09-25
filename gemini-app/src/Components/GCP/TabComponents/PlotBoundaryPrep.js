@@ -94,7 +94,14 @@ function PlotBoundaryPrep() {
         }
         
         // For all other steps, allow normal navigation
-        setActiveStepBoundaryPrep(index);
+        if(index === 2){
+            if(activeStepBoundaryPrep === 1 || activeStepBoundaryPrep === 3){
+                setActiveStepBoundaryPrep(2);
+            }
+        }
+        else {
+            setActiveStepBoundaryPrep(index);
+        }
     };
 
     const isImageViewerOpenRef = useRef(isImageViewerOpen);
