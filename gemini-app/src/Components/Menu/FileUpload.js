@@ -630,7 +630,8 @@ const FileUploadComponent = ({ actionType = null }) => {
     // Blur handler for Autocomplete fields
     const handleAutocompleteBlur = (fieldName) => {
         const value = currentInputValues[fieldName] || "";
-        formik.setFieldValue(fieldName, value);
+        const sanitizedValue = value ? sanitizeFieldInput(value) : value;
+        formik.setFieldValue(fieldName, sanitizedValue);
         const fieldIndex = dataTypes[selectedDataType].fields.indexOf(fieldName);
         const dependentFields = dataTypes[selectedDataType].fields.slice(fieldIndex + 1);
         dependentFields.forEach((dependentField) => {
@@ -714,6 +715,11 @@ const FileUploadComponent = ({ actionType = null }) => {
         return options;
     };
 
+    const sanitizeFieldInput = (value) => {
+        return value
+            .replace(/[\s\/\\<>:"|?*]/g, '')  // Don't allow problematic characters (or space)
+    };
+
     // Render function for Autocomplete components
     const renderAutocomplete = (label) => {
         const fieldName = label.toLowerCase();
@@ -727,10 +733,14 @@ const FileUploadComponent = ({ actionType = null }) => {
                 options={options}
                 value={formik.values[fieldName]}
                 inputValue={currentInputValues[fieldName] || ""}
-                onInputChange={(event, value) => handleAutocompleteInputChange(fieldName, value)}
+                onInputChange={(event, value) => {
+                    const sanitizedValue = value ? sanitizeFieldInput(value) : value;
+                    handleAutocompleteInputChange(fieldName, sanitizedValue);
+                }}
                 onBlur={() => handleAutocompleteBlur(fieldName)}
                 onChange={(event, value) => {
-                    formik.setFieldValue(fieldName, value);
+                    const sanitizedValue = value ? sanitizeFieldInput(value) : value;
+                    formik.setFieldValue(fieldName, sanitizedValue);
                 }}
                 renderInput={(params) => (
                     <TextField
@@ -741,7 +751,8 @@ const FileUploadComponent = ({ actionType = null }) => {
                         error={Boolean(error)}
                         helperText={error}
                         onChange={(event) => {
-                            formik.setFieldValue(fieldName, event.target.value);
+                            const sanitizedValue = sanitizeFieldInput(event.target.value);
+                            formik.setFieldValue(fieldName, sanitizedValue);
                         }}
                     />
                 )}
