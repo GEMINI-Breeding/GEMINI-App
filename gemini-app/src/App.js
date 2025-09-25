@@ -41,6 +41,15 @@ function App() {
     const {
         selectedMetric,
         currentView,
+        selectedYearGCP,
+        selectedExperimentGCP,
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedDateGCP,
+        selectedPlatformGCP,
+        selectedSensorGCP,
+        orthoSetting,
+        orthoCustomValue,
         flaskUrl,
         isTraining,
         progress,
@@ -192,8 +201,23 @@ function App() {
     }, [isOrthoProcessing, flaskUrl]);
 
     const handleStopOrtho = async () => {
+        const data = {
+            year: selectedYearGCP,
+            experiment: selectedExperimentGCP,
+            location: selectedLocationGCP,
+            population: selectedPopulationGCP,
+            date: selectedDateGCP,
+            platform: selectedPlatformGCP,
+            sensor: selectedSensorGCP,
+            reconstruction_quality: orthoSetting,
+            custom_options: orthoCustomValue ? orthoCustomValue : [],
+        };
         try {
-            const response = await fetch(`${flaskUrl}stop_odm`, { method: "POST" });
+            const response = await fetch(`${flaskUrl}stop_odm`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            });
             if (response.ok) {
                 // Handle successful stop
                 console.log("ODM stopped");
@@ -375,8 +399,23 @@ function App() {
 
     // FOR DRONE EXTRACT START
     const handleStopDroneExtracting = async () => {
+        const data = {
+            year: selectedYearGCP,
+            experiment: selectedExperimentGCP,
+            location: selectedLocationGCP,
+            population: selectedPopulationGCP,
+            date: selectedDateGCP,
+            platform: selectedPlatformGCP,
+            sensor: selectedSensorGCP,
+            reconstruction_quality: orthoSetting,
+            custom_options: orthoCustomValue ? orthoCustomValue : [],
+        };
         try {
-            const response = await fetch(`${flaskUrl}stop_drone_extract`, { method: "POST" });
+            const response = await fetch(`${flaskUrl}stop_drone_extract`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
             if (response.ok) {
                 // Handle successful stop
                 console.log("Extracting stopped");

@@ -28,9 +28,10 @@ export const useDataSetters = () => {
     return context;
 };
 
+const tileServerUrl = `http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}`
 export const TILE_URL_TEMPLATE =
-    "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-export const BOUNDS_URL_TEMPLATE = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
+     tileServerUrl + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+export const BOUNDS_URL_TEMPLATE = tileServerUrl + "/cog/bounds?url=${FILE_PATH}";
 
 export const DataProvider = ({ children }) => {
     const initialViewState = {
@@ -201,8 +202,8 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend
-    const [flaskUrl, setFlaskUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_FLASK_PORT || '5050'}/flask_app/`);
-    const [tileServerUrl, setTileServerUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}/`);
+    const [flaskUrl, setFlaskUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_FLASK_PORT || '5000'}/flask_app/`);
+    // const [tileServerUrl, setTileServerUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}/`);
 
     return (
         <DataStateContext.Provider
@@ -354,7 +355,7 @@ export const DataProvider = ({ children }) => {
 
                 // Backend
                 flaskUrl,
-                tileServerUrl,
+                //tileServerUrl,
             }}
         >
             <DataSettersContext.Provider
@@ -505,7 +506,7 @@ export const DataProvider = ({ children }) => {
 
                     // Backend
                     setFlaskUrl,
-                    setTileServerUrl,
+                    //setTileServerUrl,
                 }}
             >
                 {children}
