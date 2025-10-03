@@ -10,7 +10,7 @@ services:
       - "8091:8091"  # Tile server
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
-      - /mnt/d/GEMINI-App-Data:/root/GEMINI-App-Data  # Mount host data to container data directory
+      - ~/GEMINI-App-Data:/root/GEMINI-App-Data  # Mount host data to container data directory
     command: >
       bash -c "
         cd gemini-app &&
