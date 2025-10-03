@@ -1,23 +1,16 @@
 services:
   app:
-    image: gemini-breeding:latest  # Named image for reuse
+    image: paibl/gemini-breeding:latest  # Named image for reuse
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3005"  # React frontend
-      - "5000:5005"  # Flask backend
-      - "8095:8095"  # Tile server
+      - "3000:3000"  # React frontend (external:internal)
+      - "5000:5000"  # Flask backend (external:internal)
+      - "8091:8091"  # Tile server
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
-      - ${DATA_ROOT_DIR:-/mnt/d/GEMINI-App-Data}:/mnt/d/GEMINI-App-Data  # Mount data directory
-    environment:
-      - REACT_APP_FLASK_PORT=5000
-      - REACT_APP_TILE_SERVER_PORT=8095
-      - REACT_APP_PORT=3000
-      - FLASK_PORT=5000
-      - TITILER_PORT=8095
-      - DATA_ROOT_DIR=/mnt/d/GEMINI-App-Data
+      - /mnt/d/GEMINI-App-Data:/root/GEMINI-App-Data  # Mount host data to container data directory
     command: >
       bash -c "
         cd gemini-app &&

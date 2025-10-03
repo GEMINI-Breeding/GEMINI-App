@@ -20,6 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     libffi-dev \
     python3-dev \
+    # OpenCV dependencies
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglu1-mesa-dev \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -35,10 +42,15 @@ RUN curl -L -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-lat
     && yes | /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 ENV PATH=/opt/conda/bin:$PATH
 
-# Set working directory and clone repo
+# Set working directory
 WORKDIR /app
-RUN git clone https://github.com/GEMINI-Breeding/GEMINI-App.git . \
-    && git submodule update --init --recursive
+# RUN git clone https://github.com/GEMINI-Breeding/GEMINI-App.git . \
+#     && git submodule update --init --recursive
+
+# Copy local files instead of cloning
+COPY gemini-app/ /app/gemini-app/
+COPY GEMINI-Flask-Server/ /app/GEMINI-Flask-Server/
+COPY assets/ /app/assets/
 
 # Build frontend
 WORKDIR /app/gemini-app
@@ -69,5 +81,8 @@ RUN git clone https://github.com/GEMINI-Breeding/AgRowStitch.git \
     && git clone https://github.com/cvg/LightGlue.git \
     && cd LightGlue \
     && /app/GEMINI-Flask-Server/.conda/bin/pip install -e .
+
+# Create data directory
+RUN mkdir -p /root/GEMINI-App-Data
 
 WORKDIR /app

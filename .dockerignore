@@ -43,13 +43,71 @@ build/
 .env.test.local
 .env.production.local
 
-# Environment
-.env
-.venv
-env/
-venv/
-ENV/
-.conda/
+# Version control
+.git
+**/.git
+.gitignore
+.gitmodules
+
+# Node.js
+**/node_modules
+**/npm-debug.log
+**/yarn-debug.log
+**/yarn-error.log
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/.conda
+**/conda-env
+**/env
+**/.env
+**/.venv
+**/venv
+
+# Build outputs
+**/build
+**/dist
+**/*.egg-info
+
+# IDE
+.vscode
+.idea
+**/.vscode
+**/.idea
+
+# Docker
+Dockerfile
+docker-compose.yml
+.docker
+
+# Temp files
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+
+# Large model files
+**/yolov8n.pt
+**/*.weights
+**/*.pth
+**/*.onnx
+
+# Development artifacts
+**/logs
+**/temp
+**/tmp
+**/.ipynb_checkpoints
+
+# Specific large directories we don't need
+GEMINI-Flask-Server/.conda/
+GEMINI-Flask-Server/farm-ng-core/
+GEMINI-Flask-Server/AgRowStitch/
+GEMINI-Flask-Server/LightGlue/
 
 # IDE
 .idea/
