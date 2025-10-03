@@ -1,4 +1,8 @@
-FROM python:3.9
+FROM --platform=$BUILDPLATFORM python:3.9
+
+# Add ARG for target platform
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 # Install system dependencies all at once
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,6 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     libffi-dev \
     python3-dev \
+    # Cross-compilation tools
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
     # OpenCV dependencies
     libgl1 \
     libglib2.0-0 \
@@ -30,6 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Set cross-compilation environment variables based on target platform
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        export CC=aarch64-linux-gnu-gcc && \
+        export CXX=aarch64-linux-gnu-g++ && \
+        export AR=aarch64-linux-gnu-ar && \
+        export STRIP=aarch64-linux-gnu-strip; \
+    fi
 
 # Install and configure conda
 RUN curl -L -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
