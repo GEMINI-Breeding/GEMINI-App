@@ -27,7 +27,128 @@ import dataTypes from "../../uploadDataTypes.json";
 import Box from "@mui/material/Box";
 import { TableComponent } from "./TableComponent";
 
-// Helper function to map file types to human-readable descriptions
+// Helper function to check if an image has EXIF data and GPS coordinates
+const checkImageExifData = (file) => {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const arrayBuffer = e.target.result;
+            const dataView = new DataView(arrayBuffer);
+            
+            // Check for JPEG format (starts with FF D8)
+            if (dataView.getUint16(0) === 0xFFD8) {
+                // Look for EXIF marker (FF E1) followed by "Exif"
+                for (let i = 2; i < Math.min(dataView.byteLength - 6, 65536); i++) {
+                    if (dataView.getUint16(i) === 0xFFE1) {
+                        // Check if next 4 bytes spell "Exif"
+                        const exifString = String.fromCharCode(
+                            dataView.getUint8(i + 4),
+                            dataView.getUint8(i + 5),
+                            dataView.getUint8(i + 6),
+                            dataView.getUint8(i + 7)
+                        );
+                        if (exifString === "Exif") {
+                            // Found EXIF data, now check for GPS coordinates
+                            const hasGPS = parseExifForGPS(dataView, i + 10);
+                            resolve(hasGPS);
+                            return;
+                        }
+                    }
+                }
+            }
+            
+            // Check for TIFF format (starts with II or MM)
+            if (dataView.getUint16(0, true) === 0x4949 || dataView.getUint16(0, false) === 0x4D4D) {
+                // TIFF files - check for GPS data in EXIF
+                const hasGPS = parseExifForGPS(dataView, 0);
+                resolve(hasGPS);
+                return;
+            }
+            
+            resolve(false);
+        };
+        
+        reader.onerror = () => resolve(false);
+        
+        // Read more data to properly parse EXIF tags
+        reader.readAsArrayBuffer(file.slice(0, 65536)); // Read first 64KB
+    });
+};
+
+// Helper function to parse EXIF data for GPS coordinates
+const parseExifForGPS = (dataView, offset) => {
+    try {
+        // Determine byte order (II = little endian, MM = big endian)
+        const byteOrder = dataView.getUint16(offset, true) === 0x4949;
+        
+        // Get offset to first IFD
+        const ifdOffset = dataView.getUint32(offset + 4, byteOrder);
+        
+        // Parse IFD entries
+        const ifdStart = offset + ifdOffset;
+        if (ifdStart >= dataView.byteLength - 2) return false;
+        
+        const numEntries = dataView.getUint16(ifdStart, byteOrder);
+        
+        // Look for GPS IFD tag (0x8825)
+        for (let i = 0; i < numEntries; i++) {
+            const entryOffset = ifdStart + 2 + (i * 12);
+            if (entryOffset + 12 >= dataView.byteLength) break;
+            
+            const tag = dataView.getUint16(entryOffset, byteOrder);
+            
+            if (tag === 0x8825) { // GPS IFD tag
+                // Get GPS IFD offset
+                const gpsIfdOffset = dataView.getUint32(entryOffset + 8, byteOrder);
+                const gpsIfdStart = offset + gpsIfdOffset;
+                
+                if (gpsIfdStart >= dataView.byteLength - 2) return false;
+                
+                const gpsNumEntries = dataView.getUint16(gpsIfdStart, byteOrder);
+                let hasLatitude = false;
+                let hasLongitude = false;
+                
+                // Check GPS entries for latitude and longitude
+                for (let j = 0; j < gpsNumEntries; j++) {
+                    const gpsEntryOffset = gpsIfdStart + 2 + (j * 12);
+                    if (gpsEntryOffset + 12 >= dataView.byteLength) break;
+                    
+                    const gpsTag = dataView.getUint16(gpsEntryOffset, byteOrder);
+                    
+                    if (gpsTag === 0x0002) { // GPS Latitude
+                        hasLatitude = true;
+                    } else if (gpsTag === 0x0004) { // GPS Longitude
+                        hasLongitude = true;
+                    }
+                    
+                    if (hasLatitude && hasLongitude) {
+                        return true; // Found both lat and lon
+                    }
+                }
+                
+                return false; // Found GPS IFD but missing lat/lon
+            }
+        }
+        
+        return false; // No GPS IFD found
+    } catch (error) {
+        console.log("Error parsing EXIF for GPS:", error);
+        return false;
+    }
+};
+
+// Helper function to randomly sample and check EXIF data in image files
+const checkRandomImageForExif = async (imageFiles) => {
+    if (imageFiles.length === 0) return true;
+    
+    // Randomly select an image file
+    const randomIndex = Math.floor(Math.random() * imageFiles.length);
+    const selectedImage = imageFiles[randomIndex];
+    
+    return await checkImageExifData(selectedImage);
+};
+
+// Helper function to get file types to human-readable descriptions
 const getFileTypeDescription = (fileType) => {
     const typeMap = {
         "image/*": "Image files",
@@ -125,6 +246,8 @@ const FileUploadComponent = ({ actionType = null }) => {
     const [orthomosaicErrorMessage, setOrthomosaicErrorMessage] = useState("");
     const [isCreatingPyramids, setIsCreatingPyramids] = useState(false);
     const [failedUpload, setFailedUpload] = useState(false);
+    const [showExifWarning, setShowExifWarning] = useState(false);
+    const [skipExifCheck, setSkipExifCheck] = useState(false);
     const [progress, setProgress] = useState(0);
     const [uploadNewFilesOnly, setUploadNewFilesOnly] = useState(false);
     const cancelUploadRef = useRef(false);
@@ -444,7 +567,11 @@ const FileUploadComponent = ({ actionType = null }) => {
             setBadFileType(false);
             setBadOrthomosaicFiles(false);
             setOrthomosaicErrorMessage("");
+            setShowExifWarning(false);
             setIsCreatingPyramids(false);
+            
+            // Reset skip flag at the end of processing
+            const resetSkipFlag = () => setSkipExifCheck(false);
             // Construct directory path based on data type and form values
             let localDirPath = "";
             
@@ -506,6 +633,18 @@ const FileUploadComponent = ({ actionType = null }) => {
                 if (!validation.isValid) {
                     setBadOrthomosaicFiles(true);
                     setOrthomosaicErrorMessage(validation.message);
+                    setIsUploading(false);
+                    return;
+                }
+            }
+            
+            // Check for EXIF data in image files
+            if (selectedDataType === "image" && !skipExifCheck) {
+                const imageFiles = files.filter(file => file.type.startsWith('image/'));
+                const hasExifData = await checkRandomImageForExif(imageFiles);
+                
+                if (!hasExifData) {
+                    setShowExifWarning(true);
                     setIsUploading(false);
                     return;
                 }
@@ -602,11 +741,13 @@ const FileUploadComponent = ({ actionType = null }) => {
                         setUploadedData(true)
                         setProgress(0);
                         // setIsUploading(false);
+                        resetSkipFlag();
                     } else if (!cancelUploadRef.current) {
                         setIsFinishedUploading(true);
                         setUploadedData(true);
                         setProgress(0);
                         setIsUploading(false);
+                        resetSkipFlag();
                     }
                 }
             }
@@ -779,6 +920,8 @@ const FileUploadComponent = ({ actionType = null }) => {
     const clearFiles = () => {
         setFiles([]);
         setIsCreatingPyramids(false);
+        setShowExifWarning(false);
+        setSkipExifCheck(false);
     };
 
     const titleStyle = {
@@ -854,7 +997,7 @@ const FileUploadComponent = ({ actionType = null }) => {
             <Grid item xs={8}>
                 <form onSubmit={formik.handleSubmit}>
                     {isLoading && <CircularProgress />}
-                    {!isLoading && !isUploading && !isFinishedUploading && (
+                    {!isLoading && !isUploading && !isFinishedUploading && !showExifWarning && (
                         <>
                             {dataTypes[selectedDataType].fields.map((field) =>
                                 renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
@@ -983,7 +1126,9 @@ const FileUploadComponent = ({ actionType = null }) => {
                                 setIsUploading(false);
                                 setBadFileType(false);
                                 setFiles([]);
-                                                            }}
+                                setShowExifWarning(false);
+                                setSkipExifCheck(false);
+                            }}
                         >
                             Return
                         </Button>
@@ -1008,7 +1153,45 @@ const FileUploadComponent = ({ actionType = null }) => {
                         </Button>
                     </Paper>
                     )}
-                    {isUploading && !noFilesToUpload && !badFileType && !badOrthomosaicFiles && (
+                    {showExifWarning && (
+                        <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center", borderColor: "warning.main" }}>
+                            <Typography color="warning.main" sx={{ fontWeight: 'bold', mb: 1 }}>
+                                ⚠️ Missing GPS Location Data
+                            </Typography>
+                            <Typography variant="body2" sx={{ mb: 2 }}>
+                                The selected images appear to lack GPS coordinates in their EXIF metadata.
+                            </Typography>
+                            <Typography variant="body2" sx={{ textAlign: 'center', mb: 2 }}>
+                                Check the documentation for guidance: https://gemini-breeding.github.io/
+                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    onClick={() => {
+                                        setShowExifWarning(false);
+                                        setSkipExifCheck(true);
+                                        // Continue with upload despite warning
+                                        formik.handleSubmit();
+                                    }}
+                                >
+                                    Continue Upload
+                                </Button>
+                                <Button
+                                    variant="outlined"
+                                    color="warning"
+                                    onClick={() => {
+                                        setShowExifWarning(false);
+                                        setSkipExifCheck(false);
+                                        setFiles([]);
+                                    }}
+                                >
+                                    Cancel & Review Files
+                                </Button>
+                            </Box>
+                        </Paper>
+                    )}
+                    {isUploading && !noFilesToUpload && !badFileType && !badOrthomosaicFiles && !showExifWarning && (
                         <Paper variant="outlined" sx={{ p: 2, mt: 2, textAlign: "center" }}>
                             <Typography>
                                 {extractingBinary ? "Extracting Binary File..." : 
@@ -1033,6 +1216,8 @@ const FileUploadComponent = ({ actionType = null }) => {
                                     setProgress(0);
                                     setBadOrthomosaicFiles(false);
                                     setOrthomosaicErrorMessage("");
+                                    setShowExifWarning(false);
+                                    setSkipExifCheck(false);
                                     
                                     handleCancelExtraction(); // Cancel extraction if in progress
                                     clearDirPath();   // deletes any files already landed in the dir
@@ -1070,6 +1255,8 @@ const FileUploadComponent = ({ actionType = null }) => {
                                     setExtractingBinary(false);
                                     setBadOrthomosaicFiles(false);
                                     setOrthomosaicErrorMessage("");
+                                    setShowExifWarning(false);
+                                    setSkipExifCheck(false);
                                     
                                     if (failedUpload) {
                                         clearDirPath();
