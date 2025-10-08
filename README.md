@@ -35,6 +35,11 @@ If you want to rebuild the image
 docker-compose up --build
 ```
 
+Build docker image
+```
+docker build -t gemini-breeding:latest .
+```
+
 ### Docker Configuration
 The `docker-compose.yml` file contains important configuration parameters that you can customize:
 

@@ -43,18 +43,20 @@
         "html2canvas": "^1.4.0"
     },
     "config": {
-        "frontPort": "3000",
-        "flaskPort": "5000",
+        "frontPort": "3011",
+        "flaskPort": "5011",
         "tileServerPort": "8091",
         "appData": "~/GEMINI-App-Data"
     },
     "scripts": {
         "start": "react-scripts start",
-        "build": "react-scripts build",
+        "build": "REACT_APP_FLASK_PORT=$npm_package_config_flaskPort REACT_APP_TILE_SERVER_PORT=$npm_package_config_tileServerPort REACT_APP_APP_DATA=$npm_package_config_appData react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
         "front": "REACT_APP_FLASK_PORT=$npm_package_config_flaskPort REACT_APP_TILE_SERVER_PORT=$npm_package_config_tileServerPort REACT_APP__PORT=$npm_package_config_frontPort PORT=$REACT_APP__PORT react-scripts start",
+        "front:prod": "npx serve -s build -l $npm_package_config_frontPort",
         "server": "../GEMINI-Flask-Server/run_flask_server.sh $npm_package_config_appData $npm_package_config_flaskPort $npm_package_config_tileServerPort",
+        "gemini:prod": "concurrently \"npm run front:prod\"  \"npm run server\"",
         "gemini": "concurrently \"npm run front\"  \"npm run server\""
     },
     "eslintConfig": {
