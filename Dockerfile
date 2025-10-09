@@ -99,7 +99,7 @@ COPY gemini-app/package*.json /app/gemini-app/
 RUN npm ci --legacy-peer-deps --omit=dev
 
 # Install serve globally for production serving
-RUN npm install -g serve
+RUN npm install -g serve concurrently
 
 # Copy rest of the application code
 WORKDIR /app
@@ -111,11 +111,17 @@ COPY assets/ /app/assets/
 WORKDIR /app/gemini-app
 RUN npm run build
 
+# Copy entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY gemini-app/generate-runtime-config.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Create data directory
 RUN mkdir -p /root/GEMINI-App-Data
 
 WORKDIR /app
 
 # Set the default command to run the production build
-WORKDIR /app/gemini-app
-CMD ["npm", "run", "gemini:prod"]
+
+# Set the entrypoint script to generate runtime config and start services
+ENTRYPOINT ["/docker-entrypoint.sh"]

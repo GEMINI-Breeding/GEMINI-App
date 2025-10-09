@@ -26,7 +26,11 @@ For more information about the project and our partners: https://projectgemini.u
 ```bash
 git clone git@github.com:GEMINI-Breeding/GEMINI-App.git
 cd GEMINI-App
-docker-compose up # It takes 5~10 mins to build image and run. Take a coffee break!
+
+# CPU version
+docker compose up
+# GPU version (if nvidia-smi works on host)
+docker compose -f docker-compose-gpu.yml up
 ```
 
 If you want to rebuild the image
