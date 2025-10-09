@@ -8,6 +8,7 @@ import { fetchData, useDataSetters, useDataState } from "../../DataContext.js";
 
 import LoadTableModal from "./LoadTableModal.js";
 import LoadGraphModal from "./LoadGraphModal.js";
+import TableBuilder from "./TableBuilder.js";
 
 
 const TableViewTab = () => {
@@ -236,24 +237,7 @@ const TableViewTab = () => {
                 </Typography>
             </Box> */}
 
-            {sensorData && sensorData.length > 0 && (
-                sensorData
-                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
-                    .map((platformData) => (
-                    <NestedSection
-                        key={platformData.title}
-                        title={platformData.title}
-                        nestedData={platformData.nestedData.map((sensorData) => ({
-                            summary: sensorData.summary,
-                            data: sensorData.data,
-                            columns: sensorData.columns,
-                        }))}
-                        activeTab={tableViewTabNo}
-                        handleAction={null}
-                        CustomComponent={CustomComponent}
-                    />
-                ))
-            )}
+            <TableBuilder />
 
 
             <Snackbar
