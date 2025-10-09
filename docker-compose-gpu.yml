@@ -11,3 +11,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
       - ~/GEMINI-App-Data:/root/GEMINI-App-Data  # Mount host data to container data directory
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility

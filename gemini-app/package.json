@@ -43,8 +43,8 @@
         "html2canvas": "^1.4.0"
     },
     "config": {
-        "frontPort": "3011",
-        "flaskPort": "5011",
+        "frontPort": "3000",
+        "flaskPort": "5000",
         "tileServerPort": "8091",
         "appData": "~/GEMINI-App-Data"
     },

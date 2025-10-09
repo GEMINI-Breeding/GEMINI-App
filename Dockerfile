@@ -59,25 +59,19 @@ ENV PATH=/opt/conda/bin:$PATH
 
 # Set working directory
 WORKDIR /app
-# RUN git clone https://github.com/GEMINI-Breeding/GEMINI-App.git . \
-#     && git submodule update --init --recursive
 
-# Copy local files instead of cloning
-COPY gemini-app/ /app/gemini-app/
-COPY GEMINI-Flask-Server/ /app/GEMINI-Flask-Server/
-COPY assets/ /app/assets/
+# Copy conda environment file first for layer caching
+COPY GEMINI-Flask-Server/gemini-flask-server.yml /app/GEMINI-Flask-Server/gemini-flask-server.yml
+COPY GEMINI-Flask-Server/requirements.txt /app/GEMINI-Flask-Server/requirements.txt
 
-# Build frontend
-WORKDIR /app/gemini-app
-RUN npm install --legacy-peer-deps && npm run build
-
-# Setup Python environment and install dependencies
+# Setup Python environment early so it's cached
 WORKDIR /app/GEMINI-Flask-Server
 RUN conda env create -f gemini-flask-server.yml -p ./.conda \
     && conda init bash \
     && ./.conda/bin/pip install --upgrade pip setuptools wheel build pybind11 numpy grpcio-tools==1.64.1
 
-# Install farm-ng-core and farm-ng-amiga
+# Install farm-ng-core and farm-ng-amiga 
+WORKDIR /app
 RUN git clone https://github.com/farm-ng/farm-ng-core.git \
     && cd farm-ng-core \
     && git checkout v2.3.0 \
@@ -97,7 +91,31 @@ RUN git clone https://github.com/GEMINI-Breeding/AgRowStitch.git \
     && cd LightGlue \
     && /app/GEMINI-Flask-Server/.conda/bin/pip install -e .
 
+# Copy package files first for npm layer caching
+WORKDIR /app/gemini-app
+COPY gemini-app/package*.json /app/gemini-app/
+
+# Install npm dependencies (will be cached if package.json doesn't change)
+RUN npm ci --legacy-peer-deps --omit=dev
+
+# Install serve globally for production serving
+RUN npm install -g serve
+
+# Copy rest of the application code
+WORKDIR /app
+COPY gemini-app/ /app/gemini-app/
+COPY GEMINI-Flask-Server/ /app/GEMINI-Flask-Server/
+COPY assets/ /app/assets/
+
+# Build frontend
+WORKDIR /app/gemini-app
+RUN npm run build
+
 # Create data directory
 RUN mkdir -p /root/GEMINI-App-Data
 
 WORKDIR /app
+
+# Set the default command to run the production build
+WORKDIR /app/gemini-app
+CMD ["npm", "run", "gemini:prod"]
