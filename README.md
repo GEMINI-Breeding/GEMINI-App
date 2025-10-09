@@ -54,7 +54,7 @@ volumes:
 ```
 For more detailed configuration options, see the [docker-compose.yml](docker-compose.yml) file.
 
-### Native install
+### Native install for development
 ```bash
 # Step 1: Initialize submodules
 git submodule update --init --recursive
