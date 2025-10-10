@@ -28,7 +28,29 @@ export const useDataSetters = () => {
     return context;
 };
 
-const tileServerUrl = `http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}`
+// Helper function to get runtime config with fallbacks
+const getRuntimeConfig = () => {
+    // Runtime config (production/docker)
+    if (window.RUNTIME_CONFIG) {
+        return {
+            flaskPort: window.RUNTIME_CONFIG.FLASK_PORT,
+            tileServerPort: window.RUNTIME_CONFIG.TILE_SERVER_PORT,
+            flaskHost: window.RUNTIME_CONFIG.FLASK_HOST,
+            tileServerHost: window.RUNTIME_CONFIG.TILE_SERVER_HOST
+        };
+    }
+    // Development - use .env
+    return {
+        flaskPort: process.env.REACT_APP_FLASK_PORT || '5000',
+        tileServerPort: process.env.REACT_APP_TILE_SERVER_PORT || '8091',
+        flaskHost: '127.0.0.1',
+        tileServerHost: '127.0.0.1'
+    };
+};
+
+const config = getRuntimeConfig();
+const flaskUrl = `http://${config.flaskHost}:${config.flaskPort}/flask_app`;
+const tileServerUrl = `http://${config.tileServerHost}:${config.tileServerPort}`;
 export const TILE_URL_TEMPLATE =
      tileServerUrl + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
 export const BOUNDS_URL_TEMPLATE = tileServerUrl + "/cog/bounds?url=${FILE_PATH}";
@@ -201,9 +223,9 @@ export const DataProvider = ({ children }) => {
     const [selectedPlatformQuery, setSelectedPlatformQuery] = useState(null);
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
-    // Backend
-    const [flaskUrl, setFlaskUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_FLASK_PORT || '5000'}/flask_app/`);
-    // const [tileServerUrl, setTileServerUrl] = useState(`http://127.0.0.1:${process.env.REACT_APP_TILE_SERVER_PORT || '8091'}/`);
+    // Backend - use runtime config
+    const [flaskUrl, setFlaskUrl] = useState(`http://${config.flaskHost}:${config.flaskPort}/flask_app/`);
+    // const [tileServerUrl, setTileServerUrl] = useState(`http://${config.tileServerHost}:${config.tileServerPort}/`);
 
     return (
         <DataStateContext.Provider

@@ -42,20 +42,17 @@
         "chart.js": "^4.0.0",
         "html2canvas": "^1.4.0"
     },
-    "config": {
-        "frontPort": "3000",
-        "flaskPort": "5000",
-        "tileServerPort": "8091",
-        "appData": "~/GEMINI-App-Data"
-    },
     "scripts": {
         "start": "react-scripts start",
         "build": "react-scripts build",
+        "build:config": "dotenv -e .env -- bash -c './generate-runtime-config.sh'",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "REACT_APP_FLASK_PORT=$npm_package_config_flaskPort REACT_APP_TILE_SERVER_PORT=$npm_package_config_tileServerPort REACT_APP__PORT=$npm_package_config_frontPort PORT=$REACT_APP__PORT react-scripts start",
-        "server": "../GEMINI-Flask-Server/run_flask_server.sh $npm_package_config_appData $npm_package_config_flaskPort $npm_package_config_tileServerPort",
-        "gemini": "concurrently \"npm run front\"  \"npm run server\""
+        "front": "react-scripts start",
+        "front:prod": "dotenv -e .env -- bash -c 'serve -s build -l $REACT_APP_FRONT_PORT'",
+        "server": "dotenv -e .env -- bash -c '../GEMINI-Flask-Server/run_flask_server.sh $REACT_APP_APP_DATA $REACT_APP_FLASK_PORT $REACT_APP_TILE_SERVER_PORT'",
+        "gemini:prod": "concurrently \"npm run front:prod\" \"npm run server\"",
+        "gemini": "concurrently \"npm run front\" \"npm run server\""
     },
     "eslintConfig": {
         "extends": [

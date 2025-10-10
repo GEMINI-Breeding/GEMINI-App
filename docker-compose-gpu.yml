@@ -14,3 +14,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${REACT_APP_APP_DATA:-~/GEMINI-App-Data}:/root/GEMINI-App-Data
       - ./gemini-app/.env:/app/gemini-app/.env:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
