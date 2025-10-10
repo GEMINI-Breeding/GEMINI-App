@@ -21,15 +21,18 @@
         "@testing-library/user-event": "^13.5.0",
         "@turf/turf": "^6.5.0",
         "@urbica/react-map-gl": "^1.16.2",
+        "chart.js": "^4.0.0",
         "concurrently": "^8.2.1",
         "create-react-app": "^5.0.1",
         "deck.gl": "^8.9.35",
         "formik": "^2.4.5",
         "geotiff": "^2.0.7",
+        "html2canvas": "^1.4.0",
         "luma.gl": "^7.3.2",
         "mapbox-gl": "^2.15.0",
         "nebula.gl": "^1.0.4",
         "react": "^18.2.0",
+        "react-chartjs-2": "^4.0.0",
         "react-csv-importer": "^0.8.1",
         "react-dom": "^18.2.0",
         "react-dropzone": "^14.2.3",
@@ -37,10 +40,7 @@
         "react-photo-gallery": "^8.0.0",
         "react-scripts": "^5.0.1",
         "web-vitals": "^2.1.4",
-        "yet-another-react-lightbox": "^3.17.0",
-        "react-chartjs-2": "^4.0.0",
-        "chart.js": "^4.0.0",
-        "html2canvas": "^1.4.0"
+        "yet-another-react-lightbox": "^3.17.0"
     },
     "scripts": {
         "start": "react-scripts start",
@@ -71,5 +71,8 @@
             "last 1 firefox version",
             "last 1 safari version"
         ]
+    },
+    "devDependencies": {
+        "dotenv-cli": "^10.0.0"
     }
 }
