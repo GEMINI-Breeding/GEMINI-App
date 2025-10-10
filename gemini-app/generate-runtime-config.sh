@@ -10,6 +10,7 @@ TILE_SERVER_HOST=${TILE_SERVER_HOST:-127.0.0.1}
 # Target directory
 TARGET_DIR="build"
 
+pwd
 if [ ! -d "$TARGET_DIR" ]; then
     echo "Error: $TARGET_DIR directory not found"
     exit 1

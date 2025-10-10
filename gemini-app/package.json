@@ -51,8 +51,8 @@
         "front": "react-scripts start",
         "front:prod": "dotenv -e .env -- bash -c 'serve -s build -l $REACT_APP_FRONT_PORT'",
         "server": "dotenv -e .env -- bash -c '../GEMINI-Flask-Server/run_flask_server.sh $REACT_APP_APP_DATA $REACT_APP_FLASK_PORT $REACT_APP_TILE_SERVER_PORT'",
-        "gemini:prod": "dotenv -e .env -- concurrently \"npm run front:prod\" \"npm run server\"",
-        "gemini": "dotenv -e .env -- concurrently \"npm run front\" \"npm run server\""
+        "gemini:prod": "concurrently \"npm run front:prod\" \"npm run server\"",
+        "gemini": "concurrently \"npm run front\" \"npm run server\""
     },
     "eslintConfig": {
         "extends": [
