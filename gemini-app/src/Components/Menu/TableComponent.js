@@ -607,6 +607,15 @@ export const TableComponent = () => {
                             />
                         </Tooltip>
                     )}
+                    {selectedDataType === "image" && (
+                        <Tooltip title="Use Plot Marker">
+                            <AddLocationAltIcon
+                                color="success"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handleMarkPlots(params.id)}
+                            />
+                        </Tooltip>
+                    )}
                     {selectedDataType === "binary" && (
                     <>
             
