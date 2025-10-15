@@ -1,0 +1,121 @@
+# Version control
+.git
+.gitignore
+.gitmodules
+.github
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnp/
+.pnp.js
+coverage/
+build/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Version control
+.git
+**/.git
+.gitignore
+.gitmodules
+
+# Node.js
+**/node_modules
+**/npm-debug.log
+**/yarn-debug.log
+**/yarn-error.log
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/.conda
+**/conda-env
+**/env
+**/.env
+**/.venv
+**/venv
+
+# Build outputs
+**/build
+**/dist
+**/*.egg-info
+
+# IDE
+.vscode
+.idea
+**/.vscode
+**/.idea
+
+# Docker
+Dockerfile
+docker-compose.yml
+.docker
+
+# Temp files
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+
+# Large model files
+**/yolov8n.pt
+**/*.weights
+**/*.pth
+**/*.onnx
+
+# Development artifacts
+**/logs
+**/temp
+**/tmp
+**/.ipynb_checkpoints
+
+# Specific large directories we don't need
+GEMINI-Flask-Server/.conda/
+GEMINI-Flask-Server/farm-ng-core/
+GEMINI-Flask-Server/AgRowStitch/
+GEMINI-Flask-Server/LightGlue/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

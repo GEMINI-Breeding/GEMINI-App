@@ -1,0 +1,16 @@
+services:
+  app:
+    image: paibl/gemini-breeding:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env  # Load .env file directly
+    ports:
+      - "${REACT_APP_FRONT_PORT:-3000}:${REACT_APP_FRONT_PORT:-3000}"
+      - "${REACT_APP_FLASK_PORT:-5000}:${REACT_APP_FLASK_PORT:-5000}"
+      - "${REACT_APP_TILE_SERVER_PORT:-8091}:${REACT_APP_TILE_SERVER_PORT:-8091}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REACT_APP_APP_DATA:-~/GEMINI-App-Data}:/root/GEMINI-App-Data
+      - ./gemini-app/.env:/app/gemini-app/.env:ro

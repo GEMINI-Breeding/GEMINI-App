@@ -22,7 +22,43 @@ For more information about the project and our partners: https://projectgemini.u
 ---
 
 ## ⚙️ Installation
+### Docker install (recommended)
+```bash
+git clone git@github.com:GEMINI-Breeding/GEMINI-App.git
+cd GEMINI-App
 
+# CPU version
+docker compose up
+# GPU version (if nvidia-smi works on host)
+docker compose -f docker-compose-gpu.yml up
+```
+
+If you want to rebuild the image
+```bash
+# Run docker-compose up
+docker-compose up --build
+```
+
+Build docker image
+```
+docker build -t gemini-breeding:latest .
+```
+
+### Docker Configuration
+The `docker-compose.yml` file contains important configuration parameters that you can customize:
+
+```yaml
+ports:
+    - "3000:3000"  # React frontend (external:internal)
+    - "5000:5000"  # Flask backend (external:internal)
+    - "8091:8091"  # Tile server (external:internal)
+volumes:
+    - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker-in-Docker
+    - /mnt/d/GEMINI-App-Data:/root/GEMINI-App-Data  # Mount host data to container data directory
+```
+For more detailed configuration options, see the [docker-compose.yml](docker-compose.yml) file.
+
+### Native install for development
 ```bash
 # Step 1: Initialize submodules
 git submodule update --init --recursive
@@ -44,10 +80,6 @@ nvm use 18
 cd gemini-app
 npm install --legacy-peer-deps  # Fixes upstream dependency conflict
 
-## 🌾 Pipeline Overview
-
-![Sensing Pipeline](assets/sensing_pipeline.png)
-
 ```
 
 ---
@@ -61,3 +93,5 @@ npm install --legacy-peer-deps  # Fixes upstream dependency conflict
 - **Linked Data Visualization** – Visualize data with direct links to field design layouts.
 - **AI-Enabled Model Creation** – Train and deploy machine learning models for trait analysis.
 - **Trait Extraction & Export** – Extract key traits and export results for downstream use.
+
+
