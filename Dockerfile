@@ -1,37 +1,31 @@
-FROM python:3.9
+# syntax=docker/dockerfile:1.4
+FROM --platform=$BUILDPLATFORM python:3.9-slim AS base
 
-# Install system dependencies all at once
+# Enable BuildKit features
+ARG BUILDKIT_INLINE_CACHE=1
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+# Frontend builder stage
+FROM --platform=$BUILDPLATFORM node:18-alpine AS frontend-builder
+WORKDIR /app/gemini-app
+COPY gemini-app/package*.json ./
+# Use npm ci with multiple cores
+RUN npm ci --legacy-peer-deps --omit=dev --prefer-offline
+COPY gemini-app/ ./
+# Enable parallel builds for React
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN npm run build
+
+# Python dependencies builder (parallel stage)
+FROM base AS python-builder
+# Install build deps with parallel downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    docker.io \
-    build-essential \
-    gcc \
-    g++ \
-    make \
-    cmake \
-    pkg-config \
-    protobuf-compiler \
-    libprotobuf-dev \
-    libgrpc-dev \
-    libgrpc++-dev \
-    protobuf-compiler-grpc \
-    libssl-dev \
-    zlib1g-dev \
-    libffi-dev \
-    python3-dev \
-    # OpenCV dependencies
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libglu1-mesa-dev \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
+    git curl build-essential gcc g++ cmake pkg-config \
+    libssl-dev zlib1g-dev libffi-dev python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install and configure conda
+# Install conda with parallel downloads
 RUN curl -L -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
     && chmod +x ~/miniconda.sh \
     && ~/miniconda.sh -b -p /opt/conda \
@@ -42,47 +36,59 @@ RUN curl -L -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-lat
     && yes | /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 ENV PATH=/opt/conda/bin:$PATH
 
-# Set working directory
 WORKDIR /app
-# RUN git clone https://github.com/GEMINI-Breeding/GEMINI-App.git . \
-#     && git submodule update --init --recursive
+COPY GEMINI-Flask-Server/gemini-flask-server.yml ./
+COPY GEMINI-Flask-Server/requirements.txt ./
 
-# Copy local files instead of cloning
-COPY gemini-app/ /app/gemini-app/
-COPY GEMINI-Flask-Server/ /app/GEMINI-Flask-Server/
-COPY assets/ /app/assets/
+# Create conda environment in expected location
+RUN conda config --set solver libmamba \
+    && conda env create -f gemini-flask-server.yml -p /app/GEMINI-Flask-Server/.conda \
+    && /app/GEMINI-Flask-Server/.conda/bin/pip install --upgrade pip setuptools wheel
 
-# Build frontend
-WORKDIR /app/gemini-app
-RUN npm install --legacy-peer-deps && npm run build
+# Parallel git clones and installs
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git & \
+    git clone --depth 1 --branch opencv https://github.com/GEMINI-Breeding/AgRowStitch.git & \
+    git clone --depth 1 https://github.com/cvg/LightGlue.git & \
+    wait
 
-# Setup Python environment and install dependencies
-WORKDIR /app/GEMINI-Flask-Server
-RUN conda env create -f gemini-flask-server.yml -p ./.conda \
-    && conda init bash \
-    && ./.conda/bin/pip install --upgrade pip setuptools wheel build pybind11 numpy grpcio-tools==1.64.1
-
-# Install farm-ng-core and farm-ng-amiga
-RUN git clone https://github.com/farm-ng/farm-ng-core.git \
-    && cd farm-ng-core \
-    && git checkout v2.3.0 \
-    && git submodule update --init --recursive \
+RUN cd farm-ng-core \
+    && git submodule update --init --recursive --jobs 4 \
     && sed -i 's/"-Werror",//g' setup.py \
     && /app/GEMINI-Flask-Server/.conda/bin/pip install . \
-    && cd .. \
+    && cd ../AgRowStitch \
+    && /app/GEMINI-Flask-Server/.conda/bin/pip install . \
+    && cd ../LightGlue \
+    && /app/GEMINI-Flask-Server/.conda/bin/pip install -e . \
     && /app/GEMINI-Flask-Server/.conda/bin/pip install --no-build-isolation farm-ng-amiga
 
-# Install AgRowStitch and LightGlue
-RUN git clone https://github.com/GEMINI-Breeding/AgRowStitch.git \
-    && cd AgRowStitch \
-    && git checkout opencv \
-    && /app/GEMINI-Flask-Server/.conda/bin/pip install . \
-    && cd .. \
-    && git clone https://github.com/cvg/LightGlue.git \
-    && cd LightGlue \
-    && /app/GEMINI-Flask-Server/.conda/bin/pip install -e .
+# Final runtime stage
+FROM base AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libglu1-mesa curl \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g serve concurrently \
+    && rm -rf /var/lib/apt/lists/* && apt-get clean
 
-# Create data directory
-RUN mkdir -p /root/GEMINI-App-Data
+# Copy from parallel build stages
+COPY --from=python-builder /app/GEMINI-Flask-Server/.conda /app/GEMINI-Flask-Server/.conda
+COPY --from=frontend-builder /app/gemini-app/build /app/gemini-app/build
+COPY --from=frontend-builder /app/gemini-app/package*.json /app/gemini-app/
+
+ENV PATH=/app/GEMINI-Flask-Server/.conda/bin:$PATH
+WORKDIR /app
+COPY GEMINI-Flask-Server/ ./GEMINI-Flask-Server/
+COPY assets/ ./assets/
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY gemini-app/generate-runtime-config.sh /app/gemini-app/generate-runtime-config.sh
+RUN chmod +x /app/gemini-app/generate-runtime-config.sh
+RUN chmod +x /docker-entrypoint.sh && mkdir -p /root/GEMINI-App-Data
+
+# Cleanup
+RUN find /app/GEMINI-Flask-Server/.conda -name "*.pyc" -delete \
+    && find /app/GEMINI-Flask-Server/.conda -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+    && rm -rf /app/GEMINI-Flask-Server/.conda/pkgs /tmp/* /var/tmp/*
 
 WORKDIR /app
+ENTRYPOINT ["/docker-entrypoint.sh"]

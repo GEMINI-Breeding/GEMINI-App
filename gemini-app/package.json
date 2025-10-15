@@ -21,15 +21,18 @@
         "@testing-library/user-event": "^13.5.0",
         "@turf/turf": "^6.5.0",
         "@urbica/react-map-gl": "^1.16.2",
+        "chart.js": "^4.0.0",
         "concurrently": "^8.2.1",
         "create-react-app": "^5.0.1",
         "deck.gl": "^8.9.35",
         "formik": "^2.4.5",
         "geotiff": "^2.0.7",
+        "html2canvas": "^1.4.0",
         "luma.gl": "^7.3.2",
         "mapbox-gl": "^2.15.0",
         "nebula.gl": "^1.0.4",
         "react": "^18.2.0",
+        "react-chartjs-2": "^4.0.0",
         "react-csv-importer": "^0.8.1",
         "react-dom": "^18.2.0",
         "react-dropzone": "^14.2.3",
@@ -37,25 +40,19 @@
         "react-photo-gallery": "^8.0.0",
         "react-scripts": "^5.0.1",
         "web-vitals": "^2.1.4",
-        "yet-another-react-lightbox": "^3.17.0",
-        "react-chartjs-2": "^4.0.0",
-        "chart.js": "^4.0.0",
-        "html2canvas": "^1.4.0"
-    },
-    "config": {
-        "frontPort": "3000",
-        "flaskPort": "5000",
-        "tileServerPort": "8091",
-        "appData": "~/GEMINI-App-Data"
+        "yet-another-react-lightbox": "^3.17.0"
     },
     "scripts": {
         "start": "react-scripts start",
         "build": "react-scripts build",
+        "build:config": "dotenv -e .env -- bash -c './generate-runtime-config.sh'",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
-        "front": "REACT_APP_FLASK_PORT=$npm_package_config_flaskPort REACT_APP_TILE_SERVER_PORT=$npm_package_config_tileServerPort REACT_APP__PORT=$npm_package_config_frontPort PORT=$REACT_APP__PORT react-scripts start",
-        "server": "../GEMINI-Flask-Server/run_flask_server.sh $npm_package_config_appData $npm_package_config_flaskPort $npm_package_config_tileServerPort",
-        "gemini": "concurrently \"npm run front\"  \"npm run server\""
+        "front": "react-scripts start",
+        "front:prod": "dotenv -e .env -- bash -c 'serve -s build -l $REACT_APP_FRONT_PORT'",
+        "server": "dotenv -e .env -- bash -c '../GEMINI-Flask-Server/run_flask_server.sh $REACT_APP_APP_DATA $REACT_APP_FLASK_PORT $REACT_APP_TILE_SERVER_PORT'",
+        "gemini:prod": "concurrently \"npm run front:prod\" \"npm run server\"",
+        "gemini": "concurrently \"npm run front\" \"npm run server\""
     },
     "eslintConfig": {
         "extends": [
@@ -74,5 +71,8 @@
             "last 1 firefox version",
             "last 1 safari version"
         ]
+    },
+    "devDependencies": {
+        "dotenv-cli": "^10.0.0"
     }
 }
