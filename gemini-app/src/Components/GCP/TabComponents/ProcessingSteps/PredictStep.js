@@ -18,6 +18,10 @@ import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Autocomplete from "@mui/material/Autocomplete";
+import Slider from "@mui/material/Slider";
 import { useDataState, fetchData } from "../../../../DataContext";
 import InferenceTable from "../../../StatsMenu/InferenceTable";
 import AerialPrepTabs from "../Processing/AerialPrepTabs";
@@ -27,7 +31,7 @@ import useTrackComponent from "../../../../useTrackComponent";
 function PredictStep() {
     useTrackComponent("PredictStep");
 
-    const { 
+    const {
         flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
@@ -57,6 +61,17 @@ function PredictStep() {
     const [modelTask, setModelTask] = useState('detection'); // 'detection' | 'segmentation'
     const [includeMasks, setIncludeMasks] = useState(true);
 
+    // Plot filtering states
+    const [plotFilterEnabled, setPlotFilterEnabled] = useState(false);
+    const [selectedPopulations, setSelectedPopulations] = useState([]);
+    const [selectedColumns, setSelectedColumns] = useState([]);
+    const [selectedRows, setSelectedRows] = useState([]);
+    const [plotBoundaryInfo, setPlotBoundaryInfo] = useState({ populations: [], columns: [], rows: [] });
+
+    // Confidence threshold states
+    const [confidenceThresholdEnabled, setConfidenceThresholdEnabled] = useState(false);
+    const [confidenceThreshold, setConfidenceThreshold] = useState(50); // Store as percentage (1-99)
+
     // Processing state
     const [isProcessing, setIsProcessing] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -83,7 +98,7 @@ function PredictStep() {
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
         return false;
     };
 
@@ -104,7 +119,7 @@ function PredictStep() {
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
         return false;
     };
 
@@ -114,7 +129,7 @@ function PredictStep() {
             try {
                 const dates = await fetchData(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
                 let hasDroneData = false;
-                
+
                 for (const date of dates) {
                     const hasDronePyramid = await checkDroneFolder(date);
                     if (hasDronePyramid) {
@@ -122,7 +137,7 @@ function PredictStep() {
                         break;
                     }
                 }
-                
+
                 setShowAerialPrep(hasDroneData);
             } catch (error) {
                 setShowAerialPrep(false);
@@ -132,10 +147,54 @@ function PredictStep() {
         }
     };
 
+    // Load plot boundary information for filtering options
+    const loadPlotBoundaryInfo = async () => {
+        if (!selectedYearGCP || !selectedExperimentGCP || !selectedLocationGCP || !selectedPopulationGCP) {
+            setPlotBoundaryInfo({ populations: [], columns: [], rows: [] });
+            return;
+        }
+
+        try {
+            const response = await fetch(`${flaskUrl}get_plot_boundary_info`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: selectedDate || null,
+                    platform: selectedPlatform || null,
+                    sensor: selectedSensor || null
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setPlotBoundaryInfo(data);
+                console.log('Plot boundary info loaded:', data);
+            } else {
+                console.warn('No plot boundary information found - will be available after first inference run');
+                setPlotBoundaryInfo({ populations: [], columns: [], rows: [] });
+            }
+        } catch (error) {
+            console.error('Error loading plot boundary info:', error);
+            setPlotBoundaryInfo({ populations: [], columns: [], rows: [] });
+        }
+    };
+
     // Check for drone orthomosaics when GCP selections change
     useEffect(() => {
         checkForDroneOrthomosaics();
+        loadPlotBoundaryInfo(); // Load plot boundary info with basic GCP selections
     }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+
+    // Refresh plot boundary info when additional parameters are available (for better data if available)
+    useEffect(() => {
+        if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
+            loadPlotBoundaryInfo();
+        }
+    }, [selectedDate, selectedPlatform, selectedSensor, flaskUrl]);
 
     // Only use filtered dates (with stitch)
     useEffect(() => {
@@ -185,8 +244,8 @@ function PredictStep() {
             const response = await fetch(`${flaskUrl}get_platforms`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
+                body: JSON.stringify({
+                    year: selectedYearGCP,
                     experiment: selectedExperimentGCP,
                     location: selectedLocationGCP,
                     population: selectedPopulationGCP,
@@ -207,8 +266,8 @@ function PredictStep() {
             const response = await fetch(`${flaskUrl}get_sensors`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
+                body: JSON.stringify({
+                    year: selectedYearGCP,
                     experiment: selectedExperimentGCP,
                     location: selectedLocationGCP,
                     population: selectedPopulationGCP,
@@ -230,8 +289,8 @@ function PredictStep() {
             const response = await fetch(`${flaskUrl}get_orthomosaic_versions`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
+                body: JSON.stringify({
+                    year: selectedYearGCP,
                     experiment: selectedExperimentGCP,
                     location: selectedLocationGCP,
                     population: selectedPopulationGCP,
@@ -245,7 +304,7 @@ function PredictStep() {
                 const versions = []
                 console.log("AgRowStitch versions data:", data);
                 for (let i = 0; i < data.length; i++) {
-                    if (data[i].AGR_version !== undefined  && data[i].AGR_version.startsWith('AgRowStitch_v')) {
+                    if (data[i].AGR_version !== undefined && data[i].AGR_version.startsWith('AgRowStitch_v')) {
                         versions.push(data[i].AGR_version);
                     }
                 }
@@ -262,7 +321,7 @@ function PredictStep() {
     };
 
     const handleRunInference = async () => {
-        if (!apiKey || !modelId || !selectedYearGCP || !selectedExperimentGCP || !selectedLocationGCP || 
+        if (!apiKey || !modelId || !selectedYearGCP || !selectedExperimentGCP || !selectedLocationGCP ||
             !selectedPopulationGCP || !selectedDate || !selectedPlatform || !selectedSensor || !selectedAgrowstitch) {
             setError("Please fill in all required fields");
             return;
@@ -276,36 +335,47 @@ function PredictStep() {
 
         // Set API URL based on inference mode
         let selectedApiUrl = inferenceMode === "local" ? "http://localhost:9001" : "https://detect.roboflow.com";
-        
+
         // Always include masks for segmentation tasks
         const finalIncludeMasks = modelTask === 'segmentation' ? true : includeMasks;
 
         try {
+            const requestBody = {
+                apiUrl: selectedApiUrl,
+                inferenceMode,
+                apiKey,
+                modelId,
+                modelTask,
+                includeMasks: finalIncludeMasks,
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: selectedDate,
+                platform: selectedPlatform,
+                sensor: selectedSensor,
+                agrowstitchDir: selectedAgrowstitch,
+                plotFilterEnabled,
+                selectedPopulations,
+                selectedColumns,
+                selectedRows
+            };
+
+            // Add confidence threshold if enabled (convert percentage to decimal)
+            if (confidenceThresholdEnabled) {
+                requestBody.confidence_threshold = confidenceThreshold / 100;
+            }
+
             const response = await fetch(`${flaskUrl}run_roboflow_inference`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    apiUrl: selectedApiUrl,
-                    inferenceMode,
-                    apiKey,
-                    modelId,
-                    modelTask,
-                    includeMasks: finalIncludeMasks,
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    platform: selectedPlatform,
-                    sensor: selectedSensor,
-                    agrowstitchDir: selectedAgrowstitch
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (response.ok) {
                 const data = await response.json();
                 setMessage(data.message || "Inference started successfully");
-                
+
                 // Poll for progress
                 pollProgress();
             } else {
@@ -328,7 +398,7 @@ function PredictStep() {
                     const data = await response.json();
                     setProgress(data.progress || 0);
                     setMessage(data.message || "Processing...");
-                    
+
                     if (data.completed) {
                         setIsProcessing(false);
                         setResults(data.results);
@@ -350,9 +420,9 @@ function PredictStep() {
         setTimeout(() => clearInterval(interval), 30 * 60 * 1000);
     };
 
-    const isFormValid = apiKey && modelId && selectedYearGCP && selectedExperimentGCP && 
-                      selectedLocationGCP && selectedPopulationGCP && selectedDate && 
-                      selectedPlatform && selectedSensor && selectedAgrowstitch;
+    const isFormValid = apiKey && modelId && selectedYearGCP && selectedExperimentGCP &&
+        selectedLocationGCP && selectedPopulationGCP && selectedDate &&
+        selectedPlatform && selectedSensor && selectedAgrowstitch;
 
     // Check if GCP selections are available
     const hasGCPSelections = selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP;
@@ -367,7 +437,7 @@ function PredictStep() {
                         </Typography>
                         <Alert severity="warning" style={{ marginTop: "20px" }}>
                             <Typography variant="body2">
-                                Please select Year, Experiment, Location, and Population from the GCP Picker menu first, 
+                                Please select Year, Experiment, Location, and Population from the GCP Picker menu first,
                                 then click "Begin Data Preparation" to access the inference functionality.
                             </Typography>
                         </Alert>
@@ -380,22 +450,7 @@ function PredictStep() {
     return (
         <Box sx={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
             <Grid container spacing={2} sx={{ maxWidth: "100%", width: "100%" }}>
-                {/* Aerial Prep Section - Only show if drone orthomosaics are available */}
-                {showAerialPrep && isGCPReady && (
-                    <Grid item xs={12}>
-                        <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                            <Typography variant="h5" gutterBottom align="center">
-                                Aerial Data Processing
-                            </Typography>
-                            <Typography variant="body2" align="center" color="textSecondary" gutterBottom>
-                                Extract aerial-specific traits from drone imagery
-                            </Typography>
-                            <Divider style={{ margin: "20px 0" }} />
-                            <AerialPrepTabs />
-                        </Paper>
-                    </Grid>
-                )}
-
+                {/* Removed Aerial Prep Section - Re-add wherever needed */}
                 {/* Roboflow Inference Section */}
                 <Grid item xs={12}>
                     <Paper elevation={3} sx={{ padding: 2, margin: "10px 0", maxWidth: "100%", boxSizing: "border-box" }}>
@@ -407,8 +462,8 @@ function PredictStep() {
                         </Typography>
 
                         <Grid container spacing={2} sx={{ marginTop: 2, maxWidth: "100%" }}>
-                        {/* Current Dataset Info */}
-                        {/* <Grid item xs={12}>
+                            {/* Current Dataset Info */}
+                            {/* <Grid item xs={12}>
                             <Alert severity="info" style={{ marginBottom: "20px" }}>
                                 <Typography variant="body2">
                                     <strong>Selected Dataset:</strong> {selectedYearGCP} → {selectedExperimentGCP} → {selectedLocationGCP} → {selectedPopulationGCP}
@@ -416,261 +471,492 @@ function PredictStep() {
                             </Alert>
                         </Grid> */}
 
-                        {/* Roboflow Configuration */}
-                        <Grid item xs={12}>
-                            <Typography variant="h6" gutterBottom>
-                                Roboflow Configuration
-                            </Typography>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={6} md={4}>
-                            <FormControl fullWidth>
-                                <InputLabel id="inference-mode-label">Inference Mode</InputLabel>
-                                <Select
-                                    labelId="inference-mode-label"
-                                    label="Inference Mode"
-                                    value={inferenceMode}
-                                    onChange={(e) => setInferenceMode(e.target.value)}
-                                >
-                                    <MenuItem value="cloud">Remote (Cloud)</MenuItem>
-                                    <MenuItem value="local">Local</MenuItem>
-                                </Select>
-                                <Typography variant="caption" color="textSecondary">
-                                    {inferenceMode === "cloud"
-                                        ? "https://detect.roboflow.com"
-                                        : "http://localhost:9001 (requires local inference server)"}
+                            {/* Roboflow Configuration */}
+                            <Grid item xs={12}>
+                                <Typography variant="h6" gutterBottom>
+                                    Roboflow Configuration
                                 </Typography>
-                            </FormControl>
-                        </Grid>
-                        
-        <Grid item xs={12} sm={6} md={4}>
-            <TextField
-                fullWidth
-                label="API Key *"
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                helperText="Your Roboflow API key"
-                InputProps={{
-                    endAdornment: (
-                        <InputAdornment position="end">
-                            <IconButton
-                                aria-label="toggle password visibility"
-                                onClick={() => setShowApiKey(!showApiKey)}
-                                edge="end"
-                            >
-                                {showApiKey ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                            </IconButton>
-                        </InputAdornment>
-                    ),
-                }}
-            />
-        </Grid>                        <Grid item xs={12} sm={6} md={4}>
-                            <TextField
-                                fullWidth
-                                label="Model ID *"
-                                value={modelId}
-                                onChange={(e) => setModelId(e.target.value)}
-                                helperText="Format: project_id/version_id"
-                                placeholder="e.g., my-project/1"
-                            />
-                        </Grid>
+                            </Grid>
 
-                        {/* Additional Data Selection */}
-                        <Grid item xs={12}>
-                            <Typography variant="h6" gutterBottom style={{ marginTop: "20px" }}>
-                                Additional Selection
-                            </Typography>
-                        </Grid>
+                            <Grid item xs={12} sm={6} md={4}>
+                                <FormControl fullWidth>
+                                    <InputLabel id="inference-mode-label">Inference Mode</InputLabel>
+                                    <Select
+                                        labelId="inference-mode-label"
+                                        label="Inference Mode"
+                                        value={inferenceMode}
+                                        onChange={(e) => setInferenceMode(e.target.value)}
+                                    >
+                                        <MenuItem value="cloud">Remote (Cloud)</MenuItem>
+                                        <MenuItem value="local">Local</MenuItem>
+                                    </Select>
+                                    <Typography variant="caption" color="textSecondary">
+                                        {inferenceMode === "cloud"
+                                            ? "https://detect.roboflow.com"
+                                            : "http://localhost:9001 (requires local inference server)"}
+                                    </Typography>
+                                </FormControl>
+                            </Grid>
 
-                        <Grid item xs={12} sm={6} lg={3}>
-                            <FormControl fullWidth>
-                                <InputLabel id="date-label">Date *</InputLabel>
-                                <Select
-                                    labelId="date-label"
-                                    label="Date *"
-                                    value={selectedDate}
-                                    onChange={(e) => setSelectedDate(e.target.value)}
-                                >
-                                    {dateOptions.map((date) => (
-                                        <MenuItem key={date} value={date}>{date}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                        </Grid>
+                            <Grid item xs={12} sm={6} md={4}>
+                                <TextField
+                                    fullWidth
+                                    label="API Key *"
+                                    type={showApiKey ? "text" : "password"}
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    helperText="Your Roboflow API key"
+                                    InputProps={{
+                                        endAdornment: (
+                                            <InputAdornment position="end">
+                                                <IconButton
+                                                    aria-label="toggle password visibility"
+                                                    onClick={() => setShowApiKey(!showApiKey)}
+                                                    edge="end"
+                                                >
+                                                    {showApiKey ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                                </IconButton>
+                                            </InputAdornment>
+                                        ),
+                                    }}
+                                />
+                            </Grid>                        <Grid item xs={12} sm={6} md={4}>
+                                <TextField
+                                    fullWidth
+                                    label="Model ID *"
+                                    value={modelId}
+                                    onChange={(e) => setModelId(e.target.value)}
+                                    helperText="Format: project_id/version_id"
+                                    placeholder="e.g., my-project/1"
+                                />
+                            </Grid>
 
-                        <Grid item xs={12} sm={6} lg={3}>
-                            <FormControl fullWidth disabled={!selectedDate}>
-                                <InputLabel id="platform-label">Platform *</InputLabel>
-                                <Select
-                                    labelId="platform-label"
-                                    label="Platform *"
-                                    value={selectedPlatform}
-                                    onChange={(e) => setSelectedPlatform(e.target.value)}
-                                >
-                                    {platformOptions.map((platform) => (
-                                        <MenuItem key={platform} value={platform}>{platform}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                        </Grid>
-
-                        <Grid item xs={12} sm={6} lg={3}>
-                            <FormControl fullWidth disabled={!selectedPlatform}>
-                                <InputLabel id="sensor-label">Sensor *</InputLabel>
-                                <Select
-                                    labelId="sensor-label"
-                                    label="Sensor *"
-                                    value={selectedSensor}
-                                    onChange={(e) => setSelectedSensor(e.target.value)}
-                                >
-                                    {sensorOptions.map((sensor) => (
-                                        <MenuItem key={sensor} value={sensor}>{sensor}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                        </Grid>
-
-                        <Grid item xs={12} sm={6} lg={3}>
-                            <FormControl fullWidth disabled={!selectedSensor}>
-                                <InputLabel id="orthomosaic-label">Image Source *</InputLabel>
-                                <Select
-                                    labelId="orthomosaic-label"
-                                    label="Image Source *"
-                                    value={selectedAgrowstitch}
-                                    onChange={(e) => setSelectedAgrowstitch(e.target.value)}
-                                >
-                                    {agrowstitchOptions.map((version) => (
-                                        <MenuItem key={version} value={version}>
-                                            {version === 'Plot_Images' ? 'Plot Images (from Get Plot Images)' :
-                                             version === 'ODM_Direct' ? 'ODM Orthomosaic (Direct)' :
-                                             version}
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                                <Typography variant="caption" color="textSecondary">
-                                    {selectedAgrowstitch === 'Plot_Images' 
-                                        ? "Uses individual plot images created by 'Get Plot Images'"
-                                        : selectedAgrowstitch === 'ODM_Direct'
-                                        ? "Uses ODM orthomosaic directly"
-                                        : selectedAgrowstitch !== "" ? "Uses AgRowStitch processed images" : ""}
+                            {/* Additional Data Selection */}
+                            <Grid item xs={12}>
+                                <Typography variant="h6" gutterBottom style={{ marginTop: "20px" }}>
+                                    Additional Selection
                                 </Typography>
-                            </FormControl>
-                        </Grid>
-
-                        {/* Additional Information */}
-                        {selectedAgrowstitch === 'Plot_Images' && (
-                            <Grid item xs={12}>
-                                <Alert severity="info" style={{ marginTop: "10px" }}>
-                                    <Typography variant="body2">
-                                        <strong>Plot Images Mode:</strong> Inference will be run on individual plot images 
-                                        created by the "Get Plot Images" functionality. Each plot will be processed separately 
-                                        and results will include plot and accession information.
-                                    </Typography>
-                                </Alert>
                             </Grid>
-                        )}
 
-                        {/* Model Task */}
-                        <Grid item xs={12}>
-                            <Typography variant="h6" gutterBottom style={{ marginTop: "20px" }}>
-                                Model Task
-                            </Typography>
-                        </Grid>
-
-                        <Grid item xs={12} sm={6} md={6}>
-                            <FormControl fullWidth>
-                                <InputLabel id="model-task-label">Model Task</InputLabel>
-                                <Select
-                                    labelId="model-task-label"
-                                    label="Model Task"
-                                    value={modelTask}
-                                    onChange={(e)=> setModelTask(e.target.value)}
-                                >
-                                    <MenuItem value="detection">Object Detection</MenuItem>
-                                    <MenuItem value="segmentation">Instance Segmentation</MenuItem>
-                                </Select>
-                            </FormControl>
-                        </Grid>
-
-                        {/* Action Buttons */}
-                        <Grid item xs={12} style={{ textAlign: "center", marginTop: "20px" }}>
-                            <Button
-                                variant="contained"
-                                color="primary"
-                                size="large"
-                                onClick={handleRunInference}
-                                disabled={!isFormValid || isProcessing}
-                                startIcon={isProcessing ? <CircularProgress size={20} /> : null}
-                            >
-                                {isProcessing ? "Running Inference..." : "Run Inference"}
-                            </Button>
-                        </Grid>
-
-                        {/* Progress and Status */}
-                        {isProcessing && (
-                            <Grid item xs={12}>
-                                <Box style={{ textAlign: "center", marginTop: "20px" }}>
-                                    <CircularProgress variant="determinate" value={progress} size={60} />
-                                    <Typography variant="body2" style={{ marginTop: "10px" }}>
-                                        {progress}% - {message}
-                                    </Typography>
-                                </Box>
+                            <Grid item xs={12} sm={6} lg={3}>
+                                <FormControl fullWidth>
+                                    <InputLabel id="date-label">Date *</InputLabel>
+                                    <Select
+                                        labelId="date-label"
+                                        label="Date *"
+                                        value={selectedDate}
+                                        onChange={(e) => setSelectedDate(e.target.value)}
+                                    >
+                                        {dateOptions.map((date) => (
+                                            <MenuItem key={date} value={date}>{date}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
                             </Grid>
-                        )}
 
-                        {/* Error Display */}
-                        {error && (
-                            <Grid item xs={12}>
-                                <Alert severity="error">{error}</Alert>
+                            <Grid item xs={12} sm={6} lg={3}>
+                                <FormControl fullWidth disabled={!selectedDate}>
+                                    <InputLabel id="platform-label">Platform *</InputLabel>
+                                    <Select
+                                        labelId="platform-label"
+                                        label="Platform *"
+                                        value={selectedPlatform}
+                                        onChange={(e) => setSelectedPlatform(e.target.value)}
+                                    >
+                                        {platformOptions.map((platform) => (
+                                            <MenuItem key={platform} value={platform}>{platform}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
                             </Grid>
-                        )}
 
-                        {/* Results Display */}
-                        {results && (
+                            <Grid item xs={12} sm={6} lg={3}>
+                                <FormControl fullWidth disabled={!selectedPlatform}>
+                                    <InputLabel id="sensor-label">Sensor *</InputLabel>
+                                    <Select
+                                        labelId="sensor-label"
+                                        label="Sensor *"
+                                        value={selectedSensor}
+                                        onChange={(e) => setSelectedSensor(e.target.value)}
+                                    >
+                                        {sensorOptions.map((sensor) => (
+                                            <MenuItem key={sensor} value={sensor}>{sensor}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            </Grid>
+
+                            <Grid item xs={12} sm={6} lg={3}>
+                                <FormControl fullWidth disabled={!selectedSensor}>
+                                    <InputLabel id="orthomosaic-label">Image Source *</InputLabel>
+                                    <Select
+                                        labelId="orthomosaic-label"
+                                        label="Image Source *"
+                                        value={selectedAgrowstitch}
+                                        onChange={(e) => setSelectedAgrowstitch(e.target.value)}
+                                    >
+                                        {agrowstitchOptions.map((version) => (
+                                            <MenuItem key={version} value={version}>
+                                                {version === 'Plot_Images' ? 'Plot Images (from Get Plot Images)' :
+                                                    version === 'ODM_Direct' ? 'ODM Orthomosaic (Direct)' :
+                                                        version}
+                                            </MenuItem>
+                                        ))}
+                                    </Select>
+                                    <Typography variant="caption" color="textSecondary">
+                                        {selectedAgrowstitch === 'Plot_Images'
+                                            ? "Uses individual plot images created by 'Get Plot Images'"
+                                            : selectedAgrowstitch === 'ODM_Direct'
+                                                ? "Uses ODM orthomosaic directly"
+                                                : selectedAgrowstitch !== "" ? "Uses AgRowStitch processed images" : ""}
+                                    </Typography>
+                                </FormControl>
+                            </Grid>
+
+                            {/* Additional Information */}
+                            {selectedAgrowstitch === 'Plot_Images' && (
+                                <Grid item xs={12}>
+                                    <Alert severity="info" style={{ marginTop: "10px" }}>
+                                        <Typography variant="body2">
+                                            <strong>Plot Images Mode:</strong> Inference will be run on individual plot images
+                                            created by the "Get Plot Images" functionality. Each plot will be processed separately
+                                            and results will include plot and accession information.
+                                        </Typography>
+                                    </Alert>
+                                </Grid>
+                            )}
+
+                            {/* Model Task */}
                             <Grid item xs={12}>
-                                <Paper elevation={2} style={{ padding: "15px", marginTop: "20px" }}>
-                                    <Typography variant="h6" gutterBottom>
-                                        Inference Results
-                                    </Typography>
-                                    <Typography variant="body2" gutterBottom>
-                                        CSV file saved to: {results.csvPath}
-                                    </Typography>
-                                    <Typography variant="body2" gutterBottom>
-                                        Total plots processed: {results.totalPlots}
-                                    </Typography>
-                                    <Typography variant="body2" gutterBottom>
-                                        Total predictions: {results.totalPredictions}
-                                    </Typography>
-                                    {results.labels && results.labels.length > 0 && (
-                                        <Box style={{ marginTop: "10px" }}>
-                                            <Typography variant="body2" gutterBottom>
-                                                Detected labels:
-                                            </Typography>
-                                            {results.labels.map((label, index) => (
-                                                <Chip
-                                                    key={index}
-                                                    label={`${label.name} (${label.count})`}
-                                                    style={{ margin: "2px" }}
-                                                    size="small"
+                                <Typography variant="h6" gutterBottom style={{ marginTop: "20px" }}>
+                                    Model Task
+                                </Typography>
+                            </Grid>
+
+                            <Grid item xs={12} sm={6} md={6}>
+                                <FormControl fullWidth>
+                                    <InputLabel id="model-task-label">Model Task</InputLabel>
+                                    <Select
+                                        labelId="model-task-label"
+                                        label="Model Task"
+                                        value={modelTask}
+                                        onChange={(e) => setModelTask(e.target.value)}
+                                    >
+                                        <MenuItem value="detection">Object Detection</MenuItem>
+                                        <MenuItem value="segmentation">Instance Segmentation</MenuItem>
+                                    </Select>
+                                </FormControl>
+                            </Grid>
+
+                            {/* Options Section - Plot Filtering and Confidence Threshold */}
+                            {(plotBoundaryInfo.populations?.length > 0 || plotBoundaryInfo.columns?.length > 0 || plotBoundaryInfo.rows?.length > 0) && (
+                                <>
+                                    <Grid item xs={12}>
+                                        <Divider style={{ margin: "20px 0" }} />
+                                        <Typography variant="h6" gutterBottom>
+                                            Options
+                                        </Typography>
+                                    </Grid>
+
+                                    <Grid item xs={12}>
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    checked={plotFilterEnabled}
+                                                    onChange={(e) => setPlotFilterEnabled(e.target.checked)}
+                                                    color="primary"
                                                 />
-                                            ))}
-                                        </Box>
+                                            }
+                                            label="Enable plot filtering"
+                                        />
+                                        <Typography variant="caption" color="textSecondary" display="block">
+                                            Choose to run inference only on specific populations, rows, or columns
+                                        </Typography>
+                                    </Grid>
+
+                                    <Grid item xs={12}>
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    checked={confidenceThresholdEnabled}
+                                                    onChange={(e) => setConfidenceThresholdEnabled(e.target.checked)}
+                                                    color="primary"
+                                                />
+                                            }
+                                            label="Change confidence threshold"
+                                        />
+                                        <Typography variant="caption" color="textSecondary" display="block">
+                                            Override model's default confidence threshold (default uses Roboflow's optimal setting)
+                                        </Typography>
+                                    </Grid>
+
+                                    {/* Confidence Threshold Slider */}
+                                    {confidenceThresholdEnabled && (
+                                        <Grid item xs={12}>
+                                            <Box sx={{ maxWidth: 600, mb: 2 }}>
+                                                <Typography gutterBottom>
+                                                    Confidence Threshold: {confidenceThreshold}%
+                                                </Typography>
+                                                <Slider
+                                                    value={confidenceThreshold}
+                                                    onChange={(e, newValue) => setConfidenceThreshold(newValue)}
+                                                    min={1}
+                                                    max={99}
+                                                    step={1}
+                                                    marks={[
+                                                        { value: 1, label: '1%' },
+                                                        { value: 50, label: '50%' },
+                                                        { value: 99, label: '99%' }
+                                                    ]}
+                                                />
+                                            </Box>
+                                        </Grid>
                                     )}
-                                </Paper>
+
+                                    {/* Plot Filtering Controls */}
+                                    {plotFilterEnabled && (
+                                        <>
+                                            <Grid item xs={12}>
+                                                <Typography variant="body2" color="textSecondary" gutterBottom sx={{ mt: 2 }}>
+                                                    Select specific plots to process:
+                                                </Typography>
+                                            </Grid>
+                                            {plotBoundaryInfo.populations?.length > 0 && (
+                                                <Grid item xs={12} sm={6} md={4}>
+                                                    <Autocomplete
+                                                        multiple
+                                                        options={plotBoundaryInfo.populations || []}
+                                                        value={selectedPopulations}
+                                                        onChange={(event, newValue) => setSelectedPopulations(newValue)}
+                                                        renderInput={(params) => (
+                                                            <TextField
+                                                                {...params}
+                                                                label="Select Populations"
+                                                                placeholder="Choose populations..."
+                                                            />
+                                                        )}
+                                                        renderTags={(value, getTagProps) =>
+                                                            value.map((option, index) => (
+                                                                <Chip
+                                                                    variant="outlined"
+                                                                    label={option}
+                                                                    {...getTagProps({ index })}
+                                                                />
+                                                            ))
+                                                        }
+                                                    />
+                                                </Grid>
+                                            )}
+
+                                            {plotBoundaryInfo.columns?.length > 0 && (
+                                                <Grid item xs={12} sm={6} md={4}>
+                                                    <Autocomplete
+                                                        multiple
+                                                        options={plotBoundaryInfo.columns || []}
+                                                        value={selectedColumns}
+                                                        onChange={(event, newValue) => setSelectedColumns(newValue)}
+                                                        renderInput={(params) => (
+                                                            <TextField
+                                                                {...params}
+                                                                label="Select Columns"
+                                                                placeholder="Choose columns..."
+                                                            />
+                                                        )}
+                                                        renderTags={(value, getTagProps) =>
+                                                            value.map((option, index) => (
+                                                                <Chip
+                                                                    variant="outlined"
+                                                                    label={option}
+                                                                    {...getTagProps({ index })}
+                                                                />
+                                                            ))
+                                                        }
+                                                    />
+                                                </Grid>
+                                            )}
+
+                                            {plotBoundaryInfo.rows?.length > 0 && (
+                                                <Grid item xs={12} sm={6} md={4}>
+                                                    <Autocomplete
+                                                        multiple
+                                                        options={plotBoundaryInfo.rows || []}
+                                                        value={selectedRows}
+                                                        onChange={(event, newValue) => setSelectedRows(newValue)}
+                                                        renderInput={(params) => (
+                                                            <TextField
+                                                                {...params}
+                                                                label="Select Rows"
+                                                                placeholder="Choose rows..."
+                                                            />
+                                                        )}
+                                                        renderTags={(value, getTagProps) =>
+                                                            value.map((option, index) => (
+                                                                <Chip
+                                                                    variant="outlined"
+                                                                    label={option}
+                                                                    {...getTagProps({ index })}
+                                                                />
+                                                            ))
+                                                        }
+                                                    />
+                                                </Grid>
+                                            )}
+
+                                            <Grid item xs={12}>
+                                                <Typography variant="body2" color="textSecondary">
+                                                    {selectedPopulations.length > 0 && `Selected populations: ${selectedPopulations.length} `}
+                                                    {selectedColumns.length > 0 && `Selected columns: ${selectedColumns.length} `}
+                                                    {selectedRows.length > 0 && `Selected rows: ${selectedRows.length}`}
+                                                    {selectedPopulations.length === 0 && selectedColumns.length === 0 && selectedRows.length === 0 &&
+                                                        "No filters selected - inference will run on all plots"}
+                                                </Typography>
+                                            </Grid>
+                                        </>
+                                    )}
+                                </>
+                            )}
+
+                            {/* Note about plot filtering availability - now inside the main options section */}
+                            {!(plotBoundaryInfo.populations?.length > 0 || plotBoundaryInfo.columns?.length > 0 || plotBoundaryInfo.rows?.length > 0) && (
+                                <>
+                                    <Grid item xs={12}>
+                                        <Divider style={{ margin: "20px 0" }} />
+                                        <Typography variant="h6" gutterBottom>
+                                            Options
+                                        </Typography>
+                                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                                            Optional settings for inference customization
+                                        </Typography>
+                                    </Grid>
+
+                                    <Grid item xs={12}>
+                                        <Alert severity="info" style={{ marginBottom: "15px" }}>
+                                            <Typography variant="body2">
+                                                <strong>Note:</strong> Plot filtering options will become available when plot boundary data is found.
+                                                This data comes from plot_borders.csv in your Raw data directory or from previous inference results.
+                                            </Typography>
+                                        </Alert>
+                                    </Grid>
+
+                                    <Grid item xs={12}>
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    checked={confidenceThresholdEnabled}
+                                                    onChange={(e) => setConfidenceThresholdEnabled(e.target.checked)}
+                                                    color="primary"
+                                                />
+                                            }
+                                            label="Change confidence threshold"
+                                        />
+                                        <Typography variant="caption" color="textSecondary" display="block">
+                                            Override model's default confidence threshold (default uses Roboflow's optimal setting)
+                                        </Typography>
+                                    </Grid>
+
+                                    {/* Confidence Threshold Slider */}
+                                    {confidenceThresholdEnabled && (
+                                        <Grid item xs={12}>
+                                            <Box sx={{ maxWidth: 600, mb: 2 }}>
+                                                <Typography gutterBottom>
+                                                    Confidence Threshold: {confidenceThreshold}%
+                                                </Typography>
+                                                <Slider
+                                                    value={confidenceThreshold}
+                                                    onChange={(e, newValue) => setConfidenceThreshold(newValue)}
+                                                    min={1}
+                                                    max={99}
+                                                    step={1}
+                                                    marks={[
+                                                        { value: 1, label: '1%' },
+                                                        { value: 50, label: '50%' },
+                                                        { value: 99, label: '99%' }
+                                                    ]}
+                                                />
+                                            </Box>
+                                        </Grid>
+                                    )}
+                                </>
+                            )}
+
+                            {/* Action Buttons */}
+                            <Grid item xs={12} style={{ textAlign: "center", marginTop: "20px" }}>
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    size="large"
+                                    onClick={handleRunInference}
+                                    disabled={!isFormValid || isProcessing}
+                                    startIcon={isProcessing ? <CircularProgress size={20} /> : null}
+                                >
+                                    {isProcessing ? "Running Inference..." : "Run Inference"}
+                                </Button>
                             </Grid>
-                        )}
-                    </Grid>
-                </Paper>
+
+                            {/* Progress and Status */}
+                            {isProcessing && (
+                                <Grid item xs={12}>
+                                    <Box style={{ textAlign: "center", marginTop: "20px" }}>
+                                        <CircularProgress variant="determinate" value={progress} size={60} />
+                                        <Typography variant="body2" style={{ marginTop: "10px" }}>
+                                            {progress}% - {message}
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+                            )}
+
+                            {/* Error Display */}
+                            {error && (
+                                <Grid item xs={12}>
+                                    <Alert severity="error">{error}</Alert>
+                                </Grid>
+                            )}
+
+                            {/* Results Display */}
+                            {results && (
+                                <Grid item xs={12}>
+                                    <Paper elevation={2} style={{ padding: "15px", marginTop: "20px" }}>
+                                        <Typography variant="h6" gutterBottom>
+                                            Inference Results
+                                        </Typography>
+                                        <Typography variant="body2" gutterBottom>
+                                            CSV file saved to: {results.csvPath}
+                                        </Typography>
+                                        <Typography variant="body2" gutterBottom>
+                                            Total plots processed: {results.totalPlots}
+                                        </Typography>
+                                        <Typography variant="body2" gutterBottom>
+                                            Total predictions: {results.totalPredictions}
+                                        </Typography>
+                                        {results.labels && results.labels.length > 0 && (
+                                            <Box style={{ marginTop: "10px" }}>
+                                                <Typography variant="body2" gutterBottom>
+                                                    Detected labels:
+                                                </Typography>
+                                                {results.labels.map((label, index) => (
+                                                    <Chip
+                                                        key={index}
+                                                        label={`${label.name} (${label.count})`}
+                                                        style={{ margin: "2px" }}
+                                                        size="small"
+                                                    />
+                                                ))}
+                                            </Box>
+                                        )}
+                                    </Paper>
+                                </Grid>
+                            )}
+                        </Grid>
+                    </Paper>
+                </Grid>
+
+                {/* Inference Results Table */}
+                <Grid item xs={12}>
+                    <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
+                        <InferenceTable refreshTrigger={inferenceRefreshTrigger} />
+                    </Paper>
+                </Grid>
             </Grid>
-            
-            {/* Inference Results Table */}
-            <Grid item xs={12}>
-                <Paper elevation={3} style={{ padding: "20px", margin: "10px 0" }}>
-                    <InferenceTable refreshTrigger={inferenceRefreshTrigger} />
-                </Paper>
-            </Grid>
-        </Grid>
         </Box>
     );
 }

@@ -177,8 +177,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
-
-    // NEW: granular loading states + overall initial loading overlay
     const [initialLoading, setInitialLoading] = useState(false);
     const [gpsDataLoading, setGpsDataLoading] = useState(false);
     const [markedPlotsLoading, setMarkedPlotsLoading] = useState(false);
@@ -300,6 +298,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const fetchMarkedPlots = async () => {
         if (!directory) return;
+        setMarkedPlotsLoading(true);
         try {
             const response = await fetch(`${flaskUrl}get_plot_data`, {
                 method: 'POST',
@@ -351,6 +350,9 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         } catch (error) {
             console.error("Error fetching marked plots:", error);
             setMarkedPlots([]);
+        }
+        finally {
+            setMarkedPlotsLoading(false);
         }
     };
 
@@ -441,7 +443,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     }, [open, directory]);
 
     useEffect(() => {
-        if (directory) {
+        if (directory && open) {
+            setInitialLoading(true);
             setVisualIndex(0);
             setImageIndex(0);
             setDisplayedIndex(0);
@@ -1375,6 +1378,18 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [open, visualIndex, imageList.length, plotSelectionState, cropMode, plotMode]);
+    
+    // Effect to manage initial loading state
+
+    useEffect(() => {
+
+        if (!markedPlotsLoading && initialLoading) {
+
+            setInitialLoading(false);
+
+        }
+
+    }, [markedPlotsLoading, initialLoading]);
 
     return (
         <Dialog
@@ -2071,7 +2086,12 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                             flexGrow: 1
                         }}
                     >
-                        <Table stickyHeader>
+                        {markedPlotsLoading ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
+                                <CircularProgress />
+                            </Box>
+                        ) : (
+                            <Table stickyHeader>
                             <TableHead>
                                 <TableRow>
                                     <TableCell 
@@ -2174,6 +2194,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                 ))}
                             </TableBody>
                         </Table>
+                        )}
                     </TableContainer>
                 </Drawer>
             </Box>

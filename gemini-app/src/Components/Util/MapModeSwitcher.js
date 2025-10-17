@@ -247,7 +247,7 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                           padding: "10px",
                           display: "flex",
                           flexDirection: "column",
-                          width: "100px",
+                          width: "150px",
                       }
             }
         >
