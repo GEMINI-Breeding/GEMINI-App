@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM --platform=$BUILDPLATFORM python:3.9-slim AS base
+FROM --platform=$TARGETPLATFORM python:3.9-slim AS base
 
 # Enable BuildKit features
 ARG BUILDKIT_INLINE_CACHE=1
@@ -19,40 +19,59 @@ RUN npm run build
 
 # Python dependencies builder (parallel stage)
 FROM base AS python-builder
-# Install build deps with parallel downloads
+# Install build deps with parallel downloads (added GDAL dependencies for fiona)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential gcc g++ cmake pkg-config \
     libssl-dev zlib1g-dev libffi-dev python3-dev \
+    libxml2-dev libxslt1-dev \
+    libgdal-dev gdal-bin libgeos-dev libproj-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install conda with parallel downloads
-RUN curl -L -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-    && chmod +x ~/miniconda.sh \
-    && ~/miniconda.sh -b -p /opt/conda \
-    && rm ~/miniconda.sh \
+# Install conda and mamba
+RUN set -eux; \
+    echo "Building on ${BUILDPLATFORM:-unknown} for ${TARGETPLATFORM:-unknown}"; \
+    case "${TARGETPLATFORM}" in \
+      linux/arm64*|linux/aarch64*) \
+        MINICONDA=Miniconda3-latest-Linux-aarch64.sh; \
+        echo "Selected ARM64 installer: $MINICONDA"; \
+        ;; \
+      linux/amd64*|linux/x86_64*|*) \
+        MINICONDA=Miniconda3-latest-Linux-x86_64.sh; \
+        echo "Selected AMD64 installer: $MINICONDA"; \
+        ;; \
+    esac; \
+    curl -L -o /tmp/miniconda.sh "https://repo.anaconda.com/miniconda/$MINICONDA" \
+    && chmod +x /tmp/miniconda.sh \
+    && /tmp/miniconda.sh -b -p /opt/conda \
+    && rm /tmp/miniconda.sh \
     && /opt/conda/bin/conda config --set auto_activate_base false \
     && /opt/conda/bin/conda config --set channel_priority strict \
-    && yes | /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
-    && yes | /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    && /opt/conda/bin/conda config --set restore_free_channel true \
+    && printf "yes\n" | /opt/conda/bin/conda tos accept \
+    && /opt/conda/bin/conda install -n base -c conda-forge mamba -y \
+    && /opt/conda/bin/conda clean -afy
+
 ENV PATH=/opt/conda/bin:$PATH
 
 WORKDIR /app
 COPY GEMINI-Flask-Server/gemini-flask-server.yml ./
 COPY GEMINI-Flask-Server/requirements.txt ./
 
-# Create conda environment in expected location
-RUN conda config --set solver libmamba \
-    && conda env create -f gemini-flask-server.yml -p /app/GEMINI-Flask-Server/.conda \
-    && /app/GEMINI-Flask-Server/.conda/bin/pip install --upgrade pip setuptools wheel
+# Use mamba for environment creation with cache mount
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    --mount=type=cache,target=/root/.cache/pip \
+    mamba env create -f gemini-flask-server.yml -p /app/GEMINI-Flask-Server/.conda && \
+    /app/GEMINI-Flask-Server/.conda/bin/pip install --upgrade pip setuptools wheel
 
-# Parallel git clones and installs
-RUN --mount=type=cache,target=/root/.cache/pip \
-    git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git & \
+# Parallel git clones
+RUN git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git & \
     git clone --depth 1 --branch opencv https://github.com/GEMINI-Breeding/AgRowStitch.git & \
     git clone --depth 1 https://github.com/cvg/LightGlue.git & \
     wait
 
-RUN cd farm-ng-core \
+# Install packages with cache mount
+RUN --mount=type=cache,target=/root/.cache/pip \
+    cd farm-ng-core \
     && git submodule update --init --recursive --jobs 4 \
     && sed -i 's/"-Werror",//g' setup.py \
     && /app/GEMINI-Flask-Server/.conda/bin/pip install . \
@@ -66,6 +85,7 @@ RUN cd farm-ng-core \
 FROM base AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libglu1-mesa curl \
+    libgdal* libgeos* libproj* \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g serve concurrently \
