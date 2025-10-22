@@ -6,7 +6,7 @@ import { TileLayer } from "@deck.gl/geo-layers";
 import { FlyToInterpolator } from "@deck.gl/core";
 import SplitButton from "../Util/SplitButton";
 
-import { useDataSetters, useDataState } from "../../DataContext";
+import { useDataSetters, useDataState, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../DataContext";
 import useTraitsColorMap from "./ColorMap";
 import GeoJsonTooltip from "./ToolTip";
 import useExtentFromBounds from "./MapHooks";
@@ -55,10 +55,6 @@ function downloadCSV(csvString, filename = "data.csv") {
 export default function MapView() {
     useTrackComponent("MapView");
 
-    const INITIAL_TILE_URL =
-        "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-    const INITIAL_BOUNDS_URL = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
-
     const {
         viewState,
         selectedTilePath,
@@ -95,14 +91,14 @@ export default function MapView() {
 
     useEffect(() => {
         if (selectedTilePath) {
-            setTileUrl(INITIAL_TILE_URL.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}${selectedTilePath}`)));
+            setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}${selectedTilePath}`)));
             setBoundsUrl(
-                INITIAL_BOUNDS_URL.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}${selectedTilePath}`))
+                BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(`${flaskUrl}${selectedTilePath}`))
             );
         } else {
             // Reset to initial state
-            setTileUrl(INITIAL_TILE_URL);
-            setBoundsUrl(INITIAL_BOUNDS_URL);
+            setTileUrl(TILE_URL_TEMPLATE);
+            setBoundsUrl(BOUNDS_URL_TEMPLATE);
         }
     }, [selectedTilePath]);
 

@@ -4,7 +4,7 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers";
 import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
-import { useDataState, useDataSetters, TILE_URL_TEMPLATE } from "../../../DataContext";
+import { useDataState, useDataSetters, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../../DataContext";
 import GeoJsonTooltip from "../../Map/ToolTip";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
@@ -30,9 +30,6 @@ export const selectionMode = new TranslateMode();
 
 function BoundaryMap({ task }) {
     useTrackComponent("BoundaryMap");
-    const INITIAL_TILE_URL =
-        "http://127.0.0.1:8091/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-    const INITIAL_BOUNDS_URL = "http://127.0.0.1:8091/cog/bounds?url=${FILE_PATH}";
     
     const {
         viewState,
@@ -68,11 +65,11 @@ function BoundaryMap({ task }) {
             setSelectedTilePath(newPath);
             
             const encodedPath = encodeURIComponent(`${flaskUrl}${newPath}`);
-            setTileUrl(INITIAL_TILE_URL.replace("${FILE_PATH}", encodedPath));
-            setBoundsUrl(INITIAL_BOUNDS_URL.replace("${FILE_PATH}", encodedPath));
+            setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
+            setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
         } else {
-            setTileUrl(INITIAL_TILE_URL);
-            setBoundsUrl(INITIAL_BOUNDS_URL);
+            setTileUrl(TILE_URL_TEMPLATE);
+            setBoundsUrl(BOUNDS_URL_TEMPLATE);
         }
         const newPrepOrthoTileLayer = new TileLayer({
             id: "geotiff-tile-layer",
@@ -132,7 +129,7 @@ function BoundaryMap({ task }) {
             if (prepAgRowStitchPlotPaths[0]) {
                 const firstPlotPath = "files/" + prepAgRowStitchPlotPaths[0].fullPath;
                 const encodedPath = encodeURIComponent(`${flaskUrl}${firstPlotPath}`);
-                setBoundsUrl(INITIAL_BOUNDS_URL.replace("${FILE_PATH}", encodedPath));
+                setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
                 setSelectedTilePath(firstPlotPath);
             }
         } else {
