@@ -1,33 +1,73 @@
 import React, { useMemo } from "react";
 import { DataGrid } from '@mui/x-data-grid';
-import { Box, Typography } from "@mui/material";
+import { Box, Typography, IconButton, Tooltip } from "@mui/material";
+import VisibilityIcon from '@mui/icons-material/Visibility';
 
-const CSVDataTable = ({ data }) => {
+const CSVDataTable = ({ data, onVisualizePlot }) => {
   // Create columns dynamically from the data
   const columns = useMemo(() => {
     if (data.length === 0) return [];
-    
-    const headers = Object.keys(data[0]);
-    return headers.map((header, index) => ({
-      field: header,
-      headerName: header,
-      flex: 1,
-      minWidth: 120,
-      filterable: true,
-      sortable: true,
-      // Add custom styling for better readability
-      renderCell: (params) => (
-        <Box sx={{ 
-          whiteSpace: 'normal', 
-          wordWrap: 'break-word',
-          lineHeight: 1.2,
-          py: 1
-        }}>
-          {params.value}
-        </Box>
-      ),
-    }));
-  }, [data]);
+
+    const headers = Object.keys(data[0]).filter((header) => !header.startsWith('__'));
+    return headers.map((header) => {
+      if (header === 'visualizePlot' && onVisualizePlot) {
+        return {
+          field: header,
+          headerName: 'Actions',
+          flex: 0,
+          minWidth: 120,
+          sortable: false,
+          filterable: false,
+          disableColumnMenu: true,
+          align: 'center',
+          headerAlign: 'center',
+          renderCell: (params) => {
+            const meta = params.row.__visualizeMeta;
+            const hasEntries = Boolean(meta && meta.inferenceEntries && meta.inferenceEntries.length > 0);
+            const handleClick = () => {
+              if (!hasEntries || !onVisualizePlot) return;
+              onVisualizePlot(params.row);
+            };
+            const unavailableMessage = 'Plot visualization unavailable';
+            return (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                <Tooltip title={hasEntries ? 'Visualize plot' : unavailableMessage}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={handleClick}
+                      disabled={!hasEntries}
+                    >
+                      <VisibilityIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
+            );
+          },
+        };
+      }
+
+      return {
+        field: header,
+        headerName: header,
+        flex: 1,
+        minWidth: 120,
+        filterable: true,
+        sortable: true,
+        renderCell: (params) => (
+          <Box sx={{
+            whiteSpace: 'normal',
+            wordWrap: 'break-word',
+            lineHeight: 1.2,
+            py: 1
+          }}>
+            {params.value}
+          </Box>
+        ),
+      };
+    });
+  }, [data, onVisualizePlot]);
 
   // Add unique IDs to rows for DataGrid
   const rows = useMemo(() => {

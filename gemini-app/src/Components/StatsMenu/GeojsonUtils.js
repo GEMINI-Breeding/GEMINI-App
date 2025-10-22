@@ -58,6 +58,7 @@ export function tableBuilder(geojsonList, options = {}) {
 
         gjson.features.forEach((feature) => {
             const props = { ...(feature.properties || {}) };
+            const originalProps = { ...(feature.properties || {}) };
 
             // If a property key contains '/', normalize it (same logic as in LoadTableModal normalization)
             Object.keys(props).forEach((k) => {
@@ -85,7 +86,7 @@ export function tableBuilder(geojsonList, options = {}) {
             // prefer sourcePlatform if provided
             if (options.includePlatform && sourcePlatform) props.source_platform = props.source_platform || sourcePlatform;
 
-            mergedFeatures.push({ properties: props, geometry: feature.geometry });
+            mergedFeatures.push({ properties: props, geometry: feature.geometry, _source_meta: sourceMeta, _original_props: originalProps });
         });
     });
 
@@ -155,13 +156,34 @@ export function tableBuilder(geojsonList, options = {}) {
 
     // Serialize CSV
     let csv = finalHeaders.join(',') + '\n';
+    const rowsForReturn = [];
     mergedFeatures.forEach((f) => {
-        const row = finalHeaders.map((h) => {
+        const rowValues = [];
+        const rowObject = {};
+        finalHeaders.forEach((h) => {
             const v = f.properties[h];
-            return v === undefined || v === null ? '' : `${v}`;
-        }).join(',');
-        csv += row + '\n';
+            const cell = v === undefined || v === null ? '' : `${v}`;
+            rowValues.push(cell);
+            rowObject[h] = cell;
+        });
+        csv += rowValues.join(',') + '\n';
+        if (options.returnDetails) {
+            rowsForReturn.push({
+                data: rowObject,
+                sourceMeta: f._source_meta || {},
+                originalProps: f._original_props || {},
+            });
+        }
     });
 
-    return csv;
+    if (!options.returnDetails) {
+        return csv;
+    }
+
+    return {
+        csv,
+        headers: finalHeaders,
+        rows: rowsForReturn.map(entry => entry.data),
+        featureMetas: rowsForReturn.map(entry => ({ sourceMeta: entry.sourceMeta, originalProps: entry.originalProps })),
+    };
 }

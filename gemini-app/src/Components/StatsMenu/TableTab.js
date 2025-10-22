@@ -212,15 +212,11 @@ const TableViewTab = () => {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            {sensorData && sensorData.length > 0 ? (
-                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
-                    Statistics
-                </Typography>
-            ) : (
-                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
+            {!(sensorData && sensorData.length > 0) && (
+                <Typography variant="h5" component="h2" align="center" style={{ padding: '16px' }}>
                     Use the ☰ button to select a dataset
                 </Typography>
-            )} 
+            )}
 
             {/* <Box sx={{ padding: '10px', textAlign: 'center' }}>
                 <Typography variant="body1" component="p">
