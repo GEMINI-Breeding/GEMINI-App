@@ -46,7 +46,6 @@ RUN set -eux; \
     && rm /tmp/miniconda.sh \
     && /opt/conda/bin/conda config --set auto_activate_base false \
     && /opt/conda/bin/conda config --set channel_priority strict \
-    && /opt/conda/bin/conda config --set restore_free_channel true \
     && printf "yes\n" | /opt/conda/bin/conda tos accept \
     && /opt/conda/bin/conda install -n base -c conda-forge mamba -y \
     && /opt/conda/bin/conda clean -afy
