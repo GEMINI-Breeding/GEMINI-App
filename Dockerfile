@@ -58,7 +58,7 @@ COPY GEMINI-Flask-Server/requirements.txt ./
 
 # Use mamba for environment creation with cache mount
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    --mount=type=cache,target=/root/.cache/pip \
+    \
     mamba env create -f gemini-flask-server.yml -p /app/GEMINI-Flask-Server/.conda && \
     /app/GEMINI-Flask-Server/.conda/bin/pip install --upgrade pip setuptools wheel
 
