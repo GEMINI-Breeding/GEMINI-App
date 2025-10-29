@@ -106,7 +106,7 @@ docker-compose.yml
 # Specific large directories we don't need
 GEMINI-Flask-Server/.conda/
 GEMINI-Flask-Server/farm-ng-core/
-GEMINI-Flask-Server/AgRowStitch/
+#GEMINI-Flask-Server/AgRowStitch/
 GEMINI-Flask-Server/LightGlue/
 
 # IDE
