@@ -33,6 +33,8 @@ function PlotImageExtractor() {
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [plotCount, setPlotCount] = useState(0);
+    const [availableOrthoTypes, setAvailableOrthoTypes] = useState([]);
+    const [selectedOrthoType, setSelectedOrthoType] = useState(null);
 
     // Fetch available dates with ODM orthomosaics
     useEffect(() => {
@@ -45,6 +47,108 @@ function PlotImageExtractor() {
     useEffect(() => {
         setPlotCount(featureCollectionPlot.features?.length || 0);
     }, [featureCollectionPlot]);
+
+    // When a date is selected, fetch available orthomosaic types (drone pyramids, AgRowStitch combined or individual)
+    useEffect(() => {
+        if (!selectedDate) {
+            setAvailableOrthoTypes([]);
+            setSelectedOrthoType(null);
+            return;
+        }
+
+        const fetchOrthoTypes = async () => {
+            try {
+                const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
+                const platformsResp = await fetch(`${flaskUrl}list_dirs/${basePath}`);
+                const platforms = await platformsResp.json();
+
+                const orthoTypes = [];
+
+                for (const platform of platforms) {
+                    try {
+                        const sensorsResp = await fetch(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                        const sensors = await sensorsResp.json();
+
+                        for (const sensor of sensors) {
+                            // Check files for drone Pyramid.tif
+                            try {
+                                const filesResp = await fetch(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}`);
+                                const files = await filesResp.json();
+                                if (files.some(f => f.includes('Pyramid.tif'))) {
+                                    orthoTypes.push({
+                                        type: 'drone',
+                                        label: `Drone Orthomosaic (${platform}/${sensor})`,
+                                        path: `${basePath}/${platform}/${sensor}/${selectedDate}-RGB-Pyramid.tif`,
+                                        platform,
+                                        sensor
+                                    });
+                                }
+                            } catch (e) {
+                                // ignore
+                            }
+
+                            // Check for AgRowStitch directories
+                            try {
+                                const subDirsResp = await fetch(`${flaskUrl}list_dirs/${basePath}/${platform}/${sensor}`);
+                                const subDirs = await subDirsResp.json();
+                                const agDirs = subDirs.filter(d => d.startsWith('AgRowStitch_v'));
+                                for (const ag of agDirs) {
+                                    try {
+                                        const agFilesResp = await fetch(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${ag}`);
+                                        const agFiles = await agFilesResp.json();
+
+                                        const hasCombined = agFiles.includes('combined_mosaic_utm.tif');
+                                        if (hasCombined) {
+                                            orthoTypes.push({
+                                                type: 'agrowstitch_combined',
+                                                label: `${ag} - Combined Mosaic (${platform}/${sensor})`,
+                                                path: `${basePath}/${platform}/${sensor}/${ag}/combined_mosaic_utm.tif`,
+                                                platform,
+                                                sensor,
+                                                version: ag,
+                                                combinedMosaic: true
+                                            });
+                                        } else {
+                                            const utmFiles = agFiles.filter(f => f.includes('_utm.tif'));
+                                            if (utmFiles.length > 0) {
+                                                orthoTypes.push({
+                                                    type: 'agrowstitch',
+                                                    label: `${ag} - Individual Plots (${platform}/${sensor})`,
+                                                    path: `${basePath}/${platform}/${sensor}/${ag}`,
+                                                    platform,
+                                                    sensor,
+                                                    version: ag,
+                                                    plots: utmFiles.map(file => ({
+                                                        filename: file,
+                                                        fullPath: `${basePath}/${platform}/${sensor}/${ag}/${file}`
+                                                    }))
+                                                });
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // ignore per-sensor agrowstitch check errors
+                                    }
+                                }
+                            } catch (e) {
+                                // ignore
+                            }
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+
+                setAvailableOrthoTypes(orthoTypes);
+                setSelectedOrthoType(orthoTypes.length > 0 ? orthoTypes[0] : null);
+            } catch (error) {
+                console.error('Error fetching ortho types:', error);
+                setAvailableOrthoTypes([]);
+                setSelectedOrthoType(null);
+            }
+        };
+
+        fetchOrthoTypes();
+    }, [selectedDate, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
 
     const fetchAvailableDates = async () => {
         try {
@@ -120,10 +224,41 @@ function PlotImageExtractor() {
             return;
         }
 
+        if (!selectedOrthoType) {
+            setError('Please select an orthomosaic to crop from for the selected date');
+            return;
+        }
+
+        const buildOrthoChoiceReason = (ortho) => {
+            if (!ortho) return '';
+            try {
+                if (ortho.type === 'drone') {
+                    // return `Selected Drone orthomosaic from ${ortho.platform}/${ortho.sensor} (path: ${ortho.path}) because a Pyramid.tif was found.`;
+                    return `Selected Drone orthomosaic from ${ortho.platform}/${ortho.sensor}.`;
+                }
+                if (ortho.type === 'agrowstitch_combined') {
+                    return `Selected AgRowStitch combined mosaic ${ortho.version} from ${ortho.platform}/${ortho.sensor} (path: ${ortho.path}) because combined_mosaic_utm.tif was found.`;
+                }
+                if (ortho.type === 'agrowstitch') {
+                    const n = ortho.plots ? ortho.plots.length : 0;
+                    return `Selected AgRowStitch individual plots ${ortho.version} from ${ortho.platform}/${ortho.sensor} with ${n} plots available.`;
+                }
+                return `Selected ${ortho.label}`;
+            } catch (e) {
+                return `Selected ${ortho.label || ortho.type || 'orthomosaic'}`;
+            }
+        };
+
         try {
             setLoading(true);
             setError('');
             setMessage('');
+
+            const orthoReason = buildOrthoChoiceReason(selectedOrthoType);
+            // Print reason to console for debugging/trace
+            console.log('Ortho selection reason:', orthoReason);
+            // Also show a temporary message in the UI so the user sees why this ortho was chosen
+            setMessage(orthoReason);
 
             const response = await fetch(`${flaskUrl}split_orthomosaics`, {
                 method: 'POST',
@@ -134,7 +269,10 @@ function PlotImageExtractor() {
                     location: selectedLocationGCP,
                     population: selectedPopulationGCP,
                     date: selectedDate,
-                    boundaries: featureCollectionPlot
+                    boundaries: featureCollectionPlot,
+                    ortho_type: selectedOrthoType.type,
+                    ortho_path: selectedOrthoType.path,
+                    agrowstitch_plots: selectedOrthoType.plots || []
                 })
             });
 
@@ -183,6 +321,32 @@ function PlotImageExtractor() {
                         ))}
                     </Select>
                 </FormControl>
+
+                {/* Orthomosaic Type Selection (appears after date selection) */}
+                {availableOrthoTypes.length > 0 && (
+                    <FormControl fullWidth sx={{ mb: 2 }}>
+                        <InputLabel id="ortho-type-label">Orthomosaic to Crop</InputLabel>
+                        <Select
+                            labelId="ortho-type-label"
+                            value={selectedOrthoType}
+                            label="Orthomosaic to Crop"
+                            onChange={(e) => setSelectedOrthoType(e.target.value)}
+                            renderValue={(val) => (val ? val.label : '')}
+                        >
+                            {availableOrthoTypes.map((ortho, idx) => (
+                                <MenuItem key={idx} value={ortho}>
+                                    {ortho.label}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                )}
+
+                {availableOrthoTypes.length === 0 && selectedDate && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                        No orthomosaics found for the selected date to crop from.
+                    </Alert>
+                )}
 
                 {availableDates.length === 0 && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
