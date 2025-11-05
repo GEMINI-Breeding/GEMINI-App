@@ -35,6 +35,7 @@ function PlotImageExtractor() {
     const [plotCount, setPlotCount] = useState(0);
     const [availableOrthoTypes, setAvailableOrthoTypes] = useState([]);
     const [selectedOrthoType, setSelectedOrthoType] = useState(null);
+    const [loadingOrthoTypes, setLoadingOrthoTypes] = useState(false);
 
     // Fetch available dates with ODM orthomosaics
     useEffect(() => {
@@ -53,10 +54,14 @@ function PlotImageExtractor() {
         if (!selectedDate) {
             setAvailableOrthoTypes([]);
             setSelectedOrthoType(null);
+            setLoadingOrthoTypes(false);
             return;
         }
 
         const fetchOrthoTypes = async () => {
+            setLoadingOrthoTypes(true);
+            setSelectedOrthoType(null); // Clear selection while loading
+            
             try {
                 const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
                 const platformsResp = await fetch(`${flaskUrl}list_dirs/${basePath}`);
@@ -144,6 +149,8 @@ function PlotImageExtractor() {
                 console.error('Error fetching ortho types:', error);
                 setAvailableOrthoTypes([]);
                 setSelectedOrthoType(null);
+            } finally {
+                setLoadingOrthoTypes(false);
             }
         };
 
@@ -180,7 +187,7 @@ function PlotImageExtractor() {
 
     const checkForOdmOrthomosaic = async (basePath, date) => {
         try {
-            // Check for ODM orthomosaics in the date directory
+            // Check for any orthomosaics (Pyramid.tif or AgRowStitch) in the date directory
             const platformResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}`);
             const platforms = await platformResponse.json();
             
@@ -190,18 +197,37 @@ function PlotImageExtractor() {
                     const sensors = await sensorResponse.json();
                     
                     for (const sensor of sensors) {
+                        // Check for Pyramid.tif files directly in sensor folder
                         try {
-                            const processingResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
-                            const processingDirs = await processingResponse.json();
+                            const filesResponse = await fetch(`${flaskUrl}list_files/${basePath}/${date}/${platform}/${sensor}`);
+                            const files = await filesResponse.json();
                             
-                            // Look for ODM or OpenDroneMap directories
-                            const hasOdm = processingDirs.some(dir => 
-                                dir.toLowerCase().includes('odm') || 
-                                dir.toLowerCase().includes('opendronemap')
-                            );
-                            
-                            if (hasOdm) {
+                            if (files.some(file => file.includes('Pyramid.tif'))) {
                                 return true;
+                            }
+                        } catch (error) {
+                            // Continue checking
+                        }
+                        
+                        // Check for AgRowStitch directories with orthomosaics
+                        try {
+                            const subDirsResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
+                            const subDirs = await subDirsResponse.json();
+                            const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
+                            
+                            for (const agrowstitchDir of agrowstitchDirs) {
+                                try {
+                                    const agFilesResponse = await fetch(`${flaskUrl}list_files/${basePath}/${date}/${platform}/${sensor}/${agrowstitchDir}`);
+                                    const agFiles = await agFilesResponse.json();
+                                    
+                                    // Check for combined mosaic or individual plot files
+                                    if (agFiles.includes('combined_mosaic_utm.tif') || 
+                                        agFiles.some(file => file.includes('_utm.tif'))) {
+                                        return true;
+                                    }
+                                } catch (error) {
+                                    // Continue checking
+                                }
                             }
                         } catch (error) {
                             // Continue checking other sensors
@@ -259,6 +285,7 @@ function PlotImageExtractor() {
             console.log('Ortho selection reason:', orthoReason);
             // Also show a temporary message in the UI so the user sees why this ortho was chosen
             setMessage(orthoReason);
+            console.log('Ortho path used:', selectedOrthoType.path);
 
             const response = await fetch(`${flaskUrl}split_orthomosaics`, {
                 method: 'POST',
@@ -323,26 +350,34 @@ function PlotImageExtractor() {
                 </FormControl>
 
                 {/* Orthomosaic Type Selection (appears after date selection) */}
-                {availableOrthoTypes.length > 0 && (
+                {(loadingOrthoTypes || availableOrthoTypes.length > 0) && selectedDate && (
                     <FormControl fullWidth sx={{ mb: 2 }}>
                         <InputLabel id="ortho-type-label">Orthomosaic to Crop</InputLabel>
                         <Select
                             labelId="ortho-type-label"
-                            value={selectedOrthoType}
+                            value={selectedOrthoType || ''}
                             label="Orthomosaic to Crop"
                             onChange={(e) => setSelectedOrthoType(e.target.value)}
-                            renderValue={(val) => (val ? val.label : '')}
+                            disabled={loadingOrthoTypes}
+                            renderValue={(val) => {
+                                if (loadingOrthoTypes) return 'Loading...';
+                                return val ? val.label : '';
+                            }}
                         >
-                            {availableOrthoTypes.map((ortho, idx) => (
-                                <MenuItem key={idx} value={ortho}>
-                                    {ortho.label}
-                                </MenuItem>
-                            ))}
+                            {loadingOrthoTypes ? (
+                                <MenuItem disabled>Loading orthomosaics...</MenuItem>
+                            ) : (
+                                availableOrthoTypes.map((ortho, idx) => (
+                                    <MenuItem key={idx} value={ortho}>
+                                        {ortho.label}
+                                    </MenuItem>
+                                ))
+                            )}
                         </Select>
                     </FormControl>
                 )}
 
-                {availableOrthoTypes.length === 0 && selectedDate && (
+                {!loadingOrthoTypes && availableOrthoTypes.length === 0 && selectedDate && (
                     <Alert severity="info" sx={{ mb: 2 }}>
                         No orthomosaics found for the selected date to crop from.
                     </Alert>
