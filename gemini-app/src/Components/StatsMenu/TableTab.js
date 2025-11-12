@@ -8,6 +8,7 @@ import { fetchData, useDataSetters, useDataState } from "../../DataContext.js";
 
 import LoadTableModal from "./LoadTableModal.js";
 import LoadGraphModal from "./LoadGraphModal.js";
+import TableBuilder from "./TableBuilder.js";
 
 
 const TableViewTab = () => {
@@ -211,15 +212,11 @@ const TableViewTab = () => {
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>
-            {sensorData && sensorData.length > 0 ? (
-                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
-                    Statistics
-                </Typography>
-            ) : (
-                <Typography variant="h4" component="h2" align="center" style={{ padding: '16px' }}>
+            {!(sensorData && sensorData.length > 0) && (
+                <Typography variant="h5" component="h2" align="center" style={{ padding: '16px' }}>
                     Use the ☰ button to select a dataset
                 </Typography>
-            )} 
+            )}
 
             {/* <Box sx={{ padding: '10px', textAlign: 'center' }}>
                 <Typography variant="body1" component="p">
@@ -236,24 +233,7 @@ const TableViewTab = () => {
                 </Typography>
             </Box> */}
 
-            {sensorData && sensorData.length > 0 && (
-                sensorData
-                    // .filter((platformData) => includedPlatforms.includes(platformData.title))
-                    .map((platformData) => (
-                    <NestedSection
-                        key={platformData.title}
-                        title={platformData.title}
-                        nestedData={platformData.nestedData.map((sensorData) => ({
-                            summary: sensorData.summary,
-                            data: sensorData.data,
-                            columns: sensorData.columns,
-                        }))}
-                        activeTab={tableViewTabNo}
-                        handleAction={null}
-                        CustomComponent={CustomComponent}
-                    />
-                ))
-            )}
+            <TableBuilder />
 
 
             <Snackbar

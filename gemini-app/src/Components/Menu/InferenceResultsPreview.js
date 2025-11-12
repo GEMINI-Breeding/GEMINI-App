@@ -23,7 +23,7 @@ import {
 import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen} from '@mui/icons-material';
 import { fetchData, useDataState } from "../../DataContext";
 
-const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
+const InferenceResultsPreview = ({ open, onClose, inferenceData, initialPlotHint = null, rowContext = null }) => {
     const [plotImages, setPlotImages] = useState([]);
     const [currentPlotIndex, setCurrentPlotIndex] = useState(0);
     const [currentImageUrl, setCurrentImageUrl] = useState('');
@@ -72,7 +72,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             fetchPlotImages();
             fetchPlotData();
         }
-        
+
         if (open) {
             setZoom(1);
             setPanX(0);
@@ -87,7 +87,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                 URL.revokeObjectURL(currentImageUrl);
             }
         };
-    }, [open, inferenceData, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+    }, [open, inferenceData, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl, initialPlotHint, rowContext]);
 
     useEffect(() => {
         // Fetch predictions when plot changes
@@ -217,6 +217,31 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         };
     }, [imageRef.current, isImageLoaded, showBoundingBoxes, showMasks, hasSegmentation]);
 
+    const normalizePlotHint = (hint) => {
+        if (hint === null || hint === undefined) return null;
+        const str = String(hint).trim();
+        return str === '' ? null : str;
+    };
+
+    const extractPlotNumber = (value) => {
+        if (value === null || value === undefined) return null;
+        const match = String(value).match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : null;
+    };
+
+    const filenameMatchesHint = (filename, hintStr, hintNumber) => {
+        if (!filename) return false;
+        const lower = filename.toLowerCase();
+        if (hintNumber !== null) {
+            const numberMatch = lower.match(/plot[_-]?(\d+)/);
+            if (numberMatch && parseInt(numberMatch[1], 10) === hintNumber) return true;
+        }
+        if (hintStr) {
+            return lower.includes(hintStr.toLowerCase());
+        }
+        return false;
+    };
+
     const fetchPlotImages = async () => {
         if (!inferenceData) return;
         
@@ -261,12 +286,95 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     });
             }
 
+            let initialIndex = 0;
+            const hintCandidates = [];
+            if (rowContext && rowContext.plotHint) hintCandidates.push(rowContext.plotHint);
+            if (initialPlotHint) hintCandidates.push(initialPlotHint);
+
+            const numericCandidates = new Set();
+            if (rowContext && rowContext.plotNumber !== undefined && rowContext.plotNumber !== null && !Number.isNaN(rowContext.plotNumber)) {
+                numericCandidates.add(Number(rowContext.plotNumber));
+            }
+
+            if (rowContext && rowContext.imageName) {
+                const imageNameLower = String(rowContext.imageName).toLowerCase();
+                const matchedByImage = plotFiles.filter(file => file.toLowerCase().includes(imageNameLower));
+                if (matchedByImage.length > 0) {
+                    plotFiles = matchedByImage;
+                }
+            }
+
+            const applyHintFilters = (files) => {
+                let current = files;
+                hintCandidates.forEach((hint) => {
+                    const normalized = normalizePlotHint(hint);
+                    if (!normalized || current.length === 0) return;
+                    const extracted = extractPlotNumber(normalized);
+                    if (extracted !== null && !numericCandidates.has(extracted)) {
+                        numericCandidates.add(extracted);
+                    }
+                    const explicitNumber = numericCandidates.size > 0 ? [...numericCandidates][0] : extracted;
+                    const matched = current.filter(file => filenameMatchesHint(file, normalized, explicitNumber));
+                    if (matched.length > 0) {
+                        current = matched;
+                    }
+                });
+                return current;
+            };
+
+            if (plotFiles.length > 0) {
+                const filtered = applyHintFilters(plotFiles);
+                if (filtered.length > 0) {
+                    plotFiles = filtered;
+                }
+            }
+
+            if (numericCandidates.size > 0 && plotFiles.length > 1) {
+                const numberFiltered = plotFiles.filter(file => {
+                    const num = extractPlotNumber(file);
+                    return num !== null && numericCandidates.has(num);
+                });
+                if (numberFiltered.length > 0) {
+                    plotFiles = numberFiltered;
+                }
+            }
+
+            if (plotFiles.length === 0) {
+                setPlotImages([]);
+                setCurrentPlotIndex(0);
+                setLoading(false);
+                return;
+            }
+
+            if (numericCandidates.size > 0) {
+                const desiredNumber = [...numericCandidates][0];
+                const desiredIndex = plotFiles.findIndex(file => {
+                    const num = extractPlotNumber(file);
+                    return num !== null && num === desiredNumber;
+                });
+                if (desiredIndex >= 0) {
+                    initialIndex = desiredIndex;
+                }
+            } else if (hintCandidates.length > 0) {
+                for (const hint of hintCandidates) {
+                    const normalized = normalizePlotHint(hint);
+                    if (!normalized) continue;
+                    const hintNumber = extractPlotNumber(normalized);
+                    const idx = plotFiles.findIndex(file => filenameMatchesHint(file, normalized, hintNumber));
+                    if (idx >= 0) {
+                        initialIndex = idx;
+                        break;
+                    }
+                }
+            }
+
+            const clampedIndex = Math.max(0, Math.min(initialIndex, plotFiles.length - 1));
             setPlotImages(plotFiles);
-            setCurrentPlotIndex(0);
+            setCurrentPlotIndex(clampedIndex);
             setLoading(false);
 
             if (plotFiles.length > 0) {
-                loadPlotImage(plotFiles[0], date, platform, sensor, versionDir, isPlotImages);
+                loadPlotImage(plotFiles[clampedIndex], date, platform, sensor, versionDir, isPlotImages);
             }
             
         } catch (error) {
