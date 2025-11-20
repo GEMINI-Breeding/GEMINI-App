@@ -1,16 +1,150 @@
 services:
+
   app:
+
     image: paibl/gemini-breeding:latest
+    container_name: gemini-app
+    
     build:
       context: .
       dockerfile: Dockerfile
+
     env_file:
       - ./gemini-app/.env  # Load .env file directly
+      - ./GEMINI-Flask-Server/.env.database  # Add database config
+
     ports:
       - "${REACT_APP_FRONT_PORT:-3000}:${REACT_APP_FRONT_PORT:-3000}"
       - "${REACT_APP_FLASK_PORT:-5000}:${REACT_APP_FLASK_PORT:-5000}"
       - "${REACT_APP_TILE_SERVER_PORT:-8091}:${REACT_APP_TILE_SERVER_PORT:-8091}"
+
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${REACT_APP_APP_DATA:-~/GEMINI-App-Data}:/root/GEMINI-App-Data
       - ./gemini-app/.env:/app/gemini-app/.env:ro
+      - ./GEMINI-Flask-Server/.env.database:/app/GEMINI-Flask-Server/.env.database:ro
+
+    networks:
+      - gemini-network
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgis/postgis:18-3.6
+    container_name: gemini-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gemini_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gemini_password}
+      POSTGRES_DB: ${POSTGRES_DB:-gemini_db}
+      POSTGIS_GDAL_ENABLED_DRIVERS: ENABLE_ALL
+      POSTGIS_ENABLE_OUTDB_RASTERS: 1
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./GEMINI-Flask-Server/database/init-scripts:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - gemini-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gemini_user} -d ${POSTGRES_DB:-gemini_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8.4-rc1-alpine3.22
+    container_name: gemini-redis
+    restart: unless-stopped
+
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+    volumes:
+      - redis_data:/data
+
+    networks:
+      - gemini-network
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Optional: pgAdmin for database management (web UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gemini-pgadmin
+    restart: unless-stopped
+    
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@gemini.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_LISTEN_PORT: 80
+    
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    
+    networks:
+      - gemini-network
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Optional: Redis Commander for Redis management (web UI)
+  # Uncomment to enable
+  # redis-commander:
+  #   image: rediscommander/redis-commander:latest
+  #   container_name: gemini-redis-commander
+  #   restart: unless-stopped
+    
+  #   environment:
+  #     REDIS_HOSTS: redis:redis:6379
+    
+  #   ports:
+  #     - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    
+  #   networks:
+  #     - gemini-network
+    
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+
+networks:
+  gemini-network:
+    driver: bridge
+    name: gemini-network
+
+volumes:
+  postgres_data:
+    driver: local
+    name: gemini-postgres-data
+
+  redis_data:
+    driver: local
+    name: gemini-redis-data
+
+  pgadmin_data:
+    driver: local
+    name: gemini-pgadmin-data

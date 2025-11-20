@@ -24,7 +24,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     });
 
     //////////////////////////////////////////
-    // Fetch nested structure
+    // Fetch nested structure from database
     //////////////////////////////////////////
     const getData = async (url) => {
         const response = await fetch(url);
@@ -34,13 +34,138 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         return await response.json();
     };
 
+    // Fetch initial years from database
     useEffect(() => {
-        getData(`${flaskUrl}list_dirs_nested_processed`)
-            .then((data) => setNestedStructure(data))
-            .catch((error) => console.error("Error fetching nested structure:", error));
+        getData(`${flaskUrl}db/years`)
+            .then((years) => {
+                const yearsObj = {};
+                years.forEach(year => {
+                    yearsObj[year] = {};
+                });
+                setNestedStructure(yearsObj);
+            })
+            .catch((error) => console.error("Error fetching years:", error));
+    }, [flaskUrl]);
 
-        console.log("nestedStructure", nestedStructure);
-    }, []);
+    // Fetch experiments when year is selected
+    useEffect(() => {
+        const year = selectedValues.year;
+        if (!year) return;
+        
+        getData(`${flaskUrl}db/experiments?year=${encodeURIComponent(year)}`)
+            .then((experiments) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year]) updated[year] = {};
+                    experiments.forEach(exp => {
+                        updated[year][exp] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching experiments:", error));
+    }, [selectedValues.year, flaskUrl]);
+
+    // Fetch locations when experiment is selected
+    useEffect(() => {
+        const { year, experiment } = selectedValues;
+        if (!year || !experiment) return;
+        
+        getData(`${flaskUrl}db/locations?year=${encodeURIComponent(year)}&experiment=${encodeURIComponent(experiment)}`)
+            .then((locations) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year][experiment]) updated[year][experiment] = {};
+                    locations.forEach(loc => {
+                        updated[year][experiment][loc] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching locations:", error));
+    }, [selectedValues.year, selectedValues.experiment, flaskUrl]);
+
+    // Fetch populations when location is selected
+    useEffect(() => {
+        const { year, experiment, location } = selectedValues;
+        if (!year || !experiment || !location) return;
+        
+        getData(`${flaskUrl}db/populations?year=${encodeURIComponent(year)}&experiment=${encodeURIComponent(experiment)}&location=${encodeURIComponent(location)}`)
+            .then((populations) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year][experiment][location]) updated[year][experiment][location] = {};
+                    populations.forEach(pop => {
+                        updated[year][experiment][location][pop] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching populations:", error));
+    }, [selectedValues.year, selectedValues.experiment, selectedValues.location, flaskUrl]);
+
+    // Fetch dates when population is selected
+    useEffect(() => {
+        const { year, experiment, location, population } = selectedValues;
+        if (!year || !experiment || !location || !population) return;
+        
+        getData(`${flaskUrl}db/dates?year=${encodeURIComponent(year)}&experiment=${encodeURIComponent(experiment)}&location=${encodeURIComponent(location)}&population=${encodeURIComponent(population)}`)
+            .then((dates) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year][experiment][location][population]) {
+                        updated[year][experiment][location][population] = {};
+                    }
+                    dates.forEach(date => {
+                        updated[year][experiment][location][population][date] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching dates:", error));
+    }, [selectedValues.year, selectedValues.experiment, selectedValues.location, selectedValues.population, flaskUrl]);
+
+    // Fetch platforms when date is selected
+    useEffect(() => {
+        const { year, experiment, location, population, date } = selectedValues;
+        if (!year || !experiment || !location || !population || !date) return;
+        
+        getData(`${flaskUrl}db/platforms?year=${encodeURIComponent(year)}&experiment=${encodeURIComponent(experiment)}&location=${encodeURIComponent(location)}&population=${encodeURIComponent(population)}&date=${encodeURIComponent(date)}`)
+            .then((platforms) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year][experiment][location][population][date]) {
+                        updated[year][experiment][location][population][date] = {};
+                    }
+                    platforms.forEach(platform => {
+                        updated[year][experiment][location][population][date][platform] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching platforms:", error));
+    }, [selectedValues.year, selectedValues.experiment, selectedValues.location, selectedValues.population, selectedValues.date, flaskUrl]);
+
+    // Fetch sensors when platform is selected
+    useEffect(() => {
+        const { year, experiment, location, population, date, platform } = selectedValues;
+        if (!year || !experiment || !location || !population || !date || !platform) return;
+        
+        getData(`${flaskUrl}db/sensors?year=${encodeURIComponent(year)}&experiment=${encodeURIComponent(experiment)}&location=${encodeURIComponent(location)}&population=${encodeURIComponent(population)}&date=${encodeURIComponent(date)}&platform=${encodeURIComponent(platform)}`)
+            .then((sensors) => {
+                setNestedStructure(prev => {
+                    const updated = { ...prev };
+                    if (!updated[year][experiment][location][population][date][platform]) {
+                        updated[year][experiment][location][population][date][platform] = {};
+                    }
+                    sensors.forEach(sensor => {
+                        updated[year][experiment][location][population][date][platform][sensor] = {};
+                    });
+                    return updated;
+                });
+            })
+            .catch((error) => console.error("Error fetching sensors:", error));
+    }, [selectedValues.year, selectedValues.experiment, selectedValues.location, selectedValues.population, selectedValues.date, selectedValues.platform, flaskUrl]);
 
     //////////////////////////////////////////
     // Helper functions

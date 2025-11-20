@@ -86,17 +86,23 @@ export const TableComponent = () => {
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
         setLoading(true);
-        fetch(`${flaskUrl}list_dirs_nested`)
+        
+        // Fetch years from database first
+        fetch(`${flaskUrl}db/years`)
             .then((response) => response.json())
-            .then((data) => {
-                setData(data);
-                const transformedData = transformNestedData(data);
+            .then((years) => {
+                const yearsObj = {};
+                years.forEach(year => {
+                    yearsObj[year] = {};
+                });
+                setData(yearsObj);
+                const transformedData = transformNestedData(yearsObj);
                 setProcData(transformedData);
                 setFilteredData(transformedData);
                 setLoading(false);
             })
             .catch((error) => {
-                console.error("Error fetching nested directories:", error);
+                console.error("Error fetching years:", error);
                 setError(error);
                 setLoading(false);
             });
@@ -189,13 +195,17 @@ export const TableComponent = () => {
                     prevData.filter((row) => row.id !== id)
                 );
                 setShowDeleteSuccess(true);
-                fetch(`${flaskUrl}list_dirs_nested`)
+                fetch(`${flaskUrl}db/years`)
                     .then((response) => response.json())
-                    .then((data) => {
-                        setNestedDirectories(data);
+                    .then((years) => {
+                        const yearsObj = {};
+                        years.forEach(year => {
+                            yearsObj[year] = {};
+                        });
+                        setNestedDirectories(yearsObj);
                     })
                     .catch((error) => {
-                        console.error("Error fetching nested directories:", error);
+                        console.error("Error fetching years:", error);
                         setUploadedData(false);
                     });
             })

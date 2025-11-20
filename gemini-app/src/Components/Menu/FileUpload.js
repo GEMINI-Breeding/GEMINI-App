@@ -184,18 +184,23 @@ const FileUploadComponent = ({ actionType = null }) => {
         return () => clearInterval(intervalId);
     }, [extractingBinary]);
     
-    // Effect to fetch nested directories on component mount
+    // Effect to fetch initial years from database on component mount
     useEffect(() => {
         setIsLoading(true);
         setUploadedData(true);
-        fetch(`${flaskUrl}list_dirs_nested`)
+        fetch(`${flaskUrl}db/years`)
             .then((response) => response.json())
-            .then((data) => {
-                setNestedDirectories(data);
+            .then((years) => {
+                // Convert years array to nested object structure for backward compatibility
+                const yearsObj = {};
+                years.forEach(year => {
+                    yearsObj[year] = {};
+                });
+                setNestedDirectories(yearsObj);
                 setIsLoading(false);
             })
             .catch((error) => {
-                console.error("Error fetching nested directories:", error);
+                console.error("Error fetching years:", error);
                 setIsLoading(false);
                 setUploadedData(false);
             });
@@ -622,6 +627,10 @@ const FileUploadComponent = ({ actionType = null }) => {
         },
     });
 
+    // Note: We removed the cascading useEffect hooks that were fetching data on every value change.
+    // The dropdown options now only show what's already been uploaded to the database (from the initial fetch).
+    // Users can still type new values (freeSolo), but those values won't appear in dropdowns until after upload.
+
     // Handler for changes in the Autocomplete input
     const handleAutocompleteInputChange = (fieldName, value) => {
         setCurrentInputValues({ ...currentInputValues, [fieldName]: value });
@@ -701,18 +710,18 @@ const FileUploadComponent = ({ actionType = null }) => {
         });
     };
 
-    // Function to get options for a specific field
+    // Function to get options for a specific field from database
     const getOptionsForField = (field) => {
-        let options = [];
-        let currentLevel = nestedDirectories;
-        for (const key of dataTypes[selectedDataType].fields) {
-            if (key === field) break;
-            currentLevel = currentLevel[formik.values[key]] || {};
+        // Only year options are fetched from database on component mount
+        // All other fields allow freeSolo input but don't show autocomplete options
+        // This prevents querying the database with partial/unuploaded values
+        if (field === 'year') {
+            return Object.keys(nestedDirectories);
         }
-        if (currentLevel) {
-            options = Object.keys(currentLevel);
-        }
-        return options;
+        
+        // Return empty array for other fields - user can type freely but won't see suggestions
+        // Options will appear after data is uploaded and component remounts or refreshes
+        return [];
     };
 
     const sanitizeFieldInput = (value) => {
@@ -732,16 +741,18 @@ const FileUploadComponent = ({ actionType = null }) => {
                 id={`autocomplete-${fieldName}`}
                 options={options}
                 value={formik.values[fieldName]}
-                inputValue={currentInputValues[fieldName] || ""}
-                onInputChange={(event, value) => {
-                    const sanitizedValue = value ? sanitizeFieldInput(value) : value;
-                    handleAutocompleteInputChange(fieldName, sanitizedValue);
-                }}
-                onBlur={() => handleAutocompleteBlur(fieldName)}
                 onChange={(event, value) => {
                     const sanitizedValue = value ? sanitizeFieldInput(value) : value;
                     formik.setFieldValue(fieldName, sanitizedValue);
                 }}
+                onBlur={(event) => {
+                    // On blur, commit the current input value
+                    const value = event.target.value;
+                    const sanitizedValue = value ? sanitizeFieldInput(value) : value;
+                    formik.setFieldValue(fieldName, sanitizedValue);
+                    formik.handleBlur(event);
+                }}
+                isOptionEqualToValue={(option, value) => option === value}
                 renderInput={(params) => (
                     <TextField
                         {...params}
@@ -750,10 +761,6 @@ const FileUploadComponent = ({ actionType = null }) => {
                         fullWidth
                         error={Boolean(error)}
                         helperText={error}
-                        onChange={(event) => {
-                            const sanitizedValue = sanitizeFieldInput(event.target.value);
-                            formik.setFieldValue(fieldName, sanitizedValue);
-                        }}
                     />
                 )}
                 sx={{ width: "100%", marginTop: "20px" }}
