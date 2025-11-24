@@ -87,22 +87,29 @@ export const TableComponent = () => {
         setShowDeleteSuccess(false);
         setLoading(true);
         
-        // Fetch years from database first
-        fetch(`${flaskUrl}db/years`)
+        // Fetch all data from database
+        fetch(`${flaskUrl}db/all_data`)
             .then((response) => response.json())
-            .then((years) => {
-                const yearsObj = {};
-                years.forEach(year => {
-                    yearsObj[year] = {};
-                });
-                setData(yearsObj);
-                const transformedData = transformNestedData(yearsObj);
+            .then((dbData) => {
+                // Transform database results into table format
+                const transformedData = dbData.map((item, index) => ({
+                    id: index,
+                    year: item.year,
+                    experiment: item.experiment,
+                    location: item.location,
+                    population: item.population,
+                    date: item.date,
+                    platform: item.platform,
+                    sensor: item.sensor,
+                    cameras: item.cameras || []
+                }));
+                
                 setProcData(transformedData);
                 setFilteredData(transformedData);
                 setLoading(false);
             })
             .catch((error) => {
-                console.error("Error fetching years:", error);
+                console.error("Error fetching data:", error);
                 setError(error);
                 setLoading(false);
             });

@@ -16,6 +16,7 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     const [imageLoading, setImageLoading] = useState(false);
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
+    const [prefetchedImages, setPrefetchedImages] = useState(new Set());
 
     // for image removal selection
     const [selectionMode, setSelectionMode] = useState(false);
@@ -39,18 +40,38 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     }, [open, obj]);
 
     useEffect(() => {
-        if (directory) {
+        if (directory && obj && open) {
             fetchImages();
         }
-    }, [directory]);
+    }, [directory, open]);
 
     const API_ENDPOINT = `${flaskUrl}files`;
 
     const fetchImages = async () => {
+        if (!obj) return;
+        
         try {
             setImageViewerLoading(true);
-            const response = await fetch(`${flaskUrl}list_files/${directory}`);
+            // Build query params for database endpoint
+            const params = new URLSearchParams({
+                year: obj.year,
+                experiment: obj.experiment,
+                location: obj.location,
+                population: obj.population,
+                date: obj.date,
+                platform: obj.platform,
+                sensor: obj.sensor
+            });
+            
+            // Add camera param for Amiga/rover
+            if (obj.camera) {
+                params.append('camera', obj.camera);
+            }
+            
+            const response = await fetch(`${flaskUrl}db/images?${params.toString()}`);
             const data = await response.json();
+            console.log("Fetched images from database:", data);
+            console.log("Directory:", directory);
             setImageList(data);
             setImageViewerLoading(false);
         } catch (error) {
@@ -153,6 +174,33 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
             }
         }
     }, [imageIndex, imageList, API_ENDPOINT, directory, open]);
+
+    // Prefetch surrounding images for smooth navigation
+    useEffect(() => {
+        if (!imageList.length || !open) return;
+
+        const prefetchRange = 3; // Prefetch 3 images in each direction
+        const imagesToPrefetch = [];
+
+        // Get images before and after current index
+        for (let i = imageIndex - prefetchRange; i <= imageIndex + prefetchRange; i++) {
+            if (i >= 0 && i < imageList.length && i !== imageIndex) {
+                const imageUrl = `${API_ENDPOINT}/${directory}${imageList[i]}`;
+                if (!prefetchedImages.has(imageUrl)) {
+                    imagesToPrefetch.push(imageUrl);
+                }
+            }
+        }
+
+        // Prefetch images
+        imagesToPrefetch.forEach(url => {
+            const img = new Image();
+            img.src = url;
+            img.onload = () => {
+                setPrefetchedImages(prev => new Set(prev).add(url));
+            };
+        });
+    }, [imageIndex, imageList, API_ENDPOINT, directory, open, prefetchedImages]);
 
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;

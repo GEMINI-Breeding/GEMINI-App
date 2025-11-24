@@ -115,6 +115,12 @@ const FileUploadComponent = ({ actionType = null }) => {
     const { setExtractingBinary } = useDataSetters();
     const [isLoading, setIsLoading] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
+    const [experiments, setExperiments] = useState([]);
+    const [locations, setLocations] = useState([]);
+    const [populations, setPopulations] = useState([]);
+    const [dates, setDates] = useState([]);
+    const [platforms, setPlatforms] = useState([]);
+    const [sensors, setSensors] = useState([]);
     const [selectedDataType, setSelectedDataType] = useState("image");
     const [files, setFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
@@ -627,9 +633,77 @@ const FileUploadComponent = ({ actionType = null }) => {
         },
     });
 
-    // Note: We removed the cascading useEffect hooks that were fetching data on every value change.
-    // The dropdown options now only show what's already been uploaded to the database (from the initial fetch).
-    // Users can still type new values (freeSolo), but those values won't appear in dropdowns until after upload.
+    // Fetch experiments when year changes
+    useEffect(() => {
+        if (!formik.values.year) {
+            setExperiments([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/experiments?year=${formik.values.year}`)
+            .then(response => response.json())
+            .then(data => setExperiments(data))
+            .catch(error => console.error("Error fetching experiments:", error));
+    }, [formik.values.year, flaskUrl]);
+
+    // Fetch locations when year and experiment change
+    useEffect(() => {
+        if (!formik.values.year || !formik.values.experiment) {
+            setLocations([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/locations?year=${formik.values.year}&experiment=${formik.values.experiment}`)
+            .then(response => response.json())
+            .then(data => setLocations(data))
+            .catch(error => console.error("Error fetching locations:", error));
+    }, [formik.values.year, formik.values.experiment, flaskUrl]);
+
+    // Fetch populations when year, experiment, and location change
+    useEffect(() => {
+        if (!formik.values.year || !formik.values.experiment || !formik.values.location) {
+            setPopulations([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/populations?year=${formik.values.year}&experiment=${formik.values.experiment}&location=${formik.values.location}`)
+            .then(response => response.json())
+            .then(data => setPopulations(data))
+            .catch(error => console.error("Error fetching populations:", error));
+    }, [formik.values.year, formik.values.experiment, formik.values.location, flaskUrl]);
+
+    // Fetch dates when all experiment fields are filled
+    useEffect(() => {
+        if (!formik.values.year || !formik.values.experiment || !formik.values.location || !formik.values.population) {
+            setDates([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/dates?year=${formik.values.year}&experiment=${formik.values.experiment}&location=${formik.values.location}&population=${formik.values.population}`)
+            .then(response => response.json())
+            .then(data => setDates(data))
+            .catch(error => console.error("Error fetching dates:", error));
+    }, [formik.values.year, formik.values.experiment, formik.values.location, formik.values.population, flaskUrl]);
+
+    // Fetch platforms when date is selected
+    useEffect(() => {
+        if (!formik.values.year || !formik.values.experiment || !formik.values.location || !formik.values.population || !formik.values.date) {
+            setPlatforms([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/platforms?year=${formik.values.year}&experiment=${formik.values.experiment}&location=${formik.values.location}&population=${formik.values.population}&date=${formik.values.date}`)
+            .then(response => response.json())
+            .then(data => setPlatforms(data))
+            .catch(error => console.error("Error fetching platforms:", error));
+    }, [formik.values.year, formik.values.experiment, formik.values.location, formik.values.population, formik.values.date, flaskUrl]);
+
+    // Fetch sensors when platform is selected
+    useEffect(() => {
+        if (!formik.values.year || !formik.values.experiment || !formik.values.location || !formik.values.population || !formik.values.date || !formik.values.platform) {
+            setSensors([]);
+            return;
+        }
+        fetch(`${flaskUrl}db/sensors?year=${formik.values.year}&experiment=${formik.values.experiment}&location=${formik.values.location}&population=${formik.values.population}&date=${formik.values.date}&platform=${formik.values.platform}`)
+            .then(response => response.json())
+            .then(data => setSensors(data))
+            .catch(error => console.error("Error fetching sensors:", error));
+    }, [formik.values.year, formik.values.experiment, formik.values.location, formik.values.population, formik.values.date, formik.values.platform, flaskUrl]);
 
     // Handler for changes in the Autocomplete input
     const handleAutocompleteInputChange = (fieldName, value) => {
@@ -712,16 +786,24 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     // Function to get options for a specific field from database
     const getOptionsForField = (field) => {
-        // Only year options are fetched from database on component mount
-        // All other fields allow freeSolo input but don't show autocomplete options
-        // This prevents querying the database with partial/unuploaded values
-        if (field === 'year') {
-            return Object.keys(nestedDirectories);
+        switch(field) {
+            case 'year':
+                return Object.keys(nestedDirectories);
+            case 'experiment':
+                return experiments;
+            case 'location':
+                return locations;
+            case 'population':
+                return populations;
+            case 'date':
+                return dates;
+            case 'platform':
+                return platforms;
+            case 'sensor':
+                return sensors;
+            default:
+                return [];
         }
-        
-        // Return empty array for other fields - user can type freely but won't see suggestions
-        // Options will appear after data is uploaded and component remounts or refreshes
-        return [];
     };
 
     const sanitizeFieldInput = (value) => {
