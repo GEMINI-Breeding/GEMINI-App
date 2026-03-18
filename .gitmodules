@@ -1,4 +1,7 @@
-[submodule "GEMINI-Flask-Server"]
-	path = GEMINI-Flask-Server
-	url = https://github.com/GEMINI-Breeding/GEMINI-Flask-Server.git
-    branch = main
+[submodule "backend/vendor/AgRowStitch"]
+	path = backend/vendor/AgRowStitch
+	url = https://github.com/GEMINI-Breeding/AgRowStitch.git
+	branch = opencv
+[submodule "backend/vendor/LightGlue"]
+	path = backend/vendor/LightGlue
+	url = https://github.com/cvg/LightGlue.git

@@ -1,0 +1,248 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target-triple: x86_64-unknown-linux-gnu
+            artifact-glob: "frontend/src-tauri/target/release/bundle/deb/*.deb"
+            artifact-name: gemi-linux-x86_64
+          - os: macos-latest
+            target-triple: aarch64-apple-darwin
+            artifact-glob: "frontend/src-tauri/target/release/bundle/dmg/*.dmg"
+            artifact-name: gemi-macos-arm64
+          - os: windows-latest
+            target-triple: x86_64-pc-windows-msvc
+            artifact-glob: "frontend/src-tauri/target/release/bundle/nsis/*.exe"
+            artifact-name: gemi-windows-x86_64
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.target-triple }})
+
+    steps:
+      # ── Free disk space (Linux runners ship with ~14 GB free; PyTorch + Rust
+      #    build artifacts + PyInstaller output can exceed that) ─────────────────
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/lib/mono
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /home/linuxbrew/.linuxbrew
+          sudo rm -rf /opt/az
+          sudo rm -rf /usr/local/aws-cli
+          sudo rm -rf /usr/local/aws-sam-cli
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force || true
+          df -h
+
+      # ── Checkout ─────────────────────────────────────────────────────────────
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ── System dependencies ───────────────────────────────────────────────────
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config
+
+      # ── Python + uv ───────────────────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/pyproject.toml"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Cache the full venv — keyed on pyproject.toml, uv.lock, AND submodule
+      # commit hashes so any vendor update (AgRowStitch, LightGlue, bin_to_images)
+      # properly invalidates the cache.
+      - name: Get submodule hashes for cache key
+        id: submodule-hashes
+        shell: bash
+        run: |
+          HASHES=$(git submodule foreach --quiet --recursive 'git rev-parse HEAD' | tr '\n' ':')
+          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Python venv
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock') }}-${{ steps.submodule-hashes.outputs.hashes }}
+
+      - name: Install Python dependencies
+        working-directory: backend
+        shell: bash
+        run: uv sync
+
+      # ── farm-ng-core: macOS ARM has no pre-built wheels, build from source ────
+      # Linux has manylinux wheels on PyPI. macOS ARM does not — clone v2.3.0,
+      # patch out -Werror, build from source (matches the previous app's approach).
+      # Windows: also attempt a source build; continue-on-error so failures don't
+      # block the rest of the Windows build.
+      - name: Build farm-ng-core from source (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git /tmp/farm-ng-core
+          cd /tmp/farm-ng-core
+          git submodule update --init --recursive
+          sed -i '' 's/"-Werror",//g' setup.py
+          cd $GITHUB_WORKSPACE/backend
+          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
+          uv pip install --no-build-isolation /tmp/farm-ng-core
+
+      - name: Build farm-ng-core from source (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git $env:RUNNER_TEMP\farm-ng-core
+          cd $env:RUNNER_TEMP\farm-ng-core
+          git submodule update --init --recursive
+          (Get-Content setup.py) -replace '"-Werror",', '' -replace '"/WX",', '' | Set-Content setup.py
+          cd $env:GITHUB_WORKSPACE\backend
+          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
+          uv pip install --no-build-isolation $env:RUNNER_TEMP\farm-ng-core
+
+      # ── Vendor packages ───────────────────────────────────────────────────────
+      # Always run so submodule commit changes are picked up even on a cache hit.
+      # uv pip install skips packages that are already up-to-date.
+      - name: Install vendor packages (Linux)
+        if: runner.os == 'Linux'
+        working-directory: backend
+        shell: bash
+        run: |
+          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
+          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
+          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
+          uv pip install farm-ng-amiga
+
+      - name: Install vendor packages (macOS)
+        if: runner.os == 'macOS'
+        working-directory: backend
+        shell: bash
+        run: |
+          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
+          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
+          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
+          uv pip install --no-build-isolation farm-ng-amiga
+
+      - name: Install vendor packages (Windows)
+        if: runner.os == 'Windows'
+        working-directory: backend
+        shell: bash
+        run: |
+          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
+          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
+          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
+          # farm-ng-amiga: attempt after the source build above; non-fatal
+          uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
+
+      # Drop the uv download cache — the venv is already built and cached separately.
+      # On Linux this can be 1-3 GB of wheel/sdist downloads we no longer need.
+      - name: Clean uv cache (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: uv cache clean || true
+
+      # ── Node.js ───────────────────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ── Rust ──────────────────────────────────────────────────────────────────
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+          prefix-key: "v2"
+
+      # ── Build PyInstaller backend sidecar ─────────────────────────────────────
+      # Cache keyed on Python deps + spec + app source + submodule hashes.
+      # On a cache hit the entire PyInstaller build is skipped (~1-2 h saved).
+      - name: Cache PyInstaller bundle
+        id: cache-bundle
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries/gemi-backend
+          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**') }}-${{ steps.submodule-hashes.outputs.hashes }}
+
+      - name: Build backend sidecar (Unix)
+        if: runner.os != 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
+        working-directory: backend
+        shell: bash
+        run: |
+          uv run pyinstaller --clean gemi-backend.spec
+          mkdir -p ../frontend/src-tauri/binaries/gemi-backend
+          cp -r dist/gemi-backend/. ../frontend/src-tauri/binaries/gemi-backend/
+          echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
+          # Free space before the Rust build — dist/ and venv are no longer needed
+          rm -rf dist build .venv
+          df -h
+
+      - name: Build backend sidecar (Windows)
+        if: runner.os == 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
+        working-directory: backend
+        shell: pwsh
+        run: |
+          uv run pyinstaller --clean gemi-backend.spec
+          New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries | Out-Null
+          Copy-Item -Path dist/gemi-backend -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse
+          $size = (Get-ChildItem -Path dist/gemi-backend -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
+          # Free space before the Rust build
+          Remove-Item -Recurse -Force dist, build, .venv -ErrorAction SilentlyContinue
+
+      # ── Build Tauri app ───────────────────────────────────────────────────────
+      - name: Build Tauri app
+        working-directory: frontend
+        run: npx tauri build
+        env:
+          NO_AT_BRIDGE: "1"
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C debuginfo=0"
+
+      # ── Upload installer artifact ─────────────────────────────────────────────
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-glob }}
+          if-no-files-found: error
+          retention-days: 30
