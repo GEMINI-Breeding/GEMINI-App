@@ -23,8 +23,11 @@ async fn download_to_file(url: String, dest: String, method: Option<String>) -> 
 pub fn run() {
     #[cfg(debug_assertions)]
     {
-        // DEVELOPMENT MODE — backend started separately via npm run dev:backend
-        println!("Running in DEVELOPMENT mode - backend should be started separately");
+        // DEVELOPMENT MODE — backend started separately via npm run dev:backend.
+        // Window is created here (not in tauri.conf.json) to keep parity with
+        // production; no initialization_script needed because dev uses relative
+        // URLs proxied by Vite.
+        use tauri::{WebviewUrl, WebviewWindowBuilder};
 
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
@@ -36,6 +39,14 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                    .title("GEMI")
+                    .inner_size(1200.0, 800.0)
+                    .min_inner_size(800.0, 600.0)
+                    .center()
+                    .build()?;
+
                 Ok(())
             })
             .run(tauri::generate_context!())
@@ -44,10 +55,14 @@ pub fn run() {
 
     #[cfg(not(debug_assertions))]
     {
-        // PRODUCTION MODE — start backend sidecar on a free port, inject URL
+        // PRODUCTION MODE — start the backend sidecar, then create the window
+        // with an initialization_script so __GEMI_BACKEND_URL__ is available
+        // before any JavaScript runs (avoids the race where main.tsx reads the
+        // variable before window.eval() injects it).
         use sidecar_manager::SidecarManager;
         use std::sync::Arc;
-        use tauri::Manager;
+        use std::thread;
+        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
         let sidecar = Arc::new(SidecarManager::new());
         let sidecar_for_exit = Arc::clone(&sidecar);
@@ -59,30 +74,48 @@ pub fn run() {
             .setup(move |app| {
                 let app_handle = app.handle().clone();
 
+                // Spawn the sidecar — returns the port immediately after the
+                // process starts (does NOT wait for the HTTP server to be ready).
                 let port = match sidecar.start(&app_handle) {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("Failed to start backend: {}", e);
-                        return Ok(());
+                        0
                     }
                 };
 
-                if let Err(e) = sidecar.wait_for_health(30) {
-                    eprintln!("Backend health check failed: {}", e);
-                }
+                let backend_url = if port > 0 {
+                    format!("http://127.0.0.1:{}", port)
+                } else {
+                    String::new()
+                };
 
-                // Inject the backend base URL into every webview window so
-                // the frontend can use it regardless of which port was chosen.
-                let backend_url = format!("http://127.0.0.1:{}", port);
-                let script = format!(
+                // Inject the URL *before* JS runs so OpenAPI.BASE is correct
+                // from the very first line of main.tsx.
+                let init_script = format!(
                     "window.__GEMI_BACKEND_URL__ = '{}';",
                     backend_url
                 );
 
-                for window in app_handle.webview_windows().values() {
-                    if let Err(e) = window.eval(&script) {
-                        eprintln!("Failed to inject backend URL: {}", e);
-                    }
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                    .title("GEMI")
+                    .inner_size(1200.0, 800.0)
+                    .min_inner_size(800.0, 600.0)
+                    .center()
+                    .initialization_script(&init_script)
+                    .build()?;
+
+                // Health check runs in the background — it only logs; the
+                // frontend's own polling handles "backend not ready yet" state.
+                if port > 0 {
+                    let sidecar_clone = Arc::clone(&sidecar);
+                    thread::spawn(move || {
+                        if let Err(e) = sidecar_clone.wait_for_health(60) {
+                            eprintln!("Backend health check failed: {}", e);
+                        } else {
+                            println!("Backend ready on port {}", port);
+                        }
+                    });
                 }
 
                 Ok(())
