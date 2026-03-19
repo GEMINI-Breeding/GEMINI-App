@@ -107,12 +107,16 @@ jobs:
       # PyInstaller on macOS needs a framework Python to bundle _internal/Python.
       # setup-python and uv's managed Python are non-framework builds — only
       # Homebrew's Python is a framework build on macOS ARM runners.
-      - name: Use Homebrew framework Python for uv (macOS)
+      # We store the path as a step output (not GITHUB_ENV) so it only applies
+      # to steps that explicitly reference it, avoiding "externally managed"
+      # errors when uv pip install tries to target Homebrew Python directly.
+      - name: Locate Homebrew framework Python (macOS)
+        id: brew-python
         if: runner.os == 'macOS'
         run: |
           brew install python@3.12 2>/dev/null || true
           BREW_PY="$(brew --prefix python@3.12)/bin/python3.12"
-          echo "UV_PYTHON=$BREW_PY" >> "$GITHUB_ENV"
+          echo "path=$BREW_PY" >> "$GITHUB_OUTPUT"
           echo "Using Python: $BREW_PY ($($BREW_PY --version))"
 
       # Cache the full venv — keyed on pyproject.toml, uv.lock, AND submodule
@@ -135,6 +139,10 @@ jobs:
         working-directory: backend
         shell: bash
         run: uv sync
+        env:
+          # macOS only: use the Homebrew framework Python so the venv's Python
+          # is a framework build (required for PyInstaller to bundle _internal/Python).
+          UV_PYTHON: ${{ steps.brew-python.outputs.path }}
 
       # ── farm-ng-core: macOS ARM has no pre-built wheels, build from source ────
       # Linux has manylinux wheels on PyPI. macOS ARM does not — clone v2.3.0,
@@ -150,8 +158,8 @@ jobs:
           git submodule update --init --recursive
           sed -i '' 's/"-Werror",//g' setup.py
           cd $GITHUB_WORKSPACE/backend
-          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
-          uv pip install --no-build-isolation /tmp/farm-ng-core
+          uv pip install --python .venv setuptools farm-ng-package pybind11 cmake ninja scikit-build
+          uv pip install --python .venv --no-build-isolation /tmp/farm-ng-core
 
       # farm-ng-core: Windows — MSVC cannot build it (uses cxxabi.h, GCC/Clang only).
       # MinGW also fails because Visual Studio's environment overrides CC/CXX before uv runs.
