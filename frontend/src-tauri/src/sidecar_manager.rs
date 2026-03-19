@@ -62,6 +62,23 @@ impl SidecarManager {
 
         println!("Starting backend at {:?} on port {}...", binary_path, port);
 
+        if !binary_path.exists() {
+            return Err(format!("Backend binary not found: {:?}", binary_path));
+        }
+
+        // Ensure the binary is executable (artifact download can strip the bit)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&binary_path)
+                .map_err(|e| format!("Cannot stat binary: {}", e))?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&binary_path, perms)
+                .map_err(|e| format!("Cannot chmod binary: {}", e))?;
+            println!("Set execute permission on {:?}", binary_path);
+        }
+
         let mut child = Command::new(&binary_path)
             .env("GEMI_BACKEND_PORT", port.to_string())
             .env("ENVIRONMENT", "desktop")
