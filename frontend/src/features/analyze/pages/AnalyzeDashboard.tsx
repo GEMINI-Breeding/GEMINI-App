@@ -521,13 +521,8 @@ function MapTab({ records }: { records: TraitRecord[] }) {
             <CollapsibleWorkspace key={ws} name={ws}>
               {[...pipelineMap.entries()].map(([pipeline, recs]) => (
                 <div key={pipeline}>
-                  <p className="text-muted-foreground px-3 py-0.5 text-xs flex items-center gap-1.5">
-                    <span className="truncate">{pipeline}</span>
-                    {recs[0] && (
-                      <Badge variant="secondary" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
-                        {recs[0].pipeline_type}
-                      </Badge>
-                    )}
+                  <p className="text-muted-foreground px-3 py-0.5 text-xs truncate">
+                    {pipeline}
                   </p>
                   {recs.map((r) => (
                     <button

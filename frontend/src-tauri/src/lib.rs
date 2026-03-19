@@ -60,6 +60,7 @@ pub fn run() {
                     .inner_size(1200.0, 800.0)
                     .min_inner_size(800.0, 600.0)
                     .center()
+                    .maximized(true)
                     .build()?;
 
                 Ok(())
@@ -119,6 +120,7 @@ pub fn run() {
                     .inner_size(1200.0, 800.0)
                     .min_inner_size(800.0, 600.0)
                     .center()
+                    .maximized(true)
                     .initialization_script(&init_script)
                     .build()?;
 
