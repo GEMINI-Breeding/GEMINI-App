@@ -5,6 +5,7 @@ import {
   type LucideIcon,
   Play,
   Settings,
+  Terminal,
 } from "lucide-react";
 
 export type SubItem = {
@@ -41,4 +42,5 @@ export const sidebarItems: NavItem[] = [
     path: "/analyze",
   },
   { icon: Settings, title: "Settings", path: "/settings" },
+  { icon: Terminal, title: "Console", path: "/console" },
 ];

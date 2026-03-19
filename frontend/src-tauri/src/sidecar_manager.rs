@@ -64,6 +64,7 @@ impl SidecarManager {
 
         let mut child = Command::new(&binary_path)
             .env("GEMI_BACKEND_PORT", port.to_string())
+            .env("ENVIRONMENT", "desktop")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

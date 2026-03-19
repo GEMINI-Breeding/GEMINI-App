@@ -108,13 +108,20 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
             </div>
           )}
 
-          <Button
-            variant="outline"
-            className="mt-4"
-            onClick={handleUploadClick}
-          >
-            Upload {selectedPaths.length} file(s)
-          </Button>
+          <div className="mt-4 flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleUploadClick}
+            >
+              Upload {selectedPaths.length} file(s)
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setSelectedPaths([])}
+            >
+              Clear
+            </Button>
+          </div>
         </div>
       )}
     </div>

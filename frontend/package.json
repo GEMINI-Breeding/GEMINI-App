@@ -13,7 +13,7 @@
     "generate-client": "openapi-ts",
     "build:backend": "../backend/build-desktop.sh",
     "tauri": "tauri",
-    "tauri:dev": "concurrently -k -n backend,tauri -c blue,magenta \"npm run dev:backend\" \"GDK_BACKEND=x11 tauri dev\"",
+    "tauri:dev": "concurrently -k -n backend,tauri -c blue,magenta \"npm run dev:backend\" \"tauri dev\"",
     "tauri:build": "npm run build:backend && tauri build"
   },
   "dependencies": {

@@ -1,13 +1,40 @@
+import collections
+import logging
 import shutil
 
 from fastapi import APIRouter, Depends
 from pydantic.networks import EmailStr
 
-from app.api.deps import get_current_active_superuser
+from app.api.deps import CurrentUser, get_current_active_superuser
 from app.models import Message
 from app.utils import generate_test_email, send_email
 
 router = APIRouter(prefix="/utils", tags=["utils"])
+
+# ── In-memory log ring buffer ─────────────────────────────────────────────────
+# Captures the last 500 log lines from all loggers; served to the frontend
+# Console tab so developers can see backend output without a terminal.
+
+_log_buffer: collections.deque = collections.deque(maxlen=500)
+
+
+class _RingBufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            _log_buffer.append({
+                "level": record.levelname,
+                "message": self.format(record),
+                "ts": record.created,
+            })
+        except Exception:
+            self.handleError(record)
+
+
+_ring_handler = _RingBufferHandler()
+_ring_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
+logging.getLogger().addHandler(_ring_handler)
 
 
 @router.post(
@@ -31,6 +58,12 @@ def test_email(email_to: EmailStr) -> Message:
 @router.get("/health-check/")
 async def health_check() -> bool:
     return True
+
+
+@router.get("/logs")
+def get_logs(current_user: CurrentUser) -> list[dict]:
+    """Return the last 500 backend log lines for the frontend Console tab."""
+    return list(_log_buffer)
 
 
 @router.get("/docker-check/")
