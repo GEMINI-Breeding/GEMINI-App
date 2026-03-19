@@ -180,7 +180,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=['hooks'],
     hooksconfig={},
-    runtime_hooks=['hooks/rthook_proj.py'],
+    runtime_hooks=['hooks/rthook_patch_jaraco.py', 'hooks/rthook_proj.py'],
     excludes=[
         # Exclude heavy optional packages not needed at runtime
         'matplotlib', 'tkinter', 'wx', 'IPython', 'notebook',

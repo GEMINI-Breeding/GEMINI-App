@@ -30,7 +30,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "binaries/gemi-backend/**/*": "gemi-backend/"
+      "binaries/gemi-backend": "gemi-backend"
     },
     "linux": {
       "deb": {
