@@ -133,7 +133,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: backend/.venv
-          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock') }}-${{ steps.submodule-hashes.outputs.hashes }}
+          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock', '.github/workflows/build.yml') }}-${{ steps.submodule-hashes.outputs.hashes }}
 
       - name: Install Python dependencies
         working-directory: backend
