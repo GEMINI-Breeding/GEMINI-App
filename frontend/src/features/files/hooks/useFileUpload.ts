@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { OpenAPI } from "@/client";
 import { useProcess } from "@/contexts/ProcessContext";
 import useCustomToast from "@/hooks/useCustomToast";
 import type { ProcessItem } from "@/types/process";
@@ -48,7 +49,7 @@ export function useFileUpload() {
       });
 
       const token = localStorage.getItem("access_token") || "";
-      const baseUrl = import.meta.env.VITE_API_URL;
+      const baseUrl = OpenAPI.BASE;
 
       try {
         const response = await fetch(

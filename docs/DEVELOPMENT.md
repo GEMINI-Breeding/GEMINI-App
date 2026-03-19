@@ -691,5 +691,6 @@ Open an issue at `https://github.com/your-org/gemi-app/issues` with:
 | Outputs missing after step completes | Path stored as absolute, not relative | Use `paths.rel(path)` before storing in `run.outputs` |
 | `uv sync` succeeds but import fails | Vendor submodule not installed | Run vendor `uv pip install` steps from the setup section |
 | CI bundle cache not invalidating | Changed a Python file outside `app/` | Add the path to the `hashFiles` glob in the cache step |
+| API calls work in dev but fail silently in the packaged Tauri app | `import.meta.env.VITE_API_URL` is a build-time variable — it's empty in production | Use `OpenAPI.BASE` for the backend URL in any raw `fetch()` call; it is set at runtime from `window.__GEMI_BACKEND_URL__` |
 | Installer size unchanged after adding a large package | PyInstaller bundle cache hit — old bundle reused | Change any cache key input (e.g. add a comment to `build.yml`) to force a miss; see [CI Caches](#ci-caches) |
 | Windows NSIS `error mmapping datablock #12345` | CUDA DLLs exceed NSIS's 2 GB data-block limit | Windows uses Inno Setup instead of NSIS — see [CI Caches](#ci-caches) |

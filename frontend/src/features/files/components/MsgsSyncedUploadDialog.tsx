@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
+import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +15,7 @@ import {
 import useCustomToast from "@/hooks/useCustomToast"
 
 function apiUrl(path: string): string {
-  const base = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "")
+  const base = OpenAPI.BASE.replace(/\/$/, "")
   return base + path
 }
 
