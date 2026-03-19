@@ -153,6 +153,7 @@ datas += [
     ('bin_to_images/__init__.py',       'docker/bin-extractor/bin_to_images'),
 ]
 
+datas += collect_data_files('setuptools')  # jaraco.text data files needed by pkg_resources hook
 datas += collect_data_files('rasterio')   # bundled GDAL + PROJ data
 datas += collect_data_files('pyproj')     # PROJ database (proj.db)
 datas += collect_data_files('pyogrio')    # bundled GDAL/OGR drivers for GeoJSON I/O
