@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Copy, Check } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
 
 interface LogLine {
   level: string
@@ -19,6 +20,7 @@ const LEVEL_COLOR: Record<string, string> = {
 
 export function ConsolePage() {
   const [lines, setLines] = useState<LogLine[]>([])
+  const [sidecarLog, setSidecarLog] = useState<string>("")
   const [autoScroll, setAutoScroll] = useState(true)
   const [filter, setFilter] = useState("")
   const [copied, setCopied] = useState(false)
@@ -41,11 +43,25 @@ export function ConsolePage() {
           const data: LogLine[] = await res.json()
           setLines(data)
           setStatus("ok")
+          setSidecarLog("") // clear fallback log once connected
         } else {
           setStatus("error")
+          fetchSidecarLog()
         }
       } catch {
-        if (active) setStatus("error")
+        if (active) {
+          setStatus("error")
+          fetchSidecarLog()
+        }
+      }
+    }
+
+    const fetchSidecarLog = async () => {
+      try {
+        const text = await invoke<string>("read_sidecar_log")
+        if (active) setSidecarLog(text)
+      } catch {
+        // not in a Tauri production build — ignore
       }
     }
 
@@ -142,7 +158,12 @@ export function ConsolePage() {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto rounded-lg border border-border bg-zinc-950 p-3 font-mono text-xs"
       >
-        {filtered.length === 0 ? (
+        {status === "error" && sidecarLog ? (
+          <div>
+            <p className="text-yellow-500 italic mb-2">Backend unreachable — showing sidecar startup log:</p>
+            <pre className="text-zinc-300 whitespace-pre-wrap break-all">{sidecarLog}</pre>
+          </div>
+        ) : filtered.length === 0 ? (
           <p className="text-zinc-500 italic">No log output yet…</p>
         ) : (
           filtered.map((line, i) => (

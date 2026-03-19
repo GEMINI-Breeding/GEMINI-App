@@ -1,7 +1,9 @@
-use std::io::{BufRead, BufReader};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::Manager;
@@ -9,6 +11,7 @@ use tauri::Manager;
 pub struct SidecarManager {
     process: Mutex<Option<Child>>,
     port: Mutex<u16>,
+    pub log_path: Mutex<Option<PathBuf>>,
 }
 
 impl SidecarManager {
@@ -16,6 +19,7 @@ impl SidecarManager {
         SidecarManager {
             process: Mutex::new(None),
             port: Mutex::new(0),
+            log_path: Mutex::new(None),
         }
     }
 
@@ -26,11 +30,6 @@ impl SidecarManager {
             .local_addr()
             .expect("Failed to get local address")
             .port()
-    }
-
-    /// Return the port the backend was started on (0 if not started yet).
-    pub fn port(&self) -> u16 {
-        *self.port.lock().unwrap()
     }
 
     /// Start the backend on a free port.
@@ -52,6 +51,16 @@ impl SidecarManager {
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?;
 
+        // Log file in app data dir so it survives crashes and can be read later
+        let log_dir = app
+            .path()
+            .app_log_dir()
+            .map_err(|e| format!("Failed to get log dir: {}", e))?;
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|e| format!("Failed to create log dir: {}", e))?;
+        let log_path = log_dir.join("gemi-backend.log");
+        *self.log_path.lock().unwrap() = Some(log_path.clone());
+
         let binary_name = if cfg!(target_os = "windows") {
             "gemi-backend.exe"
         } else {
@@ -60,10 +69,20 @@ impl SidecarManager {
 
         let binary_path = resource_dir.join("gemi-backend").join(binary_name);
 
-        println!("Starting backend at {:?} on port {}...", binary_path, port);
+        // Write startup info to log before spawn so we always have something to read
+        let mut log_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&log_path)
+            .map_err(|e| format!("Failed to open log file: {}", e))?;
+        writeln!(log_file, "[tauri] Backend log — port {}", port).ok();
+        writeln!(log_file, "[tauri] Binary path: {:?}", binary_path).ok();
 
         if !binary_path.exists() {
-            return Err(format!("Backend binary not found: {:?}", binary_path));
+            let msg = format!("Backend binary not found: {:?}", binary_path);
+            writeln!(log_file, "[tauri] ERROR: {}", msg).ok();
+            return Err(msg);
         }
 
         // Ensure the binary is executable (artifact download can strip the bit)
@@ -76,7 +95,7 @@ impl SidecarManager {
             perms.set_mode(0o755);
             std::fs::set_permissions(&binary_path, perms)
                 .map_err(|e| format!("Cannot chmod binary: {}", e))?;
-            println!("Set execute permission on {:?}", binary_path);
+            writeln!(log_file, "[tauri] Set execute permission OK").ok();
         }
 
         let mut child = Command::new(&binary_path)
@@ -85,24 +104,45 @@ impl SidecarManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn backend {:?}: {}", binary_path, e))?;
+            .map_err(|e| {
+                let msg = format!("Failed to spawn backend {:?}: {}", binary_path, e);
+                writeln!(log_file, "[tauri] SPAWN ERROR: {}", msg).ok();
+                msg
+            })?;
 
+        writeln!(log_file, "[tauri] Spawned OK (pid {:?})", child.id()).ok();
+        drop(log_file); // threads will reopen for appending
+
+        let log_path_out = log_path.clone();
         if let Some(stdout) = child.stdout.take() {
             thread::spawn(move || {
+                let mut f = OpenOptions::new().append(true).open(&log_path_out).ok();
                 for line in BufReader::new(stdout).lines() {
                     match line {
-                        Ok(l) => println!("[backend] {}", l),
+                        Ok(l) => {
+                            println!("[backend] {}", l);
+                            if let Some(ref mut file) = f {
+                                writeln!(file, "[out] {}", l).ok();
+                            }
+                        }
                         Err(_) => break,
                     }
                 }
             });
         }
 
+        let log_path_err = log_path.clone();
         if let Some(stderr) = child.stderr.take() {
             thread::spawn(move || {
+                let mut f = OpenOptions::new().append(true).open(&log_path_err).ok();
                 for line in BufReader::new(stderr).lines() {
                     match line {
-                        Ok(l) => eprintln!("[backend] {}", l),
+                        Ok(l) => {
+                            eprintln!("[backend] {}", l);
+                            if let Some(ref mut file) = f {
+                                writeln!(file, "[err] {}", l).ok();
+                            }
+                        }
                         Err(_) => break,
                     }
                 }

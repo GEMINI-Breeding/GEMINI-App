@@ -19,6 +19,21 @@ async fn download_to_file(url: String, dest: String, method: Option<String>) -> 
     Ok(())
 }
 
+#[cfg(not(debug_assertions))]
+/// Read the sidecar startup log (captured before the HTTP server is ready).
+/// Returns raw text so the Console tab can show it even when the backend is down.
+#[tauri::command]
+fn read_sidecar_log(
+    state: tauri::State<std::sync::Arc<sidecar_manager::SidecarManager>>,
+) -> String {
+    let path_guard = state.log_path.lock().unwrap();
+    match path_guard.as_ref() {
+        Some(p) => std::fs::read_to_string(p)
+            .unwrap_or_else(|e| format!("(cannot read log: {})", e)),
+        None => "(sidecar not started yet)".into(),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
@@ -62,15 +77,17 @@ pub fn run() {
         use sidecar_manager::SidecarManager;
         use std::sync::Arc;
         use std::thread;
-        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+        use tauri::{WebviewUrl, WebviewWindowBuilder};
 
         let sidecar = Arc::new(SidecarManager::new());
         let sidecar_for_exit = Arc::clone(&sidecar);
+        let sidecar_for_state = Arc::clone(&sidecar);
 
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![download_to_file])
+            .manage(sidecar_for_state)
+            .invoke_handler(tauri::generate_handler![download_to_file, read_sidecar_log])
             .setup(move |app| {
                 let app_handle = app.handle().clone();
 
