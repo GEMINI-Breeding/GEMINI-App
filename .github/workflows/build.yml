@@ -253,9 +253,9 @@ jobs:
         shell: bash
         run: |
           uv run pyinstaller --clean gemi-backend.spec
+          echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
           mkdir -p ../frontend/src-tauri/binaries/gemi-backend
           cp -r dist/gemi-backend/. ../frontend/src-tauri/binaries/gemi-backend/
-          echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
           # Free space before the Rust build — dist/ and venv are no longer needed
           rm -rf dist build .venv
           df -h

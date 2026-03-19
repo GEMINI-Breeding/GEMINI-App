@@ -215,6 +215,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Flat layout: all collected files sit next to the executable rather than
+    # in a subdirectory called _internal/. Tauri's resource bundling flattens
+    # directory hierarchies, so _internal/ never reaches the .app bundle —
+    # using '.' keeps the bootloader and Python library at the same level.
+    contents_directory='.',
 )
 
 coll = COLLECT(
