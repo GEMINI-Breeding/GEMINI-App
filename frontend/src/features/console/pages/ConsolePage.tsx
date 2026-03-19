@@ -22,6 +22,7 @@ export function ConsolePage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [filter, setFilter] = useState("")
   const [copied, setCopied] = useState(false)
+  const [status, setStatus] = useState<"connecting" | "ok" | "error">("connecting")
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -35,12 +36,16 @@ export function ConsolePage() {
         const res = await fetch(`${base}/api/v1/utils/logs`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-        if (res.ok && active) {
+        if (!active) return
+        if (res.ok) {
           const data: LogLine[] = await res.json()
           setLines(data)
+          setStatus("ok")
+        } else {
+          setStatus("error")
         }
       } catch {
-        // Backend not reachable — ignore
+        if (active) setStatus("error")
       }
     }
 
@@ -77,10 +82,24 @@ export function ConsolePage() {
     })
   }
 
+  const backendUrl = OpenAPI.BASE || "(empty — backend URL not injected)"
+
   return (
     <div className="flex flex-col h-[calc(100vh-10rem)] gap-3">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Console</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold">Console</h1>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${
+            status === "ok" ? "bg-green-900/40 text-green-400" :
+            status === "error" ? "bg-red-900/40 text-red-400" :
+            "bg-zinc-800 text-zinc-400"
+          }`}>
+            {status === "ok" ? "connected" : status === "error" ? "unreachable" : "connecting…"}
+          </span>
+          <span className="text-xs text-zinc-500 font-mono truncate max-w-xs" title={backendUrl}>
+            {backendUrl}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <input
             type="text"
