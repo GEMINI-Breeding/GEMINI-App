@@ -14,11 +14,12 @@
 10. [Background Processing and SSE](#background-processing-and-sse)
 11. [Filesystem Layout (RunPaths)](#filesystem-layout-runpaths)
 12. [Installing New Packages](#installing-new-packages)
-13. [Code Style and Linting](#code-style-and-linting)
-14. [Building for Production](#building-for-production)
-15. [Testing the Production Build Locally](#testing-the-production-build-locally)
-16. [Pull Requests and Issues](#pull-requests-and-issues)
-17. [Common Gotchas](#common-gotchas)
+13. [CI Caches](#ci-caches)
+14. [Code Style and Linting](#code-style-and-linting)
+15. [Building for Production](#building-for-production)
+16. [Testing the Production Build Locally](#testing-the-production-build-locally)
+17. [Pull Requests and Issues](#pull-requests-and-issues)
+18. [Common Gotchas](#common-gotchas)
 
 ---
 
@@ -106,6 +107,8 @@ gemi-app/
 | Python 3.12 | `uv python install 3.12` |
 | Node.js 22 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | Rust (stable) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+
+**Windows only** — install [Inno Setup 6](https://jrsoftware.org/isdl.php) to build the installer. The default install path (`C:\Program Files (x86)\Inno Setup 6\ISCC.exe`) is expected by `build-windows.ps1` and the CI workflow. NSIS is **not** used on Windows — see [CI Caches](#ci-caches) for why.
 
 **Linux only** — install Tauri system dependencies:
 ```bash
@@ -526,7 +529,41 @@ npm install --save-dev <package> # dev dependency
 
 - **Python:** the `uv.lock` file is updated automatically. Commit both `pyproject.toml` and `uv.lock`.
 - **JS:** `package-lock.json` is updated. Commit both `package.json` and `package-lock.json`.
-- **PyInstaller cache:** adding or updating a Python package invalidates the CI bundle cache automatically (the cache key includes `uv.lock`).
+- **PyInstaller cache:** the CI bundle cache is invalidated automatically when `uv.lock`, the `.spec` file, any `app/**/*.py` source, or **the workflow file itself** changes. Changing only the install *method* (e.g. adding a `--index-url`) without touching `uv.lock` is covered because the workflow file hash is included in the cache key.
+
+---
+
+## CI Caches
+
+The GitHub Actions workflow maintains three caches to keep builds fast. Each is keyed so it auto-invalidates when the relevant inputs change.
+
+| Cache | Key inputs | Typical size | Notes |
+|-------|-----------|-------------|-------|
+| **Python venv** (`backend/.venv`) | `pyproject.toml`, `uv.lock`, submodule hashes | 3–5 GB | Shared across jobs for the same OS |
+| **PyInstaller bundle** (`binaries/gemi-backend`) | `uv.lock`, `gemi-backend.spec`, `app/**/*.py`, `hooks/**`, **`build.yml`** | 2–4 GB | Skips the 1–2 h PyInstaller step on cache hit |
+| **Cargo build artifacts** | Rust source + `Cargo.lock` + `prefix-key` | 1–2 GB | Managed by `swatinem/rust-cache`; `prefix-key: "v2"` in `build.yml` |
+
+### Windows installer: Inno Setup instead of NSIS
+
+The Windows installer is built with **Inno Setup 6**, not NSIS. NSIS has a hard ~2 GB data-block mmap limit (`Internal compiler error #12345`) that CUDA torch DLLs alone exceed. Inno Setup has no such limit.
+
+The CI workflow for Windows:
+1. `npx tauri build --no-bundle` — compiles the Rust binary, skips NSIS
+2. `ISCC.exe inno-setup.iss` — packages `GEMI.exe` + the full `gemi-backend/` sidecar (including CUDA DLLs) into a single installer
+
+The installer script lives at `frontend/src-tauri/inno-setup.iss`. The output is `target/release/bundle/inno/GEMI_<version>_x64-setup.exe`, which matches the `artifact-glob` in `build.yml`.
+
+Inno Setup 6 is pre-installed on GitHub Actions Windows runners. For local Windows builds, install it from [jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php) — `build-windows.ps1` expects it at the default path.
+
+### When to manually bust a cache
+
+- **PyInstaller bundle:** Normally auto-busts when any listed input changes, including the workflow file. If you need to force a fresh build without changing any source file (rare), bump `prefix-key` in the `swatinem/rust-cache` step or add a dummy comment to `build.yml`.
+- **Cargo:** Bump `prefix-key` (currently `"v2"`) in the `swatinem/rust-cache` step to force a full Rust rebuild (e.g. after a compiler upgrade or if the cache becomes corrupt).
+- **Python venv:** Change any of the key inputs, or delete the cache in the GitHub Actions UI under *Caches*.
+
+### Common symptom: installer size doesn't grow after adding a large package
+
+If you add or switch a large dependency (e.g. changing torch from CPU to CUDA) but the installer size stays the same, the **PyInstaller bundle cache was hit** and the old bundle was reused. Check whether any of the cache key inputs actually changed. If not, add a comment to `build.yml` to force a cache miss.
 
 ---
 
@@ -574,6 +611,8 @@ Partial builds (skip PyInstaller if backend hasn't changed):
 ./build-linux.sh tauri    # Tauri only — assumes binaries/gemi-backend/ exists
 ./build-linux.sh backend  # PyInstaller only
 ```
+
+> **Windows note:** `build-windows.ps1` uses Inno Setup 6 (not NSIS) to create the installer. Install it from [jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php) before running a full Windows build.
 
 ---
 
@@ -652,3 +691,5 @@ Open an issue at `https://github.com/your-org/gemi-app/issues` with:
 | Outputs missing after step completes | Path stored as absolute, not relative | Use `paths.rel(path)` before storing in `run.outputs` |
 | `uv sync` succeeds but import fails | Vendor submodule not installed | Run vendor `uv pip install` steps from the setup section |
 | CI bundle cache not invalidating | Changed a Python file outside `app/` | Add the path to the `hashFiles` glob in the cache step |
+| Installer size unchanged after adding a large package | PyInstaller bundle cache hit — old bundle reused | Change any cache key input (e.g. add a comment to `build.yml`) to force a miss; see [CI Caches](#ci-caches) |
+| Windows NSIS `error mmapping datablock #12345` | CUDA DLLs exceed NSIS's 2 GB data-block limit | Windows uses Inno Setup instead of NSIS — see [CI Caches](#ci-caches) |

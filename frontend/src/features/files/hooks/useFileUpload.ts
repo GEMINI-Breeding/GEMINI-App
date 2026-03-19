@@ -142,15 +142,20 @@ export function useFileUpload() {
                       status: "completed",
                       label: undefined,
                     });
+                    updateProcess(processId, { message: undefined });
                   } else if (data.phase === "error") {
                     updateProcessItem(processId, String(data.index), {
                       status: "error",
                       error: data.message || "Extraction failed",
                     });
+                    updateProcess(processId, { message: undefined });
                   } else {
                     updateProcessItem(processId, String(data.index), {
                       status: "running",
                       label: data.message || "Extracting…",
+                    });
+                    updateProcess(processId, {
+                      message: data.message || "Extracting…",
                     });
                   }
                   break;

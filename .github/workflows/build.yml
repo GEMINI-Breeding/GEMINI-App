@@ -1,6 +1,10 @@
 name: Build Desktop App
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -19,7 +23,7 @@ jobs:
             artifact-name: gemi-macos-arm64
           - os: windows-latest
             target-triple: x86_64-pc-windows-msvc
-            artifact-glob: "frontend/src-tauri/target/release/bundle/nsis/*.exe"
+            artifact-glob: "frontend/src-tauri/target/release/bundle/inno/*.exe"
             artifact-name: gemi-windows-x86_64
 
     runs-on: ${{ matrix.os }}
@@ -47,6 +51,31 @@ jobs:
           sudo rm -rf /usr/share/miniconda
           sudo docker image prune --all --force || true
           df -h
+
+      - name: Free disk space (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Remove large pre-installed toolchains and SDKs not needed for this build
+          Remove-Item -Recurse -Force "C:\Program Files\dotnet"               -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files (x86)\Microsoft SDKs" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Microsoft SDKs"       -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Android"              -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\CodeQL"     -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\go"         -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Ruby"       -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Miniconda"                          -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\ProgramData\Miniconda3"             -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\ProgramData\chocolatey"             -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\PostgreSQL"           -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\MySQL"                -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\MongoDB"              -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files (x86)\GitHub CLI"     -ErrorAction SilentlyContinue
+          # Delete uv and pip caches by path — uv isn't installed yet at this point
+          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\uv\cache"            -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\pip\Cache"           -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:TEMP\torch_extensions"            -ErrorAction SilentlyContinue
+          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
       # ── Checkout ─────────────────────────────────────────────────────────────
       - name: Checkout (with submodules)
@@ -117,18 +146,9 @@ jobs:
           uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
           uv pip install --no-build-isolation /tmp/farm-ng-core
 
-      - name: Build farm-ng-core from source (Windows)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git $env:RUNNER_TEMP\farm-ng-core
-          cd $env:RUNNER_TEMP\farm-ng-core
-          git submodule update --init --recursive
-          (Get-Content setup.py) -replace '"-Werror",', '' -replace '"/WX",', '' | Set-Content setup.py
-          cd $env:GITHUB_WORKSPACE\backend
-          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
-          uv pip install --no-build-isolation $env:RUNNER_TEMP\farm-ng-core
+      # farm-ng-core: Windows — MSVC cannot build it (uses cxxabi.h, GCC/Clang only).
+      # MinGW also fails because Visual Studio's environment overrides CC/CXX before uv runs.
+      # On Windows, .bin extraction runs via Docker at runtime instead (see bin_to_images).
 
       # ── Vendor packages ───────────────────────────────────────────────────────
       # Always run so submodule commit changes are picked up even on a cache hit.
@@ -158,10 +178,12 @@ jobs:
         working-directory: backend
         shell: bash
         run: |
+          # Install PyTorch with CUDA support — Windows default wheel is CPU-only
+          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
           [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
           [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
-          # farm-ng-amiga: attempt after the source build above; non-fatal
+          # farm-ng-amiga: no Windows wheels and farm-ng-core can't build on MSVC; non-fatal
           uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
 
       # Drop the uv download cache — the venv is already built and cached separately.
@@ -170,6 +192,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: uv cache clean || true
+
+      - name: Clean uv cache (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          uv cache clean | Out-Null
+          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
       # ── Node.js ───────────────────────────────────────────────────────────────
       - name: Set up Node.js
@@ -201,7 +230,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: frontend/src-tauri/binaries/gemi-backend
-          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**') }}-${{ steps.submodule-hashes.outputs.hashes }}
+          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**', '.github/workflows/build.yml') }}-${{ steps.submodule-hashes.outputs.hashes }}
 
       - name: Build backend sidecar (Unix)
         if: runner.os != 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
@@ -228,15 +257,40 @@ jobs:
           Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
           # Free space before the Rust build
           Remove-Item -Recurse -Force dist, build, .venv -ErrorAction SilentlyContinue
+          # Also nuke npm cache — not needed after frontend deps are installed
+          npm cache clean --force 2>$null
+          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
-      - name: Build Tauri app
+      # Windows uses --no-bundle to skip NSIS (which has a ~2 GB data-block
+      # mmap limit that CUDA torch DLLs exceed). Inno Setup runs next instead.
+      - name: Build Tauri app (Unix)
+        if: runner.os != 'Windows'
         working-directory: frontend
         run: npx tauri build
         env:
           NO_AT_BRIDGE: "1"
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C debuginfo=0"
+
+      - name: Build Tauri app (Windows — no bundle)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: npx tauri build --no-bundle
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C debuginfo=0"
+
+      - name: Create installer (Windows — Inno Setup)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri\target\release\bundle\inno | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" src-tauri\inno-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $size = (Get-Item src-tauri\target\release\bundle\inno\*.exe).Length / 1MB
+          Write-Host "Installer size: $([math]::Round($size, 1)) MB"
 
       # ── Upload installer artifact ─────────────────────────────────────────────
       - name: Upload installer

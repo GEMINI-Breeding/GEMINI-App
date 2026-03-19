@@ -20,6 +20,7 @@ Binary extraction (step 0) is triggered at upload time, not here.
 from __future__ import annotations
 
 import csv
+import hashlib
 import logging
 import os
 import shutil
@@ -1292,6 +1293,193 @@ def _import_extract_binary():
     return None
 
 
+_DOCKER_IMAGE = "gemi-bin-extractor:latest"
+
+
+def _docker_build_context() -> tuple[Path, Path]:
+    """
+    Return (dockerfile_dir, bin_to_images_src) for assembling the Docker build context.
+
+    In a PyInstaller bundle, these are extracted alongside the binary.
+    In development, they live in the backend/ source tree.
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS)
+        return (
+            base / "docker" / "bin-extractor",
+            base / "docker" / "bin-extractor" / "bin_to_images",
+        )
+    base = Path(__file__).parent.parent.parent  # backend/
+    return (
+        base / "docker" / "bin-extractor",
+        base / "bin_to_images",
+    )
+
+
+def _dockerfile_hash() -> str:
+    """Short MD5 of Dockerfile + run_extraction.py — used to detect when a rebuild is needed."""
+    dockerfile_dir, _ = _docker_build_context()
+    content = (dockerfile_dir / "Dockerfile").read_bytes()
+    content += (dockerfile_dir / "run_extraction.py").read_bytes()
+    return hashlib.md5(content).hexdigest()[:16]  # noqa: S324
+
+
+def _image_needs_rebuild() -> bool:
+    """Return True if the Docker image doesn't exist or was built from an older Dockerfile."""
+    result = subprocess.run(
+        [
+            "docker", "image", "inspect",
+            "--format", "{{index .Config.Labels \"gemi.hash\"}}",
+            _DOCKER_IMAGE,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return True  # image doesn't exist
+    return result.stdout.strip() != _dockerfile_hash()
+
+
+def _build_bin_extractor_image(emit: Callable[[dict], None]) -> None:
+    """
+    Build gemi-bin-extractor from the bundled Dockerfile.
+
+    Assembles a self-contained build context in a temp directory (Dockerfile +
+    run_extraction.py + bin_to_images source), then streams docker build output
+    line-by-line so the user can see progress.
+    """
+    msg = (
+        "Building .bin extraction tool — this downloads ~1 GB and may take "
+        "10–20 minutes depending on your internet connection. "
+        "This only happens once (and again after GEMI updates)."
+    )
+    logger.info(msg)
+    emit({"event": "progress", "message": msg})
+
+    dockerfile_dir, bin_to_images_src = _docker_build_context()
+
+    if not dockerfile_dir.exists():
+        raise RuntimeError(
+            "Docker build context not found inside the GEMI installation. "
+            "This is a packaging issue — please reinstall GEMI."
+        )
+    if not bin_to_images_src.exists():
+        raise RuntimeError(
+            "bin_to_images source not found. "
+            "Make sure submodules are checked out: git submodule update --init --recursive"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        shutil.copy(dockerfile_dir / "Dockerfile", tmp_path / "Dockerfile")
+        shutil.copy(dockerfile_dir / "run_extraction.py", tmp_path / "run_extraction.py")
+        shutil.copytree(bin_to_images_src, tmp_path / "bin_to_images")
+
+        cmd = [
+            "docker", "build",
+            "--build-arg", f"GEMI_HASH={_dockerfile_hash()}",
+            "-t", _DOCKER_IMAGE,
+            ".",
+        ]
+        logger.info("Running: %s (cwd=%s)", " ".join(cmd), tmp_path)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(tmp_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            logger.info("[docker build] %s", line)
+            # Only surface step-level lines to the UI (e.g. "Step 3/9 : RUN pip install")
+            # so the label stays readable rather than flickering through hundreds of lines.
+            if line.startswith("Step ") or line.startswith("#"):
+                emit({"event": "progress", "message": f"Building extraction tool… {line}"})
+        proc.wait()
+
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "Failed to build the gemi-bin-extractor Docker image.\n"
+            "Make sure Docker Desktop is running and you have an internet connection,\n"
+            "then try the extraction again."
+        )
+
+    logger.info("gemi-bin-extractor image built successfully.")
+    emit({"event": "progress", "message": "Extraction tool built successfully."})
+
+
+def _extract_binary_via_docker(
+    bin_path: Path,
+    output_dir: Path,
+    emit: Callable[[dict], None],
+) -> None:
+    """
+    Run .bin extraction inside a Docker container (Windows fallback).
+
+    farm-ng-core cannot be built on Windows (uses GCC/Clang-only headers), so on
+    Windows we delegate to a Linux Docker container that has farm-ng-amiga installed.
+    The image is built automatically on first use and rebuilt when GEMI updates.
+
+    Raises RuntimeError with a user-readable message on any failure.
+    """
+    # ── 1. Docker daemon reachable? ───────────────────────────────────────────
+    try:
+        subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            check=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            ".bin extraction is not supported natively on Windows and Docker was not found.\n"
+            "\n"
+            "To enable .bin extraction on Windows:\n"
+            "  1. Install Docker Desktop: https://www.docker.com/products/docker-desktop/\n"
+            "  2. Start Docker Desktop and wait for it to finish loading.\n"
+            "  3. Retry — GEMI will build the extraction tool automatically (one-time, ~15 min)."
+        )
+    except subprocess.CalledProcessError:
+        raise RuntimeError(
+            ".bin extraction on Windows requires Docker Desktop to be running.\n"
+            "Please start Docker Desktop, wait for it to finish loading, then try again."
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "Docker Desktop did not respond within 15 seconds.\n"
+            "Please ensure Docker Desktop is fully started and try again."
+        )
+
+    # ── 2. Build image if missing or outdated ─────────────────────────────────
+    if _image_needs_rebuild():
+        logger.info("gemi-bin-extractor image missing or outdated — building now.")
+        _build_bin_extractor_image(emit)
+
+    # ── 3. Run extraction ─────────────────────────────────────────────────────
+    logger.info("Running bin extraction via Docker for %s", bin_path.name)
+    emit({"event": "progress", "message": "Running extraction via Docker…"})
+
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{bin_path.parent}:/input:ro",
+        "-v", f"{output_dir}:/output",
+        _DOCKER_IMAGE,
+        f"/input/{bin_path.name}",
+        "/output",
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "no output from container"
+        raise RuntimeError(
+            f".bin extraction failed inside Docker:\n{detail}"
+        )
+
+
 def extract_bin_file(
     *,
     bin_path: Path,
@@ -1305,29 +1493,45 @@ def extract_bin_file(
     Output lives in Raw/ (not Intermediate/Processed) — extraction is not a
     processing step, it's making the raw data available.
 
-    Requires the farm_ng SDK (bin_to_images package).
-    Set BIN_TO_IMAGES_PATH to the path containing bin_to_images/bin_to_images.py.
+    On Linux/macOS: uses the farm_ng SDK directly from the Python environment.
+    On Windows:     falls back to a Docker container (gemi-bin-extractor image).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-
     emit({"event": "start", "message": f"Extracting {bin_path.name}…"})
 
     extract_binary = _import_extract_binary()
-    if extract_binary is None:
+
+    # GEMI_FORCE_DOCKER=1 bypasses the native import for local Docker testing
+    if os.environ.get("GEMI_FORCE_DOCKER") == "1":
+        extract_binary = None
+
+    if extract_binary is not None:
+        # Native path — Linux / macOS
+        try:
+            extract_binary([bin_path], output_dir, granular_progress=True)
+        except Exception as exc:
+            logger.error("Binary extraction failed for %s: %s", bin_path, exc)
+            emit({"event": "error", "message": str(exc)})
+            raise
+
+    elif sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1":
+        # Windows fallback — Docker container
+        try:
+            _extract_binary_via_docker(bin_path, output_dir, emit)
+        except RuntimeError as exc:
+            logger.error("Docker extraction failed for %s: %s", bin_path, exc)
+            emit({"event": "error", "message": str(exc)})
+            raise
+
+    else:
         msg = (
-            "farm_ng SDK / bin_to_images not available. "
-            "Clone the bin_to_images module and set BIN_TO_IMAGES_PATH."
+            "farm_ng SDK / bin_to_images is not available in this environment.\n"
+            "Run: uv pip install -e vendor/bin_to_images\n"
+            "and ensure the bin_to_images submodule is checked out."
         )
         logger.error(msg)
         emit({"event": "error", "message": msg})
         raise RuntimeError(msg)
-
-    try:
-        extract_binary([bin_path], output_dir, granular_progress=True)
-    except Exception as exc:
-        logger.error("Binary extraction failed for %s: %s", bin_path, exc)
-        emit({"event": "error", "message": str(exc)})
-        raise
 
     # msgs_synced.csv lands at output_dir/RGB/Metadata/msgs_synced.csv
     msgs_synced = output_dir / "RGB" / "Metadata" / "msgs_synced.csv"

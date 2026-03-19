@@ -6,7 +6,7 @@
 #   .\build-windows.ps1 backend  # PyInstaller sidecar only
 #   .\build-windows.ps1 tauri    # Tauri app only (assumes backend already built)
 param(
-    [ValidateSet("all", "backend", "tauri")]
+    [ValidateSet("all", "backend", "tauri", "bin-extractor")]
     [string]$Mode = "all"
 )
 
@@ -66,19 +66,45 @@ function Build-Backend {
 function Build-Tauri {
     Log "Building Tauri application..."
 
+    # Verify Inno Setup is installed
+    $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    if (-not (Test-Path $iscc)) {
+        Die "Inno Setup 6 not found at '$iscc'. Download from https://jrsoftware.org/isdl.php"
+    }
+
     Set-Location $Frontend
 
     if (-not (Test-Path "node_modules")) { npm install }
 
     $env:CARGO_INCREMENTAL = "0"
     $env:RUSTFLAGS = "-C debuginfo=0"
-    npx tauri build
 
-    Log "Done. Installer: $Frontend\src-tauri\target\release\bundle\nsis\"
+    # --no-bundle skips NSIS, which cannot handle CUDA DLLs (>2 GB mmap limit)
+    npx tauri build --no-bundle
+
+    Log "Creating installer with Inno Setup..."
+    New-Item -ItemType Directory -Force -Path "src-tauri\target\release\bundle\inno" | Out-Null
+    & $iscc "src-tauri\inno-setup.iss"
+    if ($LASTEXITCODE -ne 0) { Die "Inno Setup failed (exit code $LASTEXITCODE)" }
+
+    Log "Done. Installer: $Frontend\src-tauri\target\release\bundle\inno\"
+}
+
+function Build-BinExtractor {
+    Log "Building gemi-bin-extractor Docker image..."
+    Log "This image is required for .bin file extraction on Windows."
+
+    Set-Location $Backend
+    docker build -t gemi-bin-extractor -f docker/bin-extractor/Dockerfile .
+    if ($LASTEXITCODE -ne 0) {
+        Die "Docker build failed. Make sure Docker Desktop is running and the bin_to_images submodule is checked out."
+    }
+    Log "Docker image 'gemi-bin-extractor' built successfully."
 }
 
 switch ($Mode) {
-    "backend" { Build-Backend }
-    "tauri"   { Build-Tauri }
-    "all"     { Build-Backend; Build-Tauri }
+    "backend"       { Build-Backend }
+    "tauri"         { Build-Tauri }
+    "bin-extractor" { Build-BinExtractor }
+    "all"           { Build-Backend; Build-Tauri; Build-BinExtractor }
 }

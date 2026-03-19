@@ -3,5 +3,7 @@
 /target/
 /gen/schemas
 
-# PyInstaller-built backend sidecar binaries
+# PyInstaller-built backend sidecar binaries (ignore build output)
 /binaries/
+# ...but keep the placeholder so Tauri's resource glob doesn't fail in dev
+!/binaries/gemi-backend/placeholder.txt
