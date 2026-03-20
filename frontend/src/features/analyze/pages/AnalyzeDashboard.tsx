@@ -413,40 +413,40 @@ function MapTab({ records }: { records: TraitRecord[] }) {
     [records]
   );
 
-  const pipelines = useMemo(
-    () =>
-      [
-        ...new Set(
-          records
-            .filter(
-              (r) => wsFilter === "__all__" || r.workspace_name === wsFilter
-            )
-            .map((r) => r.pipeline_name)
-        ),
-      ].sort(),
-    [records, wsFilter]
-  );
+  // Unique pipelines for the filter dropdown, keyed by pipeline_id to avoid
+  // collisions when two pipelines share the same name (e.g. one aerial, one ground).
+  const pipelines = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string }>();
+    records
+      .filter((r) => wsFilter === "__all__" || r.workspace_name === wsFilter)
+      .forEach((r) => {
+        if (!seen.has(r.pipeline_id))
+          seen.set(r.pipeline_id, { id: r.pipeline_id, name: r.pipeline_name });
+      });
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [records, wsFilter]);
 
   const filteredRecords = useMemo(
     () =>
       records.filter((r) => {
         if (wsFilter !== "__all__" && r.workspace_name !== wsFilter)
           return false;
-        if (pipelineFilter !== "__all__" && r.pipeline_name !== pipelineFilter)
+        if (pipelineFilter !== "__all__" && r.pipeline_id !== pipelineFilter)
           return false;
         return true;
       }),
     [records, wsFilter, pipelineFilter]
   );
 
-  // Group for sidebar display: workspace → pipeline → records
+  // Group for sidebar display: workspace → pipeline_id → records
+  // Using pipeline_id as key so same-named pipelines remain separate groups.
   const grouped = useMemo(() => {
     const map = new Map<string, Map<string, TraitRecord[]>>();
     for (const r of filteredRecords) {
       if (!map.has(r.workspace_name)) map.set(r.workspace_name, new Map());
       const pMap = map.get(r.workspace_name)!;
-      if (!pMap.has(r.pipeline_name)) pMap.set(r.pipeline_name, []);
-      pMap.get(r.pipeline_name)!.push(r);
+      if (!pMap.has(r.pipeline_id)) pMap.set(r.pipeline_id, []);
+      pMap.get(r.pipeline_id)!.push(r);
     }
     return map;
   }, [filteredRecords]);
@@ -508,8 +508,8 @@ function MapTab({ records }: { records: TraitRecord[] }) {
             <SelectContent>
               <SelectItem value="__all__">All pipelines</SelectItem>
               {pipelines.map((p) => (
-                <SelectItem key={p} value={p} className="text-xs">
-                  {p}
+                <SelectItem key={p.id} value={p.id} className="text-xs">
+                  {p.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -519,11 +519,16 @@ function MapTab({ records }: { records: TraitRecord[] }) {
         <div className="flex-1 overflow-y-auto py-1">
           {[...grouped.entries()].map(([ws, pipelineMap]) => (
             <CollapsibleWorkspace key={ws} name={ws}>
-              {[...pipelineMap.entries()].map(([pipeline, recs]) => (
-                <div key={pipeline}>
-                  <p className="text-muted-foreground px-3 py-0.5 text-xs truncate">
-                    {pipeline}
-                  </p>
+              {[...pipelineMap.entries()].map(([pipelineId, recs]) => (
+                <div key={pipelineId}>
+                  <div className="flex items-center gap-1.5 px-3 py-0.5">
+                    <p className="text-muted-foreground flex-1 truncate text-xs">
+                      {recs[0].pipeline_name}
+                    </p>
+                    <Badge variant="outline" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
+                      {recs[0].pipeline_type}
+                    </Badge>
+                  </div>
                   {recs.map((r) => (
                     <button
                       key={r.id}
@@ -538,9 +543,6 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                       <div className="flex items-center gap-1.5 truncate">
                         <span className="truncate">{r.date}</span>
                         <span className="text-muted-foreground flex-shrink-0 font-mono text-[10px]">v{r.version}</span>
-                        <Badge variant="outline" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
-                          {r.pipeline_type}
-                        </Badge>
                       </div>
                       <div className="text-muted-foreground mt-0.5 space-y-0.5 text-[11px]">
                         <div className="truncate">
