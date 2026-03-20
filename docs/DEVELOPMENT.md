@@ -73,9 +73,9 @@ GEMINI-App/
 │   │   │   └── home/          # Landing / dashboard
 │   │   ├── hooks/             # Shared React hooks
 │   │   ├── routes/            # TanStack Router file-based routes
-│   │   │   ├── __root.tsx     # Root layout (providers, auth guard)
-│   │   │   ├── _layout.tsx    # Authenticated shell (sidebar + nav)
-│   │   │   └── _layout/       # All authenticated pages live here
+│   │   │   ├── __root.tsx     # Root layout (providers)
+│   │   │   ├── _layout.tsx    # App shell (sidebar + nav)
+│   │   │   └── _layout/       # All pages live here
 │   │   └── config/            # App-level constants
 │   ├── src-tauri/             # Rust/Tauri code
 │   │   ├── src/
@@ -351,10 +351,12 @@ api_router.include_router(my_feature.router)
 
 ### Auth and session dependencies
 
+There is **no login UI**. JWT auth has been removed. `get_current_user()` queries the database for the first superuser directly — the app assumes a single local user.
+
 ```python
 from app.api.deps import CurrentUser, SessionDep
 
-# CurrentUser — raises 401 if not logged in, returns the User object
+# CurrentUser — returns the first superuser from the DB (no login required)
 # SessionDep  — provides a SQLModel session, auto-committed on success
 ```
 
@@ -702,9 +704,11 @@ Open an issue at `https://github.com/GEMINI-Breeding/GEMINI-App/issues` with:
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
+| `TypeError: crypto.hash is not a function` or `Vite requires Node.js 20.19+` | Node.js version too old | `nvm install 22 && nvm use 22` (Node.js 22 required) |
+| `fuser: [-cfu] file ...` warning on macOS | macOS ships a different `fuser` utility | Non-fatal — fixed in `start-backend.sh` to use `lsof` on macOS instead |
 | `MyService is not defined` or missing method in TS | Backend route added but client not regenerated | Run `./scripts/generate-client.sh` |
 | Route not found / 404 after adding a page | `routeTree.gen.ts` is stale | Run `npx vite build --mode development` in `frontend/` |
-| Backend 401 on every request | `access_token` not in `localStorage` | Log in at `/login` — auth token is stored there |
+| Backend 401 on every request | No superuser exists in the DB | Run the backend once — it creates the default superuser on startup |
 | `ModuleNotFoundError` in PyInstaller bundle | New import not in `hiddenimports` in `.spec` | Add module to `gemi-backend.spec` and rebuild |
 | Tauri dev window blank on Wayland | `GDK_BACKEND` not set | Use `GDK_BACKEND=x11 npx tauri dev` or `npm run tauri:dev` |
 | Background thread crashes silently | Used request-scoped `SessionDep` in thread | Use `get_background_session()` instead |

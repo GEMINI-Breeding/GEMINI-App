@@ -8,7 +8,9 @@ BACKEND_DIR="$(dirname "$0")/../backend"
 echo "Checking for existing process on port $PORT..."
 
 # Kill any existing process on the port
-if command -v fuser &> /dev/null; then
+# macOS ships /usr/bin/fuser but it's a file utility (not the Linux port killer),
+# so always prefer lsof on macOS.
+if [[ "$(uname)" != "Darwin" ]] && command -v fuser &> /dev/null; then
     fuser -k $PORT/tcp 2>/dev/null && echo "Killed existing process on port $PORT"
 elif command -v lsof &> /dev/null; then
     PID=$(lsof -ti:$PORT)
