@@ -15,6 +15,14 @@ FRONTEND_DIR="$ROOT/frontend"
 log() { echo "[build] $*"; }
 die() { echo "[build] ERROR: $*" >&2; exit 1; }
 
+NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+if [[ -z "$NODE_MAJOR" ]]; then
+    die "Node.js not found. Install Node.js 22: https://nodejs.org"
+fi
+if (( NODE_MAJOR < 22 )); then
+    die "Node.js $(node --version) is too old. Vite 7 requires Node.js >= 22. Install: nvm install 22 && nvm use 22"
+fi
+
 build_backend() {
     log "Building backend sidecar (PyInstaller)..."
 
@@ -38,6 +46,10 @@ build_backend() {
     DEST_DIR="$FRONTEND_DIR/src-tauri/binaries/gemi-backend"
     mkdir -p "$DEST_DIR"
     cp -r dist/gemi-backend/. "$DEST_DIR/"
+    # Ensure the bundled Python interpreter is executable (Tauri can strip the bit).
+    for py in "$DEST_DIR"/python3.12 "$DEST_DIR"/python3 "$DEST_DIR"/python; do
+        [ -f "$py" ] && chmod +x "$py"
+    done
     log "Backend bundle → $DEST_DIR"
 }
 

@@ -16,6 +16,17 @@ FRONTEND_DIR="$ROOT/frontend"
 log() { echo "[build] $*"; }
 die() { echo "[build] ERROR: $*" >&2; exit 1; }
 
+# ── Prerequisites check ────────────────────────────────────────────────────────
+
+# Vite 7 requires Node.js >= 20.19 (uses crypto.hash added in Node 21.7/22).
+NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+if [[ -z "$NODE_MAJOR" ]]; then
+    die "Node.js not found. Install Node.js 22: https://nodejs.org"
+fi
+if (( NODE_MAJOR < 22 )); then
+    die "Node.js $( node --version ) is too old. Vite 7 requires Node.js >= 22. Install: nvm install 22 && nvm use 22"
+fi
+
 # ── Step 1: Build PyInstaller backend sidecar ──────────────────────────────────
 
 build_backend() {
@@ -51,13 +62,15 @@ build_backend() {
     OS="$(uname -s)"
     if [[ "$OS" == "Darwin" ]]; then
         log "macOS detected: building farm-ng-core from source (required for farm-ng-amiga)..."
+        # Pre-install build-time dependencies so the isolated build env has them.
+        uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
         FARM_NG_DIR="$(mktemp -d)"
         git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git "$FARM_NG_DIR/farm-ng-core"
         cd "$FARM_NG_DIR/farm-ng-core"
         git submodule update --init --recursive
         sed -i '' 's/"-Werror",//g' setup.py
         cd "$BACKEND_DIR"
-        uv pip install "$FARM_NG_DIR/farm-ng-core"
+        uv pip install --no-build-isolation "$FARM_NG_DIR/farm-ng-core"
         uv pip install --no-build-isolation farm-ng-amiga
         rm -rf "$FARM_NG_DIR"
     else
@@ -94,6 +107,10 @@ build_backend() {
     DEST_DIR="$FRONTEND_DIR/src-tauri/binaries/gemi-backend"
     mkdir -p "$DEST_DIR"
     cp -r "$SRC_DIR/." "$DEST_DIR/"
+    # Ensure the bundled Python interpreter is executable (Tauri can strip the bit).
+    for py in "$DEST_DIR"/python3.12 "$DEST_DIR"/python3 "$DEST_DIR"/python; do
+        [ -f "$py" ] && chmod +x "$py"
+    done
     log "Backend bundle → $DEST_DIR"
 }
 

@@ -34,9 +34,6 @@ function Build-Backend {
     if (Test-Path "vendor\LightGlue")     { uv pip install vendor\LightGlue }
     else                                  { Log "WARNING: vendor\LightGlue not found" }
 
-    if (Test-Path "vendor\bin_to_images") { uv pip install -e vendor\bin_to_images }
-    else                                  { Log "WARNING: vendor\bin_to_images not found" }
-
     # farm-ng-amiga: attempt source build — no Windows wheels on PyPI
     Log "Attempting farm-ng-core source build for farm-ng-amiga..."
     $FarmNgDir = Join-Path $env:TEMP "farm-ng-core"

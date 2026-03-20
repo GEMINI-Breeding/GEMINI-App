@@ -18,7 +18,7 @@ This guide covers building the GEMI desktop app on Linux, macOS, and Windows.
 | Git | any | system package manager |
 | [uv](https://docs.astral.sh/uv/) | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Python | 3.12 | managed by uv (`uv python install 3.12`) |
-| Node.js | 22 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
+| Node.js | **22** (minimum) | [nodejs.org](https://nodejs.org) or `nvm install 22` — Vite 7 uses `crypto.hash` which requires Node ≥ 22 |
 | Rust (stable) | ≥ 1.77 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 
 ### Linux (Ubuntu 22.04)
@@ -97,30 +97,20 @@ wheels exist on PyPI). This adds ~5 minutes to the first backend build.
 
 ## Build (Windows)
 
-`build.sh` does not support Windows. Run the steps manually in PowerShell:
+Use the PowerShell build script at the repo root:
 
 ```powershell
-# 1. Install Python dependencies
-cd backend
-uv sync
+# Full build (backend sidecar + Docker bin-extractor image + Tauri installer)
+.\build-windows.ps1
 
-# 2. Install vendor packages
-uv pip install -e vendor/AgRowStitch --no-build-isolation
-uv pip install vendor/LightGlue
-uv pip install --no-build-isolation farm-ng-amiga  # may fail — non-fatal
-uv pip install kornia kornia_rs
+# Backend sidecar only (PyInstaller)
+.\build-windows.ps1 backend
 
-# 3. Build PyInstaller backend bundle
-uv run pyinstaller --clean gemi-backend.spec
+# Tauri app only (assumes backend already built)
+.\build-windows.ps1 tauri
 
-# 4. Copy bundle to Tauri binaries directory
-New-Item -ItemType Directory -Force -Path ..\frontend\src-tauri\binaries\gemi-backend | Out-Null
-Copy-Item -Path dist\gemi-backend -Destination ..\frontend\src-tauri\binaries\gemi-backend -Recurse
-
-# 5. Build Tauri app
-cd ..\frontend
-npm install
-npx tauri build
+# Docker bin-extractor image only
+.\build-windows.ps1 bin-extractor
 ```
 
 The finished installer is at:
@@ -128,6 +118,11 @@ The finished installer is at:
 ```
 frontend\src-tauri\target\release\bundle\inno\GEMI_0.0.1_x64-setup.exe
 ```
+
+> **Notes:**
+> - Requires [Inno Setup 6](https://jrsoftware.org/isdl.php) for the full build / `tauri` step.
+> - `.bin` file extraction on Windows uses a Docker container at runtime (`build-windows.ps1 bin-extractor` builds that image). Docker Desktop must be running when users process Amiga `.bin` files.
+> - `farm-ng-amiga` has no Windows wheels and `farm-ng-core` cannot build on MSVC, so `.bin` extraction falls back to the Docker path automatically.
 
 ---
 

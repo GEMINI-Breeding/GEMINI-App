@@ -332,43 +332,6 @@ def run_stitching(
     else:
         cpu_count = max(1, (os.cpu_count() or 1) - 1)
 
-    # Stamp resolved pipeline settings onto base_config so stored_config reflects
-    # the actual values used (not whatever was in config.yaml).
-    # These will be overridden per-plot (direction) or at subprocess time (device),
-    # but we want the viewer to show the real pipeline-level settings.
-    base_config["device"] = agrowstitch_device
-    base_config["num_cpu"] = cpu_count
-
-    emit(
-        {
-            "event": "progress",
-            "message": f"Device: {ui_device} → {agrowstitch_device}, CPUs: {cpu_count}",
-        }
-    )
-
-    if not paths.plot_borders.exists():
-        raise FileNotFoundError(
-            f"plot_borders.csv not found at {paths.plot_borders}. "
-            "Complete the Plot Marking step first."
-        )
-
-    out_dir = paths.agrowstitch_dir(agrowstitch_version)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    images_dir = _find_images_dir(paths)
-    msgs_path = _find_msgs_synced(paths)
-
-    with open(paths.plot_borders) as f:
-        plots = list(csv.DictReader(f))
-
-    emit(
-        {
-            "event": "progress",
-            "message": f"Stitching {len(plots)} plots…",
-            "total": len(plots),
-        }
-    )
-
     # Start with the vendor defaults so all required keys are present
     agrowstitch_candidates = [
         Path(__file__).parent.parent.parent / "vendor" / "AgRowStitch" / "config.yaml",
@@ -411,6 +374,43 @@ def run_stitching(
                     "message": f"Warning: could not parse custom AgRowStitch options: {e}",
                 }
             )
+
+    # Stamp resolved pipeline settings onto base_config so stored_config reflects
+    # the actual values used (not whatever was in config.yaml).
+    # These will be overridden per-plot (direction) or at subprocess time (device),
+    # but we want the viewer to show the real pipeline-level settings.
+    base_config["device"] = agrowstitch_device
+    base_config["num_cpu"] = cpu_count
+
+    emit(
+        {
+            "event": "progress",
+            "message": f"Device: {ui_device} → {agrowstitch_device}, CPUs: {cpu_count}",
+        }
+    )
+
+    if not paths.plot_borders.exists():
+        raise FileNotFoundError(
+            f"plot_borders.csv not found at {paths.plot_borders}. "
+            "Complete the Plot Marking step first."
+        )
+
+    out_dir = paths.agrowstitch_dir(agrowstitch_version)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    images_dir = _find_images_dir(paths)
+    msgs_path = _find_msgs_synced(paths)
+
+    with open(paths.plot_borders) as f:
+        plots = list(csv.DictReader(f))
+
+    emit(
+        {
+            "event": "progress",
+            "message": f"Stitching {len(plots)} plots…",
+            "total": len(plots),
+        }
+    )
 
     # Load msgs_synced for image filtering
     msgs_df = None
@@ -583,7 +583,28 @@ def run_stitching(
             #   .venv/bin/pip install opencv-contrib-python==4.7.0.72 numpy==1.26.4 torch torchvision pyyaml
             #   .venv/bin/pip install -e backend/vendor/LightGlue
             _agrows_venv_python = agrowstitch_dir / ".venv" / "bin" / "python"
-            _python = str(_agrows_venv_python) if _agrows_venv_python.exists() else sys.executable
+            if _agrows_venv_python.exists():
+                _python = str(_agrows_venv_python)
+            elif getattr(sys, "frozen", False):
+                # PyInstaller bundle: sys.executable is the bundle launcher, not Python.
+                # Use the embedded interpreter sitting next to the executable.
+                _bundle_dir = Path(sys.executable).parent
+                for _py_name in ("python3.12", "python3", "python"):
+                    _candidate = _bundle_dir / _py_name
+                    if _candidate.exists():
+                        _python = str(_candidate)
+                        break
+                else:
+                    _python = str(_bundle_dir / "python3.12")
+                # Tauri bundling can strip the execute bit — restore it if needed.
+                try:
+                    _py_path = Path(_python)
+                    if not os.access(_py_path, os.X_OK):
+                        _py_path.chmod(_py_path.stat().st_mode | 0o111)
+                except OSError:
+                    pass
+            else:
+                _python = sys.executable
             emit({"event": "progress", "message": f"Using Python: {_python}"})
 
             # A direct function call blocks the thread with no way to interrupt it.

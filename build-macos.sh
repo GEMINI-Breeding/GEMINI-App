@@ -15,6 +15,14 @@ FRONTEND_DIR="$ROOT/frontend"
 log() { echo "[build] $*"; }
 die() { echo "[build] ERROR: $*" >&2; exit 1; }
 
+NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+if [[ -z "$NODE_MAJOR" ]]; then
+    die "Node.js not found. Install Node.js 22: brew install node@22"
+fi
+if (( NODE_MAJOR < 22 )); then
+    die "Node.js $(node --version) is too old. Vite 7 requires Node.js >= 22. Install: brew install node@22"
+fi
+
 build_backend() {
     log "Building backend sidecar (PyInstaller)..."
 
@@ -31,15 +39,17 @@ build_backend() {
     # kornia + kornia_rs: required for Amiga .bin extraction (bin_to_images lives at backend/bin_to_images/)
     uv pip install kornia kornia_rs
 
-    # farm-ng-core has no ARM64 wheels on PyPI — build from source
+    # farm-ng-core has no ARM64 wheels on PyPI — build from source.
+    # Pre-install build-time dependencies so the isolated build env has them.
     log "Building farm-ng-core from source (no ARM64 wheels on PyPI)..."
+    uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
     FARM_NG_DIR="$(mktemp -d)"
     git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git "$FARM_NG_DIR/farm-ng-core"
     cd "$FARM_NG_DIR/farm-ng-core"
     git submodule update --init --recursive
     sed -i '' 's/"-Werror",//g' setup.py
     cd "$BACKEND_DIR"
-    uv pip install "$FARM_NG_DIR/farm-ng-core"
+    uv pip install --no-build-isolation "$FARM_NG_DIR/farm-ng-core"
     uv pip install --no-build-isolation farm-ng-amiga
     rm -rf "$FARM_NG_DIR"
 
@@ -48,6 +58,10 @@ build_backend() {
     DEST_DIR="$FRONTEND_DIR/src-tauri/binaries/gemi-backend"
     mkdir -p "$DEST_DIR"
     cp -r dist/gemi-backend/. "$DEST_DIR/"
+    # Ensure the bundled Python interpreter is executable (Tauri can strip the bit).
+    for py in "$DEST_DIR"/python3.12 "$DEST_DIR"/python3 "$DEST_DIR"/python; do
+        [ -f "$py" ] && chmod +x "$py"
+    done
     log "Backend bundle → $DEST_DIR"
 }
 
