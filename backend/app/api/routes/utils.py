@@ -68,9 +68,19 @@ def get_logs(current_user: CurrentUser) -> list[dict]:
 
 @router.get("/docker-check/")
 async def docker_check() -> dict:
-    """Return whether Docker is available on the host system."""
-    available = shutil.which("docker") is not None
-    return {"available": available}
+    """Return whether Docker is installed and the daemon is running."""
+    import subprocess
+    if shutil.which("docker") is None:
+        return {"available": False}
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=5,
+        )
+        return {"available": result.returncode == 0}
+    except Exception:
+        return {"available": False}
 
 
 @router.get("/capabilities/")

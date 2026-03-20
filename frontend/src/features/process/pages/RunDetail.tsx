@@ -21,7 +21,7 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { subscribe } from "@/lib/sseManager";
-import { downloadFile } from "@/lib/platform";
+import { downloadFile, openUrl } from "@/lib/platform";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -3460,14 +3460,7 @@ export function RunDetail() {
             >
               Cancel
             </Button>
-            <Button
-              onClick={() => {
-                window.open(
-                  "https://www.docker.com/products/docker-desktop/",
-                  "_blank"
-                );
-              }}
-            >
+            <Button onClick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>
               Download Docker Desktop
             </Button>
           </DialogFooter>

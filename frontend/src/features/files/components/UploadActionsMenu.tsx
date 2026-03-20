@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import useCustomToast from "@/hooks/useCustomToast"
 import DeleteUpload from "./DeleteUpload"
 import { EditUploadDialog } from "./EditUploadDialog"
 import { ImageViewerDialog } from "./ImageViewerDialog"
@@ -51,6 +52,7 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
   const [editOpen, setEditOpen] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const canView = IMAGE_DATA_TYPES.has(upload.data_type)
   const viewerTitle = [upload.experiment, upload.location, upload.population, upload.date]
@@ -82,15 +84,19 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
             onClick={async () => {
               setMenuOpen(false)
               setDownloading(true)
+              showSuccessToast("Preparing ZIP download…")
               try {
                 await downloadZip(upload)
+                showSuccessToast("Download complete")
+              } catch (e: any) {
+                showErrorToast(`Download failed: ${e?.message ?? "Unknown error"}`)
               } finally {
                 setDownloading(false)
               }
             }}
           >
             <Download className="mr-2 h-4 w-4" />
-            {downloading ? "Downloading…" : "Download ZIP"}
+            {downloading ? "Preparing ZIP…" : "Download ZIP"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

@@ -140,7 +140,10 @@ def update_file(
         raise HTTPException(status_code=404, detail="File not found")
     if not current_user.is_superuser and file.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
+    changes = file_in.model_dump(exclude_unset=True)
+    logger.info("Updating file %s (%s): %s", id, file.data_type, changes)
     file = update_file_upload(session=session, db_file=file, file_in=file_in)
+    logger.info("File %s updated successfully", id)
     return file
 
 
@@ -232,18 +235,21 @@ def download_upload_zip(
     if not storage_dir.exists():
         raise HTTPException(status_code=404, detail="Storage directory not found")
 
+    all_files = sorted(p for p in storage_dir.rglob("*") if p.is_file())
+    logger.info("Building ZIP for upload %s (%s): %d files in %s", id, file.data_type, len(all_files), storage_dir)
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in sorted(storage_dir.rglob("*")):
-            if p.is_file():
-                zf.write(p, p.relative_to(storage_dir))
-    buf.seek(0)
+        for p in all_files:
+            zf.write(p, p.relative_to(storage_dir))
+    zip_bytes = buf.getvalue()
 
     parts = [file.experiment, file.location, file.population, file.date or "", file.data_type.replace(" ", "_")]
     zip_name = "_".join(p for p in parts if p) + ".zip"
+    logger.info("ZIP ready: %s (%.1f MB)", zip_name, len(zip_bytes) / 1_048_576)
 
     return Response(
-        content=buf.read(),
+        content=zip_bytes,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
     )

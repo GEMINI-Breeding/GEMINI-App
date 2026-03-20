@@ -1,9 +1,10 @@
-import { File, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Eye, File, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
 import { dataTypes } from "@/config/dataTypes";
 import { useFileUpload } from "@/features/files/hooks/useFileUpload";
+import { FilePreviewDialog } from "./FilePreviewDialog";
 
 interface UploadListProps {
   dataType: string | null;
@@ -19,6 +20,7 @@ function fileNameFromPath(path: string): string {
 export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete }: UploadListProps) {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const { uploadFiles } = useFileUpload();
 
   const addFiles = (paths: string[]) => {
@@ -62,6 +64,7 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
   };
 
   return (
+    <>
     <div className="space-y-6">
       <UploadZone onFilesAdded={addFiles} />
 
@@ -95,11 +98,18 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
                     </span>
                   </div>
                   <button
+                    onClick={(e) => { e.stopPropagation(); setPreviewPath(filePath); }}
+                    className="hover:bg-accent ml-2 flex-shrink-0 rounded p-1"
+                    title="Preview file"
+                  >
+                    <Eye className="text-muted-foreground h-4 w-4" />
+                  </button>
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
                       removeFile(index);
                     }}
-                    className="hover:bg-accent ml-2 flex-shrink-0 rounded p-1"
+                    className="hover:bg-accent ml-1 flex-shrink-0 rounded p-1"
                   >
                     <X className="text-muted-foreground h-4 w-4" />
                   </button>
@@ -125,5 +135,10 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
         </div>
       )}
     </div>
+
+      {previewPath && (
+        <FilePreviewDialog filePath={previewPath} onClose={() => setPreviewPath(null)} />
+      )}
+    </>
   );
 }

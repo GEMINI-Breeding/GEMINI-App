@@ -41,6 +41,20 @@ export async function downloadFile(
 }
 
 /**
+ * Open a URL in the system default browser.
+ * - In Tauri: uses plugin:shell|open (requires shell:allow-open capability).
+ * - In browser: falls back to window.open.
+ */
+export async function openUrl(url: string): Promise<void> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("plugin:shell|open", { path: url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
  * Open a native file picker.
  * - In Tauri: uses the plugin-dialog `open()`.
  * - In browser: creates a hidden <input type="file"> and resolves with the File objects.

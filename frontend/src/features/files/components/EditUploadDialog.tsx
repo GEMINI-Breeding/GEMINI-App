@@ -66,7 +66,10 @@ export function EditUploadDialog({ upload, open, onClose }: EditUploadDialogProp
       showSuccessToast("Upload updated")
       onClose()
     },
-    onError: () => showErrorToast("Failed to update upload"),
+    onError: (err: any) => {
+      const detail = err?.body?.detail ?? err?.message ?? "Unknown error"
+      showErrorToast(`Failed to update: ${detail}`)
+    },
   })
 
   function fieldLabel(f: string) {

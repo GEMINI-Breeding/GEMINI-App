@@ -328,6 +328,16 @@ export function GcpPicker({
     return best
   })()
 
+  // ── Auto-select nearest GCP when image changes ───────────────────────────
+  // When the user scrubs to a new image, automatically switch the active GCP
+  // to the nearest one so the dropdown always reflects the closest GCP.
+  useEffect(() => {
+    if (nearestGcp && nearestGcp.label !== activeGcpLabel) {
+      setActiveGcpLabel(nearestGcp.label);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedImage]);
+
   // ── View reset helper ─────────────────────────────────────────────────────
 
   function resetView() {
