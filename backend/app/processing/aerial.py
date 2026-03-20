@@ -129,8 +129,43 @@ _ODM_PROGRESS_STAGES = [
 ]
 
 
+_DOCKER_EXTRA_PATHS = [
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/usr/bin/docker",
+    os.path.expanduser("~/.docker/bin/docker"),
+]
+
+
+def _find_docker_bin() -> str | None:
+    """Find the docker binary, checking common locations beyond PATH."""
+    found = shutil.which("docker")
+    if found:
+        return found
+    for p in _DOCKER_EXTRA_PATHS:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _docker_env() -> dict:
+    """Return env with DOCKER_HOST set to Mac Docker Desktop socket if needed."""
+    env = os.environ.copy()
+    user_socket = os.path.expanduser("~/.docker/run/docker.sock")
+    if os.path.exists(user_socket) and "DOCKER_HOST" not in env:
+        env["DOCKER_HOST"] = f"unix://{user_socket}"
+    return env
+
+
 def _check_docker() -> bool:
-    return shutil.which("docker") is not None
+    bin_ = _find_docker_bin()
+    if bin_ is None:
+        return False
+    try:
+        result = subprocess.run([bin_, "info"], capture_output=True, timeout=10, env=_docker_env())
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def _check_gpu() -> bool:
@@ -198,10 +233,10 @@ def run_orthomosaic(
         except PermissionError:
             logger.warning("Permission denied removing %s — using Docker to clean up", paths.odm_working_dir)
             subprocess.run(
-                ["docker", "run", "--rm",
+                [_find_docker_bin() or "docker", "run", "--rm",
                  "-v", f"{paths.odm_working_dir}:/target",
                  "alpine", "rm", "-rf", "/target"],
-                timeout=60, capture_output=True,
+                timeout=60, capture_output=True, env=_docker_env(),
             )
             if paths.odm_working_dir.exists():
                 shutil.rmtree(paths.odm_working_dir)
@@ -268,8 +303,9 @@ def run_orthomosaic(
 
     container_name = f"ODM-gemi-{run_id!s:.8}"
 
+    docker_bin = _find_docker_bin() or "docker"
     docker_cmd: list[str] = [
-        "docker", "run",
+        docker_bin, "run",
         "--name", container_name,
         "-i", "--rm",
         "--security-opt=no-new-privileges",
@@ -295,7 +331,7 @@ def run_orthomosaic(
     emit({"event": "progress", "message": "Starting ODM Docker container…", "progress": 0})
 
     with open(log_file, "w") as lf:
-        proc = subprocess.Popen(docker_cmd, stdout=lf, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(docker_cmd, stdout=lf, stderr=subprocess.STDOUT, env=_docker_env())
 
     # Monitor log file for progress while ODM runs
     stage_count = len(_ODM_PROGRESS_STAGES)
@@ -307,7 +343,7 @@ def run_orthomosaic(
             if stop_event.is_set():
                 proc.terminate()
                 try:
-                    subprocess.run(["docker", "stop", container_name], timeout=10, capture_output=True)
+                    subprocess.run([docker_bin, "stop", container_name], timeout=10, capture_output=True, env=_docker_env())
                 except Exception:
                     pass
                 return {}
@@ -355,7 +391,7 @@ def run_orthomosaic(
 
     except Exception:
         try:
-            subprocess.run(["docker", "rm", "-f", container_name], timeout=5, capture_output=True)
+            subprocess.run([docker_bin, "rm", "-f", container_name], timeout=5, capture_output=True, env=_docker_env())
         except Exception:
             pass
         raise

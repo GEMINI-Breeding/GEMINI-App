@@ -51,7 +51,7 @@ function WorkspaceCardImages({ workspaceId }: { workspaceId: string }) {
       fetch(apiUrl(`/api/v1/workspaces/${workspaceId}/card-images`), {
         headers: authHeaders(),
       }).then((r) => r.json()),
-    staleTime: 5 * 60_000,
+    staleTime: 0,
   })
 
   if (images.length === 0) {
