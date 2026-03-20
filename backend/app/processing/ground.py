@@ -113,6 +113,8 @@ def _find_agrowstitch_dir() -> Path | None:
         Path(__file__).parent.parent.parent / "vendor" / "AgRowStitch",
         Path(os.environ.get("AGROWSTITCH_PATH", "")),
         Path(__file__).parent.parent.parent.parent / "AgRowStitch",
+        # PyInstaller bundle — AgRowStitch.py collected alongside the executable
+        Path(getattr(sys, "_MEIPASS", "")),
     ]
     for p in candidates:
         if p and (p / "AgRowStitch.py").exists():
@@ -122,6 +124,14 @@ def _find_agrowstitch_dir() -> Path | None:
 
 def _import_agrowstitch():
     """Import and return the AgRowStitch run() function, or None if not found."""
+    # Try direct import first — works when installed in the venv or bundled by PyInstaller.
+    try:
+        from AgRowStitch import run as run_agrowstitch  # type: ignore
+        return run_agrowstitch
+    except ImportError:
+        pass
+
+    # Fallback: path-based lookup for dev environments where it isn't pip-installed.
     p = _find_agrowstitch_dir()
     if p is None:
         return None
@@ -129,7 +139,6 @@ def _import_agrowstitch():
         sys.path.insert(0, str(p))
     try:
         from AgRowStitch import run as run_agrowstitch  # type: ignore
-
         return run_agrowstitch
     except ImportError:
         return None

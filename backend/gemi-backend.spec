@@ -113,11 +113,12 @@ hiddenimports += collect_submodules('shapely')
 hiddenimports += collect_submodules('geopandas')
 hiddenimports += collect_submodules('pyogrio')
 
-# AgRowStitch + LightGlue (bundled as git submodules, installed into venv before build)
+# AgRowStitch — single-file module (AgRowStitch.py), installed via pip install -e vendor/AgRowStitch
 try:
-    hiddenimports += collect_submodules('panorama_maker')
+    hiddenimports += ['AgRowStitch']
 except Exception:
     pass
+# LightGlue (dependency of AgRowStitch)
 try:
     hiddenimports += collect_submodules('lightglue')
 except Exception:
