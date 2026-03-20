@@ -1275,13 +1275,13 @@ def _import_extract_binary():
     try:
         from bin_to_images.bin_to_images import extract_binary  # type: ignore
         return extract_binary
-    except ImportError as e:
-        logger.debug("bin_to_images.bin_to_images import failed: %s", e)
+    except Exception as e:
+        logger.warning("bin_to_images.bin_to_images import failed: %s: %s", type(e).__name__, e)
     try:
         from bin_to_images import extract_binary  # type: ignore
         return extract_binary
-    except ImportError as e:
-        logger.debug("bin_to_images import failed: %s", e)
+    except Exception as e:
+        logger.warning("bin_to_images import failed: %s: %s", type(e).__name__, e)
 
     # Fallback: path-based lookup
     fallback_paths = [
@@ -1289,7 +1289,7 @@ def _import_extract_binary():
         str(Path(__file__).parent.parent.parent / "vendor" / "bin_to_images"),
         str(Path(__file__).parent.parent.parent.parent / "bin_to_images"),
         # PyInstaller frozen bundle — bin_to_images collected alongside the exe
-        str(Path(getattr(sys, "_MEIPASS", "")) ) if getattr(sys, "frozen", False) else None,
+        str(Path(getattr(sys, "_MEIPASS", ""))) if getattr(sys, "frozen", False) else None,
     ]
     for p in fallback_paths:
         if not p:
@@ -1302,8 +1302,8 @@ def _import_extract_binary():
         try:
             from bin_to_images.bin_to_images import extract_binary  # type: ignore
             return extract_binary
-        except ImportError as e:
-            logger.debug("bin_to_images import from %s failed: %s", p, e)
+        except Exception as e:
+            logger.warning("bin_to_images import from %s failed: %s: %s", p, type(e).__name__, e)
 
     return None
 

@@ -177,6 +177,8 @@ jobs:
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
           [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
           uv pip install farm-ng-amiga
+          # kornia + kornia_rs: bin_to_images dependencies that may not be in its requirements
+          uv pip install kornia kornia_rs
 
       - name: Install vendor packages (macOS)
         if: runner.os == 'macOS'
@@ -187,6 +189,8 @@ jobs:
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
           [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
           uv pip install --no-build-isolation farm-ng-amiga
+          # kornia + kornia_rs: bin_to_images dependencies that may not be in its requirements
+          uv pip install kornia kornia_rs
 
       - name: Install vendor packages (Windows)
         if: runner.os == 'Windows'
