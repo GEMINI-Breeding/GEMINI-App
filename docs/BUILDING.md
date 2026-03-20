@@ -53,8 +53,8 @@ xcode-select --install
 ## Clone the repo
 
 ```bash
-git clone --recurse-submodules https://github.com/your-org/gemi-app.git
-cd gemi-app
+git clone --recurse-submodules https://github.com/GEMINI-Breeding/GEMINI-App.git
+cd GEMINI-App
 ```
 
 If you already cloned without submodules:
@@ -109,6 +109,7 @@ uv pip install -e vendor/AgRowStitch --no-build-isolation
 uv pip install vendor/LightGlue
 uv pip install -e vendor/bin_to_images
 uv pip install --no-build-isolation farm-ng-amiga  # may fail — non-fatal
+uv pip install kornia kornia_rs
 
 # 3. Build PyInstaller backend bundle
 uv run pyinstaller --clean gemi-backend.spec
@@ -126,7 +127,7 @@ npx tauri build
 The finished installer is at:
 
 ```
-frontend\src-tauri\target\release\bundle\nsis\GEMI_1.0.0_x64-setup.exe
+frontend\src-tauri\target\release\bundle\inno\GEMI_0.0.1_x64-setup.exe
 ```
 
 ---

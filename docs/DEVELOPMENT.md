@@ -39,7 +39,7 @@
 ## Project Structure
 
 ```
-gemi-app/
+GEMINI-App/
 ├── backend/                   # FastAPI backend
 │   ├── app/
 │   │   ├── api/
@@ -119,8 +119,8 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
 ### 2. Clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/your-org/gemi-app.git
-cd gemi-app
+git clone --recurse-submodules https://github.com/GEMINI-Breeding/GEMINI-App.git
+cd GEMINI-App
 ```
 
 If you already cloned without `--recurse-submodules`:
@@ -143,6 +143,7 @@ uv pip install -e vendor/AgRowStitch --no-build-isolation
 uv pip install vendor/LightGlue
 uv pip install -e vendor/bin_to_images
 uv pip install farm-ng-amiga   # Linux/macOS only
+uv pip install kornia kornia_rs # Required by bin_to_images for Amiga .bin extraction
 ```
 
 ### 4. Install frontend dependencies
@@ -623,7 +624,7 @@ After running a full build, the Tauri app launches the backend sidecar automatic
 1. **Install the built package** on your machine:
    - Linux: `sudo dpkg -i frontend/src-tauri/target/release/bundle/deb/*.deb`
    - macOS: open the `.dmg` and drag to Applications
-   - Windows: run the NSIS `.exe` installer
+   - Windows: run the Inno Setup `.exe` installer
 
 2. **Launch GEMI** from your applications menu or `gemi` on the command line.
 
@@ -643,7 +644,7 @@ To test without installing, you can run the Tauri bundle directly:
 
 ### Reporting a bug or requesting a feature
 
-Open an issue at `https://github.com/your-org/gemi-app/issues` with:
+Open an issue at `https://github.com/GEMINI-Breeding/GEMINI-App/issues` with:
 
 - **Bug:** steps to reproduce, expected vs actual behaviour, OS and app version
 - **Feature:** what problem it solves, any relevant screenshots or mockups
