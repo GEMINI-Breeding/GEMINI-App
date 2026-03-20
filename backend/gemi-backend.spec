@@ -138,7 +138,30 @@ except Exception:
     pass
 
 # bin_to_images — vendored script (backend/bin_to_images/)
-hiddenimports += collect_submodules('bin_to_images')
+try:
+    hiddenimports += collect_submodules('bin_to_images')
+except Exception:
+    pass
+
+# kornia + kornia_rs — used by bin_to_images for image decoding
+try:
+    hiddenimports += collect_submodules('kornia')
+    hiddenimports += collect_submodules('kornia_rs')
+except Exception:
+    pass
+
+# google.protobuf — used by farm_ng for event file parsing
+try:
+    hiddenimports += collect_submodules('google.protobuf')
+except Exception:
+    pass
+
+# pandas + tqdm — used by bin_to_images
+try:
+    hiddenimports += collect_submodules('pandas')
+    hiddenimports += ['tqdm', 'tqdm.auto']
+except Exception:
+    pass
 
 # Collect data files for packages that need them at runtime
 datas = []
@@ -163,6 +186,28 @@ datas += collect_data_files('certifi')    # CA certs (for HTTPS / Roboflow)
 # AgRowStitch / LightGlue data files
 try:
     datas += collect_data_files('lightglue')
+except Exception:
+    pass
+
+# kornia / kornia_rs data files
+try:
+    datas += collect_data_files('kornia')
+except Exception:
+    pass
+try:
+    datas += collect_data_files('kornia_rs')
+except Exception:
+    pass
+
+# google.protobuf descriptor pool data files
+try:
+    datas += collect_data_files('google.protobuf')
+except Exception:
+    pass
+
+# pandas data files (timezone data, etc.)
+try:
+    datas += collect_data_files('pandas')
 except Exception:
     pass
 

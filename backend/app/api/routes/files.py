@@ -579,6 +579,18 @@ def _copy_local_stream(
 
         dest_path = dest_dir / name
 
+        # .bin files: always remove any leftover copy before uploading.
+        # extract_bin_file deletes the .bin after extraction, but a previous
+        # crashed/interrupted run may have left one behind.  If we didn't clear
+        # it here the upload would be "skipped" (file already exists) and the
+        # user would see no extraction the next time they try.
+        if src.suffix.lower() == ".bin" and dest_path.exists():
+            try:
+                dest_path.unlink()
+                logger.info("Removed stale .bin file before re-upload: %s", dest_path.name)
+            except OSError as e:
+                logger.warning("Could not remove stale .bin %s: %s", dest_path.name, e)
+
         if dest_path.exists() and not body.reupload:
             skipped.append(name)
             yield _sse_event(

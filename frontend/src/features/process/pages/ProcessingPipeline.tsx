@@ -404,43 +404,27 @@ export function ProcessingPipeline() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>DEM Resolution (cm/px)</Label>
-                        <Select
+                        <Input
+                          type="number"
+                          min="0.1"
+                          step="0.5"
                           value={aerialConfig.dem_resolution}
-                          onValueChange={(v) =>
-                            setAerialConfig({ ...aerialConfig, dem_resolution: v })
+                          onChange={(e) =>
+                            setAerialConfig({ ...aerialConfig, dem_resolution: e.target.value })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="1">1 cm</SelectItem>
-                            <SelectItem value="2">2 cm</SelectItem>
-                            <SelectItem value="3">3 cm</SelectItem>
-                            <SelectItem value="5">5 cm</SelectItem>
-                            <SelectItem value="10">10 cm</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label>Orthophoto Resolution (cm/px)</Label>
-                        <Select
+                        <Input
+                          type="number"
+                          min="0.1"
+                          step="0.5"
                           value={aerialConfig.orthophoto_resolution}
-                          onValueChange={(v) =>
-                            setAerialConfig({ ...aerialConfig, orthophoto_resolution: v })
+                          onChange={(e) =>
+                            setAerialConfig({ ...aerialConfig, orthophoto_resolution: e.target.value })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="1">1 cm</SelectItem>
-                            <SelectItem value="2">2 cm</SelectItem>
-                            <SelectItem value="3">3 cm</SelectItem>
-                            <SelectItem value="5">5 cm</SelectItem>
-                            <SelectItem value="10">10 cm</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">

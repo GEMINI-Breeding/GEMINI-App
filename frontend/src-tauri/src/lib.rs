@@ -34,14 +34,33 @@ fn read_sidecar_log(
     }
 }
 
+/// Keyboard zoom handler injected into every window.
+/// Ctrl+/- (Windows/Linux) or Cmd+/- (macOS) zoom the webview.
+const ZOOM_SCRIPT: &str = r#"
+(function() {
+  var _z = 1.0;
+  document.addEventListener('keydown', function(e) {
+    var mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
+    if (!mod) return;
+    if (e.key === '=' || e.key === '+') {
+      e.preventDefault(); _z = Math.min(_z + 0.1, 3.0);
+      document.documentElement.style.zoom = _z;
+    } else if (e.key === '-') {
+      e.preventDefault(); _z = Math.max(_z - 0.1, 0.5);
+      document.documentElement.style.zoom = _z;
+    } else if (e.key === '0') {
+      e.preventDefault(); _z = 1.0;
+      document.documentElement.style.zoom = _z;
+    }
+  });
+})();
+"#;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
     {
         // DEVELOPMENT MODE — backend started separately via npm run dev:backend.
-        // Window is created here (not in tauri.conf.json) to keep parity with
-        // production; no initialization_script needed because dev uses relative
-        // URLs proxied by Vite.
         use tauri::{WebviewUrl, WebviewWindowBuilder};
 
         tauri::Builder::default()
@@ -61,6 +80,7 @@ pub fn run() {
                     .min_inner_size(800.0, 600.0)
                     .center()
                     .maximized(true)
+                    .initialization_script(ZOOM_SCRIPT)
                     .build()?;
 
                 Ok(())
@@ -109,10 +129,10 @@ pub fn run() {
                 };
 
                 // Inject the URL *before* JS runs so OpenAPI.BASE is correct
-                // from the very first line of main.tsx.
+                // from the very first line of main.tsx.  Also inject zoom handler.
                 let init_script = format!(
-                    "window.__GEMI_BACKEND_URL__ = '{}';",
-                    backend_url
+                    "window.__GEMI_BACKEND_URL__ = '{}';\n{}",
+                    backend_url, ZOOM_SCRIPT
                 );
 
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::default())

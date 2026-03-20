@@ -21,6 +21,8 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
   Loader2,
   MousePointer,
   Move,
@@ -626,6 +628,10 @@ function GridSettingsPanel({
   featureCount,
   selectedCount,
   hideGridInputs = false,
+  onGenerateGrid,
+  gridGenerated,
+  gridVisible,
+  onToggleGrid,
 }: {
   options: GridOptions;
   onChange: (opts: GridOptions) => void;
@@ -636,6 +642,10 @@ function GridSettingsPanel({
   featureCount: number;
   selectedCount: number;
   hideGridInputs?: boolean;
+  onGenerateGrid?: () => void;
+  gridGenerated?: boolean;
+  gridVisible?: boolean;
+  onToggleGrid?: () => void;
 }) {
   const [minimized, setMinimized] = useState(false);
 
@@ -661,16 +671,31 @@ function GridSettingsPanel({
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <p className="text-sm font-medium">Plot Settings</p>
-        <button
-          onClick={() => setMinimized((m) => !m)}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          {minimized ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
+        <div className="flex items-center gap-1.5">
+          {onToggleGrid && gridGenerated && (
+            <button
+              onClick={onToggleGrid}
+              title={gridVisible ? "Hide grid" : "Show grid"}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              {gridVisible ? (
+                <Eye className="h-4 w-4" />
+              ) : (
+                <EyeOff className="h-4 w-4" />
+              )}
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => setMinimized((m) => !m)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            {minimized ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </div>
 
       {!minimized && (
@@ -751,6 +776,17 @@ function GridSettingsPanel({
             </div>
           )}
 
+          {onGenerateGrid && (
+            <Button
+              size="sm"
+              className="w-full"
+              variant={gridGenerated ? "outline" : "default"}
+              onClick={onGenerateGrid}
+            >
+              {gridGenerated ? "Regenerate Grid" : "Generate Grid"}
+            </Button>
+          )}
+
           {featureCount > 0 && (
             <p className="text-muted-foreground text-center text-xs">
               {featureCount} plots
@@ -803,10 +839,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [interactionMode, setInteractionMode] =
     useState<InteractionMode>("view");
-  // When non-null, this is a grid loaded from the backend and recomputation is suppressed.
-  // Cleared when the user explicitly changes grid options or drags the grid.
-  const [loadedGeojson, setLoadedGeojson] =
-    useState<GeoJSON.FeatureCollection | null>(null);
+  const [gridGenerated, setGridGenerated] = useState(false);
+  const [gridVisible, setGridVisible] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingSaveAs, setPendingSaveAs] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
@@ -1003,8 +1037,9 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       popLayerRef.current = popLayer;
       popLayer.addTo(map);
 
-      // Layer for plot grid preview (read-only)
+      // Layer for plot grid preview (read-only — Geoman must not touch it)
       const plotLayer = new L.FeatureGroup();
+      (plotLayer as any).options.pmIgnore = true;
       plotLayerRef.current = plotLayer;
       plotLayer.addTo(map);
 
@@ -1018,8 +1053,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
       // Load existing plot grid if present — mark as loaded so recompute is suppressed
       if (orthoInfo.existing_geojson) {
-        setLoadedGeojson(orthoInfo.existing_geojson);
         setPreviewGeoJson(orthoInfo.existing_geojson);
+        setGridGenerated(true);
         if (orthoInfo.existing_grid_settings) {
           setGridOptions(orthoInfo.existing_grid_settings.options);
           setGridOffset(orthoInfo.existing_grid_settings.offset);
@@ -1099,27 +1134,50 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     };
   }, [orthoInfo]);
 
-  // Debounce gridOptions so typing in inputs doesn't recompute every keystroke
-  const [debouncedOptions, setDebouncedOptions] = useState(gridOptions);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedOptions(gridOptions), 120);
-    return () => clearTimeout(t);
-  }, [gridOptions]);
+  // Stable refs used by the drag-recompute effect to avoid stale closures
+  const popBoundaryRef = useRef(popBoundary);
+  popBoundaryRef.current = popBoundary;
+  const gridOptionsRef = useRef(gridOptions);
+  gridOptionsRef.current = gridOptions;
+  const fdRowsRef = useRef(fdInfo?.rows);
+  fdRowsRef.current = fdInfo?.rows;
 
-  // Real-time grid recomputation (uses debounced options, instant offset/boundary).
-  // Suppressed while loadedGeojson is set — cleared when user changes options or drags grid.
+  // Live recompute ONLY when dragging the grid (gridOffset changes).
+  // Boundary / option changes require the user to click "Generate Grid".
   useEffect(() => {
-    if (!popBoundary) return;
-    if (loadedGeojson !== null) return;
+    if (!popBoundaryRef.current || previewGeoJson === null) return;
     const fc = computeGrid(
-      popBoundary,
-      debouncedOptions,
+      popBoundaryRef.current,
+      gridOptionsRef.current,
       gridOffset,
-      fdInfo?.rows
+      fdRowsRef.current
     );
     setPreviewGeoJson(fc);
+    // Don't reset selectedIndexes during drag — too disruptive
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridOffset]);
+
+  // Manual grid generation triggered by the "Generate Grid" button
+  function handleGenerateGrid() {
+    if (!popBoundary) return;
+    const fc = computeGrid(popBoundary, gridOptions, gridOffset, fdInfo?.rows);
+    setPreviewGeoJson(fc);
     setSelectedIndexes([]);
-  }, [popBoundary, debouncedOptions, gridOffset, fdInfo, loadedGeojson]);
+    setGridGenerated(true);
+    setGridVisible(true); // always show grid after generating/regenerating
+  }
+
+  // Show/hide plot grid layer
+  useEffect(() => {
+    const map = mapRef.current;
+    const plotLayer = plotLayerRef.current;
+    if (!map || !plotLayer) return;
+    if (gridVisible) {
+      if (!map.hasLayer(plotLayer)) map.addLayer(plotLayer);
+    } else {
+      if (map.hasLayer(plotLayer)) map.removeLayer(plotLayer);
+    }
+  }, [gridVisible]);
 
   // Keep interaction mode ref in sync
   useEffect(() => {
@@ -1169,6 +1227,10 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           fillOpacity: 0.15,
         },
       }).getLayers()[0] as L.Path;
+
+      // Exclude plot grid polygons from Geoman edit/remove so the toolbar
+      // only affects the outer population boundary polygon.
+      (leafletLayer as any).options.pmIgnore = true;
 
       leafletLayer.bindTooltip(lines, { sticky: true, opacity: 0.95 });
       // Capture idx at creation time — stable closure, no stale ref issues
@@ -1225,7 +1287,6 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             lon: prev.lon + lon,
             lat: prev.lat + lat,
           }));
-          setLoadedGeojson(null); // switch to compute mode
         });
       }
     }
@@ -1365,8 +1426,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       if (!res.ok) throw new Error();
       const data = await res.json();
       const fc = data.geojson as GeoJSON.FeatureCollection;
-      setLoadedGeojson(fc);
       setPreviewGeoJson(fc);
+      setGridGenerated(true);
       if (data.grid_settings) {
         setGridOptions(data.grid_settings.options);
         setGridOffset(data.grid_settings.offset ?? { lon: 0, lat: 0 });
@@ -1386,9 +1447,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     }
   }
 
-  // Explicit user-triggered option change — clears loadedGeojson to switch to compute mode (aerial only)
   function handleGridOptionsChange(opts: GridOptions) {
-    setLoadedGeojson(null);
     setGridOptions(opts);
   }
 
@@ -1424,7 +1483,6 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         }
       );
       if (!res.ok) throw new Error();
-      setLoadedGeojson(previewGeoJson);
       await queryClient.invalidateQueries({
         queryKey: ["orthomosaic-info", runId],
       });
@@ -1502,15 +1560,18 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         <li>
           Click the <strong>polygon icon</strong> (⬠) in the{" "}
           <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
-          <strong>Double-click</strong> to finish.
+          <strong>Double-click</strong> to finish. You can edit or redraw it at
+          any time using the toolbar.
         </li>
         <li>
           Adjust plot dimensions in the <strong>Plot Settings</strong> panel
-          (bottom-left). The grid updates in real-time.
+          (bottom-left), then click <strong>Generate Grid</strong> to preview
+          the plot grid.
         </li>
         <li>
           Use <strong>Move</strong> mode to drag the grid into position, or
-          adjust the <strong>Angle</strong>.
+          adjust the <strong>Angle</strong>. After changing settings, click{" "}
+          <strong>Regenerate Grid</strong> to apply.
         </li>
         <li>
           In <strong>Select</strong> mode: <strong>click</strong> a plot to
@@ -1544,6 +1605,10 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             onClearSelection={() => setSelectedIndexes([])}
             featureCount={featureCount}
             selectedCount={selectedIndexes.length}
+            onGenerateGrid={handleGenerateGrid}
+            gridGenerated={gridGenerated}
+            gridVisible={gridVisible}
+            onToggleGrid={() => setGridVisible((v) => !v)}
           />
         )}
         {!hasBoundary && (

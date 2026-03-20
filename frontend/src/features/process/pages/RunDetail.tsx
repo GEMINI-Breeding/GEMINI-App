@@ -16,7 +16,11 @@ import {
   ImageIcon,
   Zap,
   Pencil,
+  Settings,
   X,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -62,7 +66,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import useCustomToast from "@/hooks/useCustomToast";
 import { useProcess } from "@/contexts/ProcessContext";
-import { analyzeApi, versionLabel, type TraitRecord } from "@/features/analyze/api";
+import {
+  analyzeApi,
+  versionLabel,
+  type TraitRecord,
+} from "@/features/analyze/api";
 
 // Resolve a relative /api path to an absolute URL using the backend base
 // injected by the Tauri sidecar, or fall back to a same-origin relative path.
@@ -82,7 +90,7 @@ async function tauriDownload(
   url: string,
   filename: string,
   method: "GET" | "POST" = "GET",
-  filters?: { name: string; extensions: string[] }[],
+  filters?: { name: string; extensions: string[] }[]
 ): Promise<boolean> {
   return downloadFile(absoluteApiUrl(url), filename, method, filters);
 }
@@ -237,22 +245,38 @@ function useStepProgress(runId: string, isRunning: boolean) {
         setLastProgress(evt.progress);
       }
 
-      if (evt.event === "complete" || evt.event === "error" || evt.event === "cancelled") {
+      if (
+        evt.event === "complete" ||
+        evt.event === "error" ||
+        evt.event === "cancelled"
+      ) {
         queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
         if (evt.event === "complete") {
           if (evt.step === "stitching") {
-            queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
-            queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
+            queryClient.invalidateQueries({
+              queryKey: ["stitch-outputs", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["stitch-versions", runId],
+            });
           }
           if (evt.step === "georeferencing") {
-            queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
-            queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
+            queryClient.invalidateQueries({
+              queryKey: ["stitch-outputs", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["stitch-versions", runId],
+            });
           }
           if (evt.step === "orthomosaic") {
-            queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
+            queryClient.invalidateQueries({
+              queryKey: ["orthomosaic-versions", runId],
+            });
           }
           if (evt.step === "trait_extraction") {
-            queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+            queryClient.invalidateQueries({
+              queryKey: ["trait-records-run", runId],
+            });
             queryClient.invalidateQueries({ queryKey: ["trait-records"] });
           }
         }
@@ -444,7 +468,11 @@ function ConfirmDeleteDialog({
           <Button variant="outline" onClick={onCancel} disabled={isDeleting}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={isDeleting}
+          >
             {isDeleting ? (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
             ) : (
@@ -480,7 +508,9 @@ function TraitRecordsPanel({
   const { data: inferenceResults = [] } = useQuery<InferenceResult[]>({
     queryKey: ["inference-summary", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`));
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`)
+      );
       if (!res.ok) return [];
       return res.json();
     },
@@ -488,7 +518,9 @@ function TraitRecordsPanel({
   });
 
   // Count inference results per trait version
-  const inferenceCountByTraitVersion = inferenceResults.reduce<Record<number, number>>((acc, r) => {
+  const inferenceCountByTraitVersion = inferenceResults.reduce<
+    Record<number, number>
+  >((acc, r) => {
     if (r.trait_version != null) {
       acc[r.trait_version] = (acc[r.trait_version] ?? 0) + 1;
     }
@@ -497,7 +529,7 @@ function TraitRecordsPanel({
 
   if (isLoading) {
     return (
-      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
         <Loader2 className="h-3 w-3 animate-spin" />
         Loading trait records…
       </div>
@@ -510,22 +542,24 @@ function TraitRecordsPanel({
 
   return (
     <>
-      <div className="mt-3 rounded-md border overflow-hidden">
+      <div className="mt-3 overflow-hidden rounded-md border">
         <Table>
           <TableHeader>
             <TableRow className="text-xs">
-              <TableHead className="py-2 text-xs w-10">v</TableHead>
+              <TableHead className="w-10 py-2 text-xs">v</TableHead>
               <TableHead className="py-2 text-xs">Ortho / Stitch</TableHead>
               <TableHead className="py-2 text-xs">Boundary</TableHead>
-              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
-              <TableHead className="py-2 text-xs text-right">Inferences</TableHead>
-              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+              <TableHead className="py-2 text-right text-xs">Plots</TableHead>
+              <TableHead className="py-2 text-right text-xs">
+                Inferences
+              </TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {records.map((r: TraitRecord) => (
               <TableRow key={r.id} className="text-xs">
-                <TableCell className="py-1.5 font-mono text-muted-foreground">
+                <TableCell className="text-muted-foreground py-1.5 font-mono">
                   v{r.version}
                 </TableCell>
                 <TableCell className="py-1.5 font-mono">
@@ -538,7 +572,9 @@ function TraitRecordsPanel({
                     ? versionLabel(r.boundary_version, r.boundary_name)
                     : "canonical"}
                 </TableCell>
-                <TableCell className="py-1.5 text-right font-mono">{r.plot_count}</TableCell>
+                <TableCell className="py-1.5 text-right font-mono">
+                  {r.plot_count}
+                </TableCell>
                 <TableCell className="py-1.5 text-right font-mono">
                   {inferenceCountByTraitVersion[r.version] ?? 0}
                 </TableCell>
@@ -604,7 +640,9 @@ function StitchConfigDialog({
   version: StitchVersion | null;
 }) {
   if (!version) return null;
-  const label = version.name ? `${version.name} (v${version.version})` : `v${version.version}`;
+  const label = version.name
+    ? `${version.name} (v${version.version})`
+    : `v${version.version}`;
   const config = version.config ?? {};
   const entries = Object.entries(config);
   return (
@@ -619,13 +657,15 @@ function StitchConfigDialog({
             Parameters used for this stitching run
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
+        <div className="bg-muted/40 max-h-96 overflow-y-auto rounded-md border p-3 font-mono text-xs">
           {entries.length === 0 ? (
             <span className="text-muted-foreground">No config recorded</span>
           ) : (
             entries.map(([k, v]) => (
               <div key={k} className="flex gap-2 py-0.5">
-                <span className="text-muted-foreground min-w-[140px] shrink-0">{k}</span>
+                <span className="text-muted-foreground min-w-[140px] shrink-0">
+                  {k}
+                </span>
                 <span className="break-all">{JSON.stringify(v)}</span>
               </div>
             ))
@@ -651,7 +691,9 @@ function StitchImagesDialog({
   const plot = plots[pageIndex];
 
   // Reset to first plot when dialog opens
-  useEffect(() => { if (open) setPageIndex(0); }, [open]);
+  useEffect(() => {
+    if (open) setPageIndex(0);
+  }, [open]);
 
   if (!open || plots.length === 0) return null;
 
@@ -664,7 +706,7 @@ function StitchImagesDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="text-muted-foreground flex items-center justify-between text-xs">
             <span className="font-mono">{plot?.name}</span>
             <div className="flex items-center gap-1">
               <Button
@@ -676,7 +718,9 @@ function StitchImagesDialog({
               >
                 <ChevronDown className="h-3.5 w-3.5 rotate-90" />
               </Button>
-              <span className="w-16 text-center">{pageIndex + 1} / {plots.length}</span>
+              <span className="w-16 text-center">
+                {pageIndex + 1} / {plots.length}
+              </span>
               <Button
                 variant="outline"
                 size="icon"
@@ -688,13 +732,7 @@ function StitchImagesDialog({
               </Button>
             </div>
           </div>
-          {plot && (
-            <img
-              src={apiUrl(plot.url)}
-              alt={plot.name}
-              className="w-full rounded border"
-            />
-          )}
+          {plot && <ZoomableImage src={apiUrl(plot.url)} alt={plot.name} />}
         </div>
       </DialogContent>
     </Dialog>
@@ -715,19 +753,33 @@ function StitchPanel({
   isDeleting: boolean;
 }) {
   const [pageIndex, setPageIndex] = useState(0);
-  const [viewingConfig, setViewingConfig] = useState<StitchVersion | null>(null);
-  const [viewingImages, setViewingImages] = useState<{ version: StitchVersion; plots: StitchPlot[] } | null>(null);
+  const [viewingConfig, setViewingConfig] = useState<StitchVersion | null>(
+    null
+  );
+  const [viewingImages, setViewingImages] = useState<{
+    version: StitchVersion;
+    plots: StitchPlot[];
+  } | null>(null);
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
-  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
-  const [downloadingVersion, setDownloadingVersion] = useState<number | null>(null);
-  const [downloadDialog, setDownloadDialog] = useState<{ stitch: StitchVersion; selectedAssocVersion: number | null } | null>(null);
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<
+    number | null
+  >(null);
+  const [downloadingVersion, setDownloadingVersion] = useState<number | null>(
+    null
+  );
+  const [downloadDialog, setDownloadDialog] = useState<{
+    stitch: StitchVersion;
+    selectedAssocVersion: number | null;
+  } | null>(null);
 
   // Associations (for download naming)
   const { data: associations = [] } = useQuery<AssociationVersion[]>({
     queryKey: ["associations", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations`));
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/associations`)
+      );
       if (!res.ok) return [];
       return res.json();
     },
@@ -735,22 +787,30 @@ function StitchPanel({
   });
 
   // Live plots during run (polled every 5s)
-  const { data: liveData } = useQuery<{ plots: StitchPlot[]; version: number }>({
-    queryKey: ["stitch-outputs", runId],
-    queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`));
-      if (!res.ok) return { plots: [], version: 1 };
-      return res.json();
-    },
-    staleTime: 5_000,
-    refetchInterval: isRunning ? 5_000 : false,
-  });
+  const { data: liveData } = useQuery<{ plots: StitchPlot[]; version: number }>(
+    {
+      queryKey: ["stitch-outputs", runId],
+      queryFn: async () => {
+        const res = await fetch(
+          apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`)
+        );
+        if (!res.ok) return { plots: [], version: 1 };
+        return res.json();
+      },
+      staleTime: 5_000,
+      refetchInterval: isRunning ? 5_000 : false,
+    }
+  );
 
   // Completed versions (after run)
-  const { data: versions = [], isLoading: versionsLoading } = useQuery<StitchVersion[]>({
+  const { data: versions = [], isLoading: versionsLoading } = useQuery<
+    StitchVersion[]
+  >({
     queryKey: ["stitch-versions", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`));
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`)
+      );
       if (!res.ok) return [];
       return res.json();
     },
@@ -767,7 +827,9 @@ function StitchPanel({
 
   // Fetch images for a specific version to show in dialog
   async function viewVersionImages(v: StitchVersion) {
-    const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`));
+    const res = await fetch(
+      apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`)
+    );
     // The live endpoint returns active version; for other versions fetch directly if needed
     // For simplicity, use the stitch-outputs endpoint which returns the active version
     // If user wants to view a non-active version we still show what we have
@@ -792,7 +854,8 @@ function StitchPanel({
     const matching = associations
       .filter((a) => a.stitch_version === v.version)
       .sort((a, b) => a.version - b.version);
-    const defaultAssoc = matching.length > 0 ? matching[matching.length - 1].version : null;
+    const defaultAssoc =
+      matching.length > 0 ? matching[matching.length - 1].version : null;
     setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc });
   }
 
@@ -801,13 +864,18 @@ function StitchPanel({
     const { stitch, selectedAssocVersion } = downloadDialog;
     setDownloadDialog(null);
     setDownloadingVersion(stitch.version);
-    const label = stitch.name ? `${stitch.name}_v${stitch.version}` : `v${stitch.version}`;
-    const assocParam = selectedAssocVersion != null ? `?association_version=${selectedAssocVersion}` : "";
+    const label = stitch.name
+      ? `${stitch.name}_v${stitch.version}`
+      : `v${stitch.version}`;
+    const assocParam =
+      selectedAssocVersion != null
+        ? `?association_version=${selectedAssocVersion}`
+        : "";
     await tauriDownload(
       `/api/v1/pipeline-runs/${runId}/stitchings/${stitch.version}/download${assocParam}`,
       `stitching_${label}.zip`,
       "GET",
-      [{ name: "ZIP Archive", extensions: ["zip"] }],
+      [{ name: "ZIP Archive", extensions: ["zip"] }]
     );
     setDownloadingVersion(null);
   }
@@ -817,7 +885,7 @@ function StitchPanel({
   if (isRunning) {
     if (livePlots.length === 0) {
       return (
-        <div className="mt-3 text-xs text-muted-foreground">
+        <div className="text-muted-foreground mt-3 text-xs">
           Stitching in progress — plots will appear here as they complete.
         </div>
       );
@@ -825,8 +893,11 @@ function StitchPanel({
     const plot = livePlots[pageIndex] ?? livePlots[livePlots.length - 1];
     return (
       <div className="mt-3 space-y-2">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{livePlots.length} plot{livePlots.length !== 1 ? "s" : ""} stitched · v{liveData?.version ?? 1}</span>
+        <div className="text-muted-foreground flex items-center justify-between text-xs">
+          <span>
+            {livePlots.length} plot{livePlots.length !== 1 ? "s" : ""} stitched
+            · v{liveData?.version ?? 1}
+          </span>
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
@@ -837,7 +908,9 @@ function StitchPanel({
             >
               <ChevronDown className="h-3.5 w-3.5 rotate-90" />
             </Button>
-            <span className="w-16 text-center">{pageIndex + 1} / {livePlots.length}</span>
+            <span className="w-16 text-center">
+              {pageIndex + 1} / {livePlots.length}
+            </span>
             <Button
               variant="outline"
               size="icon"
@@ -854,7 +927,7 @@ function StitchPanel({
           alt={plot.name}
           className="w-full rounded border"
         />
-        <p className="text-xs font-mono text-muted-foreground">{plot.name}</p>
+        <p className="text-muted-foreground font-mono text-xs">{plot.name}</p>
       </div>
     );
   }
@@ -863,7 +936,7 @@ function StitchPanel({
 
   if (versionsLoading) {
     return (
-      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
         <Loader2 className="h-3 w-3 animate-spin" />
         Loading stitching versions…
       </div>
@@ -872,18 +945,20 @@ function StitchPanel({
 
   if (versions.length === 0) return null;
 
-  const confirmDeleteEntry = versions.find((v) => v.version === confirmDeleteVersion);
+  const confirmDeleteEntry = versions.find(
+    (v) => v.version === confirmDeleteVersion
+  );
 
   return (
     <>
-      <div className="mt-3 rounded-lg border overflow-hidden">
+      <div className="mt-3 overflow-hidden rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="py-2 text-xs">Version</TableHead>
-              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
+              <TableHead className="py-2 text-right text-xs">Plots</TableHead>
               <TableHead className="py-2 text-xs">Created</TableHead>
-              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -903,10 +978,20 @@ function StitchPanel({
                           if (e.key === "Escape") setEditingVersion(null);
                         }}
                       />
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={commitRename}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={commitRename}
+                      >
                         <Check className="h-3 w-3" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingVersion(null)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setEditingVersion(null)}
+                      >
                         <X className="h-3 w-3" />
                       </Button>
                     </div>
@@ -916,15 +1001,21 @@ function StitchPanel({
                       onClick={() => startRename(v)}
                       title="Click to rename"
                     >
-                      <span className="font-medium">{v.name ?? `v${v.version}`}</span>
+                      <span className="font-medium">
+                        {v.name ?? `v${v.version}`}
+                      </span>
                       {v.name && (
-                        <span className="text-muted-foreground">v{v.version}</span>
+                        <span className="text-muted-foreground">
+                          v{v.version}
+                        </span>
                       )}
                     </button>
                   )}
                 </TableCell>
-                <TableCell className="py-1.5 text-right font-mono">{v.plot_count}</TableCell>
-                <TableCell className="py-1.5 text-muted-foreground">
+                <TableCell className="py-1.5 text-right font-mono">
+                  {v.plot_count}
+                </TableCell>
+                <TableCell className="text-muted-foreground py-1.5">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
@@ -955,14 +1046,16 @@ function StitchPanel({
                       disabled={downloadingVersion === v.version}
                       onClick={() => openDownloadDialog(v)}
                     >
-                      {downloadingVersion === v.version
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <Download className="h-3.5 w-3.5" />}
+                      {downloadingVersion === v.version ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      className="text-destructive hover:text-destructive h-6 w-6"
                       title="Delete"
                       disabled={isDeleting}
                       onClick={() => setConfirmDeleteVersion(v.version)}
@@ -1011,10 +1104,18 @@ function StitchPanel({
       />
 
       {/* Download association selection dialog */}
-      <Dialog open={downloadDialog !== null} onOpenChange={(o) => !o && setDownloadDialog(null)}>
+      <Dialog
+        open={downloadDialog !== null}
+        onOpenChange={(o) => !o && setDownloadDialog(null)}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Download Stitching {downloadDialog?.stitch.name ? `"${downloadDialog.stitch.name}" (v${downloadDialog.stitch.version})` : `v${downloadDialog?.stitch.version}`}</DialogTitle>
+            <DialogTitle>
+              Download Stitching{" "}
+              {downloadDialog?.stitch.name
+                ? `"${downloadDialog.stitch.name}" (v${downloadDialog.stitch.version})`
+                : `v${downloadDialog?.stitch.version}`}
+            </DialogTitle>
             <DialogDescription>
               Select which association version to use for file naming.
             </DialogDescription>
@@ -1022,13 +1123,21 @@ function StitchPanel({
           <div className="space-y-3 py-2">
             {(() => {
               const sv = downloadDialog?.stitch.version;
-              const matching = associations.filter((a) => a.stitch_version === sv);
-              const others = associations.filter((a) => a.stitch_version !== sv);
-              const allOptions = [...matching.sort((a, b) => b.version - a.version), ...others.sort((a, b) => b.version - a.version)];
+              const matching = associations.filter(
+                (a) => a.stitch_version === sv
+              );
+              const others = associations.filter(
+                (a) => a.stitch_version !== sv
+              );
+              const allOptions = [
+                ...matching.sort((a, b) => b.version - a.version),
+                ...others.sort((a, b) => b.version - a.version),
+              ];
               if (allOptions.length === 0) {
                 return (
-                  <p className="text-xs text-muted-foreground">
-                    No association versions found. Images will be named by plot index.
+                  <p className="text-muted-foreground text-xs">
+                    No association versions found. Images will be named by plot
+                    index.
                   </p>
                 );
               }
@@ -1040,7 +1149,14 @@ function StitchPanel({
                     value={downloadDialog?.selectedAssocVersion ?? ""}
                     onChange={(e) =>
                       setDownloadDialog((d) =>
-                        d ? { ...d, selectedAssocVersion: e.target.value ? Number(e.target.value) : null } : d
+                        d
+                          ? {
+                              ...d,
+                              selectedAssocVersion: e.target.value
+                                ? Number(e.target.value)
+                                : null,
+                            }
+                          : d
                       )
                     }
                   >
@@ -1049,19 +1165,26 @@ function StitchPanel({
                       const isMatch = a.stitch_version === sv;
                       const label = `v${a.version} — stitch v${a.stitch_version ?? "?"} · boundary v${a.boundary_version ?? "?"}${isMatch ? " ✓" : ""}`;
                       return (
-                        <option key={a.version} value={a.version}>{label}</option>
+                        <option key={a.version} value={a.version}>
+                          {label}
+                        </option>
                       );
                     })}
                   </select>
                   {matching.length === 0 && (
-                    <p className="text-xs text-amber-600">No association matches stitch v{sv}. Using a different version may produce incorrect names.</p>
+                    <p className="text-xs text-amber-600">
+                      No association matches stitch v{sv}. Using a different
+                      version may produce incorrect names.
+                    </p>
                   )}
                 </div>
               );
             })()}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDownloadDialog(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDownloadDialog(null)}>
+              Cancel
+            </Button>
             <Button onClick={confirmDownload}>Download</Button>
           </DialogFooter>
         </DialogContent>
@@ -1110,7 +1233,7 @@ function GroundInferencePanel({
 
   if (isLoading) {
     return (
-      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
         <Loader2 className="h-3 w-3 animate-spin" />
         Loading inference results…
       </div>
@@ -1121,35 +1244,47 @@ function GroundInferencePanel({
 
   return (
     <>
-      <div className="mt-3 rounded-md border overflow-hidden">
+      <div className="mt-3 overflow-hidden rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="py-2 text-xs">Label</TableHead>
               <TableHead className="py-2 text-xs">Stitch</TableHead>
               <TableHead className="py-2 text-xs">Assoc</TableHead>
-              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
-              <TableHead className="py-2 text-xs text-right">Predictions</TableHead>
+              <TableHead className="py-2 text-right text-xs">Plots</TableHead>
+              <TableHead className="py-2 text-right text-xs">
+                Predictions
+              </TableHead>
               <TableHead className="py-2 text-xs">Classes</TableHead>
-              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {results.map((r) => (
               <TableRow key={r.label} className="text-xs">
                 <TableCell className="py-2 font-medium">{r.label}</TableCell>
-                <TableCell className="py-2 text-muted-foreground font-mono">
+                <TableCell className="text-muted-foreground py-2 font-mono">
                   {r.stitch_version != null ? `v${r.stitch_version}` : "—"}
                 </TableCell>
-                <TableCell className="py-2 text-muted-foreground font-mono">
-                  {r.association_version != null ? `v${r.association_version}` : "—"}
+                <TableCell className="text-muted-foreground py-2 font-mono">
+                  {r.association_version != null
+                    ? `v${r.association_version}`
+                    : "—"}
                 </TableCell>
-                <TableCell className="py-2 text-right">{r.plot_count}</TableCell>
-                <TableCell className="py-2 text-right">{r.total_predictions}</TableCell>
+                <TableCell className="py-2 text-right">
+                  {r.plot_count}
+                </TableCell>
+                <TableCell className="py-2 text-right">
+                  {r.total_predictions}
+                </TableCell>
                 <TableCell className="py-2">
                   <div className="flex flex-wrap gap-1">
                     {Object.entries(r.classes).map(([cls, count]) => (
-                      <Badge key={cls} variant="outline" className="text-[10px] px-1 py-0">
+                      <Badge
+                        key={cls}
+                        variant="outline"
+                        className="px-1 py-0 text-[10px]"
+                      >
                         {cls}: {count}
                       </Badge>
                     ))}
@@ -1176,7 +1311,7 @@ function GroundInferencePanel({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      className="text-destructive hover:text-destructive h-6 w-6"
                       title="Delete"
                       disabled={isDeleting}
                       onClick={() => setConfirmLabel(r.label)}
@@ -1231,12 +1366,16 @@ function AssociationVersionsPanel({
   onDelete: (version: number) => void;
   isDeleting: boolean;
 }) {
-  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<
+    number | null
+  >(null);
 
   const { data: versions = [], isLoading } = useQuery<AssociationVersion[]>({
     queryKey: ["associations", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations`));
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/associations`)
+      );
       if (!res.ok) return [];
       return res.json();
     },
@@ -1245,7 +1384,7 @@ function AssociationVersionsPanel({
 
   if (isLoading) {
     return (
-      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
         <Loader2 className="h-3 w-3 animate-spin" />
         Loading associations…
       </div>
@@ -1270,39 +1409,41 @@ function AssociationVersionsPanel({
 
   return (
     <>
-      <div className="mt-3 rounded-lg border overflow-hidden">
+      <div className="mt-3 overflow-hidden rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="py-2 text-xs">Version</TableHead>
               <TableHead className="py-2 text-xs">Stitch Used</TableHead>
               <TableHead className="py-2 text-xs">Boundary Used</TableHead>
-              <TableHead className="py-2 text-xs text-right">Matched</TableHead>
+              <TableHead className="py-2 text-right text-xs">Matched</TableHead>
               <TableHead className="py-2 text-xs">Created</TableHead>
-              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {versions.map((v) => (
               <TableRow key={v.version} className="text-xs">
-                <TableCell className="py-1.5 font-medium">v{v.version}</TableCell>
-                <TableCell className="py-1.5 text-muted-foreground font-mono">
+                <TableCell className="py-1.5 font-medium">
+                  v{v.version}
+                </TableCell>
+                <TableCell className="text-muted-foreground py-1.5 font-mono">
                   {stitchLabel(v.stitch_version)}
                 </TableCell>
-                <TableCell className="py-1.5 text-muted-foreground font-mono">
+                <TableCell className="text-muted-foreground py-1.5 font-mono">
                   {boundaryLabel(v.boundary_version)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right font-mono">
                   {v.matched}/{v.total}
                 </TableCell>
-                <TableCell className="py-1.5 text-muted-foreground">
+                <TableCell className="text-muted-foreground py-1.5">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    className="text-destructive hover:text-destructive h-6 w-6"
                     title="Delete"
                     disabled={isDeleting}
                     onClick={() => setConfirmDeleteVersion(v.version)}
@@ -1513,6 +1654,165 @@ function StepRow({
   );
 }
 
+// ── Zoomable image component ─────────────────────────────────────────────────
+
+function ZoomableImage({
+  src,
+  alt,
+  onLoad,
+}: {
+  src: string;
+  alt: string;
+  onLoad?: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  function clampPan(z: number, px: number, py: number) {
+    // Allow panning only within image bounds
+    const maxPan = ((z - 1) / 2) * 100;
+    return {
+      x: Math.max(-maxPan, Math.min(maxPan, px)),
+      y: Math.max(-maxPan, Math.min(maxPan, py)),
+    };
+  }
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    setZoom((prev) => {
+      const next = Math.max(
+        1,
+        Math.min(8, prev * (e.deltaY < 0 ? 1.15 : 1 / 1.15))
+      );
+      if (next === 1) setPan({ x: 0, y: 0 });
+      else setPan((p) => clampPan(next, p.x, p.y));
+      return next;
+    });
+  }
+
+  function handleMouseDown(e: React.MouseEvent) {
+    if (zoom <= 1) return;
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    e.preventDefault();
+  }
+
+  function handleMouseMove(e: React.MouseEvent) {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    const container = containerRef.current;
+    const w = container?.clientWidth ?? 600;
+    const h = container?.clientHeight ?? 400;
+    const newPan = clampPan(
+      zoom,
+      dragRef.current.panX + (dx / w) * 100,
+      dragRef.current.panY + (dy / h) * 100
+    );
+    setPan(newPan);
+  }
+
+  function handleMouseUp() {
+    dragRef.current = null;
+  }
+
+  function reset() {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {/* Zoom controls */}
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 p-0"
+          onClick={() =>
+            setZoom((z) => {
+              const next = Math.min(8, z * 1.5);
+              setPan((p) => clampPan(next, p.x, p.y));
+              return next;
+            })
+          }
+        >
+          <ZoomIn className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 p-0"
+          onClick={() =>
+            setZoom((z) => {
+              const next = Math.max(1, z / 1.5);
+              if (next === 1) setPan({ x: 0, y: 0 });
+              else setPan((p) => clampPan(next, p.x, p.y));
+              return next;
+            })
+          }
+          disabled={zoom <= 1}
+        >
+          <ZoomOut className="h-3.5 w-3.5" />
+        </Button>
+        <span className="text-muted-foreground text-xs tabular-nums">
+          {Math.round(zoom * 100)}%
+        </span>
+        {zoom > 1 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            onClick={reset}
+          >
+            <RotateCcw className="mr-1 h-3 w-3" />
+            Reset
+          </Button>
+        )}
+        <span className="text-muted-foreground ml-auto text-xs">
+          Scroll or use buttons to zoom · Drag to pan
+        </span>
+      </div>
+      {/* Image container */}
+      <div
+        ref={containerRef}
+        className="bg-muted/40 overflow-hidden rounded-lg border"
+        style={{ maxHeight: "60vh", cursor: zoom > 1 ? "grab" : "default" }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="max-h-[60vh] w-full object-contain select-none"
+          style={{
+            transform: `scale(${zoom}) translate(${pan.x / zoom}%, ${pan.y / zoom}%)`,
+            transformOrigin: "center center",
+            transition: dragRef.current ? "none" : "transform 0.1s ease",
+            pointerEvents: "none",
+          }}
+          draggable={false}
+          onLoad={onLoad}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Orthomosaic version viewer + inline panel ────────────────────────────────
 
 interface OrthoVersion {
@@ -1631,13 +1931,10 @@ function OrthoViewerDialog({
           </div>
 
           <TabsContent value="preview" className="mt-3">
-            <div className="bg-muted/40 overflow-hidden rounded-lg border">
-              <img
-                src={previewUrl}
-                alt={`Orthomosaic v${version.version} preview`}
-                className="max-h-[60vh] w-full object-contain"
-              />
-            </div>
+            <ZoomableImage
+              src={previewUrl}
+              alt={`Orthomosaic v${version.version} preview`}
+            />
             <p className="text-muted-foreground mt-1.5 text-xs">
               Low-res preview (≤ 2000 px). Switch to High-res tab for a sharper
               image.
@@ -1672,15 +1969,14 @@ function OrthoViewerDialog({
                 </Button>
               </div>
             ) : (
-              <div className="bg-muted/40 overflow-hidden rounded-lg border">
-                <img
+              <div className="relative">
+                <ZoomableImage
                   src={highResUrl}
                   alt={`Orthomosaic v${version.version} high-res`}
-                  className="max-h-[60vh] w-full object-contain"
                   onLoad={() => setHighResLoading(false)}
                 />
                 {highResLoading && (
-                  <div className="text-muted-foreground flex items-center justify-center gap-2 p-4 text-sm">
+                  <div className="text-muted-foreground absolute inset-0 flex items-center justify-center gap-2 rounded-lg bg-black/20 text-sm">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Rendering…
                   </div>
@@ -1982,23 +2278,23 @@ function PlotBoundaryVersionsPanel({
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
                     {pipelineType === "aerial" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      title="Download crops"
-                      disabled={
-                        downloadingCropsBv === v.version ||
-                        orthoVersions.length === 0
-                      }
-                      onClick={() => openCropDialog(v.version)}
-                    >
-                      {downloadingCropsBv === v.version ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Download crops"
+                        disabled={
+                          downloadingCropsBv === v.version ||
+                          orthoVersions.length === 0
+                        }
+                        onClick={() => openCropDialog(v.version)}
+                      >
+                        {downloadingCropsBv === v.version ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
                     )}
                     <Button
                       variant="ghost"
@@ -2229,7 +2525,11 @@ export function RunDetail() {
   // Set when the user clicks Stop — so DB sync effects know to show "Cancelled" not "Done"
   const stopWasRequestedRef = useRef(false);
 
-  const { data: run, isLoading: runLoading, isFetching: runFetching } = useQuery<PipelineRunPublic>({
+  const {
+    data: run,
+    isLoading: runLoading,
+    isFetching: runFetching,
+  } = useQuery<PipelineRunPublic>({
     queryKey: ["pipeline-runs", runId],
     queryFn: () => PipelinesService.readRun({ id: runId }),
     // Poll every 3s while running so status stays fresh even without SSE
@@ -2308,12 +2608,15 @@ export function RunDetail() {
 
   const deletePlotBoundaryMutation = useMutation({
     mutationFn: (version: number) =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`), {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-      }).then((r) => {
+      fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`),
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+        }
+      ).then((r) => {
         if (!r.ok) throw new Error("Failed to delete version");
         return r.json();
       }),
@@ -2345,9 +2648,14 @@ export function RunDetail() {
   // Ground: delete an inference result by label
   const deleteInferenceMutation = useMutation({
     mutationFn: (label: string) =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results/${encodeURIComponent(label)}`), {
-        method: "DELETE",
-      }).then((r) => {
+      fetch(
+        apiUrl(
+          `/api/v1/pipeline-runs/${runId}/inference-results/${encodeURIComponent(label)}`
+        ),
+        {
+          method: "DELETE",
+        }
+      ).then((r) => {
         if (!r.ok) throw new Error("Failed to delete inference result");
         return r.json();
       }),
@@ -2364,7 +2672,10 @@ export function RunDetail() {
     queryFn: async () => {
       const res = await fetch(apiUrl("/api/v1/utils/capabilities/"));
       if (!res.ok) return null;
-      return res.json() as Promise<{ agrowstitch: { available: boolean }; cuda_available: boolean } | null>;
+      return res.json() as Promise<{
+        agrowstitch: { available: boolean };
+        cuda_available: boolean;
+      } | null>;
     },
     enabled: pipelineType === "ground",
     staleTime: Infinity,
@@ -2399,8 +2710,12 @@ export function RunDetail() {
     mutationFn: (version: number) =>
       fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings/${version}`), {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
-      }).then((r) => { if (!r.ok) throw new Error("Failed to delete"); }),
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed to delete");
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
     },
@@ -2409,14 +2724,19 @@ export function RunDetail() {
 
   const renameStitchMutation = useMutation({
     mutationFn: ({ version, name }: { version: number; name: string | null }) =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings/${version}/rename`), {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-        body: JSON.stringify({ name }),
-      }).then((r) => { if (!r.ok) throw new Error("Failed to rename"); }),
+      fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings/${version}/rename`),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+          body: JSON.stringify({ name }),
+        }
+      ).then((r) => {
+        if (!r.ok) throw new Error("Failed to rename");
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
     },
@@ -2440,7 +2760,9 @@ export function RunDetail() {
   const { data: pageStitchVersions } = useQuery<StitchVersion[]>({
     queryKey: ["stitch-versions", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`));
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`)
+      );
       if (!res.ok) return [];
       return res.json();
     },
@@ -2452,9 +2774,15 @@ export function RunDetail() {
     mutationFn: (version: number) =>
       fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations/${version}`), {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
-      }).then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["associations", runId] }),
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed");
+        return r.json();
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["associations", runId] }),
     onError: () => showErrorToast("Failed to delete association"),
   });
 
@@ -2535,7 +2863,8 @@ export function RunDetail() {
     // Don't duplicate if ProcessContext already has an active entry (e.g. user
     // navigated away and back while the step was still running).
     const alreadyTracked = processes.some(
-      (p) => p.runId === runId && (p.status === "running" || p.status === "pending"),
+      (p) =>
+        p.runId === runId && (p.status === "running" || p.status === "pending")
     );
     if (!alreadyTracked) {
       addProcess({
@@ -2547,7 +2876,16 @@ export function RunDetail() {
         link: `/process/${workspaceId}/run/${runId}`,
       });
     }
-  }, [isRunning, runFetching, run, pipeline, runId, processes, addProcess, workspaceId]);
+  }, [
+    isRunning,
+    runFetching,
+    run,
+    pipeline,
+    runId,
+    processes,
+    addProcess,
+    workspaceId,
+  ]);
 
   // Execute step mutation
   const executeMutation = useMutation({
@@ -2588,7 +2926,11 @@ export function RunDetail() {
   // Feed SSE events into ProcessPanel for the active long-running step
   // Clear optimistic executingStep once backend confirms current_step or run is no longer running
   useEffect(() => {
-    if (run?.current_step || runStatus === "failed" || runStatus === "completed") {
+    if (
+      run?.current_step ||
+      runStatus === "failed" ||
+      runStatus === "completed"
+    ) {
       setExecutingStep(null);
     }
   }, [run?.current_step, runStatus]);
@@ -2686,7 +3028,9 @@ export function RunDetail() {
           progress: 100,
           message: "Done",
         });
-        queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+        queryClient.invalidateQueries({
+          queryKey: ["trait-records-run", runId],
+        });
       } else if (
         wasStopped ||
         (!run.steps_completed?.trait_extraction && runStatus !== "failed")
@@ -2740,8 +3084,12 @@ export function RunDetail() {
 
   // Associate boundaries version selection dialog
   const [showAssocDialog, setShowAssocDialog] = useState(false);
-  const [assocStitchVersion, setAssocStitchVersion] = useState<number | null>(null);
-  const [assocBoundaryVersion, setAssocBoundaryVersion] = useState<number | null>(null);
+  const [assocStitchVersion, setAssocStitchVersion] = useState<number | null>(
+    null
+  );
+  const [assocBoundaryVersion, setAssocBoundaryVersion] = useState<
+    number | null
+  >(null);
 
   function startStitchWithName() {
     setShowStitchNameDialog(false);
@@ -2876,7 +3224,7 @@ export function RunDetail() {
 
   async function _fetchAndTriggerDownload(
     url: string,
-    fallbackFilename: string,
+    fallbackFilename: string
   ): Promise<boolean> {
     return downloadFile(absoluteApiUrl(url), fallbackFilename, "GET", [
       { name: "ZIP Archive", extensions: ["zip"] },
@@ -2995,6 +3343,25 @@ export function RunDetail() {
               {run.platform} · {run.sensor}
             </p>
           </div>
+          {run.pipeline_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                navigate({
+                  to: "/process/$workspaceId/pipeline",
+                  params: { workspaceId },
+                  search: {
+                    type: pipelineType as "aerial" | "ground",
+                    pipelineId: run.pipeline_id,
+                  },
+                })
+              }
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Settings
+            </Button>
+          )}
         </div>
 
         {/* Auto data-sync progress banner */}
@@ -3093,13 +3460,18 @@ export function RunDetail() {
 
               // Step-specific warnings
               const warning =
-                step.key === "orthomosaic" && !run.steps_completed?.gcp_selection
+                step.key === "orthomosaic" &&
+                !run.steps_completed?.gcp_selection
                   ? "GCP selection was skipped — orthomosaic accuracy may be reduced"
-                  : step.key === "stitching" && capabilities && !capabilities.agrowstitch.available
-                  ? "AgRowStitch not found — stitching will fail. Check vendor/AgRowStitch/ or set AGROWSTITCH_PATH."
-                  : step.key === "stitching" && capabilities?.agrowstitch.available && !capabilities.cuda_available
-                  ? "CUDA not available — stitching will run on CPU and may be slow"
-                  : undefined;
+                  : step.key === "stitching" &&
+                      capabilities &&
+                      !capabilities.agrowstitch.available
+                    ? "AgRowStitch not found — stitching will fail. Check vendor/AgRowStitch/ or set AGROWSTITCH_PATH."
+                    : step.key === "stitching" &&
+                        capabilities?.agrowstitch.available &&
+                        !capabilities.cuda_available
+                      ? "CUDA not available — stitching will run on CPU and may be slow"
+                      : undefined;
 
               return (
                 <StepRow
@@ -3140,11 +3512,16 @@ export function RunDetail() {
                         />
                       );
                     }
-                    if (step.key === "trait_extraction" && pipelineType === "aerial") {
+                    if (
+                      step.key === "trait_extraction" &&
+                      pipelineType === "aerial"
+                    ) {
                       return (
                         <TraitRecordsPanel
                           runId={runId}
-                          onDelete={(id) => deleteTraitRecordMutation.mutate(id)}
+                          onDelete={(id) =>
+                            deleteTraitRecordMutation.mutate(id)
+                          }
                           isDeleting={deleteTraitRecordMutation.isPending}
                         />
                       );
@@ -3178,12 +3555,17 @@ export function RunDetail() {
                           runId={runId}
                           isRunning={isRunning}
                           onDelete={(v) => deleteStitchMutation.mutate(v)}
-                          onRename={(v, name) => renameStitchMutation.mutate({ version: v, name })}
+                          onRename={(v, name) =>
+                            renameStitchMutation.mutate({ version: v, name })
+                          }
                           isDeleting={deleteStitchMutation.isPending}
                         />
                       );
                     }
-                    if (step.key === "associate_boundaries" && pipelineType === "ground") {
+                    if (
+                      step.key === "associate_boundaries" &&
+                      pipelineType === "ground"
+                    ) {
                       return (
                         <AssociationVersionsPanel
                           runId={runId}
@@ -3198,7 +3580,9 @@ export function RunDetail() {
                       return (
                         <GroundInferencePanel
                           runId={runId}
-                          onDelete={(label) => deleteInferenceMutation.mutate(label)}
+                          onDelete={(label) =>
+                            deleteInferenceMutation.mutate(label)
+                          }
                           isDeleting={deleteInferenceMutation.isPending}
                         />
                       );
@@ -3252,12 +3636,16 @@ export function RunDetail() {
       </div>
 
       {/* Stitching name prompt dialog */}
-      <Dialog open={showStitchNameDialog} onOpenChange={setShowStitchNameDialog}>
+      <Dialog
+        open={showStitchNameDialog}
+        onOpenChange={setShowStitchNameDialog}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Name this stitching run</DialogTitle>
             <DialogDescription>
-              Optionally give this run a name so you can identify it later. You can rename it any time.
+              Optionally give this run a name so you can identify it later. You
+              can rename it any time.
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -3275,7 +3663,10 @@ export function RunDetail() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowStitchNameDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowStitchNameDialog(false)}
+            >
               Cancel
             </Button>
             <Button onClick={startStitchWithName}>Start</Button>
@@ -3320,12 +3711,16 @@ export function RunDetail() {
       </Dialog>
 
       {/* Associate boundaries version selection dialog */}
-      <Dialog open={showAssocDialog} onOpenChange={(open) => !open && setShowAssocDialog(false)}>
+      <Dialog
+        open={showAssocDialog}
+        onOpenChange={(open) => !open && setShowAssocDialog(false)}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Select Versions for Association</DialogTitle>
             <DialogDescription>
-              Choose which stitch version and plot boundary version to associate.
+              Choose which stitch version and plot boundary version to
+              associate.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -3335,11 +3730,15 @@ export function RunDetail() {
                 <select
                   className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
                   value={assocStitchVersion ?? ""}
-                  onChange={(e) => setAssocStitchVersion(Number(e.target.value))}
+                  onChange={(e) =>
+                    setAssocStitchVersion(Number(e.target.value))
+                  }
                 >
                   {pageStitchVersions!.map((sv) => (
                     <option key={sv.version} value={sv.version}>
-                      {sv.name ? `${sv.name} (v${sv.version})` : `v${sv.version}`}
+                      {sv.name
+                        ? `${sv.name} (v${sv.version})`
+                        : `v${sv.version}`}
                     </option>
                   ))}
                 </select>
@@ -3351,11 +3750,15 @@ export function RunDetail() {
                 <select
                   className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
                   value={assocBoundaryVersion ?? ""}
-                  onChange={(e) => setAssocBoundaryVersion(Number(e.target.value))}
+                  onChange={(e) =>
+                    setAssocBoundaryVersion(Number(e.target.value))
+                  }
                 >
                   {plotBoundaryVersions!.map((bv) => (
                     <option key={bv.version} value={bv.version}>
-                      {bv.name ? `${bv.name} (v${bv.version})` : `v${bv.version}`}
+                      {bv.name
+                        ? `${bv.name} (v${bv.version})`
+                        : `v${bv.version}`}
                     </option>
                   ))}
                 </select>
@@ -3448,8 +3851,8 @@ export function RunDetail() {
                 </p>
                 {dockerDenied ? (
                   <p>
-                    Docker is installed but your user does not have permission to
-                    access it. On Linux, add your user to the{" "}
+                    Docker is installed but your user does not have permission
+                    to access it. On Linux, add your user to the{" "}
                     <code className="text-foreground">docker</code> group:{" "}
                     <code className="text-foreground text-xs">
                       sudo usermod -aG docker $USER
@@ -3474,7 +3877,11 @@ export function RunDetail() {
             >
               Cancel
             </Button>
-            <Button onClick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>
+            <Button
+              onClick={() =>
+                openUrl("https://www.docker.com/products/docker-desktop/")
+              }
+            >
               Download Docker Desktop
             </Button>
           </DialogFooter>

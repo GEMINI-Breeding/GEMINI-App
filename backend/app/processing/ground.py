@@ -1269,36 +1269,41 @@ def _import_extract_binary():
     Looks in (priority order):
       1. Installed package (pip install -e vendor/bin_to_images in build.sh)
       2. BIN_TO_IMAGES_PATH environment variable (dev override)
-      3. vendor/bin_to_images relative to the backend root
+      3. vendor/bin_to_images / bin_to_images relative to the backend root
+      4. sys._MEIPASS (PyInstaller frozen bundle)
     """
     try:
         from bin_to_images.bin_to_images import extract_binary  # type: ignore
-
         return extract_binary
-    except ImportError:
-        pass
+    except ImportError as e:
+        logger.debug("bin_to_images.bin_to_images import failed: %s", e)
     try:
         from bin_to_images import extract_binary  # type: ignore
-
         return extract_binary
-    except ImportError:
-        pass
+    except ImportError as e:
+        logger.debug("bin_to_images import failed: %s", e)
 
-    # Fallback: path-based lookup for development environments
+    # Fallback: path-based lookup
     fallback_paths = [
         os.environ.get("BIN_TO_IMAGES_PATH"),
         str(Path(__file__).parent.parent.parent / "vendor" / "bin_to_images"),
         str(Path(__file__).parent.parent.parent.parent / "bin_to_images"),
+        # PyInstaller frozen bundle — bin_to_images collected alongside the exe
+        str(Path(getattr(sys, "_MEIPASS", "")) ) if getattr(sys, "frozen", False) else None,
     ]
     for p in fallback_paths:
-        if p and Path(p).exists() and p not in sys.path:
-            sys.path.insert(0, p)
-            try:
-                from bin_to_images.bin_to_images import extract_binary  # type: ignore
-
-                return extract_binary
-            except ImportError:
-                continue
+        if not p:
+            continue
+        candidate = Path(p)
+        if not candidate.exists():
+            continue
+        if str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+        try:
+            from bin_to_images.bin_to_images import extract_binary  # type: ignore
+            return extract_binary
+        except ImportError as e:
+            logger.debug("bin_to_images import from %s failed: %s", p, e)
 
     return None
 
@@ -1515,33 +1520,47 @@ def extract_bin_file(
     if os.environ.get("GEMI_FORCE_DOCKER") == "1":
         extract_binary = None
 
-    if extract_binary is not None:
-        # Native path — Linux / macOS
+    def _delete_bin() -> None:
+        """Delete the source .bin file — called after success and on failure."""
         try:
-            extract_binary([bin_path], output_dir, granular_progress=True)
-        except Exception as exc:
-            logger.error("Binary extraction failed for %s: %s", bin_path, exc)
-            emit({"event": "error", "message": str(exc)})
-            raise
+            bin_path.unlink(missing_ok=True)
+            logger.info("Deleted .bin file: %s", bin_path.name)
+        except OSError as e:
+            logger.warning("Could not delete .bin file %s: %s", bin_path.name, e)
 
-    elif sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1":
-        # Windows fallback — Docker container
-        try:
-            _extract_binary_via_docker(bin_path, output_dir, emit)
-        except RuntimeError as exc:
-            logger.error("Docker extraction failed for %s: %s", bin_path, exc)
-            emit({"event": "error", "message": str(exc)})
-            raise
+    try:
+        if extract_binary is not None:
+            # Native path — Linux / macOS
+            try:
+                extract_binary([bin_path], output_dir, granular_progress=True)
+            except Exception as exc:
+                logger.error("Binary extraction failed for %s: %s", bin_path, exc)
+                emit({"event": "error", "message": str(exc)})
+                raise
 
-    else:
-        msg = (
-            "farm_ng SDK / bin_to_images is not available in this environment.\n"
-            "Run: uv pip install -e vendor/bin_to_images\n"
-            "and ensure the bin_to_images submodule is checked out."
-        )
-        logger.error(msg)
-        emit({"event": "error", "message": msg})
-        raise RuntimeError(msg)
+        elif sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1":
+            # Windows fallback — Docker container
+            try:
+                _extract_binary_via_docker(bin_path, output_dir, emit)
+            except RuntimeError as exc:
+                logger.error("Docker extraction failed for %s: %s", bin_path, exc)
+                emit({"event": "error", "message": str(exc)})
+                raise
+
+        else:
+            msg = (
+                "farm_ng SDK / bin_to_images is not available in this environment.\n"
+                "Run: uv pip install -e vendor/bin_to_images\n"
+                "and ensure the bin_to_images submodule is checked out."
+            )
+            logger.error(msg)
+            emit({"event": "error", "message": msg})
+            raise RuntimeError(msg)
+
+    finally:
+        # Delete the .bin file whether extraction succeeded or failed.
+        # The raw images/CSV are now in output_dir; the binary is no longer needed.
+        _delete_bin()
 
     # msgs_synced.csv lands at output_dir/RGB/Metadata/msgs_synced.csv
     msgs_synced = output_dir / "RGB" / "Metadata" / "msgs_synced.csv"
