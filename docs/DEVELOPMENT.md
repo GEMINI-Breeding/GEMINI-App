@@ -706,6 +706,7 @@ Open an issue at `https://github.com/GEMINI-Breeding/GEMINI-App/issues` with:
 |---------|-------|-----|
 | `TypeError: crypto.hash is not a function` or `Vite requires Node.js 20.19+` | Node.js version too old | `nvm install 22 && nvm use 22` (Node.js 22 required) |
 | `fuser: [-cfu] file ...` warning on macOS | macOS ships a different `fuser` utility | Non-fatal — fixed in `start-backend.sh` to use `lsof` on macOS instead |
+| `resource path 'binaries/gemi-backend' doesn't exist` | Placeholder not in git | The placeholder is committed — run `git pull` to get it. Don't need to build the sidecar for `tauri dev`. |
 | `MyService is not defined` or missing method in TS | Backend route added but client not regenerated | Run `./scripts/generate-client.sh` |
 | Route not found / 404 after adding a page | `routeTree.gen.ts` is stale | Run `npx vite build --mode development` in `frontend/` |
 | Backend 401 on every request | No superuser exists in the DB | Run the backend once — it creates the default superuser on startup |

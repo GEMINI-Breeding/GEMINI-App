@@ -5,5 +5,6 @@
 
 # PyInstaller-built backend sidecar binaries (ignore build output)
 /binaries/
-# ...but keep the placeholder so Tauri's resource glob doesn't fail in dev
+# ...but keep the placeholder dir so Tauri's resource check doesn't fail in dev
+!/binaries/gemi-backend/
 !/binaries/gemi-backend/placeholder.txt
