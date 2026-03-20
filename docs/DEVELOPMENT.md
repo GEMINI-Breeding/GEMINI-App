@@ -147,14 +147,16 @@ uv pip install kornia kornia_rs # Required by bin_to_images for Amiga .bin extra
 **Installing `farm-ng-amiga` (Amiga robot SDK):**
 
 - **Linux:** `uv pip install farm-ng-amiga`
-- **macOS (Apple Silicon):** No ARM64 wheels exist on PyPI — must build `farm-ng-core` from source first:
+- **macOS (Apple Silicon):** No ARM64 wheels exist on PyPI — must build `farm-ng-core` from source first.
+  Run all of these from the `backend/` directory:
   ```bash
+  BACKEND_DIR="$PWD"
   FARM_NG_DIR=$(mktemp -d)
   git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git "$FARM_NG_DIR/farm-ng-core"
   cd "$FARM_NG_DIR/farm-ng-core"
   git submodule update --init --recursive
   sed -i '' 's/"-Werror",//g' setup.py
-  cd /path/to/GEMINI-App/backend
+  cd "$BACKEND_DIR"
   uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
   uv pip install --no-build-isolation "$FARM_NG_DIR/farm-ng-core"
   uv pip install --no-build-isolation farm-ng-amiga
