@@ -141,10 +141,11 @@ Install vendor submodule packages (required for stitching and bin extraction):
 ```bash
 uv pip install -e vendor/AgRowStitch --no-build-isolation
 uv pip install vendor/LightGlue
-uv pip install -e vendor/bin_to_images
 uv pip install farm-ng-amiga   # Linux/macOS only
 uv pip install kornia kornia_rs # Required by bin_to_images for Amiga .bin extraction
 ```
+
+> `bin_to_images` is not a submodule — it lives at `backend/bin_to_images/` and is found automatically at runtime. Only its dependencies (`farm-ng-amiga`, `kornia`, `kornia_rs`) need to be installed.
 
 ### 4. Install frontend dependencies
 

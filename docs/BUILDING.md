@@ -107,7 +107,6 @@ uv sync
 # 2. Install vendor packages
 uv pip install -e vendor/AgRowStitch --no-build-isolation
 uv pip install vendor/LightGlue
-uv pip install -e vendor/bin_to_images
 uv pip install --no-build-isolation farm-ng-amiga  # may fail — non-fatal
 uv pip install kornia kornia_rs
 

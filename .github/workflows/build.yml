@@ -175,9 +175,8 @@ jobs:
         run: |
           [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
           uv pip install farm-ng-amiga
-          # kornia + kornia_rs: bin_to_images dependencies that may not be in its requirements
+          # kornia + kornia_rs: dependencies of backend/bin_to_images for Amiga .bin extraction
           uv pip install kornia kornia_rs
 
       - name: Install vendor packages (macOS)
@@ -187,9 +186,8 @@ jobs:
         run: |
           [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
           uv pip install --no-build-isolation farm-ng-amiga
-          # kornia + kornia_rs: bin_to_images dependencies that may not be in its requirements
+          # kornia + kornia_rs: dependencies of backend/bin_to_images for Amiga .bin extraction
           uv pip install kornia kornia_rs
 
       - name: Install vendor packages (Windows)
@@ -201,7 +199,6 @@ jobs:
           uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
           [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          [ -d vendor/bin_to_images ] && uv pip install -e vendor/bin_to_images
           # farm-ng-amiga: no Windows wheels and farm-ng-core can't build on MSVC; non-fatal
           uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
 

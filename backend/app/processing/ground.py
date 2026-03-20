@@ -1283,9 +1283,12 @@ def _import_extract_binary():
     except Exception as e:
         logger.warning("bin_to_images import failed: %s: %s", type(e).__name__, e)
 
-    # Fallback: path-based lookup
+    # Fallback: path-based lookup.
+    # Each entry is added to sys.path so that `bin_to_images` is importable as a package.
+    backend_dir = str(Path(__file__).parent.parent.parent)  # backend/
     fallback_paths = [
         os.environ.get("BIN_TO_IMAGES_PATH"),
+        backend_dir,  # backend/bin_to_images/ lives here — works for local dev
         str(Path(__file__).parent.parent.parent / "vendor" / "bin_to_images"),
         str(Path(__file__).parent.parent.parent.parent / "bin_to_images"),
         # PyInstaller frozen bundle — bin_to_images collected alongside the exe
