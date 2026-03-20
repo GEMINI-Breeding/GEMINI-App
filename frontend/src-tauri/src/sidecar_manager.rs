@@ -1,9 +1,9 @@
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use tauri::Manager;
@@ -98,9 +98,9 @@ impl SidecarManager {
                     match std::fs::set_permissions(&binary_path, perms) {
                         Ok(_) => writeln!(log_file, "[tauri] Set execute permission OK").ok(),
                         Err(e) => writeln!(log_file, "[tauri] chmod skipped ({}), assuming already executable", e).ok(),
-                    };
+                    }
                 }
-                Err(e) => writeln!(log_file, "[tauri] Cannot stat binary: {}", e).ok(),
+                Err(e) => { writeln!(log_file, "[tauri] Cannot stat binary: {}", e).ok(); }
             }
         }
 
