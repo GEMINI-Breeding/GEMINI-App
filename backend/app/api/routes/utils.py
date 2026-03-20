@@ -149,13 +149,15 @@ async def capabilities() -> dict:
             except Exception:
                 pass
 
-    # ── Torch / CUDA ─────────────────────────────────────────────────────────
+    # ── Torch / CUDA / MPS ───────────────────────────────────────────────────
     torch_version: str | None = None
     cuda_available = False
+    mps_available = False
     try:
         import torch
         torch_version = torch.__version__
         cuda_available = torch.cuda.is_available()
+        mps_available = torch.backends.mps.is_available()
     except ImportError:
         pass
 
@@ -164,5 +166,6 @@ async def capabilities() -> dict:
         "agrowstitch": {"available": agrowstitch_available, "path": agrowstitch_path},
         "torch_version": torch_version,
         "cuda_available": cuda_available,
+        "mps_available": mps_available,
         "cpu_count": _os.cpu_count() or 1,
     }

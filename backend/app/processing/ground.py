@@ -300,7 +300,17 @@ def run_stitching(
     # Map UI device names to AgRowStitch device strings
     ui_device = pipeline_cfg.get("device", "cpu")
     if ui_device == "gpu":
-        agrowstitch_device = "cuda"
+        # Prefer CUDA, fall back to MPS (Apple Silicon), then CPU
+        try:
+            import torch
+            if torch.cuda.is_available():
+                agrowstitch_device = "cuda"
+            elif torch.backends.mps.is_available():
+                agrowstitch_device = "mps"
+            else:
+                agrowstitch_device = "cpu"
+        except Exception:
+            agrowstitch_device = "cpu"
     elif ui_device == "multiprocessing":
         agrowstitch_device = "multiprocessing"
     else:
