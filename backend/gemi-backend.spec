@@ -195,6 +195,14 @@ datas += collect_data_files('pyogrio')    # bundled GDAL/OGR drivers for GeoJSON
 datas += collect_data_files('shapely')    # Cython header stubs
 datas += collect_data_files('certifi')    # CA certs (for HTTPS / Roboflow)
 
+# AgRowStitch.py — single-file module; explicitly copy it into the bundle root
+# so `import AgRowStitch` works even if the editable install wasn't detected by
+# PyInstaller during analysis.  sys._MEIPASS (the bundle root) is on sys.path.
+import os as _os
+_ars_src = 'vendor/AgRowStitch/AgRowStitch.py'
+if _os.path.exists(_ars_src):
+    datas += [(_ars_src, '.')]
+
 # AgRowStitch / LightGlue data files
 try:
     datas += collect_data_files('lightglue')
