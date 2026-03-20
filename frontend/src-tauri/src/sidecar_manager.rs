@@ -85,17 +85,23 @@ impl SidecarManager {
             return Err(msg);
         }
 
-        // Ensure the binary is executable (artifact download can strip the bit)
+        // Ensure the binary is executable (artifact download can strip the bit).
+        // This may fail if the app is installed system-wide and the user is not
+        // the owner — that's fine: package managers set the bit at install time.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&binary_path)
-                .map_err(|e| format!("Cannot stat binary: {}", e))?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&binary_path, perms)
-                .map_err(|e| format!("Cannot chmod binary: {}", e))?;
-            writeln!(log_file, "[tauri] Set execute permission OK").ok();
+            match std::fs::metadata(&binary_path) {
+                Ok(meta) => {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    match std::fs::set_permissions(&binary_path, perms) {
+                        Ok(_) => writeln!(log_file, "[tauri] Set execute permission OK").ok(),
+                        Err(e) => writeln!(log_file, "[tauri] chmod skipped ({}), assuming already executable", e).ok(),
+                    };
+                }
+                Err(e) => writeln!(log_file, "[tauri] Cannot stat binary: {}", e).ok(),
+            }
         }
 
         let mut child = Command::new(&binary_path)

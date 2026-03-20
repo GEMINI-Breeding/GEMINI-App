@@ -1053,9 +1053,9 @@ def save_gcp_locations(
         raise HTTPException(status_code=400, detail="Not an aerial pipeline")
 
     paths = _get_paths(session, run)
-    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
+    paths.gcp_locations_intermediate.parent.mkdir(parents=True, exist_ok=True)
     paths.gcp_locations_intermediate.write_text(body.csv_text)
-    logger.info("Saved inline gcp_locations.csv for run %s", id)
+    logger.info("Saved inline gcp_locations.csv for run %s at %s", id, paths.gcp_locations_intermediate)
 
     gcps = _parse_gcp_csv(paths.gcp_locations_intermediate)
     return {"status": "saved", "gcps": gcps, "count": len(gcps)}

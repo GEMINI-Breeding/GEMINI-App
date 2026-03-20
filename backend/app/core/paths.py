@@ -199,16 +199,21 @@ class RunPaths:
 
     @property
     def gcp_locations_intermediate(self) -> Path:
-        """Inline gcp_locations.csv — year-specific (field layout may change per year)."""
-        return self.intermediate_year / "gcp_locations.csv"
+        """Inline gcp_locations.csv — pipeline-level (shared across all dates/years)."""
+        return self.intermediate_pipeline / "gcp_locations.csv"
 
     def gcp_locations(self) -> Path:
         """
         Return the correct gcp_locations.csv path.
-        Prefers Raw/ (uploaded via Platform Logs); falls back to Intermediate/.
+        Priority: Raw/{year}/ → Intermediate year-level → Intermediate pipeline-level.
         """
         raw_path = self.gcp_locations_raw
-        return raw_path if raw_path.exists() else self.gcp_locations_intermediate
+        if raw_path.exists():
+            return raw_path
+        year_path = self.intermediate_year / "gcp_locations.csv"
+        if year_path.exists():
+            return year_path
+        return self.gcp_locations_intermediate
 
     # ── Intermediate: run-level ───────────────────────────────────────────
 

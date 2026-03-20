@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import useCustomToast from "@/hooks/useCustomToast"
+import { useProcess } from "@/contexts/ProcessContext"
 import DeleteUpload from "./DeleteUpload"
 import { EditUploadDialog } from "./EditUploadDialog"
 import { ImageViewerDialog } from "./ImageViewerDialog"
@@ -51,8 +51,7 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { addProcess, updateProcess } = useProcess()
 
   const canView = IMAGE_DATA_TYPES.has(upload.data_type)
   const viewerTitle = [upload.experiment, upload.location, upload.population, upload.date]
@@ -80,23 +79,24 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
-            disabled={downloading}
-            onClick={async () => {
+            onClick={() => {
               setMenuOpen(false)
-              setDownloading(true)
-              showSuccessToast("Preparing ZIP download…")
-              try {
-                await downloadZip(upload)
-                showSuccessToast("Download complete")
-              } catch (e: any) {
-                showErrorToast(`Download failed: ${e?.message ?? "Unknown error"}`)
-              } finally {
-                setDownloading(false)
-              }
+              const label = [upload.experiment, upload.date].filter(Boolean).join(" · ") || "upload"
+              const pid = addProcess({
+                type: "processing",
+                status: "running",
+                title: `Downloading ZIP — ${label}`,
+                items: [],
+                progress: 0,
+                message: "Preparing archive…",
+              })
+              downloadZip(upload)
+                .then(() => updateProcess(pid, { status: "completed", progress: 100, message: "Saved to Downloads" }))
+                .catch((e: any) => updateProcess(pid, { status: "error", message: e?.message ?? "Download failed" }))
             }}
           >
             <Download className="mr-2 h-4 w-4" />
-            {downloading ? "Preparing ZIP…" : "Download ZIP"}
+            Download ZIP
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

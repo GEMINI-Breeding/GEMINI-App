@@ -69,18 +69,48 @@ def get_logs(current_user: CurrentUser) -> list[dict]:
 @router.get("/docker-check/")
 async def docker_check() -> dict:
     """Return whether Docker is installed and the daemon is running."""
+    import os
     import subprocess
-    if shutil.which("docker") is None:
-        return {"available": False}
+
+    # Common locations where Docker CLI lives on Mac (Docker Desktop) and Linux
+    extra_paths = [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/usr/bin/docker",
+        os.path.expanduser("~/.docker/bin/docker"),
+    ]
+
+    docker_bin = shutil.which("docker")
+    if docker_bin is None:
+        for p in extra_paths:
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                docker_bin = p
+                break
+
+    if docker_bin is None:
+        return {"available": False, "reason": "not_installed"}
+
+    # Docker Desktop on Mac may use a user-scoped socket
+    env = os.environ.copy()
+    user_socket = os.path.expanduser("~/.docker/run/docker.sock")
+    if os.path.exists(user_socket) and "DOCKER_HOST" not in env:
+        env["DOCKER_HOST"] = f"unix://{user_socket}"
+
     try:
         result = subprocess.run(
-            ["docker", "info"],
+            [docker_bin, "info"],
             capture_output=True,
-            timeout=5,
+            timeout=10,
+            env=env,
         )
-        return {"available": result.returncode == 0}
-    except Exception:
-        return {"available": False}
+        if result.returncode == 0:
+            return {"available": True}
+        stderr = (result.stderr or b"").decode(errors="replace")
+        if "permission denied" in stderr.lower():
+            return {"available": False, "reason": "permission_denied"}
+        return {"available": False, "reason": stderr[:200]}
+    except Exception as e:
+        return {"available": False, "reason": str(e)}
 
 
 @router.get("/capabilities/")

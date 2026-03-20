@@ -120,9 +120,11 @@ function gcpColor(idx: number): string {
 interface CsvUploadPanelProps {
   runId: string;
   onLoaded: () => void;
+  hasExisting?: boolean;
+  onCancel?: () => void;
 }
 
-function CsvUploadPanel({ runId, onLoaded }: CsvUploadPanelProps) {
+function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel }: CsvUploadPanelProps) {
   const { showErrorToast } = useCustomToast();
   const [csvText, setCsvText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -148,12 +150,22 @@ function CsvUploadPanel({ runId, onLoaded }: CsvUploadPanelProps) {
 
   return (
     <div className="mx-auto max-w-xl space-y-4 py-8">
+      {hasExisting && (
+        <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-600 dark:bg-yellow-950 dark:text-yellow-200">
+          <strong>Warning:</strong> Uploading a new file will replace the existing{" "}
+          <code>gcp_locations.csv</code> shared across all dates in this pipeline.
+        </div>
+      )}
       <div className="flex flex-col items-center gap-2 text-center">
         <MapPin className="text-muted-foreground h-10 w-10" />
-        <h3 className="font-medium">GCP Locations Required</h3>
+        <h3 className="font-medium">
+          {hasExisting ? "Replace GCP Locations" : "GCP Locations Required"}
+        </h3>
         <p className="text-muted-foreground text-sm">
-          No <code>gcp_locations.csv</code> found. Paste the CSV content below
-          or pick the file. Format:{" "}
+          {hasExisting
+            ? "Paste or pick a new CSV to replace the existing file."
+            : "No gcp_locations.csv found. Paste the CSV content below or pick the file."}{" "}
+          Format:{" "}
           <code className="text-xs">Label, Lat_dec, Lon_dec, Altitude</code>
         </p>
       </div>
@@ -162,7 +174,7 @@ function CsvUploadPanel({ runId, onLoaded }: CsvUploadPanelProps) {
         <Textarea
           rows={8}
           placeholder={
-            "Label,Lat_dec,Lon_dec,Altitude\nGCP1,33.4512,-111.9876,380.5\nGCP2,33.4498,-111.9845,381.0"
+            "Label,Lat_dec,Lon_dec,Altitude\n1,33.4512,-111.9876,380.5\n2,33.4498,-111.9845,381.0"
           }
           value={csvText}
           onChange={(e) => setCsvText(e.target.value)}
@@ -181,12 +193,17 @@ function CsvUploadPanel({ runId, onLoaded }: CsvUploadPanelProps) {
           className="hidden"
           onChange={handleFile}
         />
+        {onCancel && (
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
         <Button
           className="flex-1"
           disabled={!csvText.trim() || saveMutation.isPending}
           onClick={() => saveMutation.mutate(csvText)}
         >
-          {saveMutation.isPending ? "Saving…" : "Load GCP Locations"}
+          {saveMutation.isPending ? "Saving…" : hasExisting ? "Replace GCP Locations" : "Load GCP Locations"}
         </Button>
       </div>
     </div>
@@ -268,6 +285,7 @@ export function GcpPicker({
   const [markings, setMarkings] = useState<Record<string, GcpMarkEntry[]>>({});
   const [activeGcpLabel, setActiveGcpLabel] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [replaceMode, setReplaceMode] = useState(false);
 
   // Zoom / pan state
   const [zoom, setZoom] = useState(1);
@@ -666,8 +684,15 @@ export function GcpPicker({
     );
   }
 
-  if (!data?.has_gcp_locations) {
-    return <CsvUploadPanel runId={runId} onLoaded={() => refetch()} />;
+  if (!data?.has_gcp_locations || replaceMode) {
+    return (
+      <CsvUploadPanel
+        runId={runId}
+        hasExisting={data?.has_gcp_locations && replaceMode}
+        onLoaded={() => { setReplaceMode(false); refetch(); }}
+        onCancel={replaceMode ? () => setReplaceMode(false) : undefined}
+      />
+    );
   }
 
   if (gcps.length === 0) {
@@ -720,6 +745,9 @@ export function GcpPicker({
         </Button>
         <Button variant="outline" size="sm" onClick={onSaved}>
           Done
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setReplaceMode(true)}>
+          Replace GCP file
         </Button>
 
         <div className="bg-border mx-1 h-5 w-px" />

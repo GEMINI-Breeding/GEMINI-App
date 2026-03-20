@@ -2719,6 +2719,7 @@ export function RunDetail() {
   const [executingStep, setExecutingStep] = useState<string | null>(null);
 
   const [showDockerDialog, setShowDockerDialog] = useState(false);
+  const [dockerDenied, setDockerDenied] = useState(false);
 
   // Orthomosaic name prompt
   const [showOrthoNameDialog, setShowOrthoNameDialog] = useState(false);
@@ -2786,6 +2787,7 @@ export function RunDetail() {
       try {
         const result = await UtilsService.dockerCheck();
         if (!result.available) {
+          setDockerDenied((result as any).reason === "permission_denied");
           setShowDockerDialog(true);
           return;
         }
@@ -3444,12 +3446,24 @@ export function RunDetail() {
                   </strong>
                   , which requires Docker to be installed on your machine.
                 </p>
-                <p>
-                  Docker was not found. Download and install Docker Desktop,
-                  then restart GEMI. The ODM image (~4 GB) will download
-                  automatically the first time you run this step — no extra
-                  setup needed.
-                </p>
+                {dockerDenied ? (
+                  <p>
+                    Docker is installed but your user does not have permission to
+                    access it. On Linux, add your user to the{" "}
+                    <code className="text-foreground">docker</code> group:{" "}
+                    <code className="text-foreground text-xs">
+                      sudo usermod -aG docker $USER
+                    </code>{" "}
+                    then log out and back in.
+                  </p>
+                ) : (
+                  <p>
+                    Docker was not found or is not running. Download and install
+                    Docker Desktop, then restart GEMI. The ODM image (~4 GB)
+                    will download automatically the first time you run this step
+                    — no extra setup needed.
+                  </p>
+                )}
               </div>
             </DialogDescription>
           </DialogHeader>
