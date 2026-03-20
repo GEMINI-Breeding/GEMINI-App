@@ -95,12 +95,12 @@ impl SidecarManager {
                 Ok(meta) => {
                     let mut perms = meta.permissions();
                     perms.set_mode(0o755);
-                    match std::fs::set_permissions(&binary_path, perms) {
-                        Ok(_) => writeln!(log_file, "[tauri] Set execute permission OK").ok(),
-                        Err(e) => writeln!(log_file, "[tauri] chmod skipped ({}), assuming already executable", e).ok(),
-                    }
+                    let _ = match std::fs::set_permissions(&binary_path, perms) {
+                        Ok(_) => writeln!(log_file, "[tauri] Set execute permission OK"),
+                        Err(e) => writeln!(log_file, "[tauri] chmod skipped ({}), assuming already executable", e),
+                    };
                 }
-                Err(e) => { writeln!(log_file, "[tauri] Cannot stat binary: {}", e).ok(); }
+                Err(e) => { let _ = writeln!(log_file, "[tauri] Cannot stat binary: {}", e); }
             }
         }
 
