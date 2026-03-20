@@ -44,12 +44,8 @@ build_backend() {
         log "WARNING: vendor/LightGlue not found — AgRowStitch matching may fail"
     fi
 
-    if [[ -d "vendor/bin_to_images" ]]; then
-        log "Installing bin_to_images from vendor/..."
-        uv pip install -e vendor/bin_to_images
-    else
-        log "WARNING: vendor/bin_to_images not found — Amiga .bin extraction unavailable"
-    fi
+    # kornia + kornia_rs: required for Amiga .bin extraction (bin_to_images lives at backend/bin_to_images/)
+    uv pip install kornia kornia_rs
 
     # Install farm-ng-amiga (binary extraction SDK)
     OS="$(uname -s)"

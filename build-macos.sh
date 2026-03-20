@@ -28,8 +28,8 @@ build_backend() {
                                    || log "WARNING: vendor/AgRowStitch not found"
     [ -d "vendor/LightGlue" ]     && uv pip install vendor/LightGlue \
                                    || log "WARNING: vendor/LightGlue not found"
-    [ -d "vendor/bin_to_images" ] && uv pip install -e vendor/bin_to_images \
-                                   || log "WARNING: vendor/bin_to_images not found"
+    # kornia + kornia_rs: required for Amiga .bin extraction (bin_to_images lives at backend/bin_to_images/)
+    uv pip install kornia kornia_rs
 
     # farm-ng-core has no ARM64 wheels on PyPI — build from source
     log "Building farm-ng-core from source (no ARM64 wheels on PyPI)..."

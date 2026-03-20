@@ -141,9 +141,25 @@ Install vendor submodule packages (required for stitching and bin extraction):
 ```bash
 uv pip install -e vendor/AgRowStitch --no-build-isolation
 uv pip install vendor/LightGlue
-uv pip install farm-ng-amiga   # Linux/macOS only
 uv pip install kornia kornia_rs # Required by bin_to_images for Amiga .bin extraction
 ```
+
+**Installing `farm-ng-amiga` (Amiga robot SDK):**
+
+- **Linux:** `uv pip install farm-ng-amiga`
+- **macOS (Apple Silicon):** No ARM64 wheels exist on PyPI — must build `farm-ng-core` from source first:
+  ```bash
+  FARM_NG_DIR=$(mktemp -d)
+  git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git "$FARM_NG_DIR/farm-ng-core"
+  cd "$FARM_NG_DIR/farm-ng-core"
+  git submodule update --init --recursive
+  sed -i '' 's/"-Werror",//g' setup.py
+  cd /path/to/GEMINI-App/backend
+  uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
+  uv pip install --no-build-isolation "$FARM_NG_DIR/farm-ng-core"
+  uv pip install --no-build-isolation farm-ng-amiga
+  ```
+- **Windows:** No wheels and MSVC can't build it — skip this step (non-fatal).
 
 > `bin_to_images` is not a submodule — it lives at `backend/bin_to_images/` and is found automatically at runtime. Only its dependencies (`farm-ng-amiga`, `kornia`, `kornia_rs`) need to be installed.
 

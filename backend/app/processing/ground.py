@@ -1267,10 +1267,11 @@ def _import_extract_binary():
     Try to import extract_binary from the bin_to_images package (farm-ng-amiga SDK).
 
     Looks in (priority order):
-      1. Installed package (pip install -e vendor/bin_to_images in build.sh)
+      1. Installed package (standard import)
       2. BIN_TO_IMAGES_PATH environment variable (dev override)
-      3. vendor/bin_to_images / bin_to_images relative to the backend root
-      4. sys._MEIPASS (PyInstaller frozen bundle)
+      3. backend/ directory (bin_to_images/ lives here in the local repo)
+      4. vendor/bin_to_images relative to the backend root (legacy path)
+      5. Sibling bin_to_images/ directory
     """
     try:
         from bin_to_images.bin_to_images import extract_binary  # type: ignore
