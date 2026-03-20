@@ -1554,8 +1554,8 @@ def extract_bin_file(
         else:
             msg = (
                 "farm_ng SDK / bin_to_images is not available in this environment.\n"
-                "Run: uv pip install -e vendor/bin_to_images\n"
-                "and ensure the bin_to_images submodule is checked out."
+                "Run: uv pip install farm-ng-amiga kornia kornia_rs\n"
+                "bin_to_images is at backend/bin_to_images/ and is found automatically."
             )
             logger.error(msg)
             emit({"event": "error", "message": msg})

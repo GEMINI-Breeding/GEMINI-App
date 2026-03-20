@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 import os, sys
 
 block_cipher = None
@@ -175,6 +175,17 @@ datas += [
     ('bin_to_images/bin_to_images.py', 'docker/bin-extractor/bin_to_images'),
     ('bin_to_images/__init__.py',       'docker/bin-extractor/bin_to_images'),
 ]
+
+# farm_ng_core / farm_ng_amiga — bin_to_images uses importlib.metadata to find these;
+# copy_metadata includes the .dist-info so PackageNotFoundError doesn't occur at runtime.
+try:
+    datas += copy_metadata('farm_ng_core')
+except Exception:
+    pass
+try:
+    datas += copy_metadata('farm_ng_amiga')
+except Exception:
+    pass
 
 datas += collect_data_files('setuptools')  # jaraco.text data files needed by pkg_resources hook
 datas += collect_data_files('rasterio')   # bundled GDAL + PROJ data
