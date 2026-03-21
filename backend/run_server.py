@@ -3,6 +3,35 @@
 
 import os
 
+# ── AgRowStitch subprocess mode ───────────────────────────────────────────────
+# When the frozen bundle is spawned with GEMI_AGROWSTITCH_CONFIG set, act as a
+# plain Python interpreter running AgRowStitch instead of starting the server.
+# This is the standard pattern for PyInstaller apps that need to spawn Python
+# subprocesses (there is no standalone `python` executable in the bundle).
+_agrowstitch_config = os.environ.get("GEMI_AGROWSTITCH_CONFIG")
+if _agrowstitch_config:
+    import sys
+
+    # sys._MEIPASS is the bundle root — AgRowStitch.py is collected there.
+    _meipass = getattr(sys, "_MEIPASS", None)
+    if _meipass and _meipass not in sys.path:
+        sys.path.insert(0, _meipass)
+
+    _agrowstitch_dir = os.environ.get("GEMI_AGROWSTITCH_DIR", "")
+    if _agrowstitch_dir and _agrowstitch_dir not in sys.path:
+        sys.path.insert(0, _agrowstitch_dir)
+
+    _cpu_count = int(os.environ.get("GEMI_AGROWSTITCH_CPU_COUNT", "1"))
+
+    from AgRowStitch import run  # type: ignore
+
+    r = run(_agrowstitch_config, _cpu_count)
+    if hasattr(r, "__iter__") and not isinstance(r, (str, bytes)):
+        for _ in r:
+            pass
+    sys.exit(0)
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Set desktop environment BEFORE importing the app so config.py picks it up
 os.environ["ENVIRONMENT"] = "desktop"
 

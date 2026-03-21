@@ -563,8 +563,9 @@ def run_stitching(
                 }
             )
 
-            # Build config
+            # Build config — strip keys not in AgRowStitch's type_dict
             config = dict(base_config)
+            config.pop("num_cpu", None)  # passed as arg to run(), not a config key
             config["image_directory"] = plot_temp_dir
             config["device"] = agrowstitch_device
             config["stitching_direction"] = stitch_dir
@@ -584,41 +585,50 @@ def run_stitching(
             #   .venv/bin/pip install -e backend/vendor/LightGlue
             _agrows_venv_python = agrowstitch_dir / ".venv" / "bin" / "python"
             if _agrows_venv_python.exists():
+                # Dedicated AgRowStitch venv takes priority (dev override).
                 _python = str(_agrows_venv_python)
+                _subprocess_env = None
+                _subprocess_cmd = [
+                    _python, "-c",
+                    f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
+                    f"from AgRowStitch import run; "
+                    f"r = run({tmp_config!r}, {cpu_count}); "
+                    f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None",
+                ]
             elif getattr(sys, "frozen", False):
-                # PyInstaller bundle: sys.executable is the bundle launcher, not Python.
-                # Use the embedded interpreter sitting next to the executable.
-                _bundle_dir = Path(sys.executable).parent
-                for _py_name in ("python3.12", "python3", "python"):
-                    _candidate = _bundle_dir / _py_name
-                    if _candidate.exists():
-                        _python = str(_candidate)
-                        break
-                else:
-                    _python = str(_bundle_dir / "python3.12")
-                # Tauri bundling can strip the execute bit — restore it if needed.
-                try:
-                    _py_path = Path(_python)
-                    if not os.access(_py_path, os.X_OK):
-                        _py_path.chmod(_py_path.stat().st_mode | 0o111)
-                except OSError:
-                    pass
+                # PyInstaller bundle: there is no standalone Python executable.
+                # Re-invoke the bundle executable with GEMI_AGROWSTITCH_CONFIG set;
+                # run_server.py detects this env var and runs AgRowStitch instead
+                # of starting the server.
+                _meipass = getattr(sys, "_MEIPASS", "")
+                _subprocess_env = {
+                    **os.environ,
+                    "GEMI_AGROWSTITCH_CONFIG": tmp_config,
+                    "GEMI_AGROWSTITCH_CPU_COUNT": str(cpu_count),
+                    "GEMI_AGROWSTITCH_DIR": str(agrowstitch_dir),
+                    # Suppress the server's port so it doesn't try to bind one.
+                    "GEMI_BACKEND_PORT": "",
+                }
+                _subprocess_cmd = [sys.executable]
+                _python = sys.executable
             else:
                 _python = sys.executable
+                _subprocess_env = None
+                _subprocess_cmd = [
+                    _python, "-c",
+                    f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
+                    f"from AgRowStitch import run; "
+                    f"r = run({tmp_config!r}, {cpu_count}); "
+                    f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None",
+                ]
             emit({"event": "progress", "message": f"Using Python: {_python}"})
 
-            # A direct function call blocks the thread with no way to interrupt it.
-            script = (
-                f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
-                f"from AgRowStitch import run; "
-                f"r = run({tmp_config!r}, {cpu_count}); "
-                f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None"
-            )
             proc = subprocess.Popen(
-                [_python, "-c", script],
+                _subprocess_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                env=_subprocess_env,
             )
 
             # Resource snapshot helper — emits RAM + VRAM in one line

@@ -276,9 +276,10 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     setPlotPage(n - 1)
   }
 
-  const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - 1)), [])
+  const STEP = 3
+  const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - STEP)), [])
   const next = useCallback(
-    () => setCurrentIdx((i) => Math.min(images.length - 1, i + 1)),
+    () => setCurrentIdx((i) => Math.min(images.length - 1, i + STEP)),
     [images.length]
   )
 

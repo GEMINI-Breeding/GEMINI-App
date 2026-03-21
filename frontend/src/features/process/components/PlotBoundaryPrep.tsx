@@ -1021,7 +1021,9 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       const initVersion =
         orthoInfo.plot_boundary_ortho_version ?? orthoInfo.active_ortho_version;
       const imgSrc =
-        initVersion != null
+        pipelineType === "ground" && orthoInfo.active_stitch_version != null
+          ? apiUrl(`/api/v1/pipeline-runs/${runId}/mosaic-preview?stitch_version=${orthoInfo.active_stitch_version}`)
+          : initVersion != null
           ? apiUrl(
               `/api/v1/pipeline-runs/${runId}/orthomosaics/${initVersion}/preview?max_size=4096`
             )
@@ -1458,7 +1460,10 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
   async function handleSave(saveAs = false, name?: string) {
     if (!previewGeoJson) return;
-    if (!popBoundary) return;
+    if (!popBoundary) {
+      showErrorToast("Draw a field boundary before saving");
+      return;
+    }
     setIsSaving(true);
     if (saveAs) setPendingSaveAs(true);
     try {
@@ -1483,9 +1488,9 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         }
       );
       if (!res.ok) throw new Error();
-      await queryClient.invalidateQueries({
-        queryKey: ["orthomosaic-info", runId],
-      });
+      await queryClient.invalidateQueries({ queryKey: ["orthomosaic-info", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] });
       showSuccessToast(
         saveAs ? "Saved as new version" : "Plot boundaries saved"
       );

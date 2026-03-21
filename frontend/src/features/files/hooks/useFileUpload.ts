@@ -4,6 +4,7 @@ import { useProcess } from "@/contexts/ProcessContext";
 import useCustomToast from "@/hooks/useCustomToast";
 import type { ProcessItem } from "@/types/process";
 import { dataTypes } from "@/config/dataTypes";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface UploadParams {
   filePaths: string[];
@@ -22,6 +23,7 @@ function fileNameFromPath(path: string): string {
 export function useFileUpload() {
   const { addProcess, updateProcess, updateProcessItem } = useProcess();
   const { showErrorToastWithCopy } = useCustomToast();
+  const queryClient = useQueryClient();
 
   const uploadFiles = useCallback(
     async ({
@@ -167,6 +169,7 @@ export function useFileUpload() {
                     completedAt: new Date(),
                     title: `Uploaded ${data.count} file(s)`,
                   });
+                  queryClient.invalidateQueries({ queryKey: ["workspace-card-images"] });
                   onComplete?.(completedDestPaths);
                   break;
               }

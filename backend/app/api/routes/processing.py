@@ -1546,7 +1546,13 @@ def auto_boundary(
         }
 
     # ── Ground path ───────────────────────────────────────────────────────────
-    stitch_version = int((run.outputs or {}).get("stitching_version", 1))
+    _outputs = run.outputs or {}
+    _stitchings = list(_outputs.get("stitchings", []))
+    if not _stitchings and _outputs.get("stitching_version"):
+        _stitchings = [{"version": int(_outputs["stitching_version"]), "name": None}]
+    if not _stitchings:
+        return {"available": False}
+    stitch_version = int(_outputs["stitching_version"]) if _outputs.get("stitching_version") else _stitchings[-1]["version"]
     stitch_dir = paths.agrowstitch_dir(stitch_version)
 
     if not stitch_dir.exists():

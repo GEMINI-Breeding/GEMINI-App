@@ -199,8 +199,14 @@ datas += collect_data_files('certifi')    # CA certs (for HTTPS / Roboflow)
 # so `import AgRowStitch` works even if the editable install wasn't detected by
 # PyInstaller during analysis.  sys._MEIPASS (the bundle root) is on sys.path.
 _ars_src = 'vendor/AgRowStitch/AgRowStitch.py'
+_ars_cfg = 'vendor/AgRowStitch/config.yaml'
 if os.path.exists(_ars_src):
-    datas += [(_ars_src, '.')]
+    # Bundle into vendor/AgRowStitch/ so Path(__file__).parent.parent.parent / "vendor/AgRowStitch"
+    # resolves correctly inside the frozen app.  _find_agrowstitch_dir() finds AgRowStitch.py
+    # there, and run_server.py adds that dir to sys.path for the subprocess import.
+    datas += [(_ars_src, 'vendor/AgRowStitch')]
+if os.path.exists(_ars_cfg):
+    datas += [(_ars_cfg, 'vendor/AgRowStitch')]
 
 # AgRowStitch / LightGlue data files
 try:
@@ -247,7 +253,8 @@ a = Analysis(
     runtime_hooks=['hooks/rthook_patch_jaraco.py', 'hooks/rthook_proj.py'],
     excludes=[
         # Exclude heavy optional packages not needed at runtime
-        'matplotlib', 'tkinter', 'wx', 'IPython', 'notebook',
+        # NOTE: matplotlib is NOT excluded — supervision/draw/color.py imports it at top level
+        'tkinter', 'wx', 'IPython', 'notebook',
         'pytest',
         # NOTE: do NOT exclude 'setuptools' or 'distutils' — on Python 3.12,
         # PyInstaller's hook-distutils.py aliases distutils → setuptools._distutils,
