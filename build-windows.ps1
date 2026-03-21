@@ -65,7 +65,7 @@ function Build-Backend {
 
     $DestDir = Join-Path $Frontend "src-tauri\binaries\gemi-backend"
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
-    Copy-Item -Path dist\gemi-backend -Destination $DestDir -Recurse -Force
+    Copy-Item -Path dist\gemi-backend\* -Destination $DestDir -Recurse -Force
     Log "Backend bundle → $DestDir"
 }
 
