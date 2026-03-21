@@ -277,8 +277,8 @@ jobs:
         shell: pwsh
         run: |
           uv run pyinstaller --clean gemi-backend.spec
-          New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries | Out-Null
-          Copy-Item -Path dist/gemi-backend -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse
+          New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries/gemi-backend | Out-Null
+          Copy-Item -Path dist/gemi-backend/* -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse -Force
           $size = (Get-ChildItem -Path dist/gemi-backend -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
           # Free space before the Rust build
