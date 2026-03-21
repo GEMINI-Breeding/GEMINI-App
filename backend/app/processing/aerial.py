@@ -309,7 +309,7 @@ def run_orthomosaic(
         "--name", container_name,
         "-i", "--rm",
         "--security-opt=no-new-privileges",
-        "--user", f"{os.getuid()}:{os.getgid()}",
+        *(["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
         "-w", "/datasets",
         "-v", f"{host_project}:/datasets:rw",
         "-v", f"{host_images}:/datasets/code/images:ro",
