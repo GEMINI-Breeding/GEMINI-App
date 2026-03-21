@@ -306,6 +306,14 @@ def run_stitching(
     _existing = list((run.outputs or {}).get("stitchings", []))
     agrowstitch_version = max((s["version"] for s in _existing), default=0) + 1
 
+    # Write the new version number immediately so stitch-outputs polling reads
+    # from the correct (new) directory while plots are being generated.
+    from app.crud.pipeline import update_pipeline_run
+    from app.models.pipeline import PipelineRunUpdate
+    _early_outputs = dict(run.outputs or {})
+    _early_outputs["stitching_version"] = agrowstitch_version
+    update_pipeline_run(session=session, db_run=run, run_in=PipelineRunUpdate(outputs=_early_outputs))
+
     # Map UI device names to AgRowStitch device strings
     ui_device = pipeline_cfg.get("device", "cpu")
     if ui_device == "gpu":

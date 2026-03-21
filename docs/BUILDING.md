@@ -93,6 +93,19 @@ frontend/src-tauri/target/release/bundle/
 `build.sh` automatically detects macOS and builds `farm-ng-core` from source (no ARM64
 wheels exist on PyPI). This adds ~5 minutes to the first backend build.
 
+### Vendored submodule patches
+
+Some upstream submodules cannot be modified directly (e.g. `AgRowStitch` is owned by a
+third-party org). Fixes for those are kept in `backend/patches/` and applied automatically
+by every build script immediately after `git submodule update`:
+
+| Patch file | Submodule | Reason |
+|------------|-----------|--------|
+| `backend/patches/AgRowStitch.py` | `vendor/AgRowStitch` | Fix OpenCV 4.13 SIGSEGV — `match.H = None` causes a null-pointer dereference in `cv::detail::MatchesInfo::operator=` during spherical stitching |
+
+If you update the `AgRowStitch` submodule pointer to a newer commit, re-apply and update
+the patch file manually.
+
 ---
 
 ## Build (Windows)

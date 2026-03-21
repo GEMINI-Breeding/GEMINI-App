@@ -2722,19 +2722,21 @@ def get_stitch_outputs(
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
+    version: int | None = None,
 ) -> dict[str, Any]:
     """
-    Return stitched plot images for the active stitching version.
-    Polled during a run to show plots as they complete.
+    Return stitched plot images for a stitching version.
+    If version is omitted, returns the active stitching version (used for live polling).
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     outputs = run.outputs or {}
-    version = int(outputs.get("stitching_version") or 1)
-    img_dir = paths.agrowstitch_dir(version)
+    active_version = int(outputs.get("stitching_version") or 1)
+    use_version = version if version is not None else active_version
+    img_dir = paths.agrowstitch_dir(use_version)
 
     if not img_dir.exists():
-        return {"plots": [], "version": version, "dir": str(img_dir)}
+        return {"plots": [], "version": use_version, "dir": str(img_dir)}
 
     plots = []
     for f in sorted(img_dir.glob("*.png")):
@@ -2743,7 +2745,7 @@ def get_stitch_outputs(
             "url": f"/api/v1/files/serve?path={f}",
         })
 
-    return {"plots": plots, "version": version, "dir": str(img_dir)}
+    return {"plots": plots, "version": use_version, "dir": str(img_dir)}
 
 
 # ── Ground: inference results summary ────────────────────────────────────────

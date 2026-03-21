@@ -699,7 +699,7 @@ function StitchImagesDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl p-3">
+      <DialogContent className="max-w-5xl p-3">
         <DialogHeader className="px-1">
           <DialogTitle className="text-sm">
             {versionLabel} — {plots.length} plots
@@ -732,7 +732,7 @@ function StitchImagesDialog({
               </Button>
             </div>
           </div>
-          {plot && <ZoomableImage src={apiUrl(plot.url)} alt={plot.name} />}
+          {plot && <ZoomableImage src={apiUrl(plot.url)} alt={plot.name} maxHeight="75vh" />}
         </div>
       </DialogContent>
     </Dialog>
@@ -817,6 +817,14 @@ function StitchPanel({
     staleTime: 30_000,
   });
 
+  // Clear stale plot cache when a new run starts so old plots don't flash
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (isRunning) {
+      queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+    }
+  }, [isRunning, runId, queryClient]);
+
   // Auto-advance page index to latest plot during run
   const livePlots = liveData?.plots ?? [];
   useEffect(() => {
@@ -828,11 +836,8 @@ function StitchPanel({
   // Fetch images for a specific version to show in dialog
   async function viewVersionImages(v: StitchVersion) {
     const res = await fetch(
-      apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`)
+      apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs?version=${v.version}`)
     );
-    // The live endpoint returns active version; for other versions fetch directly if needed
-    // For simplicity, use the stitch-outputs endpoint which returns the active version
-    // If user wants to view a non-active version we still show what we have
     const data = res.ok ? await res.json() : { plots: [] };
     setViewingImages({ version: v, plots: data.plots ?? [] });
   }
@@ -1660,10 +1665,12 @@ function ZoomableImage({
   src,
   alt,
   onLoad,
+  maxHeight = "60vh",
 }: {
   src: string;
   alt: string;
   onLoad?: () => void;
+  maxHeight?: string;
 }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1788,7 +1795,7 @@ function ZoomableImage({
       <div
         ref={containerRef}
         className="bg-muted/40 overflow-hidden rounded-lg border"
-        style={{ maxHeight: "60vh", cursor: zoom > 1 ? "grab" : "default" }}
+        style={{ maxHeight, cursor: zoom > 1 ? "grab" : "default" }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -1798,8 +1805,9 @@ function ZoomableImage({
         <img
           src={src}
           alt={alt}
-          className="max-h-[60vh] w-full object-contain select-none"
+          className="w-full object-contain select-none"
           style={{
+            maxHeight,
             transform: `scale(${zoom}) translate(${pan.x / zoom}%, ${pan.y / zoom}%)`,
             transformOrigin: "center center",
             transition: dragRef.current ? "none" : "transform 0.1s ease",
