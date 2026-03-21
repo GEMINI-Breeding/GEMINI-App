@@ -79,6 +79,16 @@ jobs:
         with:
           submodules: recursive
 
+      # ── Vendor submodule patches ──────────────────────────────────────────────
+      - name: Apply vendor submodule patches
+        shell: bash
+        run: |
+          # patches/AgRowStitch.py: fixes OpenCV 4.13 SIGSEGV (match.H = None → np.zeros)
+          if [ -f backend/patches/AgRowStitch.py ] && [ -d backend/vendor/AgRowStitch ]; then
+            echo "[build] Applying patch: AgRowStitch.py (OpenCV 4.13 MatchesInfo fix)"
+            cp backend/patches/AgRowStitch.py backend/vendor/AgRowStitch/AgRowStitch.py
+          fi
+
       # ── System dependencies ───────────────────────────────────────────────────
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'

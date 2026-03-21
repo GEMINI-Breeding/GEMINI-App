@@ -25,6 +25,15 @@ function Build-Backend {
     Set-Location $Root
     git submodule update --init --recursive
 
+    # Apply local patches to vendored submodules that cannot be pushed upstream.
+    # patches/AgRowStitch.py: fixes OpenCV 4.13 SIGSEGV (match.H = None -> np.zeros).
+    $AgRowStitchPatch = Join-Path $Backend "patches\AgRowStitch.py"
+    $AgRowStitchDest  = Join-Path $Backend "vendor\AgRowStitch\AgRowStitch.py"
+    if ((Test-Path $AgRowStitchPatch) -and (Test-Path (Split-Path $AgRowStitchDest))) {
+        Log "Applying patch: AgRowStitch.py (OpenCV 4.13 MatchesInfo fix)"
+        Copy-Item $AgRowStitchPatch $AgRowStitchDest -Force
+    }
+
     Set-Location $Backend
     uv sync
 
