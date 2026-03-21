@@ -1,15 +1,18 @@
 /**
  * AnalyzeDashboard — top-level Analyze page.
  *
- * Two tabs:
- *  - Table: filterable flat table of all TraitRecords with expandable
- *           per-plot data rows.
- *  - Map:   satellite → ortho image overlay → trait polygons. Left panel
- *           lists records grouped by workspace/pipeline; click to load.
+ * Three tabs:
+ *  - Table:  workspace-dropdown-filtered table of TraitRecords (Pipeline as
+ *            first column) with expandable per-plot rows, text filters for
+ *            COL/PLOT/ACCESSION/LOCATION/CROP/REP, per-row View + Download with
+ *            progress indicator, COL/ROW deduplication and column ordering.
+ *  - Query:  query plots by field values with autocomplete; results shown
+ *            side-by-side with images + statistics.
+ *  - Map:    satellite → ortho image overlay → trait polygons.
  */
 
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -26,10 +29,15 @@ import {
   Download,
   Eye,
   EyeOff,
+  ImageOff,
   Loader2,
+  Pin,
+  PinOff,
+  X as XIcon,
   Map as MapIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Table2,
 } from "lucide-react";
 import { analyzeApi, versionLabel, type TraitRecord } from "../api";
@@ -37,6 +45,13 @@ import { TraitMap } from "../components/TraitMap";
 import { MetricSelector } from "../components/MetricSelector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -55,6 +70,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function apiUrl(path: string): string {
+  const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
+  return base ? `${base}${path}` : path;
+}
 
 function downloadCsv(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
@@ -85,6 +105,82 @@ function featuresToCsv(features: GeoJSON.Feature[]): string {
   return [header, ...lines].join("\n");
 }
 
+/** Downloads a single plot image; resolves when complete. */
+async function fetchAndDownloadPlotImage(
+  recordId: string,
+  plotId: string
+): Promise<void> {
+  const endpoint = apiUrl(
+    `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
+  );
+  const token = localStorage.getItem("access_token") || "";
+  try {
+    const res = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `plot_${plotId}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {}
+}
+
+function getPlotId(
+  properties: Record<string, unknown>,
+  fallback: number | string
+): string {
+  return String(
+    properties?.plot_id ?? properties?.plot ?? properties?.accession ?? fallback
+  );
+}
+
+/**
+ * Deduplicate column keys case-insensitively (keep first occurrence).
+ * Prevents showing "col" and "column" as two separate columns.
+ */
+function deduplicateKeys(keys: string[]): string[] {
+  const seen = new Set<string>();
+  return keys.filter((k) => {
+    const lower = k.toLowerCase();
+    if (seen.has(lower)) return false;
+    seen.add(lower);
+    return true;
+  });
+}
+
+/** Keys that represent the "column" spatial position. */
+const COL_KEY_SET = new Set(["col", "column", "bed"]);
+/** Keys that represent the "row" spatial position. */
+const ROW_KEY_SET = new Set(["row", "tier"]);
+
+/**
+ * Order columns so COL/ROW come first, then other metadata, then numeric traits.
+ * Also deduplicates case-insensitively.
+ */
+function orderColumns(
+  allKeys: string[],
+  metaCols: string[],
+  numCols: string[]
+): string[] {
+  const deduped = deduplicateKeys(allKeys);
+  const colKey = deduped.find((k) => COL_KEY_SET.has(k.toLowerCase()));
+  const rowKey = deduped.find((k) => ROW_KEY_SET.has(k.toLowerCase()));
+  const priority = [colKey, rowKey].filter(Boolean) as string[];
+
+  const remainingMeta = metaCols.filter(
+    (k) =>
+      !priority.includes(k) &&
+      deduped.includes(k) // respect deduplication
+  );
+  const remainingNum = numCols.filter((k) => deduped.includes(k));
+
+  return [...priority, ...remainingMeta, ...remainingNum].filter((c) => c !== "");
+}
+
 // ── Version badge ──────────────────────────────────────────────────────────────
 
 function VersionBadge({
@@ -107,9 +203,143 @@ function VersionBadge({
   );
 }
 
+// ── Plot view dialog ──────────────────────────────────────────────────────────
+
+function PlotViewDialog({
+  recordId,
+  plotId,
+  properties,
+  metricColumns,
+  onClose,
+}: {
+  recordId: string;
+  plotId: string;
+  properties: Record<string, unknown>;
+  metricColumns: string[];
+  onClose: () => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setBlobUrl(null);
+    setError(false);
+    const endpoint = apiUrl(
+      `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
+    );
+    const token = localStorage.getItem("access_token") || "";
+    let revoke: string | null = null;
+    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        revoke = url;
+        setBlobUrl(url);
+      })
+      .catch(() => setError(true));
+    return () => {
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [recordId, plotId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Plot {plotId}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {/* Image */}
+          <div className="bg-muted/30 rounded-lg flex items-center justify-center min-h-32">
+            {error ? (
+              <p className="text-xs text-muted-foreground py-4">Image not available</p>
+            ) : !blobUrl ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : (
+              <img
+                src={blobUrl}
+                alt={`Plot ${plotId}`}
+                className="w-full rounded-lg object-contain max-h-72"
+              />
+            )}
+          </div>
+
+          {/* Stats */}
+          {properties.accession != null && (
+            <p className="text-sm text-muted-foreground">{String(properties.accession)}</p>
+          )}
+          <div className="space-y-1">
+            {metricColumns.map((col) => {
+              const v = properties[col];
+              if (typeof v !== "number") return null;
+              return (
+                <div key={col} className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {col.replace(/_/g, " ")}
+                  </span>
+                  <span className="font-mono">{v.toFixed(3)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Expandable per-plot table ──────────────────────────────────────────────────
 
+const PLOT_FILTER_FIELDS = [
+  "col",
+  "plot",
+  "accession",
+  "location",
+  "crop",
+  "rep",
+] as const;
+type PlotFilterKey = (typeof PLOT_FILTER_FIELDS)[number];
+
+interface KeptPlot {
+  recordId: string;
+  plotId: string;
+  properties: Record<string, unknown>;
+  metricColumns: string[];
+  recordLabel: string;
+}
+
+function matchesTextFilter(
+  properties: Record<string, unknown>,
+  key: PlotFilterKey,
+  val: string
+): boolean {
+  if (!val.trim()) return true;
+  const v = val.toLowerCase();
+  const titleKey = key.charAt(0).toUpperCase() + key.slice(1);
+  const candidates = [
+    properties[key],
+    properties[key.toUpperCase()],
+    properties[titleKey],
+    key === "plot" ? properties.plot_id ?? properties.plot : null,
+  ];
+  return candidates.some(
+    (c) => c != null && String(c).toLowerCase().includes(v)
+  );
+}
+
 function ExpandedPlotTable({ recordId }: { recordId: string }) {
+  const [textFilters, setTextFilters] = useState<Record<PlotFilterKey, string>>(
+    { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
+  );
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [viewingPlot, setViewingPlot] = useState<{
+    plotId: string;
+    properties: Record<string, unknown>;
+  } | null>(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ["trait-record-geojson", recordId],
     queryFn: () => analyzeApi.getTraitRecordGeojson(recordId),
@@ -134,38 +364,94 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
     );
   }
 
-  // Determine columns: metadata first, then numeric traits
+  // Build deduplicated + ordered column list with COL/ROW first
   const allKeys = [
     ...new Set(features.flatMap((f) => Object.keys(f.properties ?? {}))),
   ];
-  const metaCols = allKeys.filter(
-    (k) =>
-      !["", "geometry"].includes(k) &&
-      typeof features[0]?.properties?.[k] !== "number"
-  );
   const numCols = data?.metric_columns ?? [];
-  const cols = [...metaCols, ...numCols].filter((c) => c !== "");
+  const numColsSet = new Set(numCols);
+  const metaCols = deduplicateKeys(allKeys).filter(
+    (k) => !["", "geometry"].includes(k) && !numColsSet.has(k)
+  );
+  const cols = orderColumns(allKeys, metaCols, numCols);
 
-  function handleDownload() {
-    downloadCsv(featuresToCsv(features), `traits_${recordId}.csv`);
+  // Apply text filters
+  const filteredFeatures = features.filter((f) => {
+    const p = f.properties ?? {};
+    return PLOT_FILTER_FIELDS.every((key) =>
+      matchesTextFilter(p, key, textFilters[key])
+    );
+  });
+
+  const hasAnyFilter = PLOT_FILTER_FIELDS.some(
+    (k) => textFilters[k].trim() !== ""
+  );
+
+  async function handleDownloadImage(plotId: string) {
+    setDownloadingIds((prev) => new Set([...prev, plotId]));
+    await fetchAndDownloadPlotImage(recordId, plotId);
+    setDownloadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(plotId);
+      return next;
+    });
+  }
+
+  function handleDownloadCsv() {
+    downloadCsv(featuresToCsv(filteredFeatures), `traits_${recordId}.csv`);
   }
 
   return (
     <div className="bg-muted/20 border-t">
+      {/* Text filters */}
+      <div className="flex flex-wrap items-center gap-2 px-6 py-2 border-b">
+        {PLOT_FILTER_FIELDS.map((field) => (
+          <Input
+            key={field}
+            className="h-7 text-xs w-24"
+            placeholder={field.toUpperCase()}
+            value={textFilters[field]}
+            onChange={(e) =>
+              setTextFilters((prev) => ({ ...prev, [field]: e.target.value }))
+            }
+          />
+        ))}
+        {hasAnyFilter && (
+          <button
+            onClick={() =>
+              setTextFilters({
+                col: "",
+                plot: "",
+                accession: "",
+                location: "",
+                crop: "",
+                rep: "",
+              })
+            }
+            className="text-primary text-xs hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       <div className="flex items-center justify-between px-6 py-2">
         <p className="text-muted-foreground text-xs">
-          {features.length} plots · {numCols.join(", ")}
+          {filteredFeatures.length}
+          {hasAnyFilter ? ` / ${features.length}` : ""} plots ·{" "}
+          {numCols.join(", ")}
         </p>
         <Button
           variant="ghost"
           size="sm"
           className="h-7 text-xs"
-          onClick={handleDownload}
+          onClick={handleDownloadCsv}
         >
           <Download className="mr-1.5 h-3 w-3" />
           Download CSV
         </Button>
       </div>
+
       <div className="max-h-64 overflow-x-auto overflow-y-auto">
         <Table>
           <TableHeader>
@@ -178,24 +464,84 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
                   {c.replace(/_/g, " ")}
                 </TableHead>
               ))}
+              <TableHead className="px-3 py-1.5 text-xs w-20 text-right">
+                Actions
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {features.map((f, i) => (
-              <TableRow key={i} className="text-xs">
-                {cols.map((c) => {
-                  const v = f.properties?.[c];
-                  return (
-                    <TableCell key={c} className="px-3 py-1 font-mono">
-                      {typeof v === "number" ? v.toFixed(3) : String(v ?? "—")}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            ))}
+            {filteredFeatures.map((f, i) => {
+              const plotId = getPlotId(f.properties ?? {}, i);
+              const isDownloading = downloadingIds.has(plotId);
+              return (
+                <TableRow key={i} className="text-xs">
+                  {cols.map((c) => {
+                    const v = f.properties?.[c];
+                    return (
+                      <TableCell key={c} className="px-3 py-1 font-mono">
+                        {typeof v === "number"
+                          ? v.toFixed(3)
+                          : String(v ?? "—")}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell className="px-3 py-1 text-right">
+                    <div className="flex items-center justify-end gap-0.5">
+                      {/* View */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        title="View plot image"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingPlot({
+                            plotId,
+                            properties: f.properties ?? {},
+                          });
+                        }}
+                      >
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                      {/* Download */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        title={
+                          isDownloading ? "Downloading…" : "Download plot image"
+                        }
+                        disabled={isDownloading}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadImage(plotId);
+                        }}
+                      >
+                        {isDownloading ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Download className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
+
+      {/* Plot view dialog */}
+      {viewingPlot && (
+        <PlotViewDialog
+          recordId={recordId}
+          plotId={viewingPlot.plotId}
+          properties={viewingPlot.properties}
+          metricColumns={numCols}
+          onClose={() => setViewingPlot(null)}
+        />
+      )}
     </div>
   );
 }
@@ -204,11 +550,6 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
 
 const traitRecordColumns: ColumnDef<TraitRecord>[] = [
   { id: "expand", enableColumnFilter: false },
-  {
-    id: "workspace_name",
-    accessorKey: "workspace_name",
-    filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
-  },
   {
     id: "pipeline_name",
     accessorKey: "pipeline_name",
@@ -226,11 +567,25 @@ const traitRecordColumns: ColumnDef<TraitRecord>[] = [
 ];
 
 function TableTab({ records }: { records: TraitRecord[] }) {
+  const [wsFilter, setWsFilter] = useState("__all__");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const workspaces = useMemo(
+    () => [...new Set(records.map((r) => r.workspace_name))].sort(),
+    [records]
+  );
+
+  const wsFilteredRecords = useMemo(
+    () =>
+      wsFilter === "__all__"
+        ? records
+        : records.filter((r) => r.workspace_name === wsFilter),
+    [records, wsFilter]
+  );
+
   const table = useReactTable({
-    data: records,
+    data: wsFilteredRecords,
     columns: traitRecordColumns,
     state: { columnFilters },
     onColumnFiltersChange: setColumnFilters,
@@ -247,14 +602,35 @@ function TableTab({ records }: { records: TraitRecord[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="text-muted-foreground flex items-center gap-1 text-xs">
-        <span>
+      {/* Workspace dropdown */}
+      <div className="flex items-center gap-3">
+        <Select
+          value={wsFilter}
+          onValueChange={(v) => {
+            setWsFilter(v);
+            setColumnFilters([]);
+          }}
+        >
+          <SelectTrigger className="h-8 text-xs w-52">
+            <SelectValue placeholder="All workspaces" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All workspaces</SelectItem>
+            {workspaces.map((w) => (
+              <SelectItem key={w} value={w} className="text-xs">
+                {w}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <span className="text-muted-foreground text-xs">
           {filtered.length} record{filtered.length !== 1 ? "s" : ""}
         </span>
         {columnFilters.length > 0 && (
           <button
             onClick={() => setColumnFilters([])}
-            className="text-primary ml-2 hover:underline"
+            className="text-primary text-xs hover:underline"
           >
             Clear filters
           </button>
@@ -268,18 +644,15 @@ function TableTab({ records }: { records: TraitRecord[] }) {
               <TableHead className="w-8" />
               <TableHead>
                 <ColumnFilter
-                  column={table.getColumn("workspace_name")!}
-                  title="Workspace"
-                />
-              </TableHead>
-              <TableHead>
-                <ColumnFilter
                   column={table.getColumn("pipeline_name")!}
                   title="Pipeline"
                 />
               </TableHead>
               <TableHead>
-                <ColumnFilter column={table.getColumn("date")!} title="Date" />
+                <ColumnFilter
+                  column={table.getColumn("date")!}
+                  title="Date"
+                />
               </TableHead>
               <TableHead className="w-12">Version</TableHead>
               <TableHead>Ortho / Stitch</TableHead>
@@ -291,7 +664,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={7}
                   className="text-muted-foreground py-8 text-center text-sm"
                 >
                   No trait records match the current filter.
@@ -312,12 +685,12 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                         <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />
                       )}
                     </TableCell>
-                    <TableCell className="text-sm font-medium">
-                      {r.workspace_name}
-                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <Badge variant="outline" className="text-xs capitalize">
+                        <Badge
+                          variant="outline"
+                          className="text-xs capitalize"
+                        >
                           {r.pipeline_type}
                         </Badge>
                         <span className="text-sm">{r.pipeline_name}</span>
@@ -370,6 +743,719 @@ function TableTab({ records }: { records: TraitRecord[] }) {
   );
 }
 
+// ── Query tab ─────────────────────────────────────────────────────────────────
+
+function PlotImageCard({
+  recordId,
+  plotId,
+  properties,
+  metricColumns,
+  onKeep,
+  isKept,
+}: {
+  recordId: string;
+  plotId: string;
+  properties: Record<string, unknown>;
+  metricColumns: string[];
+  onKeep?: () => void;
+  isKept?: boolean;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    setBlobUrl(null);
+    setError(false);
+    const endpoint = apiUrl(
+      `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
+    );
+    const token = localStorage.getItem("access_token") || "";
+    let revoke: string | null = null;
+    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        revoke = url;
+        setBlobUrl(url);
+      })
+      .catch(() => setError(true));
+    return () => {
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [recordId, plotId]);
+
+  async function handleDownload() {
+    setDownloading(true);
+    await fetchAndDownloadPlotImage(recordId, plotId);
+    setDownloading(false);
+  }
+
+  return (
+    <div className="border rounded-lg overflow-hidden bg-background shadow-sm">
+      {/* Header */}
+      <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold truncate">Plot {plotId}</p>
+          {properties.accession != null && (
+            <p className="text-xs text-muted-foreground truncate">
+              {String(properties.accession)}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {onKeep && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title={isKept ? "Remove from comparison" : "Keep for comparison"}
+              onClick={onKeep}
+              style={isKept ? { color: "hsl(var(--primary))" } : {}}
+            >
+              {isKept ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            title={downloading ? "Downloading…" : "Download image"}
+            disabled={downloading}
+            onClick={handleDownload}
+          >
+            {downloading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Download className="h-3 w-3" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Image */}
+      <div
+        className="bg-muted/20 flex items-center justify-center"
+        style={{ minHeight: 120 }}
+      >
+        {error ? (
+          <div className="flex flex-col items-center gap-1 py-5 px-3 text-center">
+            <ImageOff className="h-6 w-6 text-muted-foreground/50" />
+            <p className="text-xs text-muted-foreground">No image available</p>
+            <p className="text-[10px] text-muted-foreground/60 leading-tight">
+              Run trait extraction to generate plot images
+            </p>
+          </div>
+        ) : !blobUrl ? (
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        ) : (
+          <img
+            src={blobUrl}
+            alt={`Plot ${plotId}`}
+            className="w-full object-contain max-h-48"
+          />
+        )}
+      </div>
+
+      {/* Stats */}
+      {(() => {
+        const statRows = metricColumns.filter(
+          (col) => typeof properties[col] === "number"
+        );
+        if (statRows.length === 0) {
+          return error ? (
+            <div className="px-3 py-2 border-t">
+              <p className="text-[10px] text-muted-foreground/60 italic">
+                No trait data — this plot is from the field design only
+              </p>
+            </div>
+          ) : null;
+        }
+        return (
+          <div className="px-3 py-2 space-y-0.5">
+            {statRows.map((col) => (
+              <div key={col} className="flex justify-between gap-2 text-xs">
+                <span className="text-muted-foreground truncate">
+                  {col.replace(/_/g, " ")}
+                </span>
+                <span className="font-mono flex-shrink-0">
+                  {(properties[col] as number).toFixed(3)}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ── Comparison section ─────────────────────────────────────────────────────────
+
+function ComparisonSection({
+  plots,
+  onRemove,
+}: {
+  plots: KeptPlot[];
+  onRemove: (key: string) => void;
+}) {
+  if (plots.length === 0) return null;
+
+  // Collect all metric columns present across all kept plots
+  const allMetrics = Array.from(
+    new Set(plots.flatMap((p) => p.metricColumns.filter((c) => typeof p.properties[c] === "number")))
+  );
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <div className="flex items-center gap-2">
+        <Pin className="h-4 w-4 text-primary" />
+        <p className="text-sm font-semibold">Comparison ({plots.length})</p>
+        <p className="text-xs text-muted-foreground">— select plots using the pin button above</p>
+      </div>
+
+      {/* Plot image cards row */}
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {plots.map((p) => {
+          const key = `${p.recordId}:${p.plotId}`;
+          return (
+            <div
+              key={key}
+              className="border rounded-lg overflow-hidden bg-background shadow-sm flex-shrink-0"
+              style={{ width: 200 }}
+            >
+              <div className="px-2 py-1.5 border-b bg-muted/30 flex items-start justify-between gap-1">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold truncate">Plot {p.plotId}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{p.recordLabel}</p>
+                </div>
+                <button
+                  onClick={() => onRemove(key)}
+                  className="text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5"
+                  title="Remove from comparison"
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </div>
+              <PlotImageCard
+                recordId={p.recordId}
+                plotId={p.plotId}
+                properties={p.properties}
+                metricColumns={p.metricColumns}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Metrics comparison table */}
+      {allMetrics.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="text-xs w-full border-collapse">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-1.5 pr-4 text-muted-foreground font-medium w-40">Metric</th>
+                {plots.map((p) => (
+                  <th
+                    key={`${p.recordId}:${p.plotId}`}
+                    className="text-right py-1.5 px-3 font-semibold min-w-[80px]"
+                  >
+                    Plot {p.plotId}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {allMetrics.map((metric) => {
+                const vals = plots.map((p) =>
+                  typeof p.properties[metric] === "number" ? (p.properties[metric] as number) : null
+                );
+                const defined = vals.filter((v): v is number => v !== null);
+                const max = defined.length ? Math.max(...defined) : null;
+                return (
+                  <tr key={metric} className="border-b border-border/50 hover:bg-muted/30">
+                    <td className="py-1.5 pr-4 text-muted-foreground truncate max-w-[160px]">
+                      {metric.replace(/_/g, " ")}
+                    </td>
+                    {vals.map((v, i) => (
+                      <td
+                        key={i}
+                        className="text-right py-1.5 px-3 font-mono"
+                        style={
+                          v !== null && v === max && defined.length > 1
+                            ? { color: "hsl(var(--primary))", fontWeight: 700 }
+                            : {}
+                        }
+                      >
+                        {v !== null ? v.toFixed(3) : <span className="text-muted-foreground/50">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QueryTab({ records }: { records: TraitRecord[] }) {
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(
+    () => records[0]?.workspace_name ?? null
+  );
+  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(
+    () => records[0]?.pipeline_name ?? null
+  );
+  const [selectedDate, setSelectedDate] = useState<string | null>(
+    () => records[0]?.date ?? null
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => records[0]?.id ?? null
+  );
+  const [filters, setFilters] = useState<Record<PlotFilterKey, string>>(
+    { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
+  );
+  const [results, setResults] = useState<GeoJSON.Feature[] | null>(null);
+  const [hasQueried, setHasQueried] = useState(false);
+  const [keptPlots, setKeptPlots] = useState<KeptPlot[]>([]);
+
+  const { data: geojsonData, isLoading: geojsonLoading } = useQuery({
+    queryKey: ["trait-record-geojson", selectedId],
+    queryFn: () => analyzeApi.getTraitRecordGeojson(selectedId!),
+    enabled: !!selectedId,
+    staleTime: 60_000,
+  });
+
+  // Fetch image plot IDs for the selected record (for chip highlighting)
+  const { data: imagePlotIdsData } = useQuery({
+    queryKey: ["trait-record-image-plot-ids", selectedId],
+    queryFn: () => analyzeApi.getTraitRecordImagePlotIds(selectedId!),
+    enabled: !!selectedId,
+    staleTime: 60_000,
+  });
+  const imagePlotIdSet = useMemo(
+    () => new Set(imagePlotIdsData?.plot_ids ?? []),
+    [imagePlotIdsData]
+  );
+
+  // Fetch image availability for ALL records (for dropdown badges)
+  const allImageQueries = useQueries({
+    queries: records.map((r) => ({
+      queryKey: ["trait-record-image-plot-ids", r.id],
+      queryFn: () => analyzeApi.getTraitRecordImagePlotIds(r.id),
+      staleTime: 60_000,
+    })),
+  });
+  const recordHasImages = useMemo(() => {
+    const map = new Map<string, boolean>();
+    records.forEach((r, i) => {
+      map.set(r.id, (allImageQueries[i]?.data?.plot_ids?.length ?? 0) > 0);
+    });
+    return map;
+  }, [records, allImageQueries]);
+
+  // Build unique values per field for autocomplete
+  const uniqueFieldValues = useMemo<Record<PlotFilterKey, string[]>>(() => {
+    const empty: Record<PlotFilterKey, string[]> = {
+      col: [], plot: [], accession: [], location: [], crop: [], rep: [],
+    };
+    if (!geojsonData?.geojson?.features) return empty;
+    const sets: Record<PlotFilterKey, Set<string>> = {
+      col: new Set(), plot: new Set(), accession: new Set(),
+      location: new Set(), crop: new Set(), rep: new Set(),
+    };
+    for (const f of geojsonData.geojson.features) {
+      const p = f.properties ?? {};
+      for (const key of PLOT_FILTER_FIELDS) {
+        const titleKey = key.charAt(0).toUpperCase() + key.slice(1);
+        const candidates = [
+          p[key],
+          p[key.toUpperCase()],
+          p[titleKey],
+          key === "plot" ? (p.plot_id ?? p.plot) : null,
+        ];
+        for (const c of candidates) {
+          if (c != null && String(c).trim()) sets[key].add(String(c));
+        }
+      }
+    }
+    const result = { ...empty };
+    for (const key of PLOT_FILTER_FIELDS) {
+      result[key] = [...sets[key]].sort();
+    }
+    return result;
+  }, [geojsonData]);
+
+  function runQuery() {
+    if (!geojsonData?.geojson?.features) return;
+    const matched = geojsonData.geojson.features.filter((f) => {
+      const p = f.properties ?? {};
+      return PLOT_FILTER_FIELDS.every((key) =>
+        matchesTextFilter(p, key, filters[key])
+      );
+    });
+    setResults(matched);
+    setHasQueried(true);
+  }
+
+  const metricCols = geojsonData?.metric_columns ?? [];
+
+  const workspaces = useMemo(
+    () => Array.from(new Set(records.map((r) => r.workspace_name))),
+    [records]
+  );
+  const pipelines = useMemo(
+    () => Array.from(new Set(
+      records.filter((r) => r.workspace_name === selectedWorkspace).map((r) => r.pipeline_name)
+    )),
+    [records, selectedWorkspace]
+  );
+  const dates = useMemo(
+    () => Array.from(new Set(
+      records
+        .filter((r) => r.workspace_name === selectedWorkspace && r.pipeline_name === selectedPipeline)
+        .map((r) => r.date)
+    )).sort().reverse(),
+    [records, selectedWorkspace, selectedPipeline]
+  );
+  const versions = useMemo(
+    () => records.filter(
+      (r) =>
+        r.workspace_name === selectedWorkspace &&
+        r.pipeline_name === selectedPipeline &&
+        r.date === selectedDate
+    ),
+    [records, selectedWorkspace, selectedPipeline, selectedDate]
+  );
+
+  function handleWorkspaceChange(ws: string) {
+    setSelectedWorkspace(ws);
+    const first = records.find((r) => r.workspace_name === ws);
+    setSelectedPipeline(first?.pipeline_name ?? null);
+    setSelectedDate(first?.date ?? null);
+    setSelectedId(first?.id ?? null);
+    setResults(null);
+    setHasQueried(false);
+  }
+
+  function handlePipelineChange(pipeline: string) {
+    setSelectedPipeline(pipeline);
+    const first = records.find(
+      (r) => r.workspace_name === selectedWorkspace && r.pipeline_name === pipeline
+    );
+    setSelectedDate(first?.date ?? null);
+    setSelectedId(first?.id ?? null);
+    setResults(null);
+    setHasQueried(false);
+  }
+
+  function handleDateChange(date: string) {
+    setSelectedDate(date);
+    const first = records.find(
+      (r) =>
+        r.workspace_name === selectedWorkspace &&
+        r.pipeline_name === selectedPipeline &&
+        r.date === date
+    );
+    setSelectedId(first?.id ?? null);
+    setResults(null);
+    setHasQueried(false);
+  }
+
+  function handleVersionChange(id: string) {
+    setSelectedId(id);
+    setResults(null);
+    setHasQueried(false);
+  }
+
+  const selectedRecord = records.find((r) => r.id === selectedId);
+
+  function toggleKeep(plotId: string, properties: Record<string, unknown>) {
+    const key = `${selectedId}:${plotId}`;
+    setKeptPlots((prev) => {
+      if (prev.some((p) => `${p.recordId}:${p.plotId}` === key)) {
+        return prev.filter((p) => `${p.recordId}:${p.plotId}` !== key);
+      }
+      return [
+        ...prev,
+        {
+          recordId: selectedId!,
+          plotId,
+          properties,
+          metricColumns: metricCols,
+          recordLabel: selectedRecord
+            ? `${selectedRecord.pipeline_name} — ${selectedRecord.date}`
+            : selectedId!,
+        },
+      ];
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Step 1: Data source */}
+      <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          1 — Select data source
+        </p>
+        <div className="flex flex-wrap gap-3 items-end">
+          {/* Workspace */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Workspace</p>
+            <Select value={selectedWorkspace ?? ""} onValueChange={handleWorkspaceChange}>
+              <SelectTrigger className="h-8 text-xs w-44">
+                <SelectValue placeholder="Workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((ws) => (
+                  <SelectItem key={ws} value={ws} className="text-xs">{ws}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Pipeline */}
+          {selectedWorkspace && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Pipeline</p>
+              <Select value={selectedPipeline ?? ""} onValueChange={handlePipelineChange}>
+                <SelectTrigger className="h-8 text-xs w-52">
+                  <SelectValue placeholder="Pipeline" />
+                </SelectTrigger>
+                <SelectContent>
+                  {pipelines.map((p) => (
+                    <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Date */}
+          {selectedPipeline && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Date</p>
+              <Select value={selectedDate ?? ""} onValueChange={handleDateChange}>
+                <SelectTrigger className="h-8 text-xs w-36">
+                  <SelectValue placeholder="Date" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dates.map((d) => (
+                    <SelectItem key={d} value={d} className="text-xs">{d}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Version */}
+          {selectedDate && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Version</p>
+              <Select value={selectedId ?? ""} onValueChange={handleVersionChange}>
+                <SelectTrigger className="h-8 text-xs w-28">
+                  <SelectValue placeholder="Version" />
+                </SelectTrigger>
+                <SelectContent>
+                  {versions.map((r) => (
+                    <SelectItem key={r.id} value={r.id} className="text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full flex-shrink-0"
+                          style={{
+                            backgroundColor: recordHasImages.get(r.id)
+                              ? "hsl(var(--primary))"
+                              : "hsl(var(--muted-foreground))",
+                            opacity: recordHasImages.get(r.id) ? 1 : 0.4,
+                          }}
+                        />
+                        v{r.version}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Step 2: Filters — only shown once a record is chosen */}
+      {selectedId && (
+        <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            2 — Filter plots
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            {PLOT_FILTER_FIELDS.map((field) => {
+              const listId = `query-autocomplete-${field}`;
+              return (
+                <div key={field}>
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wide">
+                    {field}
+                  </p>
+                  <Input
+                    className="h-8 text-xs w-28"
+                    placeholder="…"
+                    value={filters[field]}
+                    list={listId}
+                    onChange={(e) =>
+                      setFilters((prev) => ({ ...prev, [field]: e.target.value }))
+                    }
+                    onKeyDown={(e) => e.key === "Enter" && runQuery()}
+                  />
+                  <datalist id={listId}>
+                    {uniqueFieldValues[field].map((v) => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
+                </div>
+              );
+            })}
+
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={runQuery}
+              disabled={!selectedId || geojsonLoading}
+            >
+              {geojsonLoading ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Query
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Results */}
+      {hasQueried && results !== null && (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            {results.length} plot{results.length !== 1 ? "s" : ""} matched
+            {results.length > 24 && " — showing first 24"}
+          </p>
+
+          {/* Candidate chips for unfilled fields */}
+          {(() => {
+            const emptyFields = PLOT_FILTER_FIELDS.filter((f) => !filters[f].trim());
+            if (emptyFields.length === 0) return null;
+
+            // Derive available values from matched results (or full dataset if 0 results)
+            const source = results.length > 0 ? results : geojsonData?.geojson?.features ?? [];
+            const valuesFromSource: Record<PlotFilterKey, string[]> = {} as Record<PlotFilterKey, string[]>;
+            for (const f of emptyFields) {
+              const set = new Set<string>();
+              for (const feat of source) {
+                const p = feat.properties ?? {};
+                const titleKey = f.charAt(0).toUpperCase() + f.slice(1);
+                const candidates = [p[f], p[f.toUpperCase()], p[titleKey], f === "plot" ? (p.plot_id ?? p.plot) : null];
+                for (const c of candidates) {
+                  if (c != null && String(c).trim()) set.add(String(c));
+                }
+              }
+              valuesFromSource[f] = [...set].sort();
+            }
+
+            const fieldsWithValues = emptyFields.filter((f) => valuesFromSource[f].length > 0);
+            if (fieldsWithValues.length === 0) return null;
+
+            // Check if a field value has any plots with images in the image set
+            function valueHasImages(field: PlotFilterKey, val: string): boolean {
+              if (imagePlotIdSet.size === 0) return false;
+              return source.some((feat) => {
+                const p = feat.properties ?? {};
+                const titleKey = field.charAt(0).toUpperCase() + field.slice(1);
+                const candidates = [p[field], p[field.toUpperCase()], p[titleKey], field === "plot" ? (p.plot_id ?? p.plot) : null];
+                if (!candidates.some((c) => c != null && String(c) === val)) return false;
+                // This feature matches the value — does it have an image?
+                const plotId = String(p.plot_id ?? p.plot ?? p.accession ?? "");
+                return imagePlotIdSet.has(plotId);
+              });
+            }
+
+            return (
+              <div className="rounded-md border border-border bg-muted/40 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">
+                  {results.length === 0 ? "No matches — try one of these:" : "Refine by:"}
+                </p>
+                <div className="flex flex-wrap gap-4">
+                  {fieldsWithValues.map((f) => (
+                    <div key={f} className="text-xs">
+                      <p className="font-semibold uppercase tracking-wide text-muted-foreground mb-1">{f}</p>
+                      <div className="flex flex-wrap gap-1 max-w-xs">
+                        {valuesFromSource[f].slice(0, 20).map((v) => {
+                          const hasImg = valueHasImages(f, v);
+                          return (
+                            <button
+                              key={v}
+                              title={hasImg ? "Has plot images & data" : "Field design only — no extraction data"}
+                              className="px-2 py-0.5 rounded cursor-pointer border text-foreground transition-colors"
+                              style={hasImg ? {
+                                backgroundColor: "hsl(var(--primary) / 0.15)",
+                                borderColor: "hsl(var(--primary) / 0.6)",
+                                color: "hsl(var(--primary))",
+                                fontWeight: 600,
+                              } : {
+                                backgroundColor: "hsl(var(--background))",
+                                borderColor: "hsl(var(--border))",
+                              }}
+                              onClick={() => setFilters((prev) => ({ ...prev, [f]: v }))}
+                            >
+                              {v}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {results.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {results.slice(0, 24).map((f, i) => {
+                const plotId = getPlotId(f.properties ?? {}, i);
+                const keepKey = `${selectedId}:${plotId}`;
+                return (
+                  <PlotImageCard
+                    key={`${plotId}-${i}`}
+                    recordId={selectedId!}
+                    plotId={plotId}
+                    properties={f.properties ?? {}}
+                    metricColumns={metricCols}
+                    onKeep={() => toggleKeep(plotId, f.properties ?? {})}
+                    isKept={keptPlots.some((p) => `${p.recordId}:${p.plotId}` === keepKey)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Comparison section */}
+      <ComparisonSection
+        plots={keptPlots}
+        onRemove={(key) =>
+          setKeptPlots((prev) =>
+            prev.filter((p) => `${p.recordId}:${p.plotId}` !== key)
+          )
+        }
+      />
+    </div>
+  );
+}
+
 // ── Collapsible workspace group ────────────────────────────────────────────────
 
 function CollapsibleWorkspace({
@@ -413,15 +1499,16 @@ function MapTab({ records }: { records: TraitRecord[] }) {
     [records]
   );
 
-  // Unique pipelines for the filter dropdown, keyed by pipeline_id to avoid
-  // collisions when two pipelines share the same name (e.g. one aerial, one ground).
   const pipelines = useMemo(() => {
     const seen = new Map<string, { id: string; name: string }>();
     records
       .filter((r) => wsFilter === "__all__" || r.workspace_name === wsFilter)
       .forEach((r) => {
         if (!seen.has(r.pipeline_id))
-          seen.set(r.pipeline_id, { id: r.pipeline_id, name: r.pipeline_name });
+          seen.set(r.pipeline_id, {
+            id: r.pipeline_id,
+            name: r.pipeline_name,
+          });
       });
     return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [records, wsFilter]);
@@ -438,8 +1525,6 @@ function MapTab({ records }: { records: TraitRecord[] }) {
     [records, wsFilter, pipelineFilter]
   );
 
-  // Group for sidebar display: workspace → pipeline_id → records
-  // Using pipeline_id as key so same-named pipelines remain separate groups.
   const grouped = useMemo(() => {
     const map = new Map<string, Map<string, TraitRecord[]>>();
     for (const r of filteredRecords) {
@@ -458,8 +1543,6 @@ function MapTab({ records }: { records: TraitRecord[] }) {
     staleTime: 60_000,
   });
 
-  // Auto-pick the first metric when data loads; fall back when user hasn't chosen one yet.
-  // Derived rather than stored in state to avoid side effects in render callbacks.
   const effectiveMetric =
     selectedMetric ?? traitsData?.metric_columns?.[0] ?? null;
 
@@ -472,7 +1555,7 @@ function MapTab({ records }: { records: TraitRecord[] }) {
 
   const selectedRecord = useMemo(
     () => records.find((r) => r.id === selectedId) ?? null,
-    [records, selectedId],
+    [records, selectedId]
   );
 
   return (
@@ -525,7 +1608,10 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                     <p className="text-muted-foreground flex-1 truncate text-xs">
                       {recs[0].pipeline_name}
                     </p>
-                    <Badge variant="outline" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
+                    <Badge
+                      variant="outline"
+                      className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight"
+                    >
                       {recs[0].pipeline_type}
                     </Badge>
                   </div>
@@ -542,7 +1628,9 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                     >
                       <div className="flex items-center gap-1.5 truncate">
                         <span className="truncate">{r.date}</span>
-                        <span className="text-muted-foreground flex-shrink-0 font-mono text-[10px]">v{r.version}</span>
+                        <span className="text-muted-foreground flex-shrink-0 font-mono text-[10px]">
+                          v{r.version}
+                        </span>
                       </div>
                       <div className="text-muted-foreground mt-0.5 space-y-0.5 text-[11px]">
                         <div className="truncate">
@@ -556,7 +1644,10 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                         <div className="truncate">
                           <span className="text-foreground/50">Boundary:</span>{" "}
                           {r.boundary_version != null
-                            ? versionLabel(r.boundary_version, r.boundary_name)
+                            ? versionLabel(
+                                r.boundary_version,
+                                r.boundary_name
+                              )
                             : "canonical"}
                         </div>
                       </div>
@@ -640,12 +1731,19 @@ function MapTab({ records }: { records: TraitRecord[] }) {
               <div className="absolute top-2 right-2 z-10 bg-background/80 backdrop-blur-sm border rounded px-2 py-1 text-xs shadow-sm space-y-0.5">
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium">{selectedRecord.date}</span>
-                  <span className="text-muted-foreground font-mono">v{selectedRecord.version}</span>
-                  <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize leading-tight">
+                  <span className="text-muted-foreground font-mono">
+                    v{selectedRecord.version}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1 py-0 capitalize leading-tight"
+                  >
                     {selectedRecord.pipeline_type}
                   </Badge>
                 </div>
-                <div className="text-muted-foreground">{selectedRecord.pipeline_name}</div>
+                <div className="text-muted-foreground">
+                  {selectedRecord.pipeline_name}
+                </div>
               </div>
             )}
           </>
@@ -699,6 +1797,10 @@ export function AnalyzeDashboard() {
             <Table2 className="h-3.5 w-3.5" />
             Table
           </TabsTrigger>
+          <TabsTrigger value="query" className="gap-1.5">
+            <Search className="h-3.5 w-3.5" />
+            Query
+          </TabsTrigger>
           <TabsTrigger value="map" className="gap-1.5">
             <MapIcon className="h-3.5 w-3.5" />
             Map
@@ -707,6 +1809,10 @@ export function AnalyzeDashboard() {
 
         <TabsContent value="table" className="mt-0 flex-1 overflow-auto pb-6">
           <TableTab records={records} />
+        </TabsContent>
+
+        <TabsContent value="query" className="mt-0 flex-1 overflow-auto pb-6">
+          <QueryTab records={records} />
         </TabsContent>
 
         <TabsContent

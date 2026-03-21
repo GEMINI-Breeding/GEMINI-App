@@ -699,7 +699,7 @@ function StitchImagesDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl p-3">
+      <DialogContent className="p-3" style={{ maxWidth: "95vw", width: "95vw" }}>
         <DialogHeader className="px-1">
           <DialogTitle className="text-sm">
             {versionLabel} — {plots.length} plots
@@ -732,7 +732,14 @@ function StitchImagesDialog({
               </Button>
             </div>
           </div>
-          {plot && <ZoomableImage src={apiUrl(plot.url)} alt={plot.name} maxHeight="75vh" />}
+          {plot && (
+            <ZoomableImage
+              key={plot.url}
+              src={apiUrl(plot.url)}
+              alt={plot.name}
+              maxHeight="calc(90vh - 100px)"
+            />
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -781,6 +781,49 @@ def run_trait_extraction(
     session.commit()
     logger.info("Created TraitRecord v%d (%d plots, ortho v%s)", _next_version_early, len(records), _resolved_ortho_v)
 
+    # ── Populate PlotRecord table ─────────────────────────────────────────────
+    try:
+        import json as _json_pr
+        from sqlmodel import select as _sel_pr
+        from app.models.pipeline import Pipeline as _Pipeline_pr
+        from app.models.workspace import Workspace as _Workspace_pr
+        from app.processing.plot_record_utils import upsert_plot_records_from_features as _upsert_pr
+
+        _pl_pr = session.exec(_sel_pr(_Pipeline_pr).where(_Pipeline_pr.id == _run.pipeline_id)).first()
+        _ws_pr = session.exec(_sel_pr(_Workspace_pr).where(_Workspace_pr.id == _pl_pr.workspace_id)).first() if _pl_pr else None
+
+        # Convert GeoDataFrame to GeoJSON features (already WGS84)
+        _gj_feats = _json_pr.loads(gdf_out.to_json()).get("features", [])
+
+        _pr_count = _upsert_pr(
+            session=session,
+            trait_record_id=_trait_record.id,
+            run_id=run_id,
+            pipeline_id=_run.pipeline_id,
+            pipeline_type="aerial",
+            pipeline_name=_pl_pr.name if _pl_pr else "",
+            workspace_id=_pl_pr.workspace_id if _pl_pr else uuid.UUID(int=0),
+            workspace_name=_ws_pr.name if _ws_pr else "",
+            date=_run.date,
+            experiment=_run.experiment,
+            location=_run.location,
+            population=_run.population,
+            platform=_run.platform,
+            sensor=_run.sensor,
+            trait_record_version=_next_version_early,
+            ortho_version=_resolved_ortho_v,
+            ortho_name=_resolved_ortho_name,
+            stitch_version=None,
+            stitch_name=None,
+            boundary_version=_resolved_boundary_v,
+            boundary_name=_resolved_boundary_name,
+            features=_gj_feats,
+            cropped_images_rel_dir=paths.rel(_versioned_crops_dir),
+        )
+        logger.info("PlotRecord: inserted %d aerial plot records", _pr_count)
+    except Exception as _pr_exc:
+        logger.warning("PlotRecord upsert failed (non-fatal): %s", _pr_exc)
+
     return {
         "traits": paths.rel(paths.traits_geojson),
         "cropped_images": paths.rel(paths.cropped_images_dir),

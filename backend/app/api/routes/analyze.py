@@ -443,6 +443,41 @@ def get_trait_record_plot_image(
     return FileResponse(str(img_path), media_type="image/png")
 
 
+@router.get("/trait-records/{record_id}/image-plot-ids")
+def get_trait_record_image_plot_ids(
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+) -> dict:
+    """
+    Return the list of plot_ids that have a cropped image on disk for this trait record.
+    Used by the frontend to highlight which plots have image data available.
+    """
+    from app.models.pipeline import TraitRecord
+
+    record = session.get(TraitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Trait record not found")
+
+    run = session.get(PipelineRun, record.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+
+    crop_dir = paths.cropped_images_dir
+    plot_ids: list[str] = []
+    if crop_dir.exists():
+        for p in sorted(crop_dir.glob("*.png")):
+            stem = p.stem  # e.g. "plot_1_1"
+            if stem.startswith("plot_"):
+                plot_ids.append(stem[5:])  # strip leading "plot_"
+
+    return {"plot_ids": plot_ids}
+
+
 @router.delete("/trait-records/{record_id}", status_code=200)
 def delete_trait_record(
     session: SessionDep,
@@ -466,6 +501,14 @@ def delete_trait_record(
 
     # Delete the GeoJSON file
     paths.abs(record.geojson_path).unlink(missing_ok=True)
+
+    # Delete associated PlotRecords (SQLite doesn't cascade FKs automatically)
+    try:
+        from app.processing.plot_record_utils import delete_plot_records_for_trait_record
+        deleted_pr = delete_plot_records_for_trait_record(session, record_id)
+        logger.info("Deleted %d PlotRecord(s) for trait_record %s", deleted_pr, record_id)
+    except Exception as _e:
+        logger.warning("Could not delete PlotRecords for %s: %s", record_id, _e)
 
     # Check remaining records before deleting this one
     remaining = session.exec(
@@ -552,3 +595,107 @@ def get_ortho_info(
 
     bounds = _read_tif_bounds(tif)
     return {"available": True, "path": str(tif), "bounds": bounds}
+
+
+# ── 8. PlotRecord query ───────────────────────────────────────────────────────
+
+@router.get("/plot-records")
+def list_plot_records(
+    session: SessionDep,
+    current_user: CurrentUser,
+    # Provenance filters
+    workspace_name: str | None = None,
+    pipeline_name: str | None = None,
+    pipeline_type: str | None = None,
+    date: str | None = None,
+    experiment: str | None = None,
+    location: str | None = None,
+    # Plot identity filters
+    plot_id: str | None = None,
+    accession: str | None = None,
+    col: str | None = None,
+    row: str | None = None,
+    # Limit / offset for pagination
+    limit: int = 500,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """
+    Query the PlotRecord table with optional filters.
+
+    All string filters are case-insensitive substring matches.
+    Returns matching rows plus total count.
+
+    Example CLI usage (with httpie):
+        http GET :8000/api/v1/analyze/plot-records \
+            accession==ABC123 \
+            "Authorization:Bearer <token>"
+
+    Or with curl:
+        curl -s -H "Authorization: Bearer <token>" \
+            "http://localhost:8000/api/v1/analyze/plot-records?accession=ABC123" | python3 -m json.tool
+    """
+    from app.models.plot_record import PlotRecord
+
+    stmt = select(PlotRecord)
+
+    # Apply filters
+    def _ilike(col_attr: Any, val: str | None):
+        """SQLite LIKE is case-insensitive for ASCII by default."""
+        if val:
+            return col_attr.like(f"%{val}%")
+        return None
+
+    filters = [
+        _ilike(PlotRecord.workspace_name, workspace_name),
+        _ilike(PlotRecord.pipeline_name, pipeline_name),
+        (PlotRecord.pipeline_type == pipeline_type) if pipeline_type else None,
+        _ilike(PlotRecord.date, date),
+        _ilike(PlotRecord.experiment, experiment),
+        _ilike(PlotRecord.location, location),
+        _ilike(PlotRecord.plot_id, plot_id),
+        _ilike(PlotRecord.accession, accession),
+        _ilike(PlotRecord.col, col),
+        _ilike(PlotRecord.row, row),
+    ]
+    for f in filters:
+        if f is not None:
+            stmt = stmt.where(f)
+
+    total = len(session.exec(stmt).all())
+    rows = session.exec(stmt.offset(offset).limit(limit)).all()
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "results": [
+            {
+                "id": str(r.id),
+                "plot_id": r.plot_id,
+                "accession": r.accession,
+                "col": r.col,
+                "row": r.row,
+                "pipeline_type": r.pipeline_type,
+                "pipeline_name": r.pipeline_name,
+                "workspace_name": r.workspace_name,
+                "date": r.date,
+                "experiment": r.experiment,
+                "location": r.location,
+                "population": r.population,
+                "platform": r.platform,
+                "sensor": r.sensor,
+                "trait_record_version": r.trait_record_version,
+                "ortho_version": r.ortho_version,
+                "stitch_version": r.stitch_version,
+                "boundary_version": r.boundary_version,
+                "traits": r.traits,
+                "extra_properties": r.extra_properties,
+                "image_rel_path": r.image_rel_path,
+                "geometry_wkt": r.geometry_wkt,
+                "trait_record_id": str(r.trait_record_id),
+                "run_id": str(r.run_id),
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ],
+    }

@@ -30,6 +30,7 @@ def _reset_stuck_runs(session: Session) -> int:
     """
     from sqlmodel import select
     from app.models.pipeline import PipelineRun, TraitRecord  # noqa: F401 — ensures table is created
+    from app.models.plot_record import PlotRecord  # noqa: F401 — ensures plotrecord table is created
 
     stuck = session.exec(
         select(PipelineRun).where(PipelineRun.status == "running")

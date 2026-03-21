@@ -15,7 +15,7 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
-import { X } from "lucide-react"
+import { X, Download, Loader2 } from "lucide-react"
 import { buildColorScale } from "../utils/colorScale"
 import { ColorLegend } from "./ColorLegend"
 
@@ -71,6 +71,7 @@ interface PlotImageState {
   plotId: string
   x: number
   y: number
+  properties: Record<string, unknown>
 }
 
 function fitBoundsViewState(
@@ -177,7 +178,7 @@ export function TraitMap({
             "",
           )
           if (plotId) {
-            setPlotImage({ plotId, x: info.x, y: info.y })
+            setPlotImage({ plotId, x: info.x, y: info.y, properties: info.object.properties ?? {} })
           }
         }
       },
@@ -211,8 +212,8 @@ export function TraitMap({
         <PlotImagePanel
           recordId={recordId}
           plotId={plotImage.plotId}
-          x={plotImage.x}
-          y={plotImage.y}
+          properties={plotImage.properties}
+          selectedMetric={selectedMetric}
           onClose={() => setPlotImage(null)}
         />
       )}
@@ -225,50 +226,116 @@ export function TraitMap({
 function PlotImagePanel({
   recordId,
   plotId,
-  x,
-  y,
+  properties,
+  selectedMetric,
   onClose,
 }: {
   recordId: string
   plotId: string
-  x: number
-  y: number
+  properties: Record<string, unknown>
+  selectedMetric: string | null
   onClose: () => void
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [error, setError] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     setBlobUrl(null)
     setError(false)
     const endpoint = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
     const token = localStorage.getItem("access_token") || ""
+    let revoked = false
+    let objectUrl: string | null = null
     fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`)
         return res.blob()
       })
-      .then((blob) => setBlobUrl(URL.createObjectURL(blob)))
+      .then((blob) => {
+        if (!revoked) {
+          objectUrl = URL.createObjectURL(blob)
+          setBlobUrl(objectUrl)
+        }
+      })
       .catch(() => setError(true))
     return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl)
+      revoked = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [recordId, plotId])
 
-  const left = Math.min(x + 12, window.innerWidth - 280)
-  const top = Math.max(y - 8, 8)
+  async function handleDownload() {
+    setDownloading(true)
+    try {
+      const endpoint = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
+      const token = localStorage.getItem("access_token") || ""
+      const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) return
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `plot_${plotId}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const numericEntries = Object.entries(properties).filter(
+    ([k, v]) => !NON_METRIC_KEYS.has(k) && typeof v === "number",
+  )
 
   return (
     <div
       className="absolute z-30 bg-background/95 backdrop-blur-sm border rounded-lg shadow-xl overflow-hidden"
-      style={{ left, top, width: 240 }}
+      style={{ bottom: 16, right: 16, width: 480, maxHeight: "calc(100% - 32px)" }}
     >
+      {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-xs font-semibold">Plot {plotId}</span>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
-          <X className="w-3.5 h-3.5" />
-        </button>
+        <span className="text-sm font-semibold">Plot {plotId}</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleDownload}
+            disabled={downloading || error || !blobUrl}
+            title="Download plot image"
+            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+          >
+            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          </button>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Plot info */}
+      <div className="px-3 py-2 border-b">
+        {properties.accession != null && (
+          <p className="text-sm text-muted-foreground mb-1.5">{String(properties.accession)}</p>
+        )}
+        {selectedMetric && properties[selectedMetric] != null && (
+          <p className="text-sm font-medium text-primary mb-1.5">
+            {formatLabel(selectedMetric)}: {Number(properties[selectedMetric]).toFixed(2)}
+          </p>
+        )}
+        {numericEntries.length > 0 && (
+          <div className="space-y-0.5 text-xs text-muted-foreground max-h-28 overflow-y-auto">
+            {numericEntries
+              .filter(([k]) => k !== selectedMetric)
+              .map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-3">
+                  <span className="truncate">{formatLabel(k)}</span>
+                  <span className="font-mono flex-shrink-0">{Number(v).toFixed(2)}</span>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Image */}
       {error ? (
         <p className="text-xs text-muted-foreground text-center py-4 px-3">Image not available</p>
       ) : !blobUrl ? (
@@ -276,7 +343,7 @@ function PlotImagePanel({
           <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
         </div>
       ) : (
-        <img src={blobUrl} alt={`Plot ${plotId}`} className="w-full object-contain max-h-48" />
+        <img src={blobUrl} alt={`Plot ${plotId}`} className="w-full object-contain max-h-64" />
       )}
     </div>
   )
@@ -303,21 +370,21 @@ function MapTooltip({
 
   return (
     <div
-      className="absolute z-20 pointer-events-none bg-background/95 backdrop-blur-sm border rounded-lg shadow-lg p-3 text-xs max-w-[240px]"
+      className="absolute z-20 pointer-events-none bg-background/95 backdrop-blur-sm border rounded-lg shadow-lg p-4 text-sm max-w-[480px]"
       style={{ left: x + 12, top: y - 8 }}
     >
-      <p className="font-semibold mb-1">
+      <p className="font-semibold mb-1.5">
         Plot {String(properties.plot ?? properties.plot_id ?? "—")}
       </p>
       {properties.accession != null && (
-        <p className="text-muted-foreground mb-1.5">{String(properties.accession)}</p>
+        <p className="text-muted-foreground mb-2">{String(properties.accession)}</p>
       )}
       {selectedMetric && properties[selectedMetric] != null && (
-        <p className="font-medium text-primary mb-1.5">
+        <p className="font-medium text-primary mb-2">
           {formatLabel(selectedMetric)}: {Number(properties[selectedMetric]).toFixed(2)}
         </p>
       )}
-      <div className="space-y-0.5 text-muted-foreground max-h-32 overflow-y-auto">
+      <div className="space-y-1 text-muted-foreground max-h-48 overflow-y-auto">
         {numericEntries
           .filter(([k]) => k !== selectedMetric)
           .map(([k, v]) => (

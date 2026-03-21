@@ -1302,6 +1302,53 @@ def run_inference(
             logger.info("Created TraitRecord v%d for ground run %s (%d plots, %d trait columns)",
                         _max_v + 1, run_id, len(_features), len(_trait_cols))
 
+            # ── Populate PlotRecord table ─────────────────────────────────────
+            try:
+                from sqlmodel import select as _sel_pr2
+                from app.models.pipeline import Pipeline as _Pipeline_pr2
+                from app.models.workspace import Workspace as _Workspace_pr2
+                from app.processing.plot_record_utils import upsert_plot_records_from_features as _upsert_pr2
+
+                _run_pr = session.get(PipelineRun, run_id)
+                _pl_pr2 = session.exec(_sel_pr2(_Pipeline_pr2).where(_Pipeline_pr2.id == _run_pr.pipeline_id)).first() if _run_pr else None
+                _ws_pr2 = session.exec(_sel_pr2(_Workspace_pr2).where(_Workspace_pr2.id == _pl_pr2.workspace_id)).first() if _pl_pr2 else None
+
+                # Resolve stitch version for ground
+                _run_outputs_pr = (_run_pr.outputs or {}) if _run_pr else {}
+                _stitch_v_pr = int(_run_outputs_pr.get("stitching_version") or 0) or None
+                _stitchings_pr = _run_outputs_pr.get("stitchings") or []
+                _stitch_entry_pr = next((s for s in _stitchings_pr if s.get("version") == _stitch_v_pr), None)
+                _stitch_name_pr = _stitch_entry_pr.get("name") if _stitch_entry_pr else None
+
+                _pr_count2 = _upsert_pr2(
+                    session=session,
+                    trait_record_id=_tr.id,
+                    run_id=run_id,
+                    pipeline_id=_run_pr.pipeline_id if _run_pr else run_id,
+                    pipeline_type="ground",
+                    pipeline_name=_pl_pr2.name if _pl_pr2 else "",
+                    workspace_id=_pl_pr2.workspace_id if _pl_pr2 else run_id,
+                    workspace_name=_ws_pr2.name if _ws_pr2 else "",
+                    date=_run_pr.date if _run_pr else "",
+                    experiment=_run_pr.experiment if _run_pr else "",
+                    location=_run_pr.location if _run_pr else "",
+                    population=_run_pr.population if _run_pr else "",
+                    platform=_run_pr.platform if _run_pr else "",
+                    sensor=_run_pr.sensor if _run_pr else "",
+                    trait_record_version=_max_v + 1,
+                    ortho_version=None,
+                    ortho_name=None,
+                    stitch_version=_stitch_v_pr,
+                    stitch_name=_stitch_name_pr,
+                    boundary_version=_boundary_v,
+                    boundary_name=None,
+                    features=_features,
+                    cropped_images_rel_dir=None,  # ground crops are per-plot in AgRowStitch dir
+                )
+                logger.info("PlotRecord: inserted %d ground plot records", _pr_count2)
+            except Exception as _pr_exc2:
+                logger.warning("PlotRecord upsert failed for ground run (non-fatal): %s", _pr_exc2)
+
     return {}
 
 

@@ -43,6 +43,7 @@ from app.models.user import (
     UserUpdateMe,
 )
 from app.models.workspace import Workspace, WorkspaceCreate, WorkspaceUpdate
+from app.models.plot_record import PlotRecord  # noqa: F401 — ensures table is created
 from app.models.pipeline import (
     Pipeline,
     PipelineCreate,

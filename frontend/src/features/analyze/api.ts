@@ -101,6 +101,7 @@ export const analyzeApi = {
     get<TraitRecord[]>(`/api/v1/analyze/trait-records?run_id=${runId}`),
   getTraitRecordGeojson: (id: string) => get<TraitsResponse>(`/api/v1/analyze/trait-records/${id}/geojson`),
   getTraitRecordOrthoInfo: (id: string) => get<OrthoInfoResponse>(`/api/v1/analyze/trait-records/${id}/ortho-info`),
+  getTraitRecordImagePlotIds: (id: string) => get<{ plot_ids: string[] }>(`/api/v1/analyze/trait-records/${id}/image-plot-ids`),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
