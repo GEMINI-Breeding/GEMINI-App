@@ -320,7 +320,8 @@ def run_orthomosaic(
         docker_cmd += ["-v", "/etc/timezone:/etc/timezone:ro"]
     if _Path("/etc/localtime").exists():
         docker_cmd += ["-v", "/etc/localtime:/etc/localtime:ro"]
-    if _check_gpu():
+    gpu_available = _check_gpu()
+    if gpu_available:
         docker_cmd += ["--gpus", "all", "opendronemap/odm:gpu"]
     else:
         docker_cmd.append("opendronemap/odm")
@@ -328,7 +329,8 @@ def run_orthomosaic(
     docker_cmd += ["--project-path", "/datasets", "code"] + odm_options.split()
 
     logger.info("Starting ODM: %s", " ".join(docker_cmd))
-    emit({"event": "progress", "message": "Starting ODM Docker container…", "progress": 0})
+    compute_mode = "GPU" if gpu_available else "CPU"
+    emit({"event": "progress", "message": f"Starting ODM Docker container… ({compute_mode})", "progress": 0})
 
     with open(log_file, "w") as lf:
         proc = subprocess.Popen(docker_cmd, stdout=lf, stderr=subprocess.STDOUT, env=_docker_env())

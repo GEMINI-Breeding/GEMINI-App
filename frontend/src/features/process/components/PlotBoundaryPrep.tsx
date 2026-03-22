@@ -625,6 +625,7 @@ function GridSettingsPanel({
   onModeChange,
   onSelectAll,
   onClearSelection,
+  onDeleteSelected,
   featureCount,
   selectedCount,
   hideGridInputs = false,
@@ -639,6 +640,7 @@ function GridSettingsPanel({
   onModeChange: (mode: InteractionMode) => void;
   onSelectAll: () => void;
   onClearSelection: () => void;
+  onDeleteSelected: () => void;
   featureCount: number;
   selectedCount: number;
   hideGridInputs?: boolean;
@@ -759,20 +761,32 @@ function GridSettingsPanel({
             </Button>
           </div>
 
-          {/* Select all / clear — shown in select mode when plots exist */}
+          {/* Select all / clear / delete — shown in select mode when plots exist */}
           {interactionMode === "select" && featureCount > 0 && (
-            <div className="grid grid-cols-2 gap-2">
-              <Button size="sm" variant="outline" onClick={onSelectAll}>
-                Select All
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onClearSelection}
-                disabled={selectedCount === 0}
-              >
-                Clear
-              </Button>
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" variant="outline" onClick={onSelectAll}>
+                  Select All
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onClearSelection}
+                  disabled={selectedCount === 0}
+                >
+                  Clear
+                </Button>
+              </div>
+              {selectedCount > 0 && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="w-full"
+                  onClick={onDeleteSelected}
+                >
+                  Delete {selectedCount} plot{selectedCount !== 1 ? "s" : ""}
+                </Button>
+              )}
             </div>
           )}
 
@@ -1143,10 +1157,19 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   gridOptionsRef.current = gridOptions;
   const fdRowsRef = useRef(fdInfo?.rows);
   fdRowsRef.current = fdInfo?.rows;
+  const gridVisibleRef = useRef(gridVisible);
+  gridVisibleRef.current = gridVisible;
+  // When set, the next gridOffset effect run is a boundary-load (not a drag) — skip recompute
+  const skipGridRecomputeRef = useRef(false);
 
   // Live recompute ONLY when dragging the grid (gridOffset changes).
   // Boundary / option changes require the user to click "Generate Grid".
   useEffect(() => {
+    // loadBoundaryVersion sets gridOffset as part of restoring saved state — don't recompute
+    if (skipGridRecomputeRef.current) {
+      skipGridRecomputeRef.current = false;
+      return;
+    }
     if (!popBoundaryRef.current || previewGeoJson === null) return;
     const fc = computeGrid(
       popBoundaryRef.current,
@@ -1169,15 +1192,23 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     setGridVisible(true); // always show grid after generating/regenerating
   }
 
-  // Show/hide plot grid layer
+  // Show/hide plot grid layer + switch Geoman edit target
   useEffect(() => {
     const map = mapRef.current;
+    const mapAny = map as any;
     const plotLayer = plotLayerRef.current;
-    if (!map || !plotLayer) return;
+    const popLayer = popLayerRef.current;
+    if (!map || !plotLayer || !popLayer) return;
     if (gridVisible) {
       if (!map.hasLayer(plotLayer)) map.addLayer(plotLayer);
+      // Grid visible → Geoman edits plot cells
+      plotLayersRef.current.forEach(l => { (l as any).options.pmIgnore = false; });
+      if (mapAny.pm) mapAny.pm.setGlobalOptions({ layerGroup: plotLayer });
     } else {
       if (map.hasLayer(plotLayer)) map.removeLayer(plotLayer);
+      // Grid hidden → Geoman edits population boundary
+      plotLayersRef.current.forEach(l => { (l as any).options.pmIgnore = true; });
+      if (mapAny.pm) mapAny.pm.setGlobalOptions({ layerGroup: popLayer });
     }
   }, [gridVisible]);
 
@@ -1230,9 +1261,9 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         },
       }).getLayers()[0] as L.Path;
 
-      // Exclude plot grid polygons from Geoman edit/remove so the toolbar
-      // only affects the outer population boundary polygon.
-      (leafletLayer as any).options.pmIgnore = true;
+      // When grid is visible, allow Geoman to edit individual plot cells;
+      // when hidden, exclude them so Geoman targets the population boundary.
+      (leafletLayer as any).options.pmIgnore = !gridVisibleRef.current;
 
       leafletLayer.bindTooltip(lines, { sticky: true, opacity: 0.95 });
       // Capture idx at creation time — stable closure, no stale ref issues
@@ -1432,6 +1463,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       setGridGenerated(true);
       if (data.grid_settings) {
         setGridOptions(data.grid_settings.options);
+        skipGridRecomputeRef.current = true;
         setGridOffset(data.grid_settings.offset ?? { lon: 0, lat: 0 });
       } else {
         const features = fc.features;
@@ -1608,6 +1640,13 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
               )
             }
             onClearSelection={() => setSelectedIndexes([])}
+            onDeleteSelected={() => {
+              if (!previewGeoJson) return;
+              const selSet = new Set(selectedIndexes);
+              const remaining = previewGeoJson.features.filter((_, i) => !selSet.has(i));
+              setPreviewGeoJson({ ...previewGeoJson, features: remaining });
+              setSelectedIndexes([]);
+            }}
             featureCount={featureCount}
             selectedCount={selectedIndexes.length}
             onGenerateGrid={handleGenerateGrid}
@@ -1696,7 +1735,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
                   Saving…
                 </>
               ) : (
-                "Done"
+                "Save As"
               )}
             </Button>
           </>

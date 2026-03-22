@@ -376,9 +376,16 @@ export function GcpPicker({
     };
   }
 
-  // ── Zoom helpers (centered on image midpoint) ─────────────────────────────
+  // ── Zoom helpers ──────────────────────────────────────────────────────────
 
   function applyZoom(dz: number) {
+    const el = containerRef.current;
+    if (!el) return;
+    applyZoomAt(dz, el.clientWidth / 2, el.clientHeight / 2);
+  }
+
+  // Zoom centered on a specific point in container-local coordinates
+  function applyZoomAt(dz: number, cx: number, cy: number) {
     const el = containerRef.current;
     if (!el) return;
     const prevZoom = zoomRef.current;
@@ -388,8 +395,6 @@ export function GcpPicker({
       setOffset({ x: 0, y: 0 });
       return;
     }
-    const cx = el.clientWidth / 2;
-    const cy = el.clientHeight / 2;
     const ratio = newZoom / prevZoom;
     const prev = offsetRef.current;
     const raw = {
@@ -403,6 +408,27 @@ export function GcpPicker({
     setZoom(newZoom);
     setOffset(clamped);
   }
+
+  // Stable ref so the wheel listener (registered once) always calls the latest version
+  const applyZoomAtRef = useRef(applyZoomAt);
+  applyZoomAtRef.current = applyZoomAt;
+
+  // Scroll wheel zoom — registered as non-passive so preventDefault works
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      applyZoomAtRef.current(
+        e.deltaY < 0 ? 1.15 : 1 / 1.15,
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   // ── Keyboard navigation ───────────────────────────────────────────────────
 

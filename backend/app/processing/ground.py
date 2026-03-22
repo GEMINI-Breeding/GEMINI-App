@@ -1577,17 +1577,32 @@ def _extract_binary_via_docker(
     logger.info("Running bin extraction via Docker for %s", bin_path.name)
     emit({"event": "progress", "message": "Running extraction via Docker…"})
 
+    # Docker Desktop on Windows requires forward-slash paths in volume mounts.
+    # Using as_posix() converts C:\foo\bar → C:/foo/bar which Docker accepts.
+    if sys.platform == "win32":
+        host_bin_dir = bin_path.parent.resolve().as_posix()
+        host_output_dir = output_dir.resolve().as_posix()
+    else:
+        host_bin_dir = str(bin_path.parent)
+        host_output_dir = str(output_dir)
+
     cmd = [
         "docker", "run", "--rm",
-        "-v", f"{bin_path.parent}:/input:ro",
-        "-v", f"{output_dir}:/output",
+        "-v", f"{host_bin_dir}:/input:ro",
+        "-v", f"{host_output_dir}:/output",
         _DOCKER_IMAGE,
         f"/input/{bin_path.name}",
         "/output",
     ]
 
+    logger.info("docker run cmd: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if proc.stdout:
+        for line in proc.stdout.splitlines():
+            logger.info("[docker run] %s", line)
     if proc.returncode != 0:
+        if proc.stderr:
+            logger.error("[docker run stderr] %s", proc.stderr.strip())
         detail = proc.stderr.strip() or proc.stdout.strip() or "no output from container"
         raise RuntimeError(
             f".bin extraction failed inside Docker:\n{detail}"
@@ -1656,10 +1671,12 @@ def extract_bin_file(
             emit({"event": "error", "message": msg})
             raise RuntimeError(msg)
 
-    finally:
-        # Delete the .bin file whether extraction succeeded or failed.
-        # The raw images/CSV are now in output_dir; the binary is no longer needed.
-        _delete_bin()
+    except Exception:
+        # Keep the .bin file on failure so the user can retry without re-uploading.
+        raise
+
+    # Extraction succeeded — raw images are now in output_dir, binary no longer needed.
+    _delete_bin()
 
     # msgs_synced.csv lands at output_dir/RGB/Metadata/msgs_synced.csv
     msgs_synced = output_dir / "RGB" / "Metadata" / "msgs_synced.csv"
