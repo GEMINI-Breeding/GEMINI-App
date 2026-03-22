@@ -55,42 +55,46 @@ export function UploadData() {
   );
 
   return (
-    <div className="bg-background min-h-screen">
-      <div className="mx-auto max-w-5xl p-8">
-        <div className="space-y-6">
-          <DataTypes onChange={setSelectedFileType} />
-          <DataStructureForm
-            fileType={selectedFileType}
-            values={formValues}
-            onChange={handleFormChange}
-          />
+    <div className="bg-background">
+      <div className="pt-6">
+        <div className="grid grid-cols-2 gap-8 items-start">
+          {/* Left column: data type selector + metadata form */}
+          <div className="space-y-6">
+            <DataTypes onChange={setSelectedFileType} />
+            <DataStructureForm
+              fileType={selectedFileType}
+              values={formValues}
+              onChange={handleFormChange}
+            />
+            {selectedFileType === "Platform Logs" && (
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">msgs_synced.csv (optional)</p>
+                    <p className="text-xs text-muted-foreground">
+                      Upload a pre-synced image GPS manifest to skip EXIF extraction during Data Sync.
+                      Platform logs will still be merged on top if present.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setMsgsSyncedDialogOpen(true)}
+                  >
+                    {msgsSyncedSaved !== null ? `Saved (${msgsSyncedSaved} rows)` : "Upload CSV"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right column: drop zone (top) + selected files (below) */}
           <UploadList
             dataType={selectedFileType}
             formValues={formValues}
             onFilesSelected={handleFilesSelected}
             onUploadComplete={handleUploadComplete}
           />
-
-          {selectedFileType === "Platform Logs" && (
-            <div className="rounded-lg border p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">msgs_synced.csv (optional)</p>
-                  <p className="text-xs text-muted-foreground">
-                    Upload a pre-synced image GPS manifest to skip EXIF extraction during Data Sync.
-                    Platform logs will still be merged on top if present.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setMsgsSyncedDialogOpen(true)}
-                >
-                  {msgsSyncedSaved !== null ? `Saved (${msgsSyncedSaved} rows)` : "Upload CSV"}
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

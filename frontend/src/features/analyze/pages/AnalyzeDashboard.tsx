@@ -1059,6 +1059,18 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
     return map;
   }, [records, allImageQueries]);
 
+  // If the default-selected record has no images but another does, auto-switch to it
+  useEffect(() => {
+    if (recordHasImages.size === 0) return;
+    if (selectedId && recordHasImages.get(selectedId)) return; // already has images
+    const withImages = records.find((r) => recordHasImages.get(r.id));
+    if (!withImages) return;
+    setSelectedId(withImages.id);
+    setSelectedWorkspace(withImages.workspace_name);
+    setSelectedPipeline(withImages.pipeline_name);
+    setSelectedDate(withImages.date);
+  }, [recordHasImages]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Build unique values per field for autocomplete
   const uniqueFieldValues = useMemo<Record<PlotFilterKey, string[]>>(() => {
     const empty: Record<PlotFilterKey, string[]> = {
@@ -1109,12 +1121,13 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
     () => Array.from(new Set(records.map((r) => r.workspace_name))),
     [records]
   );
-  const pipelines = useMemo(
-    () => Array.from(new Set(
-      records.filter((r) => r.workspace_name === selectedWorkspace).map((r) => r.pipeline_name)
-    )),
-    [records, selectedWorkspace]
-  );
+  const pipelines = useMemo(() => {
+    const seen = new Map<string, string>();
+    records
+      .filter((r) => r.workspace_name === selectedWorkspace)
+      .forEach((r) => { if (!seen.has(r.pipeline_name)) seen.set(r.pipeline_name, r.pipeline_type); });
+    return Array.from(seen.entries()).map(([name, type]) => ({ name, type }));
+  }, [records, selectedWorkspace]);
   const dates = useMemo(
     () => Array.from(new Set(
       records
@@ -1228,8 +1241,19 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
                   <SelectValue placeholder="Pipeline" />
                 </SelectTrigger>
                 <SelectContent>
-                  {pipelines.map((p) => (
-                    <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
+                  {pipelines.map(({ name, type }) => (
+                    <SelectItem key={name} value={name} className="text-xs">
+                      <span className="flex items-center gap-1.5">
+                        {name}
+                        <span className={`inline-block px-1 py-0 rounded text-[10px] font-medium leading-4 ${
+                          type === "aerial"
+                            ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        }`}>
+                          {type === "aerial" ? "Aerial" : "Ground"}
+                        </span>
+                      </span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

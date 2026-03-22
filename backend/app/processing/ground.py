@@ -1347,6 +1347,7 @@ def run_inference(
                 )
                 logger.info("PlotRecord: inserted %d ground plot records", _pr_count2)
             except Exception as _pr_exc2:
+                session.rollback()
                 logger.warning("PlotRecord upsert failed for ground run (non-fatal): %s", _pr_exc2)
 
     return {}

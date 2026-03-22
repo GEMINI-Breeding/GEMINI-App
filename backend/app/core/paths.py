@@ -24,15 +24,17 @@ Directory layout
       {sensor}/    ← drone images uploaded here
   Intermediate/
     {workspace_name}/
-      {year}/{experiment}/{location}/{population}/   ← year-level artifacts (matches Raw layout)
-        plot_borders.csv
-        plot_borders_v{N}.csv
+      {year}/{location}/{population}/               ← shared within workspace (any experiment)
         Plot-Boundary-WGS84.geojson
         Plot-Boundary-WGS84_v{N}.geojson
+        Pop-Boundary-WGS84.geojson
+        field_design.csv
+      {year}/{experiment}/{location}/{population}/  ← workspace+experiment-scoped artifacts
+        plot_borders.csv
+        plot_borders_v{N}.csv
         stitch_mask.json
         gcp_locations.csv
         field_design.csv
-        Pop-Boundary-WGS84.geojson
         {date}/{platform}/{sensor}/                  ← run-level artifacts
           msgs_synced.csv
           gcp_list.txt
@@ -103,6 +105,11 @@ class RunPaths:
         return Path(self.experiment) / self.location / self.population
 
     @property
+    def _loc_pop_seg(self) -> Path:
+        """location/population segment (no experiment — used for workspace-scoped shared paths)."""
+        return Path(self.location) / self.population
+
+    @property
     def _run_seg(self) -> Path:
         """date/platform/sensor segment."""
         return Path(self.date) / self.platform / self.sensor
@@ -139,6 +146,19 @@ class RunPaths:
         """
         return self.data_root / "Intermediate" / self.workspace_name / self._pop_seg
 
+    # ── Intermediate: shared across all workspaces (plot boundaries) ─────────
+
+    @property
+    def intermediate_shared_pop(self) -> Path:
+        """Intermediate/{workspace}/{year}/{location}/{population}/
+
+        Shared across all runs and pipeline types within the same workspace,
+        regardless of experiment name.  Plot boundaries, pop boundary, and
+        field design live here so that different-dated or differently-named
+        runs for the same physical field automatically share them.
+        """
+        return self.data_root / "Intermediate" / self.workspace_name / self._year / self._loc_pop_seg
+
     # ── Intermediate: year-level (shared across runs within a year) ────────
 
     @property
@@ -163,11 +183,11 @@ class RunPaths:
 
     @property
     def plot_boundary_geojson(self) -> Path:
-        """Aerial/Ground: Plot-Boundary-WGS84.geojson — year-specific."""
-        return self.intermediate_year / "Plot-Boundary-WGS84.geojson"
+        """Aerial/Ground: Plot-Boundary-WGS84.geojson — shared across all workspaces/pipelines."""
+        return self.intermediate_shared_pop / "Plot-Boundary-WGS84.geojson"
 
     def plot_boundary_geojson_versioned(self, version: int) -> Path:
-        return self.intermediate_year / f"Plot-Boundary-WGS84_v{version}.geojson"
+        return self.intermediate_shared_pop / f"Plot-Boundary-WGS84_v{version}.geojson"
 
     @property
     def field_design_dir(self) -> Path:
@@ -189,13 +209,13 @@ class RunPaths:
 
     @property
     def field_design_intermediate(self) -> Path:
-        """Inline field_design.csv saved during plot boundary prep (year-specific)."""
-        return self.intermediate_year / "field_design.csv"
+        """Inline field_design.csv — shared across all workspaces/pipelines for this population."""
+        return self.intermediate_shared_pop / "field_design.csv"
 
     @property
     def pop_boundary_geojson(self) -> Path:
-        """Population (outer field) boundary — year-specific."""
-        return self.intermediate_year / "Pop-Boundary-WGS84.geojson"
+        """Population (outer field) boundary — shared across all workspaces/pipelines."""
+        return self.intermediate_shared_pop / "Pop-Boundary-WGS84.geojson"
 
     @property
     def gcp_locations_intermediate(self) -> Path:
@@ -331,6 +351,7 @@ class RunPaths:
 
     def make_dirs(self) -> None:
         """Create all necessary directories for this run."""
+        self.intermediate_shared_pop.mkdir(parents=True, exist_ok=True)
         self.intermediate_year.mkdir(parents=True, exist_ok=True)
         self.intermediate_run.mkdir(parents=True, exist_ok=True)
         self.processed_run.mkdir(parents=True, exist_ok=True)

@@ -67,7 +67,7 @@ const ApplicationSettings = () => {
   }
 
   return (
-    <div className="max-w-md">
+    <div className="max-w-xl">
       <h3 className="text-lg font-semibold py-4">Application Settings</h3>
       <div className="flex flex-col gap-4">
         <div className="grid gap-2">

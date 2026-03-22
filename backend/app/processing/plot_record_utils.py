@@ -78,6 +78,10 @@ def upsert_plot_records_from_features(
     now = datetime.now(timezone.utc).isoformat()
     inserted = 0
 
+    # Deduplicate features by plot_id before inserting — prevents UNIQUE
+    # constraint failures when the source GeoJSON contains duplicate entries.
+    seen_plot_ids: set[str] = set()
+
     for feat in features:
         props = feat.get("properties") or {}
         geom = feat.get("geometry")
@@ -89,6 +93,10 @@ def upsert_plot_records_from_features(
         )
         if not plot_id:
             continue
+        if plot_id in seen_plot_ids:
+            logger.debug("plot_record_utils: skipping duplicate plot_id=%s", plot_id)
+            continue
+        seen_plot_ids.add(plot_id)
 
         # Accession / label
         accession = _str(

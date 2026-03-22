@@ -22,15 +22,7 @@ export type NavItem = {
 
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
-  {
-    icon: Folder,
-    title: "Files",
-    path: "/files",
-    subItems: [
-      { title: "Upload Data", path: "/files/upload_data" },
-      { title: "Manage Data", path: "/files/manage_data" },
-    ],
-  },
+  { icon: Folder, title: "Files", path: "/files" },
   {
     icon: Play,
     title: "Process",

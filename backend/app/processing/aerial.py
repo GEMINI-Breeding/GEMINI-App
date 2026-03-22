@@ -824,6 +824,7 @@ def run_trait_extraction(
         )
         logger.info("PlotRecord: inserted %d aerial plot records", _pr_count)
     except Exception as _pr_exc:
+        session.rollback()
         logger.warning("PlotRecord upsert failed (non-fatal): %s", _pr_exc)
 
     return {

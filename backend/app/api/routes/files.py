@@ -259,7 +259,7 @@ def download_upload_zip(
 @router.post("/sync")
 def sync_files(session: SessionDep, current_user: CurrentUser) -> Any:
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
-    result = sync_file_uploads(session=session, data_root=data_root)
+    result = sync_file_uploads(session=session, data_root=data_root, owner_id=current_user.id)
     return result
 
 

@@ -1371,8 +1371,7 @@ def orthomosaic_info(
                 pass
 
         _outputs = run.outputs or {}
-        _pb_versions = _outputs.get("plot_boundaries", [])
-        _active_pbv = _outputs.get("active_plot_boundary_version")
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
         # Stitching versions that have a combined_mosaic.tif
         _stitchings = list(_outputs.get("stitchings", []))
@@ -1393,10 +1392,7 @@ def orthomosaic_info(
             "existing_geojson": existing_geojson,
             "existing_pop_boundary": existing_pop,
             "existing_grid_settings": existing_grid_settings,
-            "plot_boundary_versions": [
-                {"version": v["version"], "name": v.get("name"), "created_at": v.get("created_at")}
-                for v in sorted(_pb_versions, key=lambda x: x["version"])
-            ],
+            "plot_boundary_versions": _pb_versions,
             "active_plot_boundary_version": _active_pbv,
             "stitch_versions": _stitch_versions,
             "active_stitch_version": _active_sv,
@@ -1430,8 +1426,7 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _versions = _get_ortho_versions(_outputs)
         _active_v = _outputs.get("active_ortho_version")
-        _pb_versions = _outputs.get("plot_boundaries", [])
-        _active_pbv = _outputs.get("active_plot_boundary_version")
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
         return {
             "available": True,
@@ -1446,10 +1441,7 @@ def orthomosaic_info(
                 {"version": v["version"], "name": v.get("name")}
                 for v in sorted(_versions, key=lambda x: x["version"])
             ],
-            "plot_boundary_versions": [
-                {"version": v["version"], "name": v.get("name"), "created_at": v.get("created_at")}
-                for v in sorted(_pb_versions, key=lambda x: x["version"])
-            ],
+            "plot_boundary_versions": _pb_versions,
             "active_plot_boundary_version": _active_pbv,
         }
 
@@ -1817,6 +1809,48 @@ def _get_ortho_versions(outputs: dict) -> list[dict]:
 
 def _get_plot_boundary_versions(outputs: dict) -> list[dict]:
     return list(outputs.get("plot_boundaries", []))
+
+
+def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict], int | None]:
+    """
+    Discover plot-boundary versions by scanning the shared population directory on disk.
+
+    Returns (versions_list, active_version) where versions_list is sorted by version
+    number.  Metadata (name, created_at) is populated from run_outputs when available,
+    falling back to the file modification time for versions created by other runs.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    shared_dir = paths.intermediate_shared_pop
+    if not shared_dir.exists():
+        return [], None
+
+    # Build a lookup from version → metadata stored in THIS run's outputs
+    run_meta: dict[int, dict] = {
+        v["version"]: v
+        for v in run_outputs.get("plot_boundaries", [])
+    }
+
+    versions: list[dict] = []
+    for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson"):
+        m = _re.search(r"_v(\d+)\.geojson$", f.name)
+        if not m:
+            continue
+        vnum = int(m.group(1))
+        meta = run_meta.get(vnum, {})
+        created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
+        versions.append({
+            "version": vnum,
+            "name": meta.get("name"),
+            "created_at": created_at,
+        })
+
+    versions.sort(key=lambda x: x["version"])
+    active = run_outputs.get("active_plot_boundary_version")
+    if active is None and versions:
+        active = versions[-1]["version"]
+    return versions, active
 
 
 @router.get("/pipeline-runs/{id}/orthomosaics")
@@ -2954,3 +2988,198 @@ def download_crops(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Plot-boundary migration ────────────────────────────────────────────────────
+
+@router.post("/migrate/plot-boundaries")
+def migrate_plot_boundaries(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """
+    One-time migration: move Plot-Boundary / Pop-Boundary files from the old
+    workspace-scoped path to the new shared (workspace-independent) path and
+    update run.outputs references accordingly.
+
+    Old: Intermediate/{workspace}/{year}/{exp}/{loc}/{pop}/Plot-Boundary-WGS84*.geojson
+    New: Intermediate/{year}/{exp}/{loc}/{pop}/Plot-Boundary-WGS84*.geojson
+
+    Safe to run multiple times — skips files that have already been moved.
+    """
+    from sqlmodel import select as _select
+
+    all_runs: list[PipelineRun] = list(session.exec(_select(PipelineRun)).all())
+
+    moved_files: list[str] = []
+    updated_runs: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    # Files that need migration from workspace-scoped to shared path
+    _BOUNDARY_GLOB = [
+        "Plot-Boundary-WGS84.geojson",
+        "Plot-Boundary-WGS84_v*.geojson",
+        "Pop-Boundary-WGS84.geojson",
+        "field_design.csv",
+    ]
+
+    for run in all_runs:
+        pipeline = session.get(Pipeline, run.pipeline_id)
+        if not pipeline:
+            continue
+        workspace = session.get(Workspace, pipeline.workspace_id)
+        if not workspace:
+            continue
+
+        paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+        data_root = paths.data_root
+
+        old_year_dir = paths.intermediate_year      # workspace-scoped (old location)
+        new_shared_dir = paths.intermediate_shared_pop  # workspace-independent (new location)
+
+        if not old_year_dir.exists():
+            continue
+
+        # Collect boundary files that exist in the old location
+        boundary_files: list[Path] = []
+        for pattern in _BOUNDARY_GLOB:
+            boundary_files.extend(old_year_dir.glob(pattern))
+
+        if not boundary_files:
+            continue
+
+        new_shared_dir.mkdir(parents=True, exist_ok=True)
+        run_changed = False
+
+        for old_file in boundary_files:
+            new_file = new_shared_dir / old_file.name
+            if new_file.exists():
+                skipped.append(str(old_file.relative_to(data_root)))
+                continue
+            try:
+                shutil.copy2(old_file, new_file)
+                old_file.unlink()
+                moved_files.append(
+                    f"{old_file.relative_to(data_root)} → {new_file.relative_to(data_root)}"
+                )
+                logger.info("migrate: %s → %s", old_file, new_file)
+                run_changed = True
+            except Exception as exc:
+                errors.append(f"{old_file}: {exc}")
+                logger.error("migrate error for %s: %s", old_file, exc)
+
+        if not run_changed:
+            continue
+
+        # Update run.outputs paths that point into the old workspace-scoped location
+        outputs = dict(run.outputs or {})
+        changed_outputs = False
+
+        # plot_boundary_prep (canonical path)
+        old_rel = outputs.get("plot_boundary_prep", "")
+        if old_rel and old_rel.startswith("Intermediate/" + workspace.name + "/"):
+            outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+            changed_outputs = True
+
+        # per-version geojson_path entries
+        versions = [dict(v) for v in outputs.get("plot_boundaries", [])]
+        for v in versions:
+            vpath = v.get("geojson_path", "")
+            if vpath and vpath.startswith("Intermediate/" + workspace.name + "/"):
+                fname = Path(vpath).name
+                v["geojson_path"] = paths.rel(new_shared_dir / fname)
+                changed_outputs = True
+        if changed_outputs:
+            outputs["plot_boundaries"] = versions
+
+        if changed_outputs:
+            update_pipeline_run(
+                session=session,
+                db_run=run,
+                run_in=PipelineRunUpdate(outputs=outputs),
+            )
+            updated_runs.append(str(run.id))
+
+    # Second pass: pick up files from the previous intermediate shared path format
+    # Old shared: Intermediate/{year}/{experiment}/{location}/{population}/
+    # These were written by an earlier version of the migration.
+    seen_run_ids = set(updated_runs)
+    for run in all_runs:
+        pipeline = session.get(Pipeline, run.pipeline_id)
+        if not pipeline:
+            continue
+        workspace = session.get(Workspace, pipeline.workspace_id)
+        if not workspace:
+            continue
+
+        paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+        data_root = paths.data_root
+
+        # Old shared path had no workspace, used experiment in segment
+        old_shared_dir = (
+            data_root / "Intermediate" / paths._year / paths._pop_seg
+        )
+        new_shared_dir = paths.intermediate_shared_pop
+
+        if not old_shared_dir.exists() or old_shared_dir == new_shared_dir:
+            continue
+
+        boundary_files = []
+        for pattern in _BOUNDARY_GLOB:
+            boundary_files.extend(old_shared_dir.glob(pattern))
+
+        if not boundary_files:
+            continue
+
+        new_shared_dir.mkdir(parents=True, exist_ok=True)
+        run_changed = False
+
+        for old_file in boundary_files:
+            new_file = new_shared_dir / old_file.name
+            if new_file.exists():
+                skipped.append(str(old_file.relative_to(data_root)))
+                continue
+            try:
+                shutil.copy2(old_file, new_file)
+                old_file.unlink()
+                moved_files.append(
+                    f"{old_file.relative_to(data_root)} → {new_file.relative_to(data_root)}"
+                )
+                logger.info("migrate (old-shared): %s → %s", old_file, new_file)
+                run_changed = True
+            except Exception as exc:
+                errors.append(f"{old_file}: {exc}")
+                logger.error("migrate error for %s: %s", old_file, exc)
+
+        if run_changed and str(run.id) not in seen_run_ids:
+            outputs = dict(run.outputs or {})
+            changed_outputs = False
+            old_rel = outputs.get("plot_boundary_prep", "")
+            # Old shared paths started with Intermediate/{year}/ (no workspace)
+            year = paths._year
+            if old_rel and old_rel.startswith(f"Intermediate/{year}/"):
+                outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+                changed_outputs = True
+            versions = [dict(v) for v in outputs.get("plot_boundaries", [])]
+            for v in versions:
+                vpath = v.get("geojson_path", "")
+                if vpath and vpath.startswith(f"Intermediate/{year}/"):
+                    fname = Path(vpath).name
+                    v["geojson_path"] = paths.rel(new_shared_dir / fname)
+                    changed_outputs = True
+            if changed_outputs:
+                outputs["plot_boundaries"] = versions
+                update_pipeline_run(
+                    session=session,
+                    db_run=run,
+                    run_in=PipelineRunUpdate(outputs=outputs),
+                )
+                updated_runs.append(str(run.id))
+
+    return {
+        "moved_files": moved_files,
+        "updated_runs": updated_runs,
+        "skipped_already_exists": skipped,
+        "errors": errors,
+    }

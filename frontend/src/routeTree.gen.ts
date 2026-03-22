@@ -20,10 +20,9 @@ import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
+import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
 import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
-import { Route as LayoutFilesUpload_dataRouteImport } from './routes/_layout/files/upload_data'
-import { Route as LayoutFilesManage_dataRouteImport } from './routes/_layout/files/manage_data'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
 import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
 import { Route as LayoutProcessWorkspaceIdToolRouteImport } from './routes/_layout/process/$workspaceId/tool'
@@ -84,6 +83,11 @@ const LayoutProcessIndexRoute = LayoutProcessIndexRouteImport.update({
   path: '/process/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutFilesIndexRoute = LayoutFilesIndexRouteImport.update({
+  id: '/files/',
+  path: '/files/',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAnalyzeIndexRoute = LayoutAnalyzeIndexRouteImport.update({
   id: '/analyze/',
   path: '/analyze/',
@@ -95,16 +99,6 @@ const LayoutProcessWorkspaceIdRoute =
     path: '/process/$workspaceId',
     getParentRoute: () => LayoutRoute,
   } as any)
-const LayoutFilesUpload_dataRoute = LayoutFilesUpload_dataRouteImport.update({
-  id: '/files/upload_data',
-  path: '/files/upload_data',
-  getParentRoute: () => LayoutRoute,
-} as any)
-const LayoutFilesManage_dataRoute = LayoutFilesManage_dataRouteImport.update({
-  id: '/files/manage_data',
-  path: '/files/manage_data',
-  getParentRoute: () => LayoutRoute,
-} as any)
 const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
   id: '/analyze/$runId',
   path: '/analyze/$runId',
@@ -146,10 +140,9 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/files/manage_data': typeof LayoutFilesManage_dataRoute
-  '/files/upload_data': typeof LayoutFilesUpload_dataRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/analyze': typeof LayoutAnalyzeIndexRoute
+  '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -167,9 +160,8 @@ export interface FileRoutesByTo {
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/files/manage_data': typeof LayoutFilesManage_dataRoute
-  '/files/upload_data': typeof LayoutFilesUpload_dataRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
+  '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -189,10 +181,9 @@ export interface FileRoutesById {
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/_layout/files/manage_data': typeof LayoutFilesManage_dataRoute
-  '/_layout/files/upload_data': typeof LayoutFilesUpload_dataRoute
   '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
+  '/_layout/files/': typeof LayoutFilesIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -212,10 +203,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/'
     | '/analyze/$runId'
-    | '/files/manage_data'
-    | '/files/upload_data'
     | '/process/$workspaceId'
     | '/analyze'
+    | '/files'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
@@ -233,9 +223,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/'
     | '/analyze/$runId'
-    | '/files/manage_data'
-    | '/files/upload_data'
     | '/analyze'
+    | '/files'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
@@ -254,10 +243,9 @@ export interface FileRouteTypes {
     | '/_layout/settings'
     | '/_layout/'
     | '/_layout/analyze/$runId'
-    | '/_layout/files/manage_data'
-    | '/_layout/files/upload_data'
     | '/_layout/process/$workspaceId'
     | '/_layout/analyze/'
+    | '/_layout/files/'
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
     | '/_layout/process/$workspaceId/tool'
@@ -352,6 +340,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/files/': {
+      id: '/_layout/files/'
+      path: '/files'
+      fullPath: '/files'
+      preLoaderRoute: typeof LayoutFilesIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/analyze/': {
       id: '/_layout/analyze/'
       path: '/analyze'
@@ -364,20 +359,6 @@ declare module '@tanstack/react-router' {
       path: '/process/$workspaceId'
       fullPath: '/process/$workspaceId'
       preLoaderRoute: typeof LayoutProcessWorkspaceIdRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/files/upload_data': {
-      id: '/_layout/files/upload_data'
-      path: '/files/upload_data'
-      fullPath: '/files/upload_data'
-      preLoaderRoute: typeof LayoutFilesUpload_dataRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/files/manage_data': {
-      id: '/_layout/files/manage_data'
-      path: '/files/manage_data'
-      fullPath: '/files/manage_data'
-      preLoaderRoute: typeof LayoutFilesManage_dataRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/analyze/$runId': {
@@ -447,10 +428,9 @@ interface LayoutRouteChildren {
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
-  LayoutFilesManage_dataRoute: typeof LayoutFilesManage_dataRoute
-  LayoutFilesUpload_dataRoute: typeof LayoutFilesUpload_dataRoute
   LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
+  LayoutFilesIndexRoute: typeof LayoutFilesIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
 }
 
@@ -461,10 +441,9 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
-  LayoutFilesManage_dataRoute: LayoutFilesManage_dataRoute,
-  LayoutFilesUpload_dataRoute: LayoutFilesUpload_dataRoute,
   LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,
+  LayoutFilesIndexRoute: LayoutFilesIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
 }
 

@@ -118,8 +118,15 @@ def get_distinct_field_values(
     return result
 
 
+def _infer_data_type(platform: str) -> str:
+    """Infer data_type from platform directory name."""
+    if platform.strip().lower() == "amiga":
+        return "Farm-ng Binary File"
+    return "Image Data"
+
+
 def sync_file_uploads(
-    *, session: Session, data_root: str
+    *, session: Session, data_root: str, owner_id: uuid.UUID | None = None
 ) -> dict[str, int]:
     """Reconcile DB records with files on disk.
 
@@ -128,6 +135,8 @@ def sync_file_uploads(
     - If a directory has just disappeared, mark the record as "missing" so the
       user sees it on the next sync and it gets cleaned up then.
     - If file counts differ, update them.
+    - If owner_id is provided, scan Raw/ for platform-level directories that
+      have no DB record and create records for them (discovery).
     """
     root = Path(data_root)
     records = session.exec(select(FileUpload)).all()
@@ -138,7 +147,8 @@ def sync_file_uploads(
     for record in records:
         dir_path = root / record.storage_path
         dir_gone = not dir_path.exists() or not dir_path.is_dir()
-        empty = (not dir_gone) and sum(1 for f in dir_path.iterdir() if f.is_file()) == 0
+        # Use rglob so subdirectory layouts (e.g. Amiga RGB/Images/) are counted correctly
+        empty = (not dir_gone) and sum(1 for f in dir_path.rglob("*") if f.is_file()) == 0
 
         if dir_gone or empty:
             if record.status == "missing":
@@ -153,7 +163,7 @@ def sync_file_uploads(
                 synced += 1
             continue
 
-        actual_count = sum(1 for f in dir_path.iterdir() if f.is_file())
+        actual_count = sum(1 for f in dir_path.rglob("*") if f.is_file())
         changed = False
         if record.file_count != actual_count:
             logger.info(
@@ -161,7 +171,7 @@ def sync_file_uploads(
             )
             record.file_count = actual_count
             changed = True
-        if record.status == "missing":
+        if record.status in ("missing", "processing"):
             record.status = "completed"
             changed = True
         if changed:
@@ -169,5 +179,66 @@ def sync_file_uploads(
             synced += 1
 
     session.commit()
-    logger.info(f"sync complete: synced={synced}, removed={removed}")
-    return {"synced": synced, "removed": removed}
+
+    # Discovery: scan Raw/{year}/{experiment}/{location}/{population}/{date}/{platform}
+    # for directories that have files but no DB record yet.
+    discovered = 0
+    if owner_id is not None:
+        raw_root = root / "Raw"
+        if raw_root.is_dir():
+            # Normalize existing paths to forward-slash for comparison
+            existing_paths = {
+                record.storage_path.replace("\\", "/")
+                for record in records
+            }
+            for year_dir in raw_root.iterdir():
+                if not year_dir.is_dir():
+                    continue
+                for exp_dir in year_dir.iterdir():
+                    if not exp_dir.is_dir():
+                        continue
+                    for loc_dir in exp_dir.iterdir():
+                        if not loc_dir.is_dir():
+                            continue
+                        for pop_dir in loc_dir.iterdir():
+                            if not pop_dir.is_dir():
+                                continue
+                            for date_dir in pop_dir.iterdir():
+                                if not date_dir.is_dir():
+                                    continue
+                                for platform_dir in date_dir.iterdir():
+                                    if not platform_dir.is_dir():
+                                        continue
+                                    rel_path = platform_dir.relative_to(root).as_posix()
+                                    if rel_path in existing_paths:
+                                        continue
+                                    file_count = sum(
+                                        1 for f in platform_dir.rglob("*") if f.is_file()
+                                    )
+                                    if file_count == 0:
+                                        continue
+                                    platform_name = platform_dir.name
+                                    new_record = FileUploadCreate(
+                                        data_type=_infer_data_type(platform_name),
+                                        experiment=exp_dir.name,
+                                        location=loc_dir.name,
+                                        population=pop_dir.name,
+                                        date=date_dir.name,
+                                        platform=platform_name,
+                                        storage_path=rel_path,
+                                    )
+                                    db_item = FileUpload.model_validate(
+                                        new_record, update={"owner_id": owner_id}
+                                    )
+                                    db_item.file_count = file_count
+                                    db_item.status = "completed"
+                                    session.add(db_item)
+                                    logger.info(
+                                        f"sync: discovered new record – {rel_path} ({file_count} files)"
+                                    )
+                                    discovered += 1
+            if discovered:
+                session.commit()
+
+    logger.info(f"sync complete: synced={synced}, removed={removed}, discovered={discovered}")
+    return {"synced": synced, "removed": removed, "discovered": discovered}
