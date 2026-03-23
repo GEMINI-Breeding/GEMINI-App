@@ -687,12 +687,13 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <Badge
-                          variant="outline"
-                          className="text-xs capitalize"
-                        >
-                          {r.pipeline_type}
-                        </Badge>
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                          r.pipeline_type === "aerial"
+                            ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        }`}>
+                          {r.pipeline_type === "aerial" ? "Aerial" : "Ground"}
+                        </span>
                         <span className="text-sm">{r.pipeline_name}</span>
                       </div>
                     </TableCell>
@@ -1632,12 +1633,13 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                     <p className="text-muted-foreground flex-1 truncate text-xs">
                       {recs[0].pipeline_name}
                     </p>
-                    <Badge
-                      variant="outline"
-                      className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight"
-                    >
-                      {recs[0].pipeline_type}
-                    </Badge>
+                    <span className={`flex-shrink-0 inline-block px-1 py-0 rounded text-[10px] font-medium leading-tight ${
+                      recs[0].pipeline_type === "aerial"
+                        ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                        : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    }`}>
+                      {recs[0].pipeline_type === "aerial" ? "Aerial" : "Ground"}
+                    </span>
                   </div>
                   {recs.map((r) => (
                     <button

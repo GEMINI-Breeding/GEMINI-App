@@ -668,7 +668,7 @@ def run_stitching(
                 _preflight_cmd = [sys.executable]
                 _preflight_env = {
                     **(_subprocess_env or os.environ),
-                    "GEMI_AGROWSTITCH_CONFIG": "",  # empty → import-only probe
+                    "GEMI_AGROWSTITCH_CONFIG": "__probe__",  # sentinel → import-only check
                     "GEMI_AGROWSTITCH_CPU_COUNT": "0",
                     "GEMI_AGROWSTITCH_DIR": str(agrowstitch_dir),
                 }

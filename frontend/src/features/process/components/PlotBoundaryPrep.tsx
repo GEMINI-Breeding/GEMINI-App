@@ -867,6 +867,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [selectedBoundaryVersion, setSelectedBoundaryVersion] = useState<number | null>(null);
   const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | null>(null);
   const [mapInitialized, setMapInitialized] = useState(false);
+  const [noFdWarningOpen, setNoFdWarningOpen] = useState(false);
 
   // Fetch mosaic/orthomosaic info (serves as background + provides existing boundaries)
   const { data: orthoInfo, isLoading: orthoLoading } = useQuery<OrthoInfo>({
@@ -1216,11 +1217,20 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   // Manual grid generation triggered by the "Generate Grid" button
   function handleGenerateGrid() {
     if (!popBoundary) return;
+    if (!fdInfo?.available) {
+      setNoFdWarningOpen(true);
+      return;
+    }
+    _doGenerateGrid();
+  }
+
+  function _doGenerateGrid() {
+    if (!popBoundary) return;
     const fc = computeGrid(popBoundary, gridOptions, gridOffset, fdInfo?.rows);
     setPreviewGeoJson(fc);
     setSelectedIndexes([]);
     setGridGenerated(true);
-    setGridVisible(true); // always show grid after generating/regenerating
+    setGridVisible(true);
   }
 
   // Show/hide plot grid layer + switch Geoman edit target
@@ -1835,6 +1845,29 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           }));
         }}
       />
+
+      {/* No field design warning */}
+      <Dialog open={noFdWarningOpen} onOpenChange={(o) => !o && setNoFdWarningOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>No Field Design Loaded</DialogTitle>
+            <DialogDescription>
+              No field design file has been uploaded for this run. The grid may not
+              match the actual plot layout (rows × columns will use the current
+              settings). You can upload a field design using the button in the
+              settings panel.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoFdWarningOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => { setNoFdWarningOpen(false); _doGenerateGrid(); }}>
+              Generate Anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={showSaveAsDialog}

@@ -8,6 +8,7 @@ import {
   Play,
   MoreVertical,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -44,6 +45,11 @@ import {
   type FileUploadPublic,
 } from "@/client";
 import useCustomToast from "@/hooks/useCustomToast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +71,7 @@ function statusBadgeClass(status: string) {
 interface NewRunDialogProps {
   pipeline: PipelinePublic;
   workspaceId: string;
+  runs: PipelineRunPublic[];
   open: boolean;
   onClose: () => void;
 }
@@ -72,6 +79,7 @@ interface NewRunDialogProps {
 function NewRunDialog({
   pipeline,
   workspaceId,
+  runs,
   open,
   onClose,
 }: NewRunDialogProps) {
@@ -165,6 +173,8 @@ function NewRunDialog({
     pipeline.type === "aerial" ? AERIAL_TYPES.has(u.data_type) : GROUND_TYPES.has(u.data_type)
   );
 
+  const includedUploadIds = new Set(runs.map((r) => r.file_upload_id).filter(Boolean));
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-3xl">
@@ -217,6 +227,7 @@ function NewRunDialog({
                   <table className="w-full text-sm">
                     <thead className="bg-muted/60 sticky top-0 z-10">
                       <tr>
+                        <th className="px-2 py-2 w-6" />
                         {["Experiment", "Location", "Population", "Date", "Platform", "Files"].map((h) => (
                           <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
                             {h}
@@ -227,29 +238,46 @@ function NewRunDialog({
                     <tbody>
                       {displayUploads.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground text-sm">
+                          <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground text-sm">
                             No datasets match the filters.
                           </td>
                         </tr>
                       ) : (
-                        displayUploads.map((u: FileUploadPublic) => (
-                          <tr
-                            key={u.id}
-                            onClick={() => setSelectedUploadId(u.id)}
-                            className={`cursor-pointer border-t transition-colors ${
-                              u.id === selectedUploadId
-                                ? "bg-primary/10"
-                                : "hover:bg-muted/50"
-                            }`}
-                          >
-                            <td className="px-3 py-2 font-medium">{u.experiment}</td>
-                            <td className="px-3 py-2 text-muted-foreground">{u.location}</td>
-                            <td className="px-3 py-2 text-muted-foreground">{u.population}</td>
-                            <td className="px-3 py-2 tabular-nums">{u.date}</td>
-                            <td className="px-3 py-2 text-muted-foreground">{u.platform ?? "—"}</td>
-                            <td className="px-3 py-2 tabular-nums text-muted-foreground">{u.file_count}</td>
-                          </tr>
-                        ))
+                        displayUploads.map((u: FileUploadPublic) => {
+                          const included = includedUploadIds.has(u.id);
+                          return (
+                            <tr
+                              key={u.id}
+                              onClick={() => setSelectedUploadId(u.id)}
+                              className={`cursor-pointer border-t transition-colors ${
+                                u.id === selectedUploadId
+                                  ? "bg-primary/10"
+                                  : "hover:bg-muted/50"
+                              }`}
+                            >
+                              <td className="px-2 py-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span
+                                      className={`inline-block w-2 h-2 rounded-full ${
+                                        included ? "bg-green-500" : "bg-orange-400"
+                                      }`}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {included ? "Already included" : "Not Included"}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </td>
+                              <td className="px-3 py-2 font-medium">{u.experiment}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{u.location}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{u.population}</td>
+                              <td className="px-3 py-2 tabular-nums">{u.date}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{u.platform ?? "—"}</td>
+                              <td className="px-3 py-2 tabular-nums text-muted-foreground">{u.file_count}</td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -404,6 +432,18 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
                     }
                   >
                     <div className="flex items-center gap-3">
+                      {run.status === "failed" && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center justify-center">
+                              <AlertTriangle className="h-4 w-4 text-red-500" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            This is a failed run. It is recommended to delete it.
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       <Badge
                         className={statusBadgeClass(run.status ?? "pending")}
                       >
@@ -454,6 +494,7 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
       <NewRunDialog
         pipeline={pipeline}
         workspaceId={workspaceId}
+        runs={runs}
         open={newRunOpen}
         onClose={() => setNewRunOpen(false)}
       />

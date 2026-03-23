@@ -21,6 +21,12 @@ if _agrowstitch_config:
     if _agrowstitch_dir and _agrowstitch_dir not in sys.path:
         sys.path.insert(0, _agrowstitch_dir)
 
+    if _agrowstitch_config == "__probe__":
+        # Import-only pre-flight check: verify AgRowStitch can be imported.
+        from AgRowStitch import run  # type: ignore  # noqa: F401
+        print("AgRowStitch import OK")
+        sys.exit(0)
+
     _cpu_count = int(os.environ.get("GEMI_AGROWSTITCH_CPU_COUNT", "1"))
 
     from AgRowStitch import run  # type: ignore

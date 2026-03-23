@@ -111,7 +111,7 @@ function makePlots(count: number): PlotSelection[] {
     plot_id: i + 1,
     start_image: null,
     end_image: null,
-    direction: "down",
+    direction: "",
   }))
 }
 
@@ -235,6 +235,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showGps, setShowGps] = useState(false)
+  const [directionWarningOpen, setDirectionWarningOpen] = useState(false)
 
   // plots state: array of PlotSelection
   const [plots, setPlots] = useState<PlotSelection[]>(makePlots(1))
@@ -250,7 +251,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         plot_id: Number(s.plot_id),
         start_image: s.start_image ?? null,
         end_image: s.end_image ?? null,
-        direction: s.direction ?? "down",
+        direction: s.direction ?? "",
       }))
       setPlots(loaded)
       setPlotNavInput("1")
@@ -614,13 +615,16 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Direction</Label>
                     <Select
-                      value={activePlot.direction}
-                      onValueChange={setDirection}
+                      value={activePlot.direction || "__none__"}
+                      onValueChange={(v) => setDirection(v === "__none__" ? "" : v)}
                     >
-                      <SelectTrigger className="h-7 text-xs">
+                      <SelectTrigger className={`h-7 text-xs ${!activePlot.direction ? "text-amber-600" : ""}`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="__none__" className="text-xs text-muted-foreground">
+                          — Select direction —
+                        </SelectItem>
                         {DIRECTIONS.map((d) => (
                           <SelectItem key={d.value} value={d.value} className="text-xs">
                             {d.label}
@@ -665,11 +669,43 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
             <Button
               className="flex-1"
               disabled={!canSave || saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
+              onClick={() => {
+                const missingDir = plots.some((p) => !p.direction);
+                if (missingDir) {
+                  setDirectionWarningOpen(true);
+                } else {
+                  saveMutation.mutate();
+                }
+              }}
             >
               {saveMutation.isPending ? "Saving…" : "Save"}
             </Button>
           </div>
+
+          {/* Direction warning dialog */}
+          {directionWarningOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-background rounded-lg border shadow-lg p-5 max-w-sm w-full space-y-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-sm">Missing stitching direction</p>
+                    <p className="text-muted-foreground text-xs mt-1">
+                      Some plots do not have a stitching direction set. This may affect how rows are stitched together.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setDirectionWarningOpen(false)}>
+                    Go Back
+                  </Button>
+                  <Button size="sm" onClick={() => { setDirectionWarningOpen(false); saveMutation.mutate(); }}>
+                    Save Anyway
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
