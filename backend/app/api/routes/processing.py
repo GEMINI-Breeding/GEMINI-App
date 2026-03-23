@@ -580,7 +580,7 @@ def save_field_design(
     """Save field design CSV inline (without going to the Files tab)."""
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
+    paths.field_design_intermediate.parent.mkdir(parents=True, exist_ok=True)
     paths.field_design_intermediate.write_text(body.csv_text)
 
     import csv as _csv

@@ -660,10 +660,54 @@ def run_stitching(
                 ]
             emit({"event": "progress", "message": f"Using Python: {_python}"})
 
+            # Pre-flight: verify AgRowStitch can be imported.
+            # This surfaces import-time errors (missing deps, ABI mismatch) with
+            # a readable message instead of a silent SIGSEGV.
+            _preflight_cmd: list[str]
+            if getattr(sys, "frozen", False):
+                _preflight_cmd = [sys.executable]
+                _preflight_env = {
+                    **(_subprocess_env or os.environ),
+                    "GEMI_AGROWSTITCH_CONFIG": "",  # empty → import-only probe
+                    "GEMI_AGROWSTITCH_CPU_COUNT": "0",
+                    "GEMI_AGROWSTITCH_DIR": str(agrowstitch_dir),
+                }
+            else:
+                _preflight_cmd = [
+                    _python, "-c",
+                    f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
+                    f"import AgRowStitch; print('AgRowStitch import OK')",
+                ]
+                _preflight_env = _subprocess_env
+            try:
+                _pf = subprocess.run(
+                    _preflight_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env=_preflight_env,
+                )
+                _pf_out = (_pf.stdout or "").strip()
+                _pf_err = (_pf.stderr or "").strip()
+                if _pf.returncode != 0:
+                    detail = "\n".join(filter(None, [_pf_out, _pf_err])) or "(no output)"
+                    raise RuntimeError(
+                        f"AgRowStitch failed import pre-flight check "
+                        f"(exit {_pf.returncode}):\n{detail}"
+                    )
+                if _pf_out:
+                    emit({"event": "progress", "message": f"[pre-flight] {_pf_out}"})
+            except subprocess.TimeoutExpired:
+                emit({"event": "progress", "message": "AgRowStitch pre-flight timed out — proceeding anyway"})
+            except RuntimeError:
+                raise
+            except Exception as _pf_exc:
+                emit({"event": "progress", "message": f"Pre-flight check error (non-fatal): {_pf_exc}"})
+
             proc = subprocess.Popen(
                 _subprocess_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 env=_subprocess_env,
             )
@@ -748,6 +792,7 @@ def run_stitching(
             _total_images = copied  # images copied into temp dir
 
             _last_lines: list[str] = []
+            _last_stderr: list[str] = []
 
             def _drain(pipe, _emit, _plot_id, _pi, _np, _ni, _buf):
                 for line in pipe:
@@ -778,6 +823,15 @@ def run_stitching(
                             }
                         )
 
+            def _drain_stderr(pipe, _buf):
+                for line in pipe:
+                    line = line.rstrip()
+                    if not line.strip():
+                        continue
+                    _buf.append(line)
+                    if len(_buf) > 30:
+                        _buf.pop(0)
+
             drain_thread = threading.Thread(
                 target=_drain,
                 args=(
@@ -792,6 +846,12 @@ def run_stitching(
                 daemon=True,
             )
             drain_thread.start()
+            stderr_thread = threading.Thread(
+                target=_drain_stderr,
+                args=(proc.stderr, _last_stderr),
+                daemon=True,
+            )
+            stderr_thread.start()
 
             try:
                 # Poll until done, checking stop every 0.3 s
@@ -806,6 +866,7 @@ def run_stitching(
                         proc.kill()
                         proc.wait()
                         drain_thread.join(timeout=2)
+                        stderr_thread.join(timeout=2)
                         _vram_stop.set()
                         vram_thread.join(timeout=2)
                         return {}
@@ -813,6 +874,7 @@ def run_stitching(
                 _vram_stop.set()
                 vram_thread.join(timeout=2)
                 drain_thread.join(timeout=5)
+                stderr_thread.join(timeout=5)
                 if proc.returncode != 0:
                     code = proc.returncode
                     # Negative codes are Unix signals (e.g. -11 = SIGSEGV)
@@ -823,11 +885,13 @@ def run_stitching(
                             sig_name = _signal.Signals(-code).name
                         except ValueError:
                             sig_name = f"signal {-code}"
-                        if code == -11:
-                            tail = "\n".join(f"  {l}" for l in _last_lines[-5:]) if _last_lines else "  (no output)"
-                            hint = f"AgRowStitch crashed with {sig_name}.\n\nLast output:\n{tail}"
-                        else:
-                            hint = f"AgRowStitch was killed by {sig_name} (exit code {code})."
+                        stdout_tail = "\n".join(f"  {l}" for l in _last_lines[-5:]) if _last_lines else "  (no stdout)"
+                        stderr_tail = "\n".join(f"  {l}" for l in _last_stderr[-10:]) if _last_stderr else "  (no stderr)"
+                        hint = (
+                            f"AgRowStitch crashed with {sig_name}.\n\n"
+                            f"Last stdout:\n{stdout_tail}\n\n"
+                            f"Last stderr:\n{stderr_tail}"
+                        )
                         raise RuntimeError(hint)
                     raise RuntimeError(f"AgRowStitch exited with code {code}")
             finally:

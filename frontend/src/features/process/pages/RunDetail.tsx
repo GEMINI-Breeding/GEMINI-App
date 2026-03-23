@@ -21,6 +21,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  RefreshCw,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -252,10 +253,31 @@ function useStepProgress(runId: string, isRunning: boolean) {
             queryClient.invalidateQueries({
               queryKey: ["stitch-versions", runId],
             });
+            // Mosaic background + stitch version dropdown in PlotBoundaryPrep
+            queryClient.invalidateQueries({
+              queryKey: ["orthomosaic-info", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["auto-boundary", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["plot-boundaries", runId],
+            });
+          }
+          if (evt.step === "plot_boundary_prep") {
+            queryClient.invalidateQueries({
+              queryKey: ["orthomosaic-info", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["plot-boundaries", runId],
+            });
           }
           if (evt.step === "orthomosaic") {
             queryClient.invalidateQueries({
               queryKey: ["orthomosaic-versions", runId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["orthomosaic-info", runId],
             });
           }
           if (evt.step === "trait_extraction") {
@@ -555,7 +577,7 @@ function TraitRecordsPanel({
                 <TableCell className="py-1.5 font-mono">
                   {r.boundary_version != null
                     ? versionLabel(r.boundary_version, r.boundary_name)
-                    : "canonical"}
+                    : "default"}
                 </TableCell>
                 <TableCell className="py-1.5 text-right font-mono">
                   {r.plot_count}
@@ -836,13 +858,20 @@ function StitchPanel({
     if (!isRunning) setUserBrowsing(false);
   }, [isRunning]);
 
-  // Fetch images for a specific version to show in dialog
+  // Fetch images for a specific version to show in dialog.
+  // Append a cache-bust timestamp so the browser doesn't serve stale images
+  // from a previous stitch run that wrote to the same file paths.
   async function viewVersionImages(v: StitchVersion) {
     const res = await fetch(
       apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs?version=${v.version}`)
     );
     const data = res.ok ? await res.json() : { plots: [] };
-    setViewingImages({ version: v, plots: data.plots ?? [] });
+    const ts = Date.now();
+    const plots = (data.plots ?? []).map((p: StitchPlot) => ({
+      ...p,
+      url: `${p.url}${p.url.includes("?") ? "&" : "?"}t=${ts}`,
+    }));
+    setViewingImages({ version: v, plots });
   }
 
   function startRename(v: StitchVersion) {
@@ -2575,6 +2604,7 @@ export function RunDetail() {
   });
   const { showErrorToast } = useCustomToast();
   const queryClient = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const { addProcess, updateProcess, processes } = useProcess();
   const orthoProcessIdRef = useRef<string | null>(null);
   const traitProcessIdRef = useRef<string | null>(null);
@@ -2609,6 +2639,24 @@ export function RunDetail() {
   const runStatus = run?.status ?? "pending";
   const isRunning = runStatus === "running";
   const pipelineType = pipeline?.type ?? "ground";
+
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["orthomosaic-info", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["auto-boundary", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] });
+      await queryClient.invalidateQueries({ queryKey: ["associations", runId] });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
 
   // Check for an uploaded orthomosaic (aerial only, before ortho step completes)
   const { data: uploadedOrthoCheck } = useQuery<{
@@ -3182,9 +3230,13 @@ export function RunDetail() {
         setShowTraitDialog(true);
         return;
       }
-      // Single versions — just run with defaults (backend uses active)
+      // Single versions — pass them explicitly so the TraitRecord is recorded correctly
       stopWasRequestedRef.current = false;
-      executeMutation.mutate({ step });
+      executeMutation.mutate({
+        step,
+        ortho_version: orthoVersions?.[0]?.version ?? undefined,
+        boundary_version: plotBoundaryVersions?.[0]?.version ?? undefined,
+      } as any);
       return;
     }
     if (step === "orthomosaic") {
@@ -3399,6 +3451,15 @@ export function RunDetail() {
               {run.platform} · {run.sensor}
             </p>
           </div>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={isRefreshing || isRunning}
+            title="Refresh all pipeline data"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          </Button>
           {run.pipeline_id && (
             <Button
               variant="outline"

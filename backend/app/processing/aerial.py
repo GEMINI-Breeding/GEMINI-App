@@ -597,13 +597,20 @@ def run_trait_extraction(
             "Complete the Orthomosaic step or select a valid version."
         )
 
-    # Resolve plot boundary GeoJSON — use specified version or fall back to canonical
+    # Resolve plot boundary GeoJSON — use specified version or fall back to canonical.
+    # Use _discover_pb_versions (disk scan) so versions saved by other runs in the
+    # same pipeline are also found, not just those in this run's DB outputs.
+    from app.api.routes.processing import _discover_pb_versions as _disc_pbv
+    _all_pb_versions, _active_pbv = _disc_pbv(paths, _outputs)
+    _pb_by_version = {v["version"]: v for v in _all_pb_versions}
+
+    # If no explicit version requested, use the active one (last saved)
+    _effective_bv = boundary_version if boundary_version is not None else _active_pbv
     _boundary_path = paths.plot_boundary_geojson  # default canonical
-    if boundary_version is not None:
-        _boundaries = _outputs.get("plot_boundaries", [])
-        _bv = next((b for b in _boundaries if b["version"] == boundary_version), None)
-        if _bv:
-            _boundary_path = paths.abs(_bv["geojson_path"])
+    if _effective_bv is not None and _effective_bv in _pb_by_version:
+        _candidate = paths.abs(_pb_by_version[_effective_bv]["geojson_path"])
+        if _candidate.exists():
+            _boundary_path = _candidate
 
     if not _boundary_path.exists():
         raise FileNotFoundError(
@@ -749,15 +756,12 @@ def run_trait_extraction(
     height_avg = round(float(np.mean(h_values)), 4) if h_values else None
     trait_cols = [c for c in df_traits.columns if c not in ("plot_id",)]
 
-    # Resolve boundary version + name used
+    # Resolve boundary version + name used (use _effective_bv resolved above)
     _resolved_boundary_v: int | None = None
     _resolved_boundary_name: str | None = None
-    if boundary_version is not None:
-        _boundaries_list = (_run.outputs or {}).get("plot_boundaries", []) if _run else []
-        _matched_bv = next((b for b in _boundaries_list if b["version"] == boundary_version), None)
-        if _matched_bv:
-            _resolved_boundary_v = boundary_version
-            _resolved_boundary_name = _matched_bv.get("name")
+    if _effective_bv is not None and _effective_bv in _pb_by_version:
+        _resolved_boundary_v = _effective_bv
+        _resolved_boundary_name = _pb_by_version[_effective_bv].get("name")
 
     # Resolve ortho version + name used
     _resolved_ortho_v = ortho_version if ortho_version is not None else _resolve_v

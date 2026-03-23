@@ -988,6 +988,16 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     // Apply grid_options only on first-time setup (no existing geojson)
     if (!orthoInfo?.existing_geojson) {
       setGridOptions(autoBoundaryData.grid_options);
+      // Auto-generate the grid immediately — no need to click "Generate Grid"
+      const fc = computeGrid(
+        autoBoundaryData.pop_boundary as GeoJSON.Feature,
+        autoBoundaryData.grid_options,
+        gridOffset,
+        fdInfo?.rows,
+      );
+      setPreviewGeoJson(fc);
+      setGridGenerated(true);
+      setGridVisible(true);
     }
   }, [mapInitialized, autoBoundaryData]);
 
@@ -1526,6 +1536,13 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
   function handleGridOptionsChange(opts: GridOptions) {
     setGridOptions(opts);
+    // Live recompute — updates the grid immediately as the user adjusts any setting
+    // (angle slider, width, rows, etc.) without requiring "Regenerate Grid".
+    if (gridGenerated && popBoundary) {
+      const fc = computeGrid(popBoundary, opts, gridOffset, fdInfo?.rows);
+      setPreviewGeoJson(fc);
+      setGridVisible(true);
+    }
   }
 
   function handleModeChange(mode: InteractionMode) {
