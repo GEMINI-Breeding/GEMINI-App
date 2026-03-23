@@ -137,6 +137,7 @@ These issues have been hit and fixed. Do not reintroduce them.
 5. **Inference** *(optional)* — Roboflow detection/segmentation
 
 ### Aerial (Drone)
+0. **Data sync** — triggered automatically; extracts EXIF GPS from images, optionally merges with ArduPilot platform log, writes `msgs_synced.csv` and `drone_msgs.csv`
 1. **GCP selection** — user marks ground control points in images
 2. **Orthomosaic** — ODM generates orthomosaic + DEM
 3. **Plot boundaries** — user draws polygons on the map

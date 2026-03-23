@@ -510,7 +510,8 @@ All file paths are derived from database values — nothing is hardcoded. **Neve
 {data_root}/
   Raw/
     {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
-      Metadata/          ← platform logs (.bin/.log/.tlog)
+      Images/            ← uploaded image files
+      Metadata/          ← platform logs (.bin/.log/.tlog), synced metadata
 
   Intermediate/
     {workspace}/

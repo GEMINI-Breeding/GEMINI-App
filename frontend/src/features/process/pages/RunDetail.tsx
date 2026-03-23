@@ -3309,7 +3309,7 @@ export function RunDetail() {
 
   const { data: uploadedOrthosList } = useQuery<{
     id: string; experiment: string; location: string; population: string;
-    date: string; platform: string; sensor: string; tif_files: string[];
+    date: string; platform: string; sensor: string; file_count: number; tif_files: string[];
   }[]>({
     queryKey: ["uploaded-orthos-list"],
     queryFn: async () => {
