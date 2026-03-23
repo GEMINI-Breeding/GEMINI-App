@@ -107,7 +107,7 @@ const colActions: ColumnDef<FileUploadPublic> = {
 // Fields that have platform + sensor
 const WITH_PLATFORM_SENSOR = ["Image Data", "Orthomosaic", "Farm-ng Binary File"]
 // Fields that have platform but not sensor
-const WITH_PLATFORM_ONLY = ["Platform Logs"]
+const WITH_PLATFORM_ONLY = ["Ardupilot Logs", "Synced Metadata"]
 // Fields that have no date/platform/sensor (population-level data)
 const POP_LEVEL_ONLY = ["Field Design"]
 

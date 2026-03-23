@@ -141,9 +141,9 @@ def execute_step(
 
     # Resolve step function
     if ptype == "ground":
-        from app.processing import ground
-        from app.processing import plot_boundary
+        from app.processing import ground, plot_boundary, sync
         dispatch: dict[str, Any] = {
+            "data_sync": (sync.run_data_sync, {}),
             "stitching": (
                 ground.run_stitching,
                 {"name": body.stitch_name},
@@ -393,11 +393,14 @@ def list_images(
 
     exts = {f".{e.strip().lower()}" for e in extensions.split(",")}
 
-    # For Amiga/Farm-ng data the extracted images live in a nested "top" subfolder.
-    # Search recursively for a directory named "top" when the raw dir has no direct images.
+    # Priority: Images/ subdir (standard upload), then direct files in raw/,
+    # then Farm-ng "top/" subdir for extracted .bin data.
     image_dir = paths.raw
+    images_subdir = paths.raw / "Images"
     direct = [p for p in paths.raw.iterdir() if p.is_file() and p.suffix.lower() in exts]
-    if not direct:
+    if images_subdir.is_dir() and any(f.suffix.lower() in exts for f in images_subdir.iterdir()):
+        image_dir = images_subdir
+    elif not direct:
         top_dirs = list(paths.raw.rglob("top"))
         top_dir = next((d for d in top_dirs if d.is_dir()), None)
         if top_dir:
@@ -2222,53 +2225,93 @@ def download_crops_for_boundary(
 
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
 
+class _UseUploadedOrthoRequest(BaseModel):
+    file_upload_id: str | None = None  # FileUpload record id to import from
+    save_mode: str = "new_version"      # "new_version" | "replace"
+    name: str | None = None             # optional name for the version
+
+
 @router.post("/pipeline-runs/{id}/use-uploaded-ortho")
 def use_uploaded_ortho(
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
+    body: _UseUploadedOrthoRequest | None = None,
 ) -> dict[str, Any]:
     """
     Register a user-uploaded orthomosaic TIF as the orthomosaic output for this
     run, skipping ODM generation entirely.
 
-    Expects the TIF to be in:
-        Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/Orthomosaic/
+    Without a body: looks in the run's own Raw/{...}/Orthomosaic/ dir (backward compat).
+    With file_upload_id: uses that FileUpload record's storage path instead, so any
+    uploaded ortho can be imported regardless of which fields it was uploaded with.
 
-    The file is hard-linked (or copied if cross-device) to the processed dir
-    as {date}-RGB.tif and the run's orthomosaic step is marked complete.
+    save_mode="new_version" (default) adds a new versioned entry.
+    save_mode="replace" overwrites the currently active version.
     """
+    from app.crud.file_upload import get_file_upload as _get_fu
+    from datetime import datetime as _dt, timezone as _tz
+
     run = _get_run_or_404(session, id)
     pipeline = session.get(Pipeline, run.pipeline_id)
     if not pipeline or pipeline.type != "aerial":
         raise HTTPException(status_code=400, detail="Not an aerial pipeline")
 
     paths = _get_paths(session, run)
+    req = body or _UseUploadedOrthoRequest()
 
-    # Uploaded orthomosaics live inside an Orthomosaic/ sub-dir of the run's Raw dir
-    ortho_dir = paths.raw / "Orthomosaic"
-    if not ortho_dir.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "No Orthomosaic directory found at the expected Raw path. "
-                "Upload a GeoTIFF via Files → Orthomosaic first, using the "
-                "same experiment/location/population/date/platform/sensor."
-            ),
+    # ── Locate the source TIF ──────────────────────────────────────────────────
+    if req.file_upload_id:
+        try:
+            fu_id = uuid.UUID(req.file_upload_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid file_upload_id")
+        fu = _get_fu(session=session, id=fu_id)
+        if not fu:
+            raise HTTPException(status_code=404, detail="File upload not found")
+        src_dir = Path(settings.APP_DATA_ROOT) / fu.storage_path
+        tif_files = sorted(
+            p for p in src_dir.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+        )
+    else:
+        # Backward-compat: run's own Raw dir
+        ortho_dir = paths.raw / "Orthomosaic"
+        if not ortho_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No Orthomosaic directory found. Upload a GeoTIFF via Files → "
+                    "Orthomosaic first (matching experiment/location/population/date/"
+                    "platform/sensor), or select an existing upload."
+                ),
+            )
+        tif_files = sorted(
+            p for p in ortho_dir.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
         )
 
-    tif_files = sorted(
-        p for p in ortho_dir.iterdir()
-        if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
-    )
     if not tif_files:
-        raise HTTPException(status_code=404, detail="No TIF files found in Orthomosaic directory")
+        raise HTTPException(status_code=404, detail="No TIF files found in the selected upload")
 
     src_tif = tif_files[0]
     paths.make_dirs()
-    dest_tif = paths.aerial_rgb
 
-    # Hard-link for instant registration (same filesystem); fall back to copy
+    # ── Determine version ──────────────────────────────────────────────────────
+    existing_outputs = dict(run.outputs or {})
+    existing_versions = list(_get_ortho_versions(existing_outputs))
+    active_version = existing_outputs.get("active_ortho_version")
+
+    if req.save_mode == "replace" and existing_versions:
+        # Overwrite the active version (or last version if no active set)
+        target_version = active_version or existing_versions[-1]["version"]
+    else:
+        # New version
+        target_version = max((v["version"] for v in existing_versions), default=0) + 1
+
+    dest_tif = paths.aerial_rgb_versioned(target_version)
+
+    # Hard-link (instant, same filesystem) or copy
     try:
         if dest_tif.exists():
             dest_tif.unlink()
@@ -2276,12 +2319,39 @@ def use_uploaded_ortho(
     except OSError:
         shutil.copy2(src_tif, dest_tif)
 
-    logger.info("Registered uploaded ortho %s → %s", src_tif.name, dest_tif)
+    logger.info("Registered uploaded ortho %s → %s (v%d)", src_tif.name, dest_tif.name, target_version)
 
-    existing_outputs = dict(run.outputs or {})
-    existing_outputs["orthomosaic"] = paths.rel(dest_tif)
+    # ── Update outputs list ────────────────────────────────────────────────────
+    new_entry = {
+        "version": target_version,
+        "name": req.name,
+        "rgb": paths.rel(dest_tif),
+        "dem": None,
+        "pyramid": None,
+        "created_at": _dt.now(_tz.utc).isoformat(),
+        "imported": True,
+    }
+
+    if req.save_mode == "replace" and any(v["version"] == target_version for v in existing_versions):
+        # Replace the matching entry in-place, preserving name if not overriding
+        updated_versions = []
+        for v in existing_versions:
+            if v["version"] == target_version:
+                merged = dict(v)
+                merged.update({k: val for k, val in new_entry.items() if val is not None})
+                updated_versions.append(merged)
+            else:
+                updated_versions.append(v)
+        existing_outputs["orthomosaics"] = updated_versions
+    else:
+        # Append new version entry (also handles migration from flat key)
+        existing_outputs["orthomosaics"] = existing_versions + [new_entry]
+        # Remove legacy flat key to avoid confusion
+        existing_outputs.pop("orthomosaic", None)
+
+    existing_outputs["active_ortho_version"] = target_version
+
     existing_steps = dict(run.steps_completed or {})
-    # Mark data_sync and orthomosaic as done so plot_boundary_prep unlocks immediately
     existing_steps["data_sync"] = True
     existing_steps["orthomosaic"] = True
 
@@ -2290,7 +2360,11 @@ def use_uploaded_ortho(
         db_run=run,
         run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
     )
-    return {"status": "registered", "tif": paths.rel(dest_tif)}
+    return {
+        "status": "registered",
+        "version": target_version,
+        "tif": paths.rel(dest_tif),
+    }
 
 
 @router.get("/pipeline-runs/{id}/check-uploaded-ortho")

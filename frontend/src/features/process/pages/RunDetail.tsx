@@ -22,6 +22,7 @@ import {
   ZoomOut,
   RotateCcw,
   RefreshCw,
+  FolderOpen,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -108,6 +109,13 @@ interface StepDef {
 }
 
 const GROUND_STEPS: StepDef[] = [
+  {
+    key: "data_sync",
+    label: "Data Sync",
+    description:
+      "Extract GPS from image EXIF for accurate positioning. No platform log required — skipped automatically if not present.",
+    kind: "compute",
+  },
   {
     key: "plot_marking",
     label: "Plot Marking",
@@ -445,6 +453,7 @@ interface StepRowProps {
   isStarting?: boolean;
   warning?: string;
   extraContent?: React.ReactNode;
+  extraButtons?: React.ReactNode;
 }
 
 // ── Shared confirm-delete dialog ──────────────────────────────────────────────
@@ -1544,6 +1553,7 @@ function StepRow({
   isStarting = false,
   warning,
   extraContent,
+  extraButtons,
 }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1624,6 +1634,7 @@ function StepRow({
               )}
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">
+              {extraButtons}
               {isActive && (
                 <Button
                   variant="outline"
@@ -2915,14 +2926,14 @@ export function RunDetail() {
   const steps = pipelineType === "aerial" ? AERIAL_STEPS : GROUND_STEPS;
   const nextStepKey = getNextStep(steps, run?.steps_completed, runStatus);
 
-  // Auto-trigger data_sync for aerial runs that haven't had it completed yet.
+  // Auto-trigger data_sync for aerial and ground runs that haven't had it completed yet.
   // Runs silently in the background — the SSE progress bar shows inline.
   const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   useEffect(() => {
     if (
       run &&
       pipeline &&
-      pipelineType === "aerial" &&
+      (pipelineType === "aerial" || pipelineType === "ground") &&
       !run.steps_completed?.data_sync &&
       runStatus !== "running" &&
       runStatus !== "failed" &&
@@ -3290,6 +3301,64 @@ export function RunDetail() {
   // Use uploaded orthomosaic (aerial: skip ODM)
   const [isRegisteringOrtho, setIsRegisteringOrtho] = useState(false);
 
+  // Import orthomosaic dialog
+  const [showImportOrthoDialog, setShowImportOrthoDialog] = useState(false);
+  const [importSelectedId, setImportSelectedId] = useState<string>("");
+  const [importSaveMode, setImportSaveMode] = useState<"new_version" | "replace">("new_version");
+  const [importName, setImportName] = useState("");
+
+  const { data: uploadedOrthosList } = useQuery<{
+    id: string; experiment: string; location: string; population: string;
+    date: string; platform: string; sensor: string; tif_files: string[];
+  }[]>({
+    queryKey: ["uploaded-orthos-list"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/v1/files/uploaded-orthos"), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: showImportOrthoDialog,
+    staleTime: 30_000,
+  });
+
+  async function handleImportOrtho() {
+    setIsRegisteringOrtho(true);
+    try {
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/use-uploaded-ortho`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+          body: JSON.stringify({
+            file_upload_id: importSelectedId || null,
+            save_mode: importSaveMode,
+            name: importName || null,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Failed to import orthomosaic" }));
+        showErrorToast(err.detail ?? "Failed to import orthomosaic");
+        return;
+      }
+      setShowImportOrthoDialog(false);
+      setImportSelectedId("");
+      setImportName("");
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
+      queryClient.invalidateQueries({ queryKey: ["orthomosaic-info", runId] });
+    } catch {
+      showErrorToast("Failed to import orthomosaic");
+    } finally {
+      setIsRegisteringOrtho(false);
+    }
+  }
+
   async function handleUseUploadedOrtho() {
     setIsRegisteringOrtho(true);
     try {
@@ -3327,6 +3396,7 @@ export function RunDetail() {
   const hasCrops = !!(
     run?.outputs?.stitching ||
     run?.outputs?.cropped_images ||
+    run?.outputs?.traits_geojson ||
     run?.outputs?.traits
   );
 
@@ -3482,7 +3552,7 @@ export function RunDetail() {
         </div>
 
         {/* Auto data-sync progress banner */}
-        {pipelineType === "aerial" &&
+        {(pipelineType === "aerial" || pipelineType === "ground") &&
           isRunning &&
           run.current_step === "data_sync" && (
             <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
@@ -3558,7 +3628,9 @@ export function RunDetail() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {steps.map((step, idx) => {
+            {(() => {
+              const isExecuting = executeMutation.isPending || isRunning;
+              return steps.map((step, idx) => {
               const status = getStepStatus(
                 step.key,
                 run.current_step,
@@ -3610,6 +3682,24 @@ export function RunDetail() {
                   isStopping={stopMutation.isPending}
                   isStarting={executingStep === step.key}
                   warning={warning}
+                  extraButtons={
+                    step.key === "orthomosaic" && pipelineType === "aerial" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isExecuting || isRunning}
+                        onClick={() => {
+                          setImportSelectedId("");
+                          setImportName("");
+                          setImportSaveMode("new_version");
+                          setShowImportOrthoDialog(true);
+                        }}
+                      >
+                        <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                        Import
+                      </Button>
+                    ) : undefined
+                  }
                   extraContent={(() => {
                     if (
                       step.key === "orthomosaic" &&
@@ -3708,7 +3798,8 @@ export function RunDetail() {
                   })()}
                 />
               );
-            })}
+            });
+            })()}
           </CardContent>
         </Card>
 
@@ -3953,6 +4044,98 @@ export function RunDetail() {
       </Dialog>
 
       {/* Docker missing dialog */}
+      {/* ── Import Orthomosaic Dialog ── */}
+      <Dialog open={showImportOrthoDialog} onOpenChange={(o) => !o && setShowImportOrthoDialog(false)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Import Orthomosaic</DialogTitle>
+            <DialogDescription>
+              Select an uploaded orthomosaic to import into this run. Any GeoTIFF
+              uploaded via Files → Orthomosaic is available here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            {/* Ortho list */}
+            <div className="border rounded-md overflow-hidden">
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60 sticky top-0">
+                    <tr>
+                      {["", "Date", "Experiment", "Location", "Population", "Platform", "Files"].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!uploadedOrthosList ? (
+                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin inline-block mr-1" />Loading…
+                      </td></tr>
+                    ) : uploadedOrthosList.length === 0 ? (
+                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                        No orthomosaics uploaded yet. Upload via Files → Orthomosaic first.
+                      </td></tr>
+                    ) : uploadedOrthosList.map((o) => (
+                      <tr
+                        key={o.id}
+                        onClick={() => setImportSelectedId(o.id)}
+                        className={`cursor-pointer border-t transition-colors ${
+                          o.id === importSelectedId ? "bg-primary/10" : "hover:bg-muted/50"
+                        }`}
+                      >
+                        <td className="px-2 py-2">
+                          <input type="radio" readOnly checked={o.id === importSelectedId} className="accent-primary" />
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">{o.date}</td>
+                        <td className="px-3 py-2 font-medium">{o.experiment}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{o.location}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{o.population}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{[o.platform, o.sensor].filter(Boolean).join(" / ") || "—"}</td>
+                        <td className="px-3 py-2 tabular-nums text-muted-foreground">{o.file_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Save mode + optional name */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Save as</label>
+                <select
+                  value={importSaveMode}
+                  onChange={(e) => setImportSaveMode(e.target.value as "new_version" | "replace")}
+                  className="border-input bg-background rounded border px-2 py-1.5 text-xs w-full focus:outline-none"
+                >
+                  <option value="new_version">New version</option>
+                  <option value="replace">Replace current version</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Version name (optional)</label>
+                <input
+                  value={importName}
+                  onChange={(e) => setImportName(e.target.value)}
+                  placeholder="e.g. external-software, manual"
+                  className="border-input bg-background rounded border px-2 py-1.5 text-xs w-full focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowImportOrthoDialog(false)}>Cancel</Button>
+            <Button
+              disabled={!importSelectedId || isRegisteringOrtho}
+              onClick={handleImportOrtho}
+            >
+              {isRegisteringOrtho && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {isRegisteringOrtho ? "Importing…" : "Import"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showDockerDialog} onOpenChange={setShowDockerDialog}>
         <DialogContent>
           <DialogHeader>

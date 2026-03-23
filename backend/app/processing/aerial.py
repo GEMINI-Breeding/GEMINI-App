@@ -832,7 +832,7 @@ def run_trait_extraction(
         logger.warning("PlotRecord upsert failed (non-fatal): %s", _pr_exc)
 
     return {
-        "traits": paths.rel(paths.traits_geojson),
+        "traits_geojson": paths.rel(paths.traits_geojson),
         "cropped_images": paths.rel(paths.cropped_images_dir),
         f"cropped_images_v{_next_version_early}": paths.rel(_versioned_crops_dir),
     }

@@ -212,6 +212,11 @@ def sync_file_uploads(
                                     rel_path = platform_dir.relative_to(root).as_posix()
                                     if rel_path in existing_paths:
                                         continue
+                                    # Skip if a deeper record already exists under this path
+                                    # (e.g. Raw/.../DJI when Raw/.../DJI/FC6310S/Images exists)
+                                    prefix = rel_path + "/"
+                                    if any(p.startswith(prefix) for p in existing_paths):
+                                        continue
                                     file_count = sum(
                                         1 for f in platform_dir.rglob("*") if f.is_file()
                                     )

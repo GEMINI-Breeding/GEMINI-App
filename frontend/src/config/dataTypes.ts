@@ -21,9 +21,24 @@ export const dataTypes = {
       "Images",
     ],
   },
-  "Platform Logs": {
-    fields: ["experiment", "location", "population", "date", "platform"],
+  "Ardupilot Logs": {
+    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
     fileType: "*",
+    directory: [
+      "Raw",
+      "Year",
+      "Experiment",
+      "Location",
+      "Population",
+      "Date",
+      "Platform",
+      "Sensor",
+      "Metadata",
+    ],
+  },
+  "Synced Metadata": {
+    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fileType: ".csv",
     directory: [
       "Raw",
       "Year",

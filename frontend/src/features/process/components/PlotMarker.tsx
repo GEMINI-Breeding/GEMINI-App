@@ -277,10 +277,10 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     setPlotPage(n - 1)
   }
 
-  const STEP = 3
-  const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - STEP)), [])
+  const [step, setStep] = useState(3)
+  const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - step)), [step])
   const next = useCallback(
-    () => setCurrentIdx((i) => Math.min(images.length - 1, i + STEP)),
+    () => setCurrentIdx((i) => Math.min(images.length - 1, i + step)),
     [images.length]
   )
 
@@ -465,8 +465,21 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
-          <div className="text-center text-xs text-muted-foreground">
-            {currentIdx + 1} / {images.length}
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{currentIdx + 1} / {images.length}</span>
+            <div className="flex items-center gap-1">
+              <span>Step:</span>
+              <Select value={String(step)} onValueChange={(v) => setStep(Number(v))}>
+                <SelectTrigger className="h-6 w-14 text-xs px-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 5, 10].map((n) => (
+                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Mark buttons */}

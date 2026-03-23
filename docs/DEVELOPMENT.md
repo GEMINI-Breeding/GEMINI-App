@@ -502,28 +502,101 @@ The frontend subscribes to `GET /api/v1/pipeline-runs/{id}/progress`. Events are
 
 ## Filesystem Layout (RunPaths)
 
-All file paths are derived from database values — nothing is hardcoded. Use `RunPaths` for any file I/O in processing code:
+All file paths are derived from database values — nothing is hardcoded. **Never construct `Intermediate/` or `Processed/` paths manually in route handlers or processing functions** — always use `RunPaths`.
+
+### Directory structure
+
+```
+{data_root}/
+  Raw/
+    {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
+      Metadata/          ← platform logs (.bin/.log/.tlog)
+
+  Intermediate/
+    {workspace}/
+      {year}/{location}/{population}/              ← shared (any experiment)
+        Plot-Boundary-WGS84.geojson
+        Pop-Boundary-WGS84.geojson
+        field_design.csv
+      {year}/{experiment}/{location}/{population}/ ← experiment-scoped
+        plot_borders.csv
+        stitch_mask.json
+        gcp_locations.csv
+        {date}/{platform}/{sensor}/                ← run-level
+          msgs_synced.csv
+          geo.txt
+          gcp_list.txt
+          temp/          (ODM working dir)
+
+  Processed/
+    {workspace}/
+      {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
+        AgRowStitch_v{N}/   ← ground outputs
+        {date}-RGB.tif      ← aerial orthomosaic
+        Traits-WGS84.geojson
+        cropped_images/
+```
+
+### Using RunPaths
 
 ```python
 from app.core.paths import RunPaths
 
 paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
-paths.make_dirs()
+paths.make_dirs()   # creates Intermediate and Processed dirs for this run
 
 # Common paths
-paths.raw                  # Raw uploaded images
-paths.raw_metadata         # Platform logs, msgs_synced.csv
-paths.msgs_synced          # Intermediate/workspace/.../msgs_synced.csv
-paths.geo_txt              # GCP geo.txt
-paths.plot_borders         # Pipeline-level, reused across runs
-paths.agrowstitch_dir(n)   # Ground stitch output versioned directory
-paths.ortho_dir(n)         # Aerial ortho output versioned directory
+paths.raw                   # Raw uploaded images
+paths.raw_metadata          # Platform logs (.bin/.log)
+paths.intermediate_run      # Run-level intermediate dir
+paths.processed_run         # Run-level processed output dir
+paths.msgs_synced           # .../msgs_synced.csv
+paths.plot_borders          # .../plot_borders.csv (ground, reused across runs)
+paths.plot_boundary_geojson # .../Plot-Boundary-WGS84.geojson (shared)
+paths.traits_geojson        # .../Traits-WGS84.geojson
+paths.agrowstitch_dir(n)    # .../AgRowStitch_v{n}/
+paths.gcp_locations()       # Raw → Intermediate fallback
 
 # Store relative paths in PipelineRun.outputs (relative to data_root)
-run.outputs = {"stitched": paths.rel(paths.agrowstitch_dir(1))}
+outputs["my_file"] = paths.rel(paths.processed_run / "my_file.csv")
+
+# Reconstruct absolute path from a stored relative path
+file_path = paths.abs(run.outputs["my_file"])
 ```
 
-See `backend/app/core/paths.py` for the full directory layout documentation.
+### Adding a new output file
+
+1. Add a `@property` (or method if versioned) to `RunPaths` in `backend/app/core/paths.py`:
+
+```python
+@property
+def my_new_file(self) -> Path:
+    """Description of what this file contains."""
+    return self.processed_run / "my_new_file.csv"
+```
+
+2. Use it in your processing function:
+
+```python
+paths.my_new_file.write_text(content)
+return {"my_new_file": paths.rel(paths.my_new_file)}
+```
+
+3. The runner merges the returned dict into `run.outputs`, so the relative path is persisted. Read it back later with `paths.abs(run.outputs["my_new_file"])`.
+
+### Key properties reference
+
+| Property | Path | Scope |
+|---|---|---|
+| `paths.raw` | `Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/` | Run |
+| `paths.intermediate_shared_pop` | `Intermediate/{ws}/{year}/{loc}/{pop}/` | Shared (cross-experiment) |
+| `paths.intermediate_year` | `Intermediate/{ws}/{year}/{exp}/{loc}/{pop}/` | Year + experiment |
+| `paths.intermediate_run` | `…/{date}/{platform}/{sensor}/` | Run |
+| `paths.processed_run` | `Processed/{ws}/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/` | Run |
+| `paths.plot_boundary_geojson` | `intermediate_shared_pop/Plot-Boundary-WGS84.geojson` | Shared |
+| `paths.traits_geojson` | `processed_run/Traits-WGS84.geojson` | Run |
+| `paths.plot_borders` | `intermediate_year/plot_borders.csv` | Ground, year |
+| `paths.gcp_locations()` | Raw → Intermediate fallback | Aerial, year |
 
 ---
 

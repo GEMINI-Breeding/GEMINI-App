@@ -19,9 +19,9 @@ Directory layout
 ----------------
 {data_root}/
   Raw/
-    {year}/{experiment}/{location}/{population}/{date}/{platform}/
+    {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
+      Images/      ← drone images uploaded here
       Metadata/    ← platform logs (.bin/.log/.tlog) uploaded here
-      {sensor}/    ← drone images uploaded here
   Intermediate/
     {workspace_name}/
       {year}/{location}/{population}/               ← shared within workspace (any experiment)
@@ -34,7 +34,6 @@ Directory layout
         plot_borders_v{N}.csv
         stitch_mask.json
         gcp_locations.csv
-        field_design.csv
         {date}/{platform}/{sensor}/                  ← run-level artifacts
           msgs_synced.csv
           gcp_list.txt
@@ -43,7 +42,7 @@ Directory layout
           plot_images/         (aerial: split plot PNGs)
   Processed/
     {workspace_name}/
-      {experiment}/{location}/{population}/{date}/{platform}/{sensor}/
+      {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
         AgRowStitch_v{N}/      (ground outputs)
           full_res_mosaic_temp_plot_{id}.png
           georeferenced_plot_{id}_utm.tif
@@ -127,24 +126,13 @@ class RunPaths:
 
     @property
     def raw_metadata(self) -> Path:
-        """Raw/.../Platform/Metadata/ — platform logs (.bin/.log) live here.
-        One level above sensor (platform log is shared across all sensors on that flight)."""
-        return self.raw.parent / "Metadata"
+        """Raw/.../Platform/Sensor/Metadata/ — platform logs (.bin/.log) live here."""
+        return self.raw / "Metadata"
 
     @property
     def gcp_locations_raw(self) -> Path:
         """gcp_locations.csv at the population level in Raw/ (shared across dates)."""
         return self.data_root / "Raw" / self._year / self._pop_seg / "gcp_locations.csv"
-
-    # ── Intermediate: pipeline-level (workspace + population, no year) ────
-    # NOTE: kept for backward-compat with make_dirs only; prefer intermediate_year
-
-    @property
-    def intermediate_pipeline(self) -> Path:
-        """Intermediate/{workspace}/{experiment}/{location}/{population}/
-        (Legacy — no year prefix.  Use intermediate_year for year-scoped artifacts.)
-        """
-        return self.data_root / "Intermediate" / self.workspace_name / self._pop_seg
 
     # ── Intermediate: shared across all workspaces (plot boundaries) ─────────
 
@@ -219,20 +207,17 @@ class RunPaths:
 
     @property
     def gcp_locations_intermediate(self) -> Path:
-        """Inline gcp_locations.csv — pipeline-level (shared across all dates/years)."""
-        return self.intermediate_pipeline / "gcp_locations.csv"
+        """Inline gcp_locations.csv — year+experiment-scoped (matches intermediate_year layout)."""
+        return self.intermediate_year / "gcp_locations.csv"
 
     def gcp_locations(self) -> Path:
         """
         Return the correct gcp_locations.csv path.
-        Priority: Raw/{year}/ → Intermediate year-level → Intermediate pipeline-level.
+        Priority: Raw/{year}/... → Intermediate year-level.
         """
         raw_path = self.gcp_locations_raw
         if raw_path.exists():
             return raw_path
-        year_path = self.intermediate_year / "gcp_locations.csv"
-        if year_path.exists():
-            return year_path
         return self.gcp_locations_intermediate
 
     # ── Intermediate: run-level ───────────────────────────────────────────
@@ -276,11 +261,12 @@ class RunPaths:
 
     @property
     def processed_run(self) -> Path:
-        """Processed/{workspace}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/"""
+        """Processed/{workspace}/{year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/"""
         return (
             self.data_root
             / "Processed"
             / self.workspace_name
+            / self._year
             / self._pop_seg
             / self._run_seg
         )

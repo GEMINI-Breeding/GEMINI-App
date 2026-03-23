@@ -1,36 +1,33 @@
 import { useCallback, useState } from "react";
-import { FilesService } from "@/client";
+import { FilesService, OpenAPI } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
 import { GeoTiffValidationDialog } from "../components/GeoTiffValidationDialog";
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog";
-import { Button } from "@/components/ui/button";
-import useCustomToast from "@/hooks/useCustomToast";
+
+function apiUrl(path: string): string {
+  const base = OpenAPI.BASE.replace(/\/$/, "")
+  return base + path
+}
 
 export function UploadData() {
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [pendingValidation, setPendingValidation] = useState<string[]>([]);
-  const [msgsSyncedDialogOpen, setMsgsSyncedDialogOpen] = useState(false);
-  const [msgsSyncedSaved, setMsgsSyncedSaved] = useState<number | null>(null);
-  const { showSuccessToast } = useCustomToast();
+  const [syncedCsvText, setSyncedCsvText] = useState<string | null>(null);
+  const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null);
 
   const handleFormChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }));
-    // Reset msgs_synced saved state when the path changes
-    setMsgsSyncedSaved(null);
   };
 
   const handleFilesSelected = useCallback(
     async (paths: string[]) => {
-      // Only try the first file, and only fill in empty fields
       const firstPath = paths[0];
       if (!firstPath) return;
-
       try {
         const meta = await FilesService.extractMetadata({
           requestBody: { file_path: firstPath },
         }) as { date?: string; platform?: string; sensor?: string };
-
         setFormValues((prev) => {
           const next = { ...prev };
           if (meta.date && !next.date) next.date = meta.date;
@@ -39,17 +36,35 @@ export function UploadData() {
           return next;
         });
       } catch {
-        // No EXIF available — that's fine, user fills in manually
+        // No EXIF available — fine, user fills in manually
       }
     },
     [],
   );
 
   const handleUploadComplete = useCallback(
-    (destPaths: string[]) => {
-      if (selectedFileType !== "Orthomosaic") return;
-      const tifs = destPaths.filter((p) => /\.(tif|tiff)$/i.test(p));
-      if (tifs.length > 0) setPendingValidation(tifs);
+    async (destPaths: string[]) => {
+      if (selectedFileType === "Orthomosaic") {
+        const tifs = destPaths.filter((p) => /\.(tif|tiff)$/i.test(p));
+        if (tifs.length > 0) setPendingValidation(tifs);
+      }
+
+      if (selectedFileType === "Synced Metadata") {
+        const csvPath = destPaths.find((p) => /\.csv$/i.test(p));
+        if (!csvPath) return;
+        try {
+          const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(csvPath)}`);
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+          });
+          if (!res.ok) return;
+          const text = await res.text();
+          setSyncedCsvText(text);
+          setSyncedCsvPath(csvPath);
+        } catch {
+          // silently ignore — user can upload again
+        }
+      }
     },
     [selectedFileType],
   );
@@ -58,7 +73,6 @@ export function UploadData() {
     <div className="bg-background">
       <div className="pt-6">
         <div className="grid grid-cols-2 gap-8 items-start">
-          {/* Left column: data type selector + metadata form */}
           <div className="space-y-6">
             <DataTypes onChange={setSelectedFileType} />
             <DataStructureForm
@@ -66,29 +80,8 @@ export function UploadData() {
               values={formValues}
               onChange={handleFormChange}
             />
-            {selectedFileType === "Platform Logs" && (
-              <div className="rounded-lg border p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">msgs_synced.csv (optional)</p>
-                    <p className="text-xs text-muted-foreground">
-                      Upload a pre-synced image GPS manifest to skip EXIF extraction during Data Sync.
-                      Platform logs will still be merged on top if present.
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setMsgsSyncedDialogOpen(true)}
-                  >
-                    {msgsSyncedSaved !== null ? `Saved (${msgsSyncedSaved} rows)` : "Upload CSV"}
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Right column: drop zone (top) + selected files (below) */}
           <UploadList
             dataType={selectedFileType}
             formValues={formValues}
@@ -105,15 +98,15 @@ export function UploadData() {
         />
       )}
 
-      <MsgsSyncedUploadDialog
-        open={msgsSyncedDialogOpen}
-        onClose={() => setMsgsSyncedDialogOpen(false)}
-        onSaved={(rowCount) => {
-          setMsgsSyncedSaved(rowCount);
-          showSuccessToast(`msgs_synced.csv saved (${rowCount} rows)`);
-        }}
-        formValues={formValues}
-      />
+      {syncedCsvText !== null && (
+        <MsgsSyncedUploadDialog
+          open
+          initialCsvText={syncedCsvText}
+          destPath={syncedCsvPath ?? undefined}
+          onClose={() => { setSyncedCsvText(null); setSyncedCsvPath(null); }}
+          onSaved={(_rowCount) => { setSyncedCsvText(null); setSyncedCsvPath(null); }}
+        />
+      )}
     </div>
   );
 }

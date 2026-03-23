@@ -110,7 +110,7 @@ function NewRunDialog({
   });
 
   // Show only data types that can actually be processed by each pipeline type.
-  // Platform Logs, Weather Data, Field Design etc. are support files, not inputs.
+  // Ardupilot Logs, Synced Metadata, Weather Data, Field Design etc. are support files, not inputs.
   const AERIAL_TYPES = new Set(["Image Data", "Orthomosaic"])
   const GROUND_TYPES = new Set(["Farm-ng Binary File", "Image Data"])
 
@@ -432,18 +432,30 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
                     }
                   >
                     <div className="flex items-center gap-3">
-                      {run.status === "failed" && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex items-center justify-center">
-                              <AlertTriangle className="h-4 w-4 text-red-500" />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            This is a failed run. It is recommended to delete it.
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
+                      {run.status === "failed" && (() => {
+                        const failedStep = run.current_step;
+                        const COMPUTE_STEPS = new Set(["stitching", "orthomosaic", "trait_extraction", "inference", "data_sync"]);
+                        if (!failedStep || !COMPUTE_STEPS.has(failedStep)) return null;
+                        const stepLabel: Record<string, string> = {
+                          stitching: "Stitching (AgRowStitch)",
+                          orthomosaic: "Orthomosaic Generation",
+                          trait_extraction: "Trait Extraction",
+                          inference: "Inference",
+                          data_sync: "Data Sync",
+                        };
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center justify-center">
+                                <AlertTriangle className="h-4 w-4 text-red-500" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {stepLabel[failedStep] ?? failedStep} failed. It is recommended to delete this run.
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })()}
                       <Badge
                         className={statusBadgeClass(run.status ?? "pending")}
                       >

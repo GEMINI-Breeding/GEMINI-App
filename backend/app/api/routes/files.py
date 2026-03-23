@@ -115,6 +115,48 @@ def read_field_values(
     )
 
 
+# GET /files/uploaded-orthos — list all Orthomosaic uploads for the import picker
+@router.get("/uploaded-orthos")
+def list_uploaded_orthos(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Return all FileUpload records with data_type='Orthomosaic', with TIF filenames."""
+    from sqlmodel import select as _sel
+    from app.models import FileUpload as _FU
+
+    rows = session.exec(
+        _sel(_FU)
+        .where(_FU.data_type == "Orthomosaic")
+        .where(_FU.owner_id == current_user.id)
+    ).all()
+
+    data_root = Path(settings.APP_DATA_ROOT)
+    result = []
+    for r in rows:
+        storage = data_root / r.storage_path
+        tifs: list[str] = []
+        if storage.is_dir():
+            tifs = sorted(
+                p.name
+                for p in storage.rglob("*")
+                if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+            )[:5]
+        result.append({
+            "id": str(r.id),
+            "experiment": r.experiment,
+            "location": r.location,
+            "population": r.population,
+            "date": r.date,
+            "platform": r.platform or "",
+            "sensor": r.sensor or "",
+            "file_count": r.file_count,
+            "storage_path": r.storage_path,
+            "tif_files": tifs,
+        })
+    return result
+
+
 # GET /files/{id} (get single upload)
 @router.get("/{id}", response_model=FileUploadPublic)
 def read_file(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
@@ -313,12 +355,26 @@ def extract_metadata(body: dict[str, str]) -> Any:
                     result["platform"] = make.replace("\x00", "").strip()
                 if model and isinstance(model, str):
                     result["sensor"] = model.replace("\x00", "").strip()
+
+                # Fallback: GPSDateStamp inside GPS IFD (e.g. iPhone images stripped of Make/Model)
+                if not result["date"]:
+                    try:
+                        gps_ifd = exif.get_ifd(ExifBase.GPSInfo)
+                        gps_date = gps_ifd.get(29)  # GPSDateStamp tag id
+                        if gps_date and isinstance(gps_date, str):
+                            result["date"] = gps_date.replace("\x00", "").strip().replace(":", "-")
+                    except Exception:
+                        pass
     except Exception:
         pass
 
-    # 2. If no date yet, try parsing it from the filename
+    # 2. If no date yet, try parsing it from the filename or parent directory name
     if not result["date"]:
-        result["date"] = _date_from_name(src.name) or _date_from_name(src.stem)
+        result["date"] = (
+            _date_from_name(src.name)
+            or _date_from_name(src.stem)
+            or _date_from_name(src.parent.name)
+        )
 
     return result
 
@@ -577,14 +633,15 @@ def _copy_local_stream(
             )
             continue
 
-        dest_path = dest_dir / name
+        # Synced Metadata CSVs are always saved as msgs_synced.csv regardless of filename.
+        dest_path = dest_dir / ("msgs_synced.csv" if body.data_type == "Synced Metadata" else name)
 
-        # .bin files: always remove any leftover copy before uploading.
+        # Farm-ng .bin files: always remove any leftover copy before uploading.
         # extract_bin_file deletes the .bin after extraction, but a previous
         # crashed/interrupted run may have left one behind.  If we didn't clear
         # it here the upload would be "skipped" (file already exists) and the
         # user would see no extraction the next time they try.
-        if src.suffix.lower() == ".bin" and dest_path.exists():
+        if src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File" and dest_path.exists():
             try:
                 dest_path.unlink()
                 logger.info("Removed stale .bin file before re-upload: %s", dest_path.name)
@@ -613,7 +670,8 @@ def _copy_local_stream(
 
             # Amiga .bin files need extraction after copy — run inline
             # so the SSE stream stays open until extraction finishes.
-            if src.suffix.lower() == ".bin":
+            # ArduPilot platform logs (.bin) are left in place for data sync to parse.
+            if src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File":
                 yield from _extract_bin_inline(dest_path, dest_dir, idx)
 
         except Exception as exc:
@@ -651,38 +709,28 @@ def _copy_local_stream(
 
 class SaveMsgsSyncedRequest(BaseModel):
     csv_text: str
-    experiment: str
-    location: str
-    population: str
-    date: str
-    platform: str
+    dest_path: str  # absolute path already determined by the upload step
 
 
 @router.post("/msgs-synced")
 def save_msgs_synced(
     *,
-    session: SessionDep,
     current_user: CurrentUser,
     body: SaveMsgsSyncedRequest,
 ) -> dict[str, Any]:
     """
-    Save a user-provided msgs_synced.csv to Raw/.../Metadata/msgs_synced.csv.
+    Overwrite an already-uploaded msgs_synced.csv with column-remapped content.
 
-    This file takes priority over EXIF extraction during the aerial Data Sync step.
-    Delete it from Metadata/ to revert to auto-generation.
+    The file was placed at dest_path by the upload step; this endpoint just
+    rewrites it with the user-confirmed column mapping applied.
     """
     import csv as _csv
     import io as _io
 
-    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
-    year = body.date.split("-")[0] if "-" in body.date else body.date
-    target_dir = (
-        data_root / "Raw" / year
-        / body.experiment / body.location / body.population
-        / body.date / body.platform / "Metadata"
-    )
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / "msgs_synced.csv"
+    target = Path(body.dest_path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {body.dest_path}")
+
     target.write_text(body.csv_text)
 
     rows = list(_csv.DictReader(_io.StringIO(body.csv_text)))

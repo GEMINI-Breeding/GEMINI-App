@@ -46,6 +46,30 @@ logger = logging.getLogger(__name__)
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 _LOG_EXTS = {".bin", ".log", ".tlog"}
 
+# Column name aliases for user-provided msgs_synced.csv
+_COL_ALIASES: dict[str, list[str]] = {
+    "image_path": ["image_path", "image", "filename", "file", "name", "path"],
+    "timestamp":  ["timestamp", "unix_time", "unix_ts", "epoch", "posix", "ts"],
+    "lat":        ["lat", "latitude"],
+    "lon":        ["lon", "long", "longitude"],
+    "alt":        ["alt", "altitude", "height", "elevation"],
+    "time":       ["time", "datetime", "date_time", "date"],
+}
+
+
+def _normalise_msgs_synced_columns(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Rename user CSV columns to the pipeline-expected names using aliases."""
+    lower = {c.lower(): c for c in df.columns}
+    rename: dict[str, str] = {}
+    for target, aliases in _COL_ALIASES.items():
+        if target in df.columns:
+            continue  # already correct
+        for alias in aliases:
+            if alias in lower and lower[alias] not in rename.values():
+                rename[lower[alias]] = target
+                break
+    return df.rename(columns=rename) if rename else df
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -66,11 +90,16 @@ def _get_paths(session: Session, run_id: uuid.UUID) -> RunPaths:
 
 
 def _find_image_dir(paths: RunPaths) -> Path:
+    # Standard upload layout: Images/ subdir, then direct files in raw/
     for candidate in [paths.raw / "Images", paths.raw]:
         if candidate.is_dir() and any(
             f.suffix.lower() in _IMAGE_EXTS for f in candidate.iterdir()
         ):
             return candidate
+    # Farm-ng extracted layout: nested top/ directory
+    top_dirs = [d for d in paths.raw.rglob("top") if d.is_dir()]
+    if top_dirs:
+        return top_dirs[0]
     return paths.raw / "Images"
 
 
@@ -120,7 +149,8 @@ def _extract_exif(image_path: Path) -> dict[str, Any] | None:
             longitude = float(lon[0] + lon[1] / 60 + lon[2] / 3600)
             if gps_info.get(3) == "W":
                 longitude = -longitude
-            altitude = float(gps_info.get(6, 0))
+            _alt_raw = gps_info.get(6)
+            altitude = float(_alt_raw) if _alt_raw is not None else None
         except (KeyError, IndexError, TypeError, ZeroDivisionError) as exc:
             logger.debug("GPS coordinate parse error in %s: %s", image_path.name, exc)
 
@@ -466,7 +496,7 @@ def run_data_sync(
     elif user_msgs_synced.exists():
         emit({"type": "progress", "step": "data_sync",
               "message": "Found user-provided msgs_synced.csv in Metadata/ — skipping EXIF extraction.", "pct": 45})
-        df_msgs = pd.read_csv(user_msgs_synced)
+        df_msgs = _normalise_msgs_synced_columns(pd.read_csv(user_msgs_synced))
         df_msgs.to_csv(paths.msgs_synced, index=False)
         msgs_synced_source = "user-provided"
         logger.info("Loaded user-provided msgs_synced.csv from Metadata/ (%d rows)", len(df_msgs))
@@ -496,6 +526,25 @@ def run_data_sync(
               "message": "Merging platform log GPS into image manifest…", "pct": 70})
         df_msgs = _merge_drone_gps(df_msgs, df_drone)
         df_msgs.to_csv(paths.msgs_synced, index=False)
+
+    # ── GPS availability check ────────────────────────────────────────────────
+    has_gps = (
+        "lat" in df_msgs.columns
+        and "lon" in df_msgs.columns
+        and df_msgs["lat"].notna().any()
+        and df_msgs["lon"].notna().any()
+    )
+    if not has_gps:
+        emit({
+            "type": "warning",
+            "step": "data_sync",
+            "message": (
+                "⚠ No GPS data found — images have no EXIF coordinates and no "
+                "msgs_synced.csv was uploaded. Stitching and georeferencing will "
+                "not have position data."
+            ),
+        })
+        logger.warning("Data sync for run %s: no GPS data available", run_id)
 
     # ── Step 4: Write geo.txt ─────────────────────────────────────────────────
     emit({"type": "progress", "step": "data_sync", "message": "Writing geo.txt for ODM…", "pct": 90})

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -131,15 +131,33 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved: (rowCount: number) => void
-  formValues: Record<string, string>
+  initialCsvText?: string   // if provided, skip file picker and go straight to mapping
+  destPath?: string         // absolute server path of the already-uploaded file
 }
 
-export function MsgsSyncedUploadDialog({ open, onClose, onSaved, formValues }: Props) {
+export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText, destPath }: Props) {
   const [step, setStep] = useState<"upload" | "map">("upload")
   const [headers, setHeaders] = useState<string[]>([])
   const [parsedRows, setParsedRows] = useState<Record<string, string>[]>([])
   const [mapping, setMapping] = useState<Partial<Record<TargetKey, string>>>({})
   const { showErrorToast } = useCustomToast()
+
+  // When initialCsvText is provided (post-upload flow), jump straight to map step
+  useEffect(() => {
+    if (open && initialCsvText) {
+      loadCsvText(initialCsvText)
+    }
+  }, [open, initialCsvText])
+
+  function loadCsvText(text: string) {
+    const { headers: h, rows } = parseCSV(text)
+    setHeaders(h)
+    setParsedRows(rows)
+    const auto: Partial<Record<TargetKey, string>> = {}
+    for (const t of TARGET_COLS) auto[t.key] = autoDetect(h, t.key)
+    setMapping(auto)
+    setStep("map")
+  }
 
   function handleClose() {
     setStep("upload")
@@ -153,16 +171,7 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, formValues }: P
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      const { headers: h, rows } = parseCSV(text)
-      setHeaders(h)
-      setParsedRows(rows)
-      const auto: Partial<Record<TargetKey, string>> = {}
-      for (const t of TARGET_COLS) auto[t.key] = autoDetect(h, t.key)
-      setMapping(auto)
-      setStep("map")
-    }
+    reader.onload = (ev) => loadCsvText(ev.target?.result as string)
     reader.readAsText(file)
   }
 
@@ -177,11 +186,7 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, formValues }: P
         },
         body: JSON.stringify({
           csv_text: csvText,
-          experiment: formValues.experiment ?? "",
-          location: formValues.location ?? "",
-          population: formValues.population ?? "",
-          date: formValues.date ?? "",
-          platform: formValues.platform ?? "",
+          dest_path: destPath ?? "",
         }),
       }).then(async (r) => {
         if (!r.ok) throw new Error(await r.text())
@@ -199,7 +204,7 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, formValues }: P
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-3xl flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>
             {step === "upload" ? "Upload msgs_synced.csv" : "Map Columns"}
@@ -219,7 +224,7 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, formValues }: P
         )}
 
         {step === "map" && (
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto min-h-0 flex-1">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b text-left">

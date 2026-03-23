@@ -34,6 +34,12 @@ fn read_sidecar_log(
     }
 }
 
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
 /// Keyboard zoom handler injected into every window.
 /// Ctrl+/- (Windows/Linux) or Cmd+/- (macOS) zoom the webview.
 const ZOOM_SCRIPT: &str = r#"
@@ -66,7 +72,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![download_to_file])
+            .invoke_handler(tauri::generate_handler![download_to_file, open_devtools])
             .setup(|app| {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -74,13 +80,22 @@ pub fn run() {
                         .build(),
                 )?;
 
+                const DEVTOOLS_SCRIPT: &str = r#"
+                    document.addEventListener('keydown', function(e) {
+                        if (e.metaKey && e.altKey && e.key === 'i') {
+                            window.__TAURI_INTERNALS__.invoke('open_devtools');
+                        }
+                    });
+                "#;
+                let init = format!("{}\n{}", ZOOM_SCRIPT, DEVTOOLS_SCRIPT);
+
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                     .title("GEMI")
                     .inner_size(1200.0, 800.0)
                     .min_inner_size(800.0, 600.0)
                     .center()
                     .maximized(true)
-                    .initialization_script(ZOOM_SCRIPT)
+                    .initialization_script(&init)
                     .build()?;
 
                 Ok(())

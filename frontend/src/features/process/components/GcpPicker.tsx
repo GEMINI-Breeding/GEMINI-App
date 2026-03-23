@@ -115,6 +115,12 @@ function gcpColor(idx: number): string {
   return GCP_COLORS[idx % GCP_COLORS.length];
 }
 
+function gcpShortLabel(label: string): string {
+  // Strip leading non-numeric prefix (e.g. "gcp13" → "13", "GCP_13" → "13", "13" → "13")
+  const match = label.match(/(\d+)$/);
+  return match ? match[1] : label;
+}
+
 // ── Inline CSV upload panel ───────────────────────────────────────────────────
 
 interface CsvUploadPanelProps {
@@ -1065,7 +1071,7 @@ export function GcpPicker({
                         color: "#fff",
                       }}
                     >
-                      {m.gcpIdx + 1}
+                      {gcpShortLabel(m.label)}
                     </div>
                   </div>
                 );
@@ -1177,7 +1183,7 @@ export function GcpPicker({
                       className="absolute -translate-x-1/2 text-[9px] leading-none font-bold"
                       style={{ top: 12, color }}
                     >
-                      {m.gcpIdx + 1}
+                      {gcpShortLabel(m.label)}
                     </div>
                   </div>
                 );

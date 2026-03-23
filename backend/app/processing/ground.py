@@ -180,7 +180,12 @@ def _build_gps_index(msgs_synced_path: "Path") -> dict[str, tuple[float, float]]
         (c for c in df.columns if "top" in c.lower() and "file" in c.lower()), None
     )
     if not img_col:
-        img_col = next((c for c in df.columns if "file" in c.lower()), None)
+        img_col = next(
+            (c for c in df.columns if c.lower() in ("image_path", "image", "filename", "file")),
+            None,
+        )
+    if not img_col:
+        img_col = next((c for c in df.columns if "file" in c.lower() or "path" in c.lower()), None)
 
     if not lat_col or not lon_col or not img_col:
         return {}
@@ -513,6 +518,7 @@ def run_stitching(
                 # The /top/rgb_file column has values like "/top/rgb-123.jpg";
                 # start_image/end_image in plot_borders are plain basenames "rgb-123.jpg".
                 # Build a basename column for reliable range filtering.
+                # Farm-ng column first (/top/rgb_file), then standard image_path fallback
                 rgb_col = next(
                     (
                         c
@@ -521,6 +527,15 @@ def run_stitching(
                     ),
                     None,
                 )
+                if rgb_col is None:
+                    rgb_col = next(
+                        (
+                            c
+                            for c in msgs_df.columns
+                            if c.lower() in ("image_path", "image", "filename", "file", "path")
+                        ),
+                        None,
+                    )
                 emit(
                     {
                         "event": "progress",
@@ -1029,10 +1044,15 @@ def run_georeferencing(
     msgs_df = pd.read_csv(msgs_path)
     logger.info("Loaded msgs_synced.csv: %d rows from %s", len(msgs_df), msgs_path)
 
-    # Determine the image filename column
+    # Determine the image filename column (Farm-ng first, then standard fallback)
     rgb_col = "/top/rgb_file" if "/top/rgb_file" in msgs_df.columns else None
     if rgb_col is None and "rgb_file" in msgs_df.columns:
         rgb_col = "rgb_file"
+    if rgb_col is None:
+        rgb_col = next(
+            (c for c in msgs_df.columns if c.lower() in ("image_path", "image", "filename", "file", "path")),
+            None,
+        )
 
     # Load plot borders for direction info
     plot_directions: dict[str, str] = {}

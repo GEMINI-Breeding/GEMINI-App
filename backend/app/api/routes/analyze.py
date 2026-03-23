@@ -45,7 +45,7 @@ def _is_analyzable(run: PipelineRun, pipeline: Pipeline) -> bool:
     """True if the run has at least one output we can visualise."""
     outputs = run.outputs or {}
     if pipeline.type == "aerial":
-        return bool(outputs.get("traits_geojson") or outputs.get("orthomosaic") or outputs.get("inference"))
+        return bool(outputs.get("traits_geojson") or outputs.get("traits") or outputs.get("orthomosaic") or outputs.get("inference"))
     else:
         return bool(outputs.get("georeferencing") or outputs.get("plot_boundaries_geojson") or outputs.get("inference"))
 
@@ -106,7 +106,7 @@ def list_runs(
 
         available: list[str] = []
         if pipeline.type == "aerial":
-            if outputs.get("traits_geojson"):
+            if outputs.get("traits_geojson") or outputs.get("traits"):
                 available.append("traits")
             if outputs.get("orthomosaic"):
                 available.append("orthomosaic")
@@ -167,7 +167,7 @@ def get_traits(
     outputs = run.outputs or {}
 
     if pipeline and pipeline.type == "aerial":
-        traits_rel = outputs.get("traits_geojson")
+        traits_rel = outputs.get("traits_geojson") or outputs.get("traits")
         if not traits_rel:
             raise HTTPException(status_code=404, detail="No traits GeoJSON for this run")
         traits_path = paths.abs(traits_rel)
