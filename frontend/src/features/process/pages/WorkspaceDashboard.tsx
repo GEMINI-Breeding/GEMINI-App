@@ -164,6 +164,21 @@ export function WorkspaceDashboard() {
     queryFn: () => WorkspacesService.readAll(),
   })
 
+  const [isSyncing, setIsSyncing] = useState(false)
+  async function handleRefresh() {
+    setIsSyncing(true)
+    try {
+      await fetch(apiUrl("/api/v1/workspaces/sync"), {
+        method: "POST",
+        headers: authHeaders(),
+      })
+      await refetch()
+      queryClient.invalidateQueries({ queryKey: ["workspace-stats"] })
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   const [editWorkspace, setEditWorkspace] = useState<WorkspacePublic | null>(null)
   const [editForm, setEditForm] = useState({ name: "", description: "" })
 
@@ -227,11 +242,11 @@ export function WorkspaceDashboard() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              title="Refresh workspaces"
+              onClick={handleRefresh}
+              disabled={isFetching || isSyncing}
+              title="Refresh workspaces — removes stale entries with no data on disk"
             >
-              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              <RefreshCw className={`h-4 w-4 ${isFetching || isSyncing ? "animate-spin" : ""}`} />
             </Button>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>

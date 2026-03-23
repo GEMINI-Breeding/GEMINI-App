@@ -9,3 +9,4 @@ htmlcov
 build/
 dist/
 **/alembic**
+.DS_Store

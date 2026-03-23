@@ -52,6 +52,39 @@ def read_all(
     )
 
 
+@router.post("/sync")
+def sync_workspaces(
+    session: SessionDep, current_user: CurrentUser
+) -> dict[str, Any]:
+    """
+    Scan the filesystem and remove workspaces whose data directories no longer exist.
+
+    A workspace is considered stale when BOTH of these directories are absent:
+      {data_root}/Intermediate/{workspace_name}/
+      {data_root}/Processed/{workspace_name}/
+
+    Mirrors the file-upload /sync endpoint behaviour.
+    Returns { removed: [name, ...], remaining: WorkspacesPublic }
+    """
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    workspaces = get_workspaces_by_owner(session=session, owner_id=current_user.id)
+
+    removed: list[str] = []
+    for ws in workspaces:
+        intermediate = data_root / "Intermediate" / ws.name
+        processed = data_root / "Processed" / ws.name
+        if not intermediate.exists() and not processed.exists():
+            delete_workspace(session=session, id=ws.id)
+            removed.append(ws.name)
+
+    remaining = get_workspaces_by_owner(session=session, owner_id=current_user.id)
+    return {
+        "removed": removed,
+        "data": [WorkspacePublic.model_validate(w) for w in remaining],
+        "count": len(remaining),
+    }
+
+
 @router.get("/stats")
 def workspace_stats(
     session: SessionDep, current_user: CurrentUser
