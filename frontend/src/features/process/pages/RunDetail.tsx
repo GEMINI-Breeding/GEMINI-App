@@ -118,14 +118,7 @@ const GROUND_STEPS: StepDef[] = [
     key: "stitching",
     label: "Stitching",
     description:
-      "AgRowStitch stitches images per plot into panoramic mosaics and creates a combined mosaic",
-    kind: "compute",
-  },
-  {
-    key: "georeferencing",
-    label: "Georeferencing",
-    description:
-      "GPS-based georeferencing of stitched plots and combined mosaic",
+      "AgRowStitch stitches images per plot into panoramic mosaics, then automatically georeferences and creates a combined mosaic",
     kind: "compute",
   },
   {
@@ -253,14 +246,6 @@ function useStepProgress(runId: string, isRunning: boolean) {
         queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
         if (evt.event === "complete") {
           if (evt.step === "stitching") {
-            queryClient.invalidateQueries({
-              queryKey: ["stitch-outputs", runId],
-            });
-            queryClient.invalidateQueries({
-              queryKey: ["stitch-versions", runId],
-            });
-          }
-          if (evt.step === "georeferencing") {
             queryClient.invalidateQueries({
               queryKey: ["stitch-outputs", runId],
             });
@@ -760,6 +745,8 @@ function StitchPanel({
   isDeleting: boolean;
 }) {
   const [pageIndex, setPageIndex] = useState(0);
+  // When the user manually navigates, stop auto-advancing to the latest plot
+  const [userBrowsing, setUserBrowsing] = useState(false);
   const [viewingConfig, setViewingConfig] = useState<StitchVersion | null>(
     null
   );
@@ -804,7 +791,7 @@ function StitchPanel({
         if (!res.ok) return { plots: [], version: 1 };
         return res.json();
       },
-      staleTime: 5_000,
+      staleTime: 0,
       refetchInterval: isRunning ? 5_000 : false,
     }
   );
@@ -824,21 +811,30 @@ function StitchPanel({
     staleTime: 30_000,
   });
 
-  // Clear stale plot cache when a new run starts so old plots don't flash
+  // When a new run starts: immediately wipe the stale cache so old plots don't
+  // flash, then trigger a fresh fetch right away rather than waiting for the
+  // next 5-second interval tick.
   const queryClient = useQueryClient();
   useEffect(() => {
     if (isRunning) {
-      queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+      queryClient.setQueryData(["stitch-outputs", runId], { plots: [], version: 0 });
+      queryClient.refetchQueries({ queryKey: ["stitch-outputs", runId] });
+      setPageIndex(0);
+      setUserBrowsing(false);
     }
   }, [isRunning, runId, queryClient]);
 
-  // Auto-advance page index to latest plot during run
   const livePlots = liveData?.plots ?? [];
   useEffect(() => {
-    if (isRunning && livePlots.length > 0) {
+    if (isRunning && livePlots.length > 0 && !userBrowsing) {
       setPageIndex(livePlots.length - 1);
     }
-  }, [isRunning, livePlots.length]);
+  }, [isRunning, livePlots.length, userBrowsing]);
+
+  // When run finishes, reset browsing lock so the next run starts at latest
+  useEffect(() => {
+    if (!isRunning) setUserBrowsing(false);
+  }, [isRunning]);
 
   // Fetch images for a specific version to show in dialog
   async function viewVersionImages(v: StitchVersion) {
@@ -916,7 +912,7 @@ function StitchPanel({
               size="icon"
               className="h-7 w-7"
               disabled={pageIndex === 0}
-              onClick={() => setPageIndex((p) => p - 1)}
+              onClick={() => { setUserBrowsing(true); setPageIndex((p) => p - 1); }}
             >
               <ChevronDown className="h-3.5 w-3.5 rotate-90" />
             </Button>
@@ -928,10 +924,26 @@ function StitchPanel({
               size="icon"
               className="h-7 w-7"
               disabled={pageIndex === livePlots.length - 1}
-              onClick={() => setPageIndex((p) => p + 1)}
+              onClick={() => {
+                const next = pageIndex + 1;
+                setPageIndex(next);
+                // Re-enable auto-advance if the user scrolled back to the latest
+                if (next >= livePlots.length - 1) setUserBrowsing(false);
+                else setUserBrowsing(true);
+              }}
             >
               <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
             </Button>
+            {userBrowsing && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => { setUserBrowsing(false); setPageIndex(livePlots.length - 1); }}
+              >
+                Latest
+              </Button>
+            )}
           </div>
         </div>
         <img
@@ -1849,6 +1861,16 @@ interface PlotBoundaryVersion {
   stitch_version: number | null;
   created_at: string | null;
   active: boolean;
+  run_meta?: {
+    experiment?: string;
+    location?: string;
+    population?: string;
+    platform?: string;
+    sensor?: string;
+    date?: string;
+    stitch_version?: number | null;
+    ortho_version?: number | null;
+  } | null;
 }
 
 function OrthoViewerDialog({
@@ -2225,6 +2247,7 @@ function PlotBoundaryVersionsPanel({
               ) : (
                 <TableHead>Stitch Used</TableHead>
               )}
+              <TableHead>Dataset</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -2287,6 +2310,24 @@ function PlotBoundaryVersionsPanel({
                     {v.stitch_version != null ? `v${v.stitch_version}` : "—"}
                   </TableCell>
                 )}
+                <TableCell className="text-muted-foreground max-w-[200px] text-sm">
+                  {v.run_meta ? (
+                    <div className="flex flex-col gap-0.5">
+                      {v.run_meta.experiment && (
+                        <span className="truncate font-medium text-foreground/80">
+                          {v.run_meta.experiment}
+                        </span>
+                      )}
+                      <span className="truncate text-xs">
+                        {[v.run_meta.date, v.run_meta.platform, v.run_meta.sensor]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                  ) : (
+                    <span>—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
                 </TableCell>
@@ -2767,7 +2808,7 @@ export function RunDetail() {
             Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
           },
         }).then((r) => r.json()),
-      enabled: !!run && !!run.steps_completed?.plot_boundary_prep,
+      enabled: !!run,
       refetchInterval: false,
     });
 

@@ -148,10 +148,6 @@ def execute_step(
                 ground.run_stitching,
                 {"name": body.stitch_name},
             ),
-            "georeferencing": (
-                ground.run_georeferencing,
-                {},
-            ),
             "associate_boundaries": (
                 plot_boundary.run_associate_boundaries,
                 {
@@ -637,13 +633,24 @@ def save_plot_grid(
     if body.pop_boundary is not None:
         paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
 
-    # Embed grid_settings as a non-standard top-level key so options are restored on re-open
+    # Embed grid_settings and run_meta as non-standard top-level keys so they
+    # can be recovered when the file is discovered by other runs in the same pipeline.
     geojson_to_save = dict(body.geojson)
     if body.grid_options is not None:
         geojson_to_save["grid_settings"] = {
             "options": body.grid_options,
             "offset": body.grid_offset or {"lon": 0, "lat": 0},
         }
+    geojson_to_save["_run_meta"] = {
+        "experiment": paths.experiment,
+        "location": paths.location,
+        "population": paths.population,
+        "platform": paths.platform,
+        "sensor": paths.sensor,
+        "date": paths.date,
+        "stitch_version": body.stitch_version,
+        "ortho_version": body.ortho_version,
+    }
 
     existing_outputs = dict(run.outputs or {})
     versions = [dict(v) for v in existing_outputs.get("plot_boundaries", [])]
@@ -1351,13 +1358,27 @@ def orthomosaic_info(
 
         bounds = _read_tif_bounds(tif)
 
-        # Load canonical Plot-Boundary-WGS84.geojson (saved by save-plot-grid endpoint)
+        _outputs = run.outputs or {}
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+
+        # Load the active user-saved versioned boundary file.
+        # Fall back to canonical Plot-Boundary-WGS84.geojson only when no versioned
+        # file exists — the canonical file may be overwritten by auto-georeferencing
+        # and would show stale/incorrect boundaries after a re-stitch.
         existing_geojson = None
         existing_grid_settings = None
-        if paths.plot_boundary_geojson.exists():
+        _geojson_source = None
+        if _active_pbv is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
+            if _vf.exists():
+                _geojson_source = _vf
+        if _geojson_source is None and paths.plot_boundary_geojson.exists():
+            _geojson_source = paths.plot_boundary_geojson
+        if _geojson_source is not None:
             try:
-                raw = json.loads(paths.plot_boundary_geojson.read_text())
+                raw = json.loads(_geojson_source.read_text())
                 existing_grid_settings = raw.pop("grid_settings", None)
+                raw.pop("_run_meta", None)
                 existing_geojson = raw
             except Exception:
                 pass
@@ -1369,9 +1390,6 @@ def orthomosaic_info(
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
-
-        _outputs = run.outputs or {}
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
         # Stitching versions that have a combined_mosaic.tif
         _stitchings = list(_outputs.get("stitchings", []))
@@ -1406,12 +1424,25 @@ def orthomosaic_info(
 
         bounds = _read_tif_bounds(tif)
 
+        _outputs = run.outputs or {}
+        _versions = _get_ortho_versions(_outputs)
+        _active_v = _outputs.get("active_ortho_version")
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+
         existing_geojson = None
         existing_grid_settings = None
-        if paths.plot_boundary_geojson.exists():
+        _geojson_source = None
+        if _active_pbv is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
+            if _vf.exists():
+                _geojson_source = _vf
+        if _geojson_source is None and paths.plot_boundary_geojson.exists():
+            _geojson_source = paths.plot_boundary_geojson
+        if _geojson_source is not None:
             try:
-                raw = json.loads(paths.plot_boundary_geojson.read_text())
+                raw = json.loads(_geojson_source.read_text())
                 existing_grid_settings = raw.pop("grid_settings", None)
+                raw.pop("_run_meta", None)
                 existing_geojson = raw
             except Exception:
                 pass
@@ -1422,11 +1453,6 @@ def orthomosaic_info(
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
-
-        _outputs = run.outputs or {}
-        _versions = _get_ortho_versions(_outputs)
-        _active_v = _outputs.get("active_ortho_version")
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
         return {
             "available": True,
@@ -1692,19 +1718,27 @@ def get_plot_boundary_version(
     paths = _get_paths(session, run)
     versions = (run.outputs or {}).get("plot_boundaries", [])
     entry = next((v for v in versions if v["version"] == version), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail=f"Plot boundary version {version} not found")
-    p = paths.abs(entry["geojson_path"])
+
+    # Resolve the file path: prefer the per-run metadata entry, but fall back to
+    # the shared population directory for versions saved by other runs in this pipeline.
+    if entry:
+        p = paths.abs(entry["geojson_path"])
+    else:
+        p = paths.intermediate_shared_pop / f"Plot-Boundary-WGS84_v{version}.geojson"
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"Plot boundary version {version} not found")
+
     if not p.exists():
         raise HTTPException(status_code=404, detail="Plot boundary file not found on disk")
     try:
         raw = json.loads(p.read_text())
         grid_settings = raw.pop("grid_settings", None)
+        raw.pop("_run_meta", None)
         return {
             "geojson": raw,
             "grid_settings": grid_settings,
             "version": version,
-            "name": entry.get("name"),
+            "name": entry.get("name") if entry else None,
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1840,10 +1874,24 @@ def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
         vnum = int(m.group(1))
         meta = run_meta.get(vnum, {})
         created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
+
+        # Read run_meta embedded in the file (saved by save_plot_grid); fall back to
+        # per-run DB metadata for versions created by this run.
+        file_run_meta: dict = {}
+        try:
+            raw = json.loads(f.read_text())
+            file_run_meta = raw.get("_run_meta") or {}
+        except Exception:
+            pass
+
         versions.append({
             "version": vnum,
             "name": meta.get("name"),
+            "geojson_path": paths.rel(f),
             "created_at": created_at,
+            "stitch_version": meta.get("stitch_version") or file_run_meta.get("stitch_version"),
+            "ortho_version": meta.get("ortho_version") or file_run_meta.get("ortho_version"),
+            "run_meta": file_run_meta or None,
         })
 
     versions.sort(key=lambda x: x["version"])
@@ -2045,11 +2093,16 @@ def list_plot_boundaries(
     current_user: CurrentUser,
     id: uuid.UUID,
 ) -> list[dict]:
+    """
+    Return all plot boundary versions for this run's population directory.
+    Scans the shared intermediate directory so versions saved by other runs
+    (e.g. different dates in the same pipeline) are always included.
+    """
     run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
     outputs = run.outputs or {}
-    versions = _get_plot_boundary_versions(outputs)
-    active_v = outputs.get("active_plot_boundary_version")
-    return [{"active": v["version"] == active_v, **v} for v in sorted(versions, key=lambda x: x["version"])]
+    versions, active_v = _discover_pb_versions(paths, outputs)
+    return [{"active": v["version"] == active_v, **v} for v in versions]
 
 
 class RenamePlotBoundaryRequest(BaseModel):
@@ -2764,10 +2817,31 @@ def get_stitch_outputs(
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    outputs = run.outputs or {}
-    active_version = int(outputs.get("stitching_version") or 1)
-    use_version = version if version is not None else active_version
+
+    if version is not None:
+        use_version = version
+    else:
+        # For live polling: take the maximum of:
+        #   1. stitching_version written to DB early in the stitching function (before mkdir)
+        #   2. highest-numbered AgRowStitch_v* directory on disk (created right after DB write)
+        # Using max() of both sources handles the brief window between the DB write and mkdir,
+        # and ensures stale directories from failed runs don't win over a freshly-started run.
+        db_version = int((run.outputs or {}).get("stitching_version") or 0)
+        fs_dirs = [
+            p for p in paths.processed_run.glob("AgRowStitch_v*")
+            if p.is_dir() and p.name[len("AgRowStitch_v"):].isdigit()
+        ]
+        fs_versions = sorted(int(p.name[len("AgRowStitch_v"):]) for p in fs_dirs)
+        fs_version = fs_versions[-1] if fs_versions else 0
+        use_version = max(db_version, fs_version) or 1
+
+        logger.info(
+            "[stitch-outputs] run=%s db_version=%s fs_versions=%s → use_version=%s processed_run=%s",
+            id, db_version, fs_versions, use_version, paths.processed_run,
+        )
+
     img_dir = paths.agrowstitch_dir(use_version)
+    logger.info("[stitch-outputs] img_dir=%s exists=%s", img_dir, img_dir.exists())
 
     if not img_dir.exists():
         return {"plots": [], "version": use_version, "dir": str(img_dir)}
@@ -2779,6 +2853,7 @@ def get_stitch_outputs(
             "url": f"/api/v1/files/serve?path={f}",
         })
 
+    logger.info("[stitch-outputs] version=%s plot_count=%s", use_version, len(plots))
     return {"plots": plots, "version": use_version, "dir": str(img_dir)}
 
 

@@ -10,9 +10,8 @@ The returned dict is merged into PipelineRun.outputs using relative paths
 Steps
 -----
 1. plot_marking   — save user's start/end image selections → plot_borders.csv
-2. stitching      — run AgRowStitch on marked images
-3. georeferencing — GPS-based georeferencing of stitched plots
-4. inference      — Roboflow detection/segmentation (optional)
+2. stitching      — run AgRowStitch on marked images + auto-georeference
+3. inference      — Roboflow detection/segmentation (optional)
 
 Binary extraction (step 0) is triggered at upload time, not here.
 """
@@ -362,6 +361,24 @@ def run_stitching(
         with open(pipeline_config_path) as f:
             base_config.update(yaml.safe_load(f) or {})
 
+    # Apply structured agrowstitch_params saved from the UI (forward_limit, mask, etc.)
+    structured = pipeline_cfg.get("agrowstitch_params") or {}
+    if structured:
+        to_apply: dict = {}
+        mask_keys = {"mask_left", "mask_right", "mask_top", "mask_bottom"}
+        if mask_keys & set(structured):
+            to_apply["mask"] = [
+                int(structured.get("mask_left", 0)),
+                int(structured.get("mask_right", 0)),
+                int(structured.get("mask_top", 0)),
+                int(structured.get("mask_bottom", 0)),
+            ]
+        for k in ("forward_limit", "max_reprojection_error", "batch_size", "min_inliers"):
+            if k in structured:
+                to_apply[k] = structured[k]
+        base_config.update(to_apply)
+        logger.info("Applied structured agrowstitch_params: %s", list(to_apply.keys()))
+
     # Apply custom_agrowstitch_options from pipeline settings (freeform YAML string)
     custom_opts_str = pipeline_cfg.get("custom_agrowstitch_options", "").strip()
     if custom_opts_str:
@@ -404,6 +421,9 @@ def run_stitching(
         )
 
     out_dir = paths.agrowstitch_dir(agrowstitch_version)
+    # Clear any stale output from a previous failed/partial run at the same version
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     images_dir = _find_images_dir(paths)
@@ -458,8 +478,17 @@ def run_stitching(
             }
         )
 
-        # Gather images for this plot
-        plot_temp_dir = tempfile.mkdtemp(prefix=f"agrows_plot{plot_id}_")
+        # Gather images for this plot.
+        # IMPORTANT: AgRowStitch derives its output path as:
+        #   parent_directory = os.path.dirname(image_directory)
+        #   final_mosaic_path = parent_directory / "final_mosaics"
+        # If all plots share the same parent (e.g. /tmp), every plot writes
+        # into the same /tmp/final_mosaics/ folder and outputs collide.
+        # Fix: give each plot a unique outer dir; images go in a sub-dir so
+        # AgRowStitch sees a unique parent_directory per plot.
+        plot_temp_outer = tempfile.mkdtemp(prefix=f"agrows_plot{plot_id}_")
+        plot_temp_dir = Path(plot_temp_outer) / "images"
+        plot_temp_dir.mkdir()
         emit(
             {
                 "event": "progress",
@@ -541,7 +570,7 @@ def run_stitching(
                         for basename in unique_basenames:
                             src = images_dir / basename
                             if src.exists():
-                                shutil.copy2(src, Path(plot_temp_dir) / basename)
+                                shutil.copy2(src, plot_temp_dir / basename)
                                 copied += 1
                         emit(
                             {
@@ -574,7 +603,7 @@ def run_stitching(
             # Build config — strip keys not in AgRowStitch's type_dict
             config = dict(base_config)
             config.pop("num_cpu", None)  # passed as arg to run(), not a config key
-            config["image_directory"] = plot_temp_dir
+            config["image_directory"] = str(plot_temp_dir)
             config["device"] = agrowstitch_device
             config["stitching_direction"] = stitch_dir
 
@@ -839,11 +868,11 @@ def run_stitching(
                 logger.info("[Plot %s] Stitched → %s", plot_id, dest.name)
             else:
                 logger.warning(
-                    "[Plot %s] No stitched output found in %s", plot_id, plot_temp_dir
+                    "[Plot %s] No stitched output found in %s", plot_id, plot_temp_outer
                 )
 
         finally:
-            shutil.rmtree(plot_temp_dir, ignore_errors=True)
+            shutil.rmtree(plot_temp_outer, ignore_errors=True)
 
     emit(
         {
@@ -858,7 +887,7 @@ def run_stitching(
     stored_config.pop("image_directory", None)
 
     from datetime import datetime, timezone as _tz
-    return {
+    stitch_result: dict[str, Any] = {
         "_stitch_new_entry": {
             "version": agrowstitch_version,
             "name": name,
@@ -869,6 +898,22 @@ def run_stitching(
         },
         "stitching_version": agrowstitch_version,
     }
+
+    # Automatically run georeferencing right after stitching completes
+    emit({"event": "progress", "message": "Starting georeferencing…"})
+    try:
+        geo_outputs = run_georeferencing(
+            session=session,
+            run_id=run_id,
+            stop_event=stop_event,
+            emit=emit,
+        )
+        stitch_result.update(geo_outputs)
+    except Exception as exc:
+        logger.warning("Georeferencing failed (non-fatal): %s", exc)
+        emit({"event": "progress", "message": f"Georeferencing skipped: {exc}"})
+
+    return stitch_result
 
 
 # ── Step 3: Georeferencing ────────────────────────────────────────────────────
@@ -1022,10 +1067,10 @@ def run_georeferencing(
     outputs: dict = {"georeferencing": paths.rel(out_dir)}
     if geojson_path:
         outputs["plot_boundaries_geojson"] = paths.rel(geojson_path)
-        # Copy to canonical location and auto-complete plot_boundary_prep so the
-        # user can open the tool to review/adjust without having to redo it.
-        import shutil as _shutil
-        _shutil.copy2(str(geojson_path), str(paths.plot_boundary_geojson))
+        # Write to canonical location so the boundary tool can open it directly.
+        # Use read_bytes/write_bytes instead of shutil.copy2 — more portable on Windows.
+        paths.plot_boundary_geojson.parent.mkdir(parents=True, exist_ok=True)
+        paths.plot_boundary_geojson.write_bytes(geojson_path.read_bytes())
         outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
         outputs["_mark_steps_complete"] = ["plot_boundary_prep"]
     return outputs

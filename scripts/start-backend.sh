@@ -15,12 +15,12 @@ if [[ "$(uname)" != "Darwin" ]] && command -v fuser &> /dev/null; then
 elif command -v lsof &> /dev/null; then
     PID=$(lsof -ti:$PORT)
     if [ -n "$PID" ]; then
-        kill $PID 2>/dev/null && echo "Killed existing process (PID: $PID) on port $PORT"
+        kill -9 $PID 2>/dev/null && echo "Killed existing process (PID: $PID) on port $PORT"
     fi
 fi
 
 # Small delay to ensure port is released
-sleep 1
+sleep 0.3
 
 echo "Starting backend server..."
 cd "$BACKEND_DIR"

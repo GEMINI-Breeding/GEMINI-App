@@ -834,6 +834,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const handlePlotClickRef = useRef<(idx: number, shiftKey: boolean) => void>(
     () => {}
   );
+  const selectedIndexesRef = useRef<number[]>([]);
 
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [gridOptions, setGridOptions] = useState<GridOptions>({
@@ -904,7 +905,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
         },
       }).then((r) => r.json()),
-    enabled: !orthoInfo?.existing_geojson && !!orthoInfo?.available,
+    enabled: !!orthoInfo?.available,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
@@ -967,11 +968,13 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     imageOverlayRef.current.setUrl(url);
   }, [selectedOrthoVersion, runId]);
 
-  // Apply auto-boundary estimate to the map once both map and data are ready
+  // Apply auto-boundary estimate to the map once both map and data are ready.
+  // Only used when there is no existing saved boundary — if one exists, its own
+  // grid_settings are authoritative and should not be overwritten.
   useEffect(() => {
     if (!mapInitialized || !autoBoundaryData?.available) return;
     if (!autoBoundaryData.pop_boundary || !autoBoundaryData.grid_options) return;
-    if (popBoundary) return; // don't overwrite if boundary already exists
+    if (popBoundary) return; // boundary already drawn (from existing save or previous effect run)
     const popLayer = popLayerRef.current;
     const map = mapRef.current;
     if (!popLayer || !map) return;
@@ -982,7 +985,10 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
     setPopBoundary(autoBoundaryData.pop_boundary);
     setHasBoundary(true);
-    setGridOptions(autoBoundaryData.grid_options);
+    // Apply grid_options only on first-time setup (no existing geojson)
+    if (!orthoInfo?.existing_geojson) {
+      setGridOptions(autoBoundaryData.grid_options);
+    }
   }, [mapInitialized, autoBoundaryData]);
 
   // Destroy map only on component unmount — separate from the init effect so that
@@ -1073,6 +1079,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         setGridGenerated(true);
         if (orthoInfo.existing_grid_settings) {
           setGridOptions(orthoInfo.existing_grid_settings.options);
+          // Suppress the gridOffset→recompute effect so we keep the loaded geojson as-is
+          skipGridRecomputeRef.current = true;
           setGridOffset(orthoInfo.existing_grid_settings.offset);
         } else {
           const features = orthoInfo.existing_geojson.features;
@@ -1182,6 +1190,19 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridOffset]);
 
+  // Hide the population boundary (orange) only when the plot grid is actively visible.
+  // When the grid is hidden (or no grid exists), restore the orange boundary.
+  useEffect(() => {
+    const popLayer = popLayerRef.current;
+    if (!popLayer) return;
+    const gridActivelyShown = gridVisible && (previewGeoJson?.features?.length ?? 0) > 0;
+    popLayer.setStyle(
+      gridActivelyShown
+        ? { opacity: 0, fillOpacity: 0 }
+        : { color: "#f59e0b", weight: 2, opacity: 1, fillOpacity: 0.1 }
+    );
+  }, [previewGeoJson, gridVisible, mapInitialized]);
+
   // Manual grid generation triggered by the "Generate Grid" button
   function handleGenerateGrid() {
     if (!popBoundary) return;
@@ -1216,6 +1237,11 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   useEffect(() => {
     interactionModeRef.current = interactionMode;
   }, [interactionMode]);
+
+  // Keep selectedIndexes ref in sync for use in Leaflet event handlers
+  useEffect(() => {
+    selectedIndexesRef.current = selectedIndexes;
+  }, [selectedIndexes]);
 
   // Keep click handler ref fresh — uses index, not string key
   handlePlotClickRef.current = (idx: number, shiftKey: boolean) => {
@@ -1316,10 +1342,27 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           const { lon, lat } = pendingOffset;
           pendingOffset.lon = 0;
           pendingOffset.lat = 0;
-          setGridOffset((prev) => ({
-            lon: prev.lon + lon,
-            lat: prev.lat + lat,
-          }));
+          if (selectedIndexesRef.current.length > 0) {
+            // Move only the selected features by directly translating their coordinates
+            const selSet = new Set(selectedIndexesRef.current);
+            setPreviewGeoJson((prev) => {
+              if (!prev) return prev;
+              const newFeatures = prev.features.map((feature, idx) => {
+                if (!selSet.has(idx)) return feature;
+                const geom = feature.geometry as GeoJSON.Polygon;
+                const newCoords = geom.coordinates.map((ring) =>
+                  ring.map(([fLon, fLat]) => [fLon + lon, fLat + lat])
+                );
+                return { ...feature, geometry: { ...geom, coordinates: newCoords } };
+              });
+              return { ...prev, features: newFeatures };
+            });
+          } else {
+            setGridOffset((prev) => ({
+              lon: prev.lon + lon,
+              lat: prev.lat + lat,
+            }));
+          }
         });
       }
     }
@@ -1498,6 +1541,26 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     }
     setIsSaving(true);
     if (saveAs) setPendingSaveAs(true);
+
+    // Sync any Geoman vertex-edits from live Leaflet layers into the GeoJSON before saving.
+    // Geoman edits the layer geometry in place without updating React state, so we read
+    // the current layer coordinates directly rather than relying on previewGeoJson.
+    let geojsonToSave = previewGeoJson;
+    const liveLayers = plotLayersRef.current;
+    if (liveLayers.length > 0 && liveLayers.length === previewGeoJson.features.length) {
+      const newFeatures = previewGeoJson.features.map((feature, idx) => {
+        const layer = liveLayers[idx];
+        if (!layer) return feature;
+        try {
+          const updated = (layer as any).toGeoJSON() as GeoJSON.Feature;
+          return { ...updated, properties: feature.properties };
+        } catch {
+          return feature;
+        }
+      });
+      geojsonToSave = { ...previewGeoJson, features: newFeatures };
+    }
+
     try {
       const res = await fetch(
         apiUrl(`/api/v1/pipeline-runs/${runId}/save-plot-grid`),
@@ -1508,7 +1571,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
           },
           body: JSON.stringify({
-            geojson: previewGeoJson,
+            geojson: geojsonToSave,
             pop_boundary: popBoundary,
             grid_options: gridOptions,
             grid_offset: gridOffset,

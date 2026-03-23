@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Check,
+  Info,
   Map,
   Brain,
   Settings,
@@ -9,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,8 +30,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PipelinesService, type PipelinePublic } from "@/client";
 import useCustomToast from "@/hooks/useCustomToast";
+
+function InfoTooltip({ text }: { text: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <sup className="cursor-help inline-flex items-center ml-0.5 align-super">
+          <Info className="text-muted-foreground hover:text-foreground" size={11} />
+        </sup>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs whitespace-normal">{text}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 interface RoboflowModel {
   label: string;
@@ -48,10 +63,43 @@ const EMPTY_MODEL = (): RoboflowModel => ({
 
 type Step = 1 | 2 | 3;
 
-// Step 2 config defaults per type
+// ── Ground pipeline ───────────────────────────────────────────────────────────
+
+type GroundPlatform = "amiga" | "monopod" | "custom";
+
+interface AgrowstitchParams {
+  forward_limit: number;
+  max_reprojection_error: number;
+  mask_left: number;
+  mask_right: number;
+  mask_top: number;
+  mask_bottom: number;
+  batch_size: number;
+  min_inliers: number;
+}
+
+const PLATFORM_PRESETS: Record<Exclude<GroundPlatform, "custom">, AgrowstitchParams> = {
+  amiga:   { forward_limit: 4, max_reprojection_error: 1.0, mask_left: 0, mask_right: 0, mask_top: 0, mask_bottom: 0, batch_size: 10, min_inliers: 20 },
+  monopod: { forward_limit: 8, max_reprojection_error: 3.0, mask_left: 0, mask_right: 0, mask_top: 0, mask_bottom: 0, batch_size: 10, min_inliers: 20 },
+};
+
+const DEFAULT_AGROWSTITCH_PARAMS: AgrowstitchParams = {
+  forward_limit: 8, max_reprojection_error: 1.0,
+  mask_left: 0, mask_right: 0, mask_top: 0, mask_bottom: 0,
+  batch_size: 10, min_inliers: 20,
+};
+
+// Per-parameter platform recommendations shown next to each field
+const PARAM_RECS: Record<keyof Pick<AgrowstitchParams, "forward_limit" | "max_reprojection_error">, string> = {
+  forward_limit:         "Amiga: 4 · Monopod: 5–8",
+  max_reprojection_error: "Amiga: 1.0 · Monopod: 3.0",
+};
+
 const GROUND_DEFAULT_CONFIG = {
   device: "cpu" as "cpu" | "gpu" | "multiprocessing",
   num_cpu: 0,
+  platform: "custom" as GroundPlatform,
+  agrowstitch_params: DEFAULT_AGROWSTITCH_PARAMS,
   custom_agrowstitch_options: "",
 };
 
@@ -125,11 +173,13 @@ export function ProcessingPipeline() {
     const cfg = (existingPipeline.config ?? {}) as Record<string, unknown>;
     setPipelineName(existingPipeline.name);
     if (existingPipeline.type === "ground") {
+      const savedParams = (cfg.agrowstitch_params as Partial<AgrowstitchParams>) ?? {};
       setGroundConfig({
         device: (cfg.device as "cpu" | "gpu" | "multiprocessing") ?? "cpu",
         num_cpu: (cfg.num_cpu as number) ?? 0,
-        custom_agrowstitch_options:
-          (cfg.custom_agrowstitch_options as string) ?? "",
+        platform: (cfg.platform as GroundPlatform) ?? "custom",
+        agrowstitch_params: { ...DEFAULT_AGROWSTITCH_PARAMS, ...savedParams },
+        custom_agrowstitch_options: (cfg.custom_agrowstitch_options as string) ?? "",
       });
     } else {
       setAerialConfig({
@@ -492,8 +542,47 @@ export function ProcessingPipeline() {
 
             {currentStep === 2 && pipelineType === "ground" && (
               <>
+                {/* Platform preset */}
                 <div className="space-y-2">
-                  <Label>Processing Device</Label>
+                  <Label>Platform</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["amiga", "monopod", "custom"] as GroundPlatform[]).map((p) => {
+                      const labels: Record<GroundPlatform, [string, string]> = {
+                        amiga:   ["Amiga",   "Farm-ng ground robot"],
+                        monopod: ["Monopod", "Handheld / rolling"],
+                        custom:  ["Custom",  "Configure manually"],
+                      };
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => {
+                            const preset = p !== "custom" ? PLATFORM_PRESETS[p] : groundConfig.agrowstitch_params;
+                            setGroundConfig({ ...groundConfig, platform: p, agrowstitch_params: preset });
+                          }}
+                          className={`text-left rounded-lg border p-3 transition-colors ${
+                            groundConfig.platform === p
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:border-primary/50"
+                          }`}
+                        >
+                          <p className="text-sm font-medium">{labels[p][0]}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{labels[p][1]}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Selecting a platform fills in recommended defaults below. You can adjust any value afterward.
+                  </p>
+                </div>
+
+                {/* Processing device */}
+                <div className="space-y-2">
+                  <Label>
+                    Processing Device
+                    <InfoTooltip text="GPU significantly speeds up stitching. Multiprocessing runs plots in parallel across CPU cores. Stitch direction is set per-plot during the plot marking step." />
+                  </Label>
                   <Select
                     value={groundConfig.device}
                     onValueChange={(v: "cpu" | "gpu" | "multiprocessing") =>
@@ -509,17 +598,13 @@ export function ProcessingPipeline() {
                       <SelectItem value="gpu">GPU (CUDA)</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-muted-foreground text-xs">
-                    GPU significantly speeds up stitching. Multiprocessing runs
-                    plots in parallel across CPU cores. Stitch direction is set
-                    per-plot during the plot marking step.
-                  </p>
                 </div>
 
                 {groundConfig.device === "multiprocessing" && (
                   <div className="space-y-2">
                     <Label>
                       Number of CPU Workers
+                      <InfoTooltip text={`Leave blank (0) to use all cores minus one automatically.${systemCpuCount > 0 ? ` Max recommended: ${systemCpuCount}.` : ""}`} />
                       {systemCpuCount > 0 && (
                         <span className="text-muted-foreground ml-2 font-normal">
                           (system has {systemCpuCount} logical cores)
@@ -530,39 +615,166 @@ export function ProcessingPipeline() {
                       type="number"
                       min={0}
                       max={systemCpuCount || undefined}
-                      placeholder={
-                        systemCpuCount > 0
-                          ? `0 = auto (${Math.max(1, systemCpuCount - 1)} cores)`
-                          : "0 = auto"
-                      }
+                      placeholder={systemCpuCount > 0 ? `0 = auto (${Math.max(1, systemCpuCount - 1)} cores)` : "0 = auto"}
                       value={groundConfig.num_cpu === 0 ? "" : groundConfig.num_cpu}
                       onChange={(e) => {
                         const v = parseInt(e.target.value, 10);
-                        setGroundConfig({
-                          ...groundConfig,
-                          num_cpu: isNaN(v) ? 0 : Math.max(0, v),
-                        });
+                        setGroundConfig({ ...groundConfig, num_cpu: isNaN(v) ? 0 : Math.max(0, v) });
                       }}
                     />
-                    <p className="text-muted-foreground text-xs">
-                      Leave blank (0) to use all cores minus one automatically.
-                      {systemCpuCount > 0 &&
-                        ` Max recommended: ${systemCpuCount}.`}
-                    </p>
                   </div>
                 )}
-                <div className="space-y-2">
-                  <Label>Additional AgRowStitch Options (optional)</Label>
+
+                {/* Stitching parameters */}
+                <div className="border-t pt-4 space-y-5">
+                  <p className="text-sm font-semibold">Stitching Parameters</p>
+
+                  {/* Look-ahead frames */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <Label>
+                        Look-ahead Frames
+                        <InfoTooltip text="How many images ahead to search for matching features. Higher values help when images have less overlap or when the robot moves quickly. Range: 3–8." />
+                      </Label>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{PARAM_RECS.forward_limit}</span>
+                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={groundConfig.agrowstitch_params.forward_limit}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        setGroundConfig({ ...groundConfig, platform: "custom", agrowstitch_params: { ...groundConfig.agrowstitch_params, forward_limit: isNaN(v) ? 4 : v } });
+                      }}
+                    />
+                    {(groundConfig.agrowstitch_params.forward_limit < 2 || groundConfig.agrowstitch_params.forward_limit > 15) && (
+                      <p className="text-amber-600 dark:text-amber-400 text-xs">⚠ Value outside typical range (3–8) — results may be unpredictable.</p>
+                    )}
+                  </div>
+
+                  {/* Alignment tolerance */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <Label>
+                        Alignment Tolerance
+                        <InfoTooltip text="How many pixels of error are allowed when aligning two images. Higher = more forgiving of imperfect matches. Higher-resolution cameras (e.g. Monopod) often need a higher value. Range: 0.25–5.0." />
+                      </Label>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{PARAM_RECS.max_reprojection_error}</span>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0.1}
+                      max={10}
+                      step={0.25}
+                      value={groundConfig.agrowstitch_params.max_reprojection_error}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setGroundConfig({ ...groundConfig, platform: "custom", agrowstitch_params: { ...groundConfig.agrowstitch_params, max_reprojection_error: isNaN(v) ? 1.0 : v } });
+                      }}
+                    />
+                    {groundConfig.agrowstitch_params.max_reprojection_error > 5 && (
+                      <p className="text-amber-600 dark:text-amber-400 text-xs">⚠ Very high tolerance — may allow poor image alignments.</p>
+                    )}
+                  </div>
+
+                  {/* Edge crop / mask */}
+                  <div className="space-y-1.5">
+                    <Label>
+                      Edge Crop (pixels)
+                      <InfoTooltip text="Removes a fixed number of pixels from each image edge before stitching — useful for camera mounts, lens rigs, or static obstructions. Default is 0 for all platforms — only change if your camera has a fixed obstruction." />
+                    </Label>
+                    <div className="grid grid-cols-4 gap-2 mt-1">
+                      {(["mask_left", "mask_right", "mask_top", "mask_bottom"] as const).map((side) => (
+                        <div key={side} className="space-y-1">
+                          <p className="text-[11px] text-muted-foreground capitalize">{side.replace("mask_", "")}</p>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={groundConfig.agrowstitch_params[side]}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value, 10);
+                              setGroundConfig({ ...groundConfig, platform: "custom", agrowstitch_params: { ...groundConfig.agrowstitch_params, [side]: isNaN(v) ? 0 : Math.max(0, v) } });
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Advanced — collapsed by default */}
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground select-none list-none flex items-center gap-1">
+                      <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+                      Advanced Settings
+                    </summary>
+                    <div className="mt-4 space-y-5 pl-1 border-l-2 border-border">
+
+                      {/* Batch size */}
+                      <div className="space-y-1.5">
+                        <Label>
+                          Batch Size
+                          <InfoTooltip text="Number of images processed together in each round of feature matching. Larger batches use more RAM. Keep between 10 and 20 unless you have limited memory." />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={groundConfig.agrowstitch_params.batch_size}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            setGroundConfig({ ...groundConfig, platform: "custom", agrowstitch_params: { ...groundConfig.agrowstitch_params, batch_size: isNaN(v) ? 10 : v } });
+                          }}
+                        />
+                        {groundConfig.agrowstitch_params.batch_size > 20 && (
+                          <p className="text-amber-600 dark:text-amber-400 text-xs">⚠ Large batch size may exhaust memory on some systems.</p>
+                        )}
+                      </div>
+
+                      {/* Min inliers */}
+                      <div className="space-y-1.5">
+                        <Label>
+                          Min Feature Matches
+                          <InfoTooltip text="Minimum number of confirmed matching points required between two adjacent images for them to be stitched together. Raise this if stitches look smeared or distorted. Recommended: 20–50." />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={5}
+                          max={200}
+                          value={groundConfig.agrowstitch_params.min_inliers}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            setGroundConfig({ ...groundConfig, platform: "custom", agrowstitch_params: { ...groundConfig.agrowstitch_params, min_inliers: isNaN(v) ? 20 : v } });
+                          }}
+                        />
+                      </div>
+
+                    </div>
+                  </details>
+                </div>
+
+                {/* Raw overrides — power users */}
+                <div className="space-y-1.5 border-t pt-4">
+                  <Label>
+                    Additional Overrides{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                    <InfoTooltip text="Raw YAML key-value pairs that override any AgRowStitch setting not exposed above. Applied last — takes precedence over everything else." />
+                  </Label>
                   <Input
-                    placeholder="Custom YAML overrides"
+                    placeholder="e.g.  final_size: [71628, 0]"
                     value={groundConfig.custom_agrowstitch_options}
-                    onChange={(e) =>
-                      setGroundConfig({
-                        ...groundConfig,
-                        custom_agrowstitch_options: e.target.value,
-                      })
-                    }
+                    onChange={(e) => setGroundConfig({ ...groundConfig, custom_agrowstitch_options: e.target.value })}
                   />
+                  <p className="text-muted-foreground text-xs">
+                    <a
+                      href="https://github.com/GEMINI-Breeding/AgRowStitch/blob/opencv/config.yaml"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-foreground"
+                    >
+                      See all available settings ↗
+                    </a>
+                  </p>
                 </div>
               </>
             )}

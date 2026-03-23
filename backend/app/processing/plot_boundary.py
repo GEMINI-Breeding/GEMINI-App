@@ -322,13 +322,15 @@ def run_associate_boundaries(
             writer.writeheader()
             writer.writerows(associations)
 
-    # Copy labelled plot PNGs to cropped_images/ so the same serve/analyze
-    # endpoints work for ground runs as they do for aerial.
+    # Link labelled plot PNGs into cropped_images/ so the same serve/analyze
+    # endpoints work for ground runs as they do for aerial — without duplicating data.
+    # Uses symlinks (no disk duplication); falls back to a copy if symlinks are
+    # unavailable (e.g. Windows without Developer Mode).
     # Filename: plot_{Plot}.png  (using the matched boundary "Plot" property,
     # falling back to the original plot_id from the TIF filename).
+    import shutil
     crops_dir = paths.cropped_images_dir
     crops_dir.mkdir(parents=True, exist_ok=True)
-    import shutil
     for assoc in associations:
         tif_name = assoc.get("plot_tif", "")
         stem = Path(tif_name).stem  # e.g. "georeferenced_plot_3_utm"
@@ -343,10 +345,15 @@ def run_associate_boundaries(
         src_png = png_candidates[0]
         label = assoc.get("Plot") or assoc.get("plot") or stem.replace("georeferenced_plot_", "").replace("_utm", "")
         dest_png = crops_dir / f"plot_{label}.png"
+        if dest_png.exists() or dest_png.is_symlink():
+            dest_png.unlink()
         try:
-            shutil.copy2(src_png, dest_png)
-        except Exception as exc:
-            logger.warning("Could not copy %s → %s: %s", src_png.name, dest_png.name, exc)
+            dest_png.symlink_to(src_png.resolve())
+        except (OSError, NotImplementedError):
+            try:
+                shutil.copy2(src_png, dest_png)
+            except Exception as exc:
+                logger.warning("Could not link/copy %s → %s: %s", src_png.name, dest_png.name, exc)
 
     matched = sum(1 for a in associations if a.get("matched"))
     now = datetime.now(timezone.utc).isoformat()
