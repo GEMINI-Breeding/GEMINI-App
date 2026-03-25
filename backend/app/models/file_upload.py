@@ -18,6 +18,7 @@ class FileUploadBase(SQLModel):
     platform: str | None = Field(default=None, max_length=255)
     sensor: str | None = Field(default=None, max_length=255)
     storage_path: str = Field(max_length=1000)  # where files are stored
+    msgs_synced_path: str | None = Field(default=None, max_length=1000)  # relative path to bundled GPS file (Farm-ng)
 
 
 # Properties to receive on creation
@@ -38,6 +39,7 @@ class FileUploadUpdate(SQLModel):
     status: str | None = Field(default=None, max_length=50)
     file_count: int | None = None
     notes: str | None = Field(default=None, max_length=1000)
+    msgs_synced_path: str | None = Field(default=None, max_length=1000)
 
 
 # Database model
@@ -71,6 +73,7 @@ class FileUploadPublic(FileUploadBase):
     file_size_bytes: int | None
     status: str
     notes: str | None
+    msgs_synced_path: str | None
     created_at: str
 
 

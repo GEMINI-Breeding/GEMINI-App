@@ -160,6 +160,19 @@ def postprocessing(
     if 'latitude' in msgs_df.columns:
         msgs_df.rename(columns={'latitude': 'lat'}, inplace=True)
 
+    # Add timestamp column (Unix seconds float) for cross-sensor sync.
+    # gps_time is GPS epoch in microseconds; use it when positive, fall back to
+    # the device clock (stamp, also in microseconds) otherwise.
+    if 'gps_time' in msgs_df.columns:
+        gps_sec = pd.to_numeric(msgs_df['gps_time'], errors='coerce') / 1e6
+        if 'stamp' in msgs_df.columns:
+            stamp_sec = pd.to_numeric(msgs_df['stamp'], errors='coerce') / 1e6
+            msgs_df['timestamp'] = gps_sec.where(gps_sec > 0, stamp_sec)
+        else:
+            msgs_df['timestamp'] = gps_sec.where(gps_sec > 0)
+    elif 'stamp' in msgs_df.columns:
+        msgs_df['timestamp'] = pd.to_numeric(msgs_df['stamp'], errors='coerce') / 1e6
+
     return msgs_df
 
 # Zhenghao Fei, PAIBL 2020 (edited by Earl Ranario, PAIBL 2025)

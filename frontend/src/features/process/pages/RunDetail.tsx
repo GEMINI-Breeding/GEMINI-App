@@ -211,7 +211,7 @@ interface ProgressEvent {
 const eventBuffer = new Map<string, ProgressEvent[]>();
 const progressBuffer = new Map<string, number | null>();
 
-function useStepProgress(runId: string, isRunning: boolean) {
+function useStepProgress(runId: string, isRunning: boolean, onStepComplete?: (step: string) => void) {
   const [events, setEvents] = useState<ProgressEvent[]>(
     () => eventBuffer.get(runId) ?? []
   );
@@ -271,6 +271,8 @@ function useStepProgress(runId: string, isRunning: boolean) {
             queryClient.invalidateQueries({
               queryKey: ["plot-boundaries", runId],
             });
+            // Full refresh so the run card and all panels reflect the new state
+            onStepComplete?.("stitching");
           }
           if (evt.step === "plot_boundary_prep") {
             queryClient.invalidateQueries({
@@ -454,6 +456,7 @@ interface StepRowProps {
   warning?: string;
   extraContent?: React.ReactNode;
   extraButtons?: React.ReactNode;
+  hideDefaultButton?: boolean;
 }
 
 // ── Shared confirm-delete dialog ──────────────────────────────────────────────
@@ -644,6 +647,7 @@ interface StitchVersion {
   config: Record<string, any>;
   plot_count: number;
   created_at: string | null;
+  plot_marking_version: number | null;
 }
 
 function StitchConfigDialog({
@@ -797,6 +801,19 @@ function StitchPanel({
     stitch: StitchVersion;
     selectedAssocVersion: number | null;
   } | null>(null);
+
+  // Plot marking versions (for displaying marker label in the stitch table)
+  const { data: plotMarkings = [] } = useQuery<{ version: number; name: string }[]>({
+    queryKey: ["plot-markings", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
 
   // Associations (for download naming)
   const { data: associations = [] } = useQuery<AssociationVersion[]>({
@@ -1019,6 +1036,7 @@ function StitchPanel({
             <TableRow>
               <TableHead className="py-2 text-xs">Version</TableHead>
               <TableHead className="py-2 text-right text-xs">Plots</TableHead>
+              <TableHead className="py-2 text-xs">Markers</TableHead>
               <TableHead className="py-2 text-xs">Created</TableHead>
               <TableHead className="py-2 text-right text-xs">Actions</TableHead>
             </TableRow>
@@ -1076,6 +1094,12 @@ function StitchPanel({
                 </TableCell>
                 <TableCell className="py-1.5 text-right font-mono">
                   {v.plot_count}
+                </TableCell>
+                <TableCell className="py-1.5 text-muted-foreground text-xs">
+                  {v.plot_marking_version != null ? (() => {
+                    const pm = plotMarkings.find((m) => m.version === v.plot_marking_version);
+                    return pm?.name ? `${pm.name} (v${v.plot_marking_version})` : `v${v.plot_marking_version}`;
+                  })() : "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground py-1.5">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
@@ -1403,6 +1427,148 @@ function GroundInferencePanel({
   );
 }
 
+// ── Ground: plot marking versions panel ──────────────────────────────────────
+
+function PlotMarkingVersionsPanel({
+  runId,
+  onDelete,
+  isDeleting,
+}: {
+  runId: string;
+  onDelete: (version: number) => void;
+  isDeleting: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
+  const [renamingVersion, setRenamingVersion] = useState<number | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+
+  const { data: versions = [], isLoading } = useQuery<{ version: number; name: string; created_at: string; run_label: string; is_active: boolean }[]>({
+    queryKey: ["plot-markings", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  function startRename(v: { version: number; name: string }) {
+    setRenamingVersion(v.version);
+    setRenameInput(v.name ?? "");
+  }
+
+  async function confirmRename(version: number) {
+    await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings/${version}/rename`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+      },
+      body: JSON.stringify({ name: renameInput }),
+    });
+    setRenamingVersion(null);
+    queryClient.invalidateQueries({ queryKey: ["plot-markings", runId] });
+  }
+
+  if (isLoading) {
+    return (
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading plot marking versions…
+      </div>
+    );
+  }
+
+  if (versions.length === 0) return null;
+
+  return (
+    <>
+      <div className="mt-3 overflow-hidden rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="py-2 text-xs">Version</TableHead>
+              <TableHead className="py-2 text-xs">Dataset</TableHead>
+              <TableHead className="py-2 text-xs">Created</TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {versions.map((v) => (
+              <TableRow key={v.version} className="text-xs">
+                <TableCell className="py-1.5">
+                  {renamingVersion === v.version ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        className="border rounded px-1.5 py-0.5 text-xs w-32"
+                        value={renameInput}
+                        onChange={(e) => setRenameInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") confirmRename(v.version);
+                          if (e.key === "Escape") setRenamingVersion(null);
+                        }}
+                        autoFocus
+                      />
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => confirmRename(v.version)}>
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRenamingVersion(null)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1 hover:underline"
+                      onClick={() => startRename(v)}
+                      title="Click to rename"
+                    >
+                      <span className="font-medium">{v.name || `v${v.version}`}</span>
+                      {v.name && <span className="text-muted-foreground">v{v.version}</span>}
+                    </button>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground py-1.5 text-xs max-w-[200px] truncate">
+                  {v.run_label || "—"}
+                </TableCell>
+                <TableCell className="text-muted-foreground py-1.5">
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-red-500 hover:text-red-600"
+                    disabled={isDeleting || versions.length <= 1}
+                    title={versions.length <= 1 ? "Cannot delete the only version" : "Delete version"}
+                    onClick={() => setConfirmDeleteVersion(v.version)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteVersion !== null}
+        title="Delete plot marking version?"
+        description={`Delete plot marking v${confirmDeleteVersion ?? ""}? This cannot be undone.`}
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmDeleteVersion !== null) onDelete(confirmDeleteVersion);
+          setConfirmDeleteVersion(null);
+        }}
+        onCancel={() => setConfirmDeleteVersion(null)}
+      />
+    </>
+  );
+}
+
 // ── Ground: association versions panel ───────────────────────────────────────
 
 interface AssociationVersion {
@@ -1554,6 +1720,7 @@ function StepRow({
   warning,
   extraContent,
   extraButtons,
+  hideDefaultButton,
 }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1646,24 +1813,26 @@ function StepRow({
                   Stop
                 </Button>
               )}
-              <Button
-                variant={status === "completed" ? "outline" : "default"}
-                size="sm"
-                disabled={
-                  status === "locked" || isActive || (isExecuting && !isActive)
-                }
-                title={warning}
-                onClick={() => {
-                  if (isInteractive) onOpenTool(step.key);
-                  else if (canRun) onRunStep(step.key);
-                }}
-              >
-                {isActive && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                {warning && !isActive && (
-                  <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
-                )}
-                {actionLabel}
-              </Button>
+              {!hideDefaultButton && (
+                <Button
+                  variant={status === "completed" ? "outline" : "default"}
+                  size="sm"
+                  disabled={
+                    status === "locked" || isActive || (isExecuting && !isActive)
+                  }
+                  title={warning}
+                  onClick={() => {
+                    if (isInteractive) onOpenTool(step.key);
+                    else if (canRun) onRunStep(step.key);
+                  }}
+                >
+                  {isActive && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  {warning && !isActive && (
+                    <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  {actionLabel}
+                </Button>
+              )}
               {status === "completed" && (
                 <Button
                   variant="ghost"
@@ -2858,7 +3027,17 @@ export function RunDetail() {
     onError: () => showErrorToast("Failed to rename stitching version"),
   });
 
-  const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
+  const deletePlotMarkingMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings/${version}`), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      }).then((r) => { if (!r.ok) throw new Error("Failed to delete"); }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["plot-markings", runId] }),
+    onError: () => showErrorToast("Failed to delete plot marking version"),
+  });
+
+const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     useQuery<PlotBoundaryVersion[]>({
       queryKey: ["plot-boundaries", runId],
       queryFn: () =>
@@ -2870,6 +3049,20 @@ export function RunDetail() {
       enabled: !!run,
       refetchInterval: false,
     });
+
+  // Plot marking versions (for stitching dialog version picker)
+  const { data: plotMarkingVersions } = useQuery<{ version: number; name: string; created_at: string }[]>({
+    queryKey: ["plot-markings", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!run && pipelineType === "ground",
+    refetchInterval: false,
+  });
 
   // Page-level stitch versions (needed for associate_boundaries dialog)
   const { data: pageStitchVersions } = useQuery<StitchVersion[]>({
@@ -2926,24 +3119,19 @@ export function RunDetail() {
   const steps = pipelineType === "aerial" ? AERIAL_STEPS : GROUND_STEPS;
   const nextStepKey = getNextStep(steps, run?.steps_completed, runStatus);
 
-  // Auto-trigger data_sync for aerial and ground runs that haven't had it completed yet.
-  // Runs silently in the background — the SSE progress bar shows inline.
-  const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
-  useEffect(() => {
-    if (
-      run &&
-      pipeline &&
-      (pipelineType === "aerial" || pipelineType === "ground") &&
-      !run.steps_completed?.data_sync &&
-      runStatus !== "running" &&
-      runStatus !== "failed" &&
-      !autoSyncTriggered
-    ) {
-      setAutoSyncTriggered(true);
-      executeMutation.mutate({ step: "data_sync" });
+  function handleStartSync() {
+    setShowSyncDialog(false);
+    if (syncMode === "cross_sensor") {
+      executeMutation.mutate({
+        step: "data_sync",
+        sync_mode: "cross_sensor",
+        sync_source_run_id: syncSourceRunId,
+        sync_max_extrapolation_sec: syncMaxExtrapolationSec,
+      } as any);
+    } else {
+      executeMutation.mutate({ step: "data_sync", sync_mode: "own_metadata" } as any);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run?.id, pipeline?.id]);
+  }
 
   // Navigate to the full-page tool view
   function handleOpenTool(step: string) {
@@ -2959,7 +3147,7 @@ export function RunDetail() {
     events: progressEvents,
     lastProgress,
     clearEvents,
-  } = useStepProgress(runId, isRunning);
+  } = useStepProgress(runId, isRunning, () => handleRefresh());
 
   // When the run becomes active (isRunning=true), ensure ProcessContext has an
   // entry so the panel tracks it. This fires whether the user clicked Start in
@@ -3033,8 +3221,7 @@ export function RunDetail() {
       stopWasRequestedRef.current = true;
       return ProcessingService.stopStep({ id: runId });
     },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
+    onSuccess: () => handleRefresh(),
     onError: () => showErrorToast("Failed to stop step"),
   });
 
@@ -3187,6 +3374,7 @@ export function RunDetail() {
   // Stitching name prompt
   const [showStitchNameDialog, setShowStitchNameDialog] = useState(false);
   const [stitchNameInput, setStitchNameInput] = useState("");
+  const [stitchPlotMarkingVersion, setStitchPlotMarkingVersion] = useState<number | null>(null);
 
   // Trait extraction version selection dialog
   const [showTraitDialog, setShowTraitDialog] = useState(false);
@@ -3212,6 +3400,7 @@ export function RunDetail() {
     executeMutation.mutate({
       step: "stitching",
       stitch_name: stitchNameInput.trim() || undefined,
+      plot_marking_version: stitchPlotMarkingVersion ?? undefined,
     } as any);
   }
 
@@ -3228,6 +3417,8 @@ export function RunDetail() {
     }
     if (step === "stitching") {
       setStitchNameInput("");
+      const activeMarkingVersion = (run?.outputs as any)?.active_plot_marking_version ?? null;
+      setStitchPlotMarkingVersion(activeMarkingVersion ?? plotMarkingVersions?.[plotMarkingVersions.length - 1]?.version ?? null);
       setShowStitchNameDialog(true);
       return;
     }
@@ -3306,6 +3497,28 @@ export function RunDetail() {
   const [importSelectedId, setImportSelectedId] = useState<string>("");
   const [importSaveMode, setImportSaveMode] = useState<"new_version" | "replace">("new_version");
   const [importName, setImportName] = useState("");
+
+  // Data sync dialog
+  const [showSyncDialog, setShowSyncDialog] = useState(false);
+  const [syncMode, setSyncMode] = useState<"own_metadata" | "cross_sensor">("own_metadata");
+  const [syncSourceRunId, setSyncSourceRunId] = useState<string>("");
+  const [syncMaxExtrapolationSec, setSyncMaxExtrapolationSec] = useState<number>(30);
+
+  const { data: syncSources } = useQuery<{
+    run_id: string; pipeline_name: string; pipeline_type: string;
+    date: string; experiment: string; location: string; population: string;
+    platform: string; sensor: string; gps_record_count: number;
+  }[]>({
+    queryKey: ["available-sync-sources", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/available-sync-sources`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: showSyncDialog,
+  });
 
   const { data: uploadedOrthosList } = useQuery<{
     id: string; experiment: string; location: string; population: string;
@@ -3551,16 +3764,16 @@ export function RunDetail() {
           )}
         </div>
 
-        {/* Auto data-sync progress banner */}
+        {/* Data sync progress banner */}
         {(pipelineType === "aerial" || pipelineType === "ground") &&
           isRunning &&
           run.current_step === "data_sync" && (
             <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
               <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-500" />
               <div className="flex-1">
-                <span className="font-medium">Preparing data…</span>
+                <span className="font-medium">Running data sync…</span>
                 <span className="text-muted-foreground ml-2">
-                  Extracting GPS from images and syncing with platform log.
+                  Syncing image GPS coordinates.
                 </span>
               </div>
               {lastProgress !== null && (
@@ -3568,6 +3781,129 @@ export function RunDetail() {
               )}
             </div>
           )}
+
+        {/* Data sync dialog */}
+        {showSyncDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-background w-full max-w-lg rounded-xl border p-6 shadow-xl">
+              <h2 className="mb-1 text-base font-semibold">Data Sync</h2>
+              <p className="text-muted-foreground mb-5 text-sm">
+                Choose how to assign GPS coordinates to your images.
+              </p>
+
+              {/* Option A */}
+              <label className="mb-3 flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors hover:bg-muted/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+                <input
+                  type="radio"
+                  name="syncMode"
+                  value="own_metadata"
+                  checked={syncMode === "own_metadata"}
+                  onChange={() => setSyncMode("own_metadata")}
+                  className="accent-primary mt-0.5"
+                />
+                <div>
+                  <p className="text-sm font-medium">Use own metadata</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Extract GPS from each image's own EXIF data. If ArduPilot logs
+                    are present in Metadata/, they will be used to refine positions.
+                  </p>
+                </div>
+              </label>
+
+              {/* Option B */}
+              <label className="mb-1 flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors hover:bg-muted/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+                <input
+                  type="radio"
+                  name="syncMode"
+                  value="cross_sensor"
+                  checked={syncMode === "cross_sensor"}
+                  onChange={() => setSyncMode("cross_sensor")}
+                  className="accent-primary mt-0.5"
+                  disabled={!syncSources || syncSources.length === 0}
+                />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${(!syncSources || syncSources.length === 0) ? "text-muted-foreground" : ""}`}>
+                    Sync from another sensor
+                    {(!syncSources || syncSources.length === 0) && (
+                      <span className="text-muted-foreground ml-2 text-xs font-normal">(no compatible sources available)</span>
+                    )}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Interpolate GPS positions from a different sensor's synced data using
+                    image capture timestamps. Positions are linearly interpolated — no images
+                    are dropped.
+                  </p>
+                  {syncMode === "cross_sensor" && syncSources && syncSources.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <select
+                        className="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
+                        value={syncSourceRunId}
+                        onChange={(e) => setSyncSourceRunId(e.target.value)}
+                      >
+                        <option value="">— Select a source run —</option>
+                        {syncSources.map((s) => (
+                          <option key={s.run_id} value={s.run_id}>
+                            {s.date} · {s.platform} / {s.sensor} · {s.experiment} ({s.gps_record_count} GPS records)
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-2">
+                        <label className="text-muted-foreground whitespace-nowrap text-xs">
+                          Out-of-range threshold
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={3600}
+                          step={5}
+                          value={syncMaxExtrapolationSec}
+                          onChange={(e) => setSyncMaxExtrapolationSec(Number(e.target.value))}
+                          className="border-input bg-background w-20 rounded-md border px-2 py-1 text-sm"
+                        />
+                        <span className="text-muted-foreground text-xs">seconds</span>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        Images within this window of the reference coverage boundary are clamped to the nearest GPS position. Images beyond it fall back to their own EXIF GPS.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </label>
+
+              {/* Warning for cross-sensor */}
+              {syncMode === "cross_sensor" && (
+                <div className="mb-4 mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  ⚠ Cross-sensor sync works best when both sensors are mounted on the same
+                  platform and were capturing data during the same pass. If capture rates differ
+                  significantly, interpolated positions may be less accurate near the boundaries
+                  of the reference sensor's coverage.
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="border-input bg-background hover:bg-muted rounded-md border px-4 py-1.5 text-sm"
+                  onClick={() => setShowSyncDialog(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-4 py-1.5 text-sm disabled:opacity-50"
+                  disabled={
+                    isRunning ||
+                    executeMutation.isPending ||
+                    (syncMode === "cross_sensor" && !syncSourceRunId)
+                  }
+                  onClick={handleStartSync}
+                >
+                  Start Sync
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Aerial: uploaded orthomosaic detected — offer to skip ODM */}
         {pipelineType === "aerial" &&
@@ -3682,8 +4018,24 @@ export function RunDetail() {
                   isStopping={stopMutation.isPending}
                   isStarting={executingStep === step.key}
                   warning={warning}
+                  hideDefaultButton={step.key === "data_sync"}
                   extraButtons={
-                    step.key === "orthomosaic" && pipelineType === "aerial" ? (
+                    step.key === "data_sync" ? (
+                      <Button
+                        variant={run.steps_completed?.data_sync ? "outline" : "default"}
+                        size="sm"
+                        disabled={isExecuting || isRunning}
+                        onClick={() => {
+                          setSyncMode("own_metadata");
+                          setSyncSourceRunId("");
+                          setSyncMaxExtrapolationSec(30);
+                          setShowSyncDialog(true);
+                        }}
+                      >
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        {run.steps_completed?.data_sync ? "Re-run" : "Run Step"}
+                      </Button>
+                    ) : step.key === "orthomosaic" && pipelineType === "aerial" ? (
                       <Button
                         variant="outline"
                         size="sm"
@@ -3730,6 +4082,15 @@ export function RunDetail() {
                             deleteTraitRecordMutation.mutate(id)
                           }
                           isDeleting={deleteTraitRecordMutation.isPending}
+                        />
+                      );
+                    }
+                    if (step.key === "plot_marking" && pipelineType === "ground") {
+                      return (
+                        <PlotMarkingVersionsPanel
+                          runId={runId}
+                          onDelete={(v) => deletePlotMarkingMutation.mutate(v)}
+                          isDeleting={deletePlotMarkingMutation.isPending}
                         />
                       );
                     }
@@ -3843,22 +4204,66 @@ export function RunDetail() {
         </details>
       </div>
 
-      {/* Stitching name prompt dialog */}
+      {/* Stitching name + config confirmation dialog */}
       <Dialog
         open={showStitchNameDialog}
         onOpenChange={setShowStitchNameDialog}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Name this stitching run</DialogTitle>
+            <DialogTitle>Confirm stitching parameters</DialogTitle>
             <DialogDescription>
-              Optionally give this run a name so you can identify it later. You
-              can rename it any time.
+              Review the configuration below before starting. You can update
+              these in Pipeline Settings any time.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-2">
+
+          {/* Config summary */}
+          {(() => {
+            const cfg = (pipeline?.config ?? {}) as Record<string, any>;
+            const p = cfg.agrowstitch_params ?? {};
+            const platform: string = cfg.platform ?? "custom";
+            const rows: { label: string; value: string }[] = [
+              { label: "Platform", value: platform.charAt(0).toUpperCase() + platform.slice(1) },
+              { label: "Device", value: cfg.device === "multiprocessing" ? `Multiprocessing${cfg.num_cpu > 0 ? ` (${cfg.num_cpu})` : ""}` : (cfg.device ?? "cpu").toUpperCase() },
+              { label: "Forward limit", value: String(p.forward_limit ?? "—") },
+              { label: "Alignment tolerance", value: String(p.max_reprojection_error ?? "—") },
+              { label: "Edge crop (L/R/T/B)", value: `${p.mask_left ?? 0} / ${p.mask_right ?? 0} / ${p.mask_top ?? 0} / ${p.mask_bottom ?? 0} px` },
+              { label: "Batch size", value: String(p.batch_size ?? "—") },
+              { label: "Min inliers", value: String(p.min_inliers ?? "—") },
+            ];
+            return (
+              <div className="bg-muted rounded-md px-3 py-2 text-xs space-y-1">
+                {rows.map(({ label, value }) => (
+                  <div key={label} className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="font-mono font-medium text-right">{value}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {plotMarkingVersions && plotMarkingVersions.length >= 1 && (
+            <div className="pt-1">
+              <Label className="text-sm">Plot marking version</Label>
+              <select
+                value={stitchPlotMarkingVersion ?? ""}
+                onChange={(e) => setStitchPlotMarkingVersion(Number(e.target.value))}
+                className="mt-1 w-full border-input bg-background rounded border px-2 py-1.5 text-sm focus:outline-none"
+              >
+                {plotMarkingVersions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.name ? `${v.name} (v${v.version})` : `Version ${v.version}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="pt-1">
             <Label htmlFor="stitch-name" className="text-sm">
-              Name (optional)
+              Run name (optional)
             </Label>
             <Input
               id="stitch-name"
@@ -3877,7 +4282,7 @@ export function RunDetail() {
             >
               Cancel
             </Button>
-            <Button onClick={startStitchWithName}>Start</Button>
+            <Button onClick={startStitchWithName}>Start stitching</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

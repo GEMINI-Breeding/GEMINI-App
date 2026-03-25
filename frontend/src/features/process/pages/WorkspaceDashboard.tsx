@@ -233,7 +233,7 @@ export function WorkspaceDashboard() {
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl">Process</h2>
+            <h2 className="text-2xl font-semibold">Process</h2>
             <p className="text-muted-foreground text-sm">
               Create and manage your phenotyping projects
             </p>

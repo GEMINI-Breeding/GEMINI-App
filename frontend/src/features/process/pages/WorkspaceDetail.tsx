@@ -177,7 +177,7 @@ function NewRunDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>New Run — {pipeline.name}</DialogTitle>
           <DialogDescription>
@@ -223,13 +223,13 @@ function NewRunDialog({
 
               {/* Table */}
               <div className="border rounded-md overflow-hidden">
-                <div className="max-h-64 overflow-y-auto">
-                  <table className="w-full text-sm">
+                <div className="max-h-64 overflow-auto">
+                  <table className="w-full text-xs">
                     <thead className="bg-muted/60 sticky top-0 z-10">
                       <tr>
-                        <th className="px-2 py-2 w-6" />
-                        {["Experiment", "Location", "Population", "Date", "Platform", "Files"].map((h) => (
-                          <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                        <th className="px-2 py-1.5 w-5" />
+                        {["Experiment", "Location", "Population", "Date", "Platform", "Sensor", "Files"].map((h) => (
+                          <th key={h} className="px-2 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                             {h}
                           </th>
                         ))}
@@ -238,7 +238,7 @@ function NewRunDialog({
                     <tbody>
                       {displayUploads.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground text-sm">
+                          <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
                             No datasets match the filters.
                           </td>
                         </tr>
@@ -255,7 +255,7 @@ function NewRunDialog({
                                   : "hover:bg-muted/50"
                               }`}
                             >
-                              <td className="px-2 py-2">
+                              <td className="px-2 py-1.5">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <span
@@ -269,12 +269,13 @@ function NewRunDialog({
                                   </TooltipContent>
                                 </Tooltip>
                               </td>
-                              <td className="px-3 py-2 font-medium">{u.experiment}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{u.location}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{u.population}</td>
-                              <td className="px-3 py-2 tabular-nums">{u.date}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{u.platform ?? "—"}</td>
-                              <td className="px-3 py-2 tabular-nums text-muted-foreground">{u.file_count}</td>
+                              <td className="px-2 py-1.5 font-medium max-w-[120px] truncate">{u.experiment}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground max-w-[100px] truncate">{u.location}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground max-w-[100px] truncate">{u.population}</td>
+                              <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">{u.date}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{u.platform ?? "—"}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{u.sensor ?? "—"}</td>
+                              <td className="px-2 py-1.5 tabular-nums text-muted-foreground text-right">{u.file_count}</td>
                             </tr>
                           );
                         })
@@ -451,7 +452,7 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
                               </span>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {stepLabel[failedStep] ?? failedStep} failed. It is recommended to delete this run.
+                              {stepLabel[failedStep] ?? failedStep} failed. It is recommended to delete that failed run if possible.
                             </TooltipContent>
                           </Tooltip>
                         );
@@ -463,7 +464,7 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
                       </Badge>
                       <span className="text-sm font-medium">{run.date}</span>
                       <span className="text-muted-foreground text-sm">
-                        {run.experiment} / {run.location} / {run.population}
+                        {run.experiment} / {run.location} / {run.population} / {run.platform} / {run.sensor}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
@@ -624,7 +625,7 @@ export function WorkspaceDetail() {
 
         {/* Create new pipeline */}
         <div className="mb-8">
-          <h2 className="mb-1 text-lg font-medium">Create New Pipeline</h2>
+          <h2 className="mb-1 text-lg font-medium">Create a new pipeline</h2>
           <p className="text-muted-foreground mb-4 text-sm">
             Choose the type of sensing data you want to process
           </p>

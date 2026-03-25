@@ -868,6 +868,42 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | null>(null);
   const [mapInitialized, setMapInitialized] = useState(false);
   const [noFdWarningOpen, setNoFdWarningOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // ── Undo / redo history ──────────────────────────────────────────────────
+  const historyRef = useRef<GeoJSON.FeatureCollection[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  function pushHistory(fc: GeoJSON.FeatureCollection) {
+    // Discard any redo states beyond current position
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current.push(fc);
+    historyIndexRef.current = historyRef.current.length - 1;
+    setCanUndo(historyIndexRef.current > 0);
+    setCanRedo(false);
+  }
+
+  function undo() {
+    if (historyIndexRef.current <= 0) return;
+    historyIndexRef.current -= 1;
+    const fc = historyRef.current[historyIndexRef.current];
+    setPreviewGeoJson(fc);
+    setSelectedIndexes([]);
+    setCanUndo(historyIndexRef.current > 0);
+    setCanRedo(true);
+  }
+
+  function redo() {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current += 1;
+    const fc = historyRef.current[historyIndexRef.current];
+    setPreviewGeoJson(fc);
+    setSelectedIndexes([]);
+    setCanUndo(true);
+    setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
+  }
 
   // Fetch mosaic/orthomosaic info (serves as background + provides existing boundaries)
   const { data: orthoInfo, isLoading: orthoLoading } = useQuery<OrthoInfo>({
@@ -1181,6 +1217,47 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   // When set, the next gridOffset effect run is a boundary-load (not a drag) — skip recompute
   const skipGridRecomputeRef = useRef(false);
 
+  // Stable refs for keyboard shortcuts (avoid stale closures)
+  const interactionModeRef2 = useRef(interactionMode);
+  interactionModeRef2.current = interactionMode;
+  const previewGeoJsonRef = useRef(previewGeoJson);
+  previewGeoJsonRef.current = previewGeoJson;
+  const selectedIndexesRef2 = useRef(selectedIndexes);
+  selectedIndexesRef2.current = selectedIndexes;
+
+  // Keyboard shortcuts: S=select, M=move, A=select-all, C=clear, D=delete, Ctrl+Z=undo, Ctrl+Y/Ctrl+Shift+Z=redo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      // Don't fire shortcuts when typing in an input/textarea
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+        if (e.key === "z" && e.shiftKey)  { e.preventDefault(); redo(); return; }
+        if (e.key === "y")                { e.preventDefault(); redo(); return; }
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case "s": setInteractionMode("select"); break;
+        case "m": setInteractionMode("move"); break;
+        case "a":
+          if (previewGeoJsonRef.current) {
+            setSelectedIndexes(Array.from({ length: previewGeoJsonRef.current.features.length }, (_, i) => i));
+          }
+          break;
+        case "c": setSelectedIndexes([]); break;
+        case "d":
+          if (selectedIndexesRef2.current.length > 0) setShowDeleteConfirm(true);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Live recompute ONLY when dragging the grid (gridOffset changes).
   // Boundary / option changes require the user to click "Generate Grid".
   useEffect(() => {
@@ -1231,6 +1308,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     setSelectedIndexes([]);
     setGridGenerated(true);
     setGridVisible(true);
+    pushHistory(fc);
   }
 
   // Show/hide plot grid layer + switch Geoman edit target
@@ -1673,14 +1751,22 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             merge accession data.
           </span>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowUploadDialog(true)}
-        >
-          <Upload className="mr-1 h-3 w-3" />
-          {fdInfo?.available ? "Replace" : "Upload"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
+            ↩
+          </Button>
+          <Button variant="ghost" size="sm" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
+            ↪
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowUploadDialog(true)}
+          >
+            <Upload className="mr-1 h-3 w-3" />
+            {fdInfo?.available ? "Replace" : "Upload"}
+          </Button>
+        </div>
       </div>
 
       <ol className="bg-muted/40 list-inside list-decimal space-y-1.5 rounded-md border px-4 py-3 text-sm">
@@ -1731,11 +1817,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             }
             onClearSelection={() => setSelectedIndexes([])}
             onDeleteSelected={() => {
-              if (!previewGeoJson) return;
-              const selSet = new Set(selectedIndexes);
-              const remaining = previewGeoJson.features.filter((_, i) => !selSet.has(i));
-              setPreviewGeoJson({ ...previewGeoJson, features: remaining });
-              setSelectedIndexes([]);
+              if (selectedIndexes.length > 0) setShowDeleteConfirm(true);
             }}
             featureCount={featureCount}
             selectedCount={selectedIndexes.length}
@@ -1836,15 +1918,58 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         open={showUploadDialog}
         onClose={() => setShowUploadDialog(false)}
         runId={runId}
-        onSaved={(info) => {
-          refetchFd();
-          setGridOptions((prev) => ({
-            ...prev,
-            rows: info.row_count || prev.rows,
-            columns: info.col_count || prev.columns,
-          }));
+        onSaved={async (info) => {
+          const result = await refetchFd();
+          const newRows = (result.data as FieldDesignInfo | undefined)?.rows;
+          const newOpts = {
+            ...gridOptions,
+            rows: info.row_count || gridOptions.rows,
+            columns: info.col_count || gridOptions.columns,
+          };
+          setGridOptions(newOpts);
+          // Merge field design into existing grid if one has already been generated
+          if (gridGenerated && popBoundary) {
+            const fc = computeGrid(popBoundary, newOpts, gridOffset, newRows);
+            setPreviewGeoJson(fc);
+            setSelectedIndexes([]);
+            pushHistory(fc);
+          }
         }}
       />
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={(o) => !o && setShowDeleteConfirm(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete selected plots?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove{" "}
+              <strong>{selectedIndexes.length} plot{selectedIndexes.length !== 1 ? "s" : ""}</strong>{" "}
+              from the grid. Use undo (Ctrl+Z) to restore them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!previewGeoJson) { setShowDeleteConfirm(false); return; }
+                const selSet = new Set(selectedIndexes);
+                const remaining = previewGeoJson.features.filter((_, i) => !selSet.has(i));
+                const fc = { ...previewGeoJson, features: remaining };
+                setPreviewGeoJson(fc);
+                setSelectedIndexes([]);
+                pushHistory(fc);
+                setShowDeleteConfirm(false);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* No field design warning */}
       <Dialog open={noFdWarningOpen} onOpenChange={(o) => !o && setNoFdWarningOpen(false)}>

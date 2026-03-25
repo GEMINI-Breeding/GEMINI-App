@@ -17,8 +17,33 @@ engine = create_engine(
 
 
 def create_db_and_tables() -> None:
-    """Create all database tables."""
+    """Create all database tables and apply incremental column migrations."""
     SQLModel.metadata.create_all(engine)
+    _run_column_migrations()
+
+
+def _run_column_migrations() -> None:
+    """
+    Add new columns to existing tables that were created before the column was
+    introduced.  SQLite does not support DROP/ALTER beyond ADD COLUMN, so we
+    only ever add here.  Safe to call on every startup — each statement is
+    guarded by a check for the column's existence.
+    """
+    migrations = [
+        # (table_name, column_name, column_definition)
+        ("fileupload", "msgs_synced_path", "VARCHAR(1000)"),
+    ]
+    with engine.connect() as conn:
+        for table, col, definition in migrations:
+            # Read current columns via PRAGMA
+            cols = {row[1] for row in conn.execute(
+                __import__("sqlalchemy").text(f"PRAGMA table_info({table})")
+            )}
+            if col not in cols:
+                conn.execute(__import__("sqlalchemy").text(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
+                ))
+                conn.commit()
 
 
 def init_db(session: Session) -> None:

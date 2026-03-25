@@ -41,6 +41,16 @@ import {
   Table2,
 } from "lucide-react";
 import { analyzeApi, versionLabel, type TraitRecord } from "../api";
+import {
+  COL_KEY_SET,
+  ROW_KEY_SET,
+  deduplicateKeys,
+  orderColumns,
+  lookupProperty,
+  matchesTextFilter,
+  PLOT_FILTER_FIELDS,
+  type PlotFilterKey,
+} from "../utils/traitAliases";
 import { TraitMap } from "../components/TraitMap";
 import { MetricSelector } from "../components/MetricSelector";
 import { Badge } from "@/components/ui/badge";
@@ -138,48 +148,9 @@ function getPlotId(
   );
 }
 
-/**
- * Deduplicate column keys case-insensitively (keep first occurrence).
- * Prevents showing "col" and "column" as two separate columns.
- */
-function deduplicateKeys(keys: string[]): string[] {
-  const seen = new Set<string>();
-  return keys.filter((k) => {
-    const lower = k.toLowerCase();
-    if (seen.has(lower)) return false;
-    seen.add(lower);
-    return true;
-  });
-}
-
-/** Keys that represent the "column" spatial position. */
-const COL_KEY_SET = new Set(["col", "column", "bed"]);
-/** Keys that represent the "row" spatial position. */
-const ROW_KEY_SET = new Set(["row", "tier"]);
-
-/**
- * Order columns so COL/ROW come first, then other metadata, then numeric traits.
- * Also deduplicates case-insensitively.
- */
-function orderColumns(
-  allKeys: string[],
-  metaCols: string[],
-  numCols: string[]
-): string[] {
-  const deduped = deduplicateKeys(allKeys);
-  const colKey = deduped.find((k) => COL_KEY_SET.has(k.toLowerCase()));
-  const rowKey = deduped.find((k) => ROW_KEY_SET.has(k.toLowerCase()));
-  const priority = [colKey, rowKey].filter(Boolean) as string[];
-
-  const remainingMeta = metaCols.filter(
-    (k) =>
-      !priority.includes(k) &&
-      deduped.includes(k) // respect deduplication
-  );
-  const remainingNum = numCols.filter((k) => deduped.includes(k));
-
-  return [...priority, ...remainingMeta, ...remainingNum].filter((c) => c !== "");
-}
+// COL_KEY_SET, ROW_KEY_SET, deduplicateKeys, orderColumns, lookupProperty,
+// matchesTextFilter, PLOT_FILTER_FIELDS, PlotFilterKey — all imported from
+// ../utils/traitAliases
 
 // ── Version badge ──────────────────────────────────────────────────────────────
 
@@ -268,8 +239,8 @@ function PlotViewDialog({
           </div>
 
           {/* Stats */}
-          {properties.accession != null && (
-            <p className="text-sm text-muted-foreground">{String(properties.accession)}</p>
+          {lookupProperty(properties, "accession") != null && (
+            <p className="text-sm text-muted-foreground">{String(lookupProperty(properties, "accession"))}</p>
           )}
           <div className="space-y-1">
             {metricColumns.map((col) => {
@@ -293,15 +264,7 @@ function PlotViewDialog({
 
 // ── Expandable per-plot table ──────────────────────────────────────────────────
 
-const PLOT_FILTER_FIELDS = [
-  "col",
-  "plot",
-  "accession",
-  "location",
-  "crop",
-  "rep",
-] as const;
-type PlotFilterKey = (typeof PLOT_FILTER_FIELDS)[number];
+// PLOT_FILTER_FIELDS, PlotFilterKey, matchesTextFilter — imported from ../utils/traitAliases
 
 interface KeptPlot {
   recordId: string;
@@ -309,25 +272,6 @@ interface KeptPlot {
   properties: Record<string, unknown>;
   metricColumns: string[];
   recordLabel: string;
-}
-
-function matchesTextFilter(
-  properties: Record<string, unknown>,
-  key: PlotFilterKey,
-  val: string
-): boolean {
-  if (!val.trim()) return true;
-  const v = val.toLowerCase();
-  const titleKey = key.charAt(0).toUpperCase() + key.slice(1);
-  const candidates = [
-    properties[key],
-    properties[key.toUpperCase()],
-    properties[titleKey],
-    key === "plot" ? properties.plot_id ?? properties.plot : null,
-  ];
-  return candidates.some(
-    (c) => c != null && String(c).toLowerCase().includes(v)
-  );
 }
 
 function ExpandedPlotTable({ recordId }: { recordId: string }) {
@@ -476,11 +420,12 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
               return (
                 <TableRow key={i} className="text-xs">
                   {cols.map((c) => {
-                    const v = f.properties?.[c];
+                    const v = lookupProperty(f.properties ?? {}, c);
+                    const isPos = COL_KEY_SET.has(c.toLowerCase()) || ROW_KEY_SET.has(c.toLowerCase());
                     return (
                       <TableCell key={c} className="px-3 py-1 font-mono">
                         {typeof v === "number"
-                          ? v.toFixed(3)
+                          ? isPos ? String(Math.round(v)) : v.toFixed(3)
                           : String(v ?? "—")}
                       </TableCell>
                     );
@@ -801,9 +746,9 @@ function PlotImageCard({
       <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold truncate">Plot {plotId}</p>
-          {properties.accession != null && (
+          {lookupProperty(properties, "accession") != null && (
             <p className="text-xs text-muted-foreground truncate">
-              {String(properties.accession)}
+              {String(lookupProperty(properties, "accession"))}
             </p>
           )}
         </div>
@@ -1085,16 +1030,9 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
     for (const f of geojsonData.geojson.features) {
       const p = f.properties ?? {};
       for (const key of PLOT_FILTER_FIELDS) {
-        const titleKey = key.charAt(0).toUpperCase() + key.slice(1);
-        const candidates = [
-          p[key],
-          p[key.toUpperCase()],
-          p[titleKey],
-          key === "plot" ? (p.plot_id ?? p.plot) : null,
-        ];
-        for (const c of candidates) {
-          if (c != null && String(c).trim()) sets[key].add(String(c));
-        }
+        // lookupProperty covers COL/ROW aliases; fall back to plot_id for "plot"
+        const val = lookupProperty(p, key) ?? (key === "plot" ? (p.plot_id ?? p.plot) : undefined);
+        if (val != null && String(val).trim()) sets[key].add(String(val));
       }
     }
     const result = { ...empty };

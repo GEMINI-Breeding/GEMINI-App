@@ -24,12 +24,11 @@ Directory layout
       Metadata/    ← platform logs (.bin/.log/.tlog) uploaded here
   Intermediate/
     {workspace_name}/
-      {year}/{location}/{population}/               ← shared within workspace (any experiment)
+      {year}/{experiment}/{location}/{population}/  ← workspace+experiment-scoped artifacts
         Plot-Boundary-WGS84.geojson
         Plot-Boundary-WGS84_v{N}.geojson
         Pop-Boundary-WGS84.geojson
         field_design.csv
-      {year}/{experiment}/{location}/{population}/  ← workspace+experiment-scoped artifacts
         plot_borders.csv
         plot_borders_v{N}.csv
         stitch_mask.json
@@ -104,11 +103,6 @@ class RunPaths:
         return Path(self.experiment) / self.location / self.population
 
     @property
-    def _loc_pop_seg(self) -> Path:
-        """location/population segment (no experiment — used for workspace-scoped shared paths)."""
-        return Path(self.location) / self.population
-
-    @property
     def _run_seg(self) -> Path:
         """date/platform/sensor segment."""
         return Path(self.date) / self.platform / self.sensor
@@ -138,14 +132,14 @@ class RunPaths:
 
     @property
     def intermediate_shared_pop(self) -> Path:
-        """Intermediate/{workspace}/{year}/{location}/{population}/
+        """Intermediate/{workspace}/{year}/{experiment}/{location}/{population}/
 
-        Shared across all runs and pipeline types within the same workspace,
-        regardless of experiment name.  Plot boundaries, pop boundary, and
-        field design live here so that different-dated or differently-named
-        runs for the same physical field automatically share them.
+        Shared across all runs and pipeline types within the same workspace
+        and experiment.  Plot boundaries, pop boundary, and field design live
+        here so that different-dated runs for the same physical field
+        automatically share them within an experiment.
         """
-        return self.data_root / "Intermediate" / self.workspace_name / self._year / self._loc_pop_seg
+        return self.data_root / "Intermediate" / self.workspace_name / self._year / self._pop_seg
 
     # ── Intermediate: year-level (shared across runs within a year) ────────
 

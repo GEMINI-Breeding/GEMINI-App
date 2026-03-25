@@ -200,12 +200,27 @@ def delete_file(
     if not current_user.is_superuser and file.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
-    # Remove files from disk
+    # Remove files from disk — only delete the specific upload directory.
+    # Safety check: abort disk deletion if any OTHER upload's storage_path lives
+    # inside this directory (would silently wipe sibling datasets).
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
     dir_path = Path(data_root) / file.storage_path
     if dir_path.exists() and dir_path.is_dir():
-        shutil.rmtree(dir_path)
-        logger.info(f"Deleted directory: {dir_path}")
+        from sqlmodel import select as _sel
+        from app.models import FileUpload as _FU
+        other_uploads = session.exec(_sel(_FU).where(_FU.id != id)).all()
+        protected_by = [
+            o.storage_path for o in other_uploads
+            if (Path(data_root) / o.storage_path).as_posix().startswith(dir_path.as_posix() + "/")
+        ]
+        if protected_by:
+            logger.warning(
+                "Skipping disk deletion of %s — it contains storage paths for other uploads: %s",
+                dir_path, protected_by,
+            )
+        else:
+            shutil.rmtree(dir_path)
+            logger.info(f"Deleted directory: {dir_path}")
 
     delete_file_upload(session=session, id=id)
     return Message(message="File deleted successfully")
@@ -686,6 +701,21 @@ def _copy_local_stream(
     )
     final_count = image_count if image_count > 0 else len(uploaded)
 
+    # Record the path to any msgs_synced.csv associated with this upload so that
+    # Data Sync can find it without scanning.  Covers:
+    #   • Farm-ng Binary File — bundled GPS CSV extracted alongside images
+    #   • Synced Metadata     — user-uploaded GPS CSV saved as Metadata/msgs_synced.csv
+    bundled_gps_rel: str | None = None
+    data_root_path = Path(data_root)
+    if body.data_type == "Farm-ng Binary File":
+        for candidate in dest_dir.rglob("msgs_synced.csv"):
+            bundled_gps_rel = candidate.relative_to(data_root_path).as_posix()
+            break
+    elif body.data_type == "Synced Metadata":
+        synced_candidate = dest_dir / "msgs_synced.csv"
+        if synced_candidate.exists():
+            bundled_gps_rel = synced_candidate.relative_to(data_root_path).as_posix()
+
     # Update the FileUpload record with final status
     db_file = get_file_upload(session=session, id=file_upload_id)
     if db_file:
@@ -693,7 +723,9 @@ def _copy_local_stream(
             session=session,
             db_file=db_file,
             file_in=FileUploadUpdate(
-                status="completed", file_count=final_count
+                status="completed",
+                file_count=final_count,
+                msgs_synced_path=bundled_gps_rel,
             ),
         )
 
@@ -736,6 +768,43 @@ def save_msgs_synced(
     rows = list(_csv.DictReader(_io.StringIO(body.csv_text)))
     logger.info("Saved user msgs_synced.csv → %s (%d rows)", target, len(rows))
     return {"status": "saved", "row_count": len(rows)}
+
+
+class CheckExistingRequest(BaseModel):
+    target_root_dir: str
+    file_names: list[str]
+    data_type: str = ""
+
+
+@router.post("/check-existing")
+def check_existing_files(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: CheckExistingRequest,
+) -> dict[str, list[str]]:
+    """
+    Return which of the provided filenames already exist in the destination directory.
+    Used by the frontend to warn the user before uploading.
+    """
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    dest_dir = Path(data_root) / body.target_root_dir.replace("\x00", "")
+    if not dest_dir.exists():
+        return {"existing": []}
+
+    # Farm-ng .bin files are deleted after extraction; check for extracted images instead.
+    if body.data_type == "Farm-ng Binary File":
+        image_exts = {".jpg", ".jpeg", ".png"}
+        has_images = any(
+            f.suffix.lower() in image_exts
+            for f in dest_dir.rglob("*") if f.is_file()
+        )
+        return {"existing": body.file_names if has_images else []}
+
+    existing = [
+        name for name in body.file_names
+        if (dest_dir / name).exists()
+    ]
+    return {"existing": existing}
 
 
 @router.post("/copy-local-stream")

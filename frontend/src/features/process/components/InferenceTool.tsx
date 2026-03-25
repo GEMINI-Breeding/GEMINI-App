@@ -45,6 +45,10 @@ interface Prediction {
 interface ImageInfo {
   name: string
   path: string
+  plot?: string
+  row?: string
+  col?: string
+  accession?: string
 }
 
 export interface ModelConfig {
@@ -386,6 +390,11 @@ export function InferenceTool({
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined)
   // 0–100 integer threshold applied client-side; API always returns at confidence ≥ 0.1
   const [confThreshold, setConfThreshold] = useState(50)
+  // Plot metadata filters
+  const [filterCol, setFilterCol] = useState("")
+  const [filterRow, setFilterRow] = useState("")
+  const [filterAccession, setFilterAccession] = useState("")
+  const [filterPlot, setFilterPlot] = useState("")
   const [hiddenClasses, setHiddenClasses] = useState<Set<string>>(new Set())
   const [showMasks, setShowMasks] = useState(true)
   // Traits output state
@@ -499,11 +508,25 @@ export function InferenceTool({
   // All unique classes across loaded predictions
   const allClasses = [...new Set(predictions.map((p) => p.class))].sort()
 
+  // Check if any plot metadata exists
+  const hasPlotMeta = images.some((im) => im.row || im.col || im.accession || im.plot)
+
+  // Apply metadata filters
+  const filteredImages = hasPlotMeta ? images.filter((im) => {
+    if (filterCol && !(im.col ?? "").toLowerCase().includes(filterCol.toLowerCase())) return false
+    if (filterRow && !(im.row ?? "").toLowerCase().includes(filterRow.toLowerCase())) return false
+    if (filterAccession && !(im.accession ?? "").toLowerCase().includes(filterAccession.toLowerCase())) return false
+    if (filterPlot && !(im.plot ?? im.name).toLowerCase().includes(filterPlot.toLowerCase())) return false
+    return true
+  }) : images
+
   // Reset viewer & filters when model changes
   useEffect(() => { setImageIdx(0) }, [images.length, activeModel])
   useEffect(() => { setHiddenClasses(new Set()); setShowMasks(true) }, [currentModelLabel])
+  // Reset index when filter narrows results
+  useEffect(() => { setImageIdx(0) }, [filteredImages.length])
 
-  const currentImage = images[imageIdx] ?? null
+  const currentImage = filteredImages[imageIdx] ?? null
 
   // Predictions visible given current filters
   const visiblePreds = predictions.filter(
@@ -530,6 +553,9 @@ export function InferenceTool({
     })
   }
 
+  const filteredImagesLenRef = useRef(0)
+  filteredImagesLenRef.current = filteredImages.length
+
   // Keyboard navigation
   useEffect(() => {
     if (!inferenceComplete || isRunning || images.length === 0) return
@@ -537,7 +563,7 @@ export function InferenceTool({
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
       if (e.key === "ArrowLeft") setImageIdx((i) => Math.max(0, i - 1))
-      if (e.key === "ArrowRight") setImageIdx((i) => Math.min(images.length - 1, i + 1))
+      if (e.key === "ArrowRight") setImageIdx((i) => Math.min(filteredImagesLenRef.current - 1, i + 1))
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -740,12 +766,15 @@ export function InferenceTool({
                         <ChevronLeft className="w-3.5 h-3.5" />
                       </Button>
                       <span className="text-xs text-muted-foreground font-mono">
-                        {imageIdx + 1} / {images.length}
+                        {imageIdx + 1} / {filteredImages.length}
+                        {filteredImages.length !== images.length && (
+                          <span className="ml-1 text-muted-foreground/60">(of {images.length})</span>
+                        )}
                       </span>
                       <Button
                         variant="outline" size="icon" className="h-7 w-7"
-                        onClick={() => setImageIdx((i) => Math.min(images.length - 1, i + 1))}
-                        disabled={imageIdx === images.length - 1}
+                        onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
+                        disabled={imageIdx === filteredImages.length - 1}
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
                       </Button>
@@ -756,11 +785,11 @@ export function InferenceTool({
                       className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0 max-w-xs"
                       value={currentImage?.name ?? ""}
                       onChange={(e) => {
-                        const idx = images.findIndex((im) => im.name === e.target.value)
+                        const idx = filteredImages.findIndex((im) => im.name === e.target.value)
                         if (idx >= 0) setImageIdx(idx)
                       }}
                     >
-                      {images.map((im) => (
+                      {filteredImages.map((im) => (
                         <option key={im.name} value={im.name}>
                           {im.name} ({(predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length)} det)
                         </option>
@@ -782,6 +811,63 @@ export function InferenceTool({
 
                 {/* ── Right: controls panel ── */}
                 <div className="space-y-5 rounded-lg border p-4">
+                  {/* Plot metadata filters (only shown when metadata exists) */}
+                  {hasPlotMeta && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold">Filter Plots</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div>
+                          <label className="text-xs text-muted-foreground">Column</label>
+                          <input
+                            type="text"
+                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                            placeholder="e.g. 1"
+                            value={filterCol}
+                            onChange={(e) => setFilterCol(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Row</label>
+                          <input
+                            type="text"
+                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                            placeholder="e.g. 3"
+                            value={filterRow}
+                            onChange={(e) => setFilterRow(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Accession</label>
+                          <input
+                            type="text"
+                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                            placeholder="Search…"
+                            value={filterAccession}
+                            onChange={(e) => setFilterAccession(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Plot</label>
+                          <input
+                            type="text"
+                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                            placeholder="e.g. 101"
+                            value={filterPlot}
+                            onChange={(e) => setFilterPlot(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      {(filterCol || filterRow || filterAccession || filterPlot) && (
+                        <button
+                          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                          onClick={() => { setFilterCol(""); setFilterRow(""); setFilterAccession(""); setFilterPlot("") }}
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <div>
                     <p className="text-sm font-semibold mb-3">Detection Controls</p>
 
@@ -871,11 +957,16 @@ export function InferenceTool({
                       <p className="text-xs font-semibold mb-1">All plots</p>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Total detections</span>
-                        <span className="font-mono">{visiblePreds.length}</span>
+                        <span className="font-mono">
+                          {visiblePreds.filter((p) => filteredImages.some((im) => im.name === p.image)).length}
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Plots</span>
-                        <span className="font-mono">{images.length}</span>
+                        <span className="text-muted-foreground">Plots shown</span>
+                        <span className="font-mono">
+                          {filteredImages.length}
+                          {filteredImages.length !== images.length && <span className="text-muted-foreground/60"> / {images.length}</span>}
+                        </span>
                       </div>
                     </div>
                   </div>

@@ -33,7 +33,6 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
-import piexif
 from PIL import Image
 from scipy.spatial import KDTree
 from sqlmodel import Session
@@ -46,9 +45,11 @@ logger = logging.getLogger(__name__)
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 _LOG_EXTS = {".bin", ".log", ".tlog"}
 
-# Column name aliases for user-provided msgs_synced.csv
+# Column name aliases for user-provided msgs_synced.csv.
+# Farm-ng bundled files use slash-prefixed column names like "/top/rgb_file".
 _COL_ALIASES: dict[str, list[str]] = {
-    "image_path": ["image_path", "image", "filename", "file", "name", "path"],
+    "image_path": ["image_path", "image", "filename", "file", "name", "path",
+                   "/top/rgb_file", "/top/rgb", "/left/rgb_file", "/right/rgb_file"],
     "timestamp":  ["timestamp", "unix_time", "unix_ts", "epoch", "posix", "ts"],
     "lat":        ["lat", "latitude"],
     "lon":        ["lon", "long", "longitude"],
@@ -89,6 +90,53 @@ def _get_paths(session: Session, run_id: uuid.UUID) -> RunPaths:
     return RunPaths.from_db(session=session, run=run, workspace=workspace)
 
 
+def _find_bundled_msgs_synced(
+    session: Session, run_id: uuid.UUID, paths: RunPaths
+) -> "Path | None":
+    """
+    Look up the FileUpload record for this run and return the absolute path to
+    the bundled msgs_synced.csv stored in msgs_synced_path, if any.
+
+    Falls back to scanning Raw/.../Images/**/Metadata/msgs_synced.csv so that
+    existing uploads that pre-date the msgs_synced_path column still work.
+    """
+    from app.models.pipeline import PipelineRun
+    from app.models.file_upload import FileUpload as _FU
+    from sqlmodel import select as _sel
+    from app.core.config import settings as _settings
+    from app.crud.app_settings import get_setting as _get_setting
+
+    run = session.get(PipelineRun, run_id)
+    if run is None:
+        return None
+
+    data_root = Path(_get_setting(session=session, key="data_root") or _settings.APP_DATA_ROOT)
+
+    # Check FileUpload record first
+    fu = session.exec(
+        _sel(_FU).where(
+            _FU.experiment == run.experiment,
+            _FU.location == run.location,
+            _FU.population == run.population,
+            _FU.date == run.date,
+            _FU.platform == run.platform,
+            _FU.sensor == run.sensor,
+            _FU.msgs_synced_path.isnot(None),  # type: ignore[attr-defined]
+        )
+    ).first()
+
+    if fu and fu.msgs_synced_path:
+        candidate = data_root / fu.msgs_synced_path
+        if candidate.exists():
+            return candidate
+
+    # Fallback: scan Raw upload dir for any Metadata/msgs_synced.csv
+    for candidate in paths.raw.rglob("Metadata/msgs_synced.csv"):
+        return candidate
+
+    return None
+
+
 def _find_image_dir(paths: RunPaths) -> Path:
     # Standard upload layout: Images/ subdir, then direct files in raw/
     for candidate in [paths.raw / "Images", paths.raw]:
@@ -106,11 +154,21 @@ def _find_image_dir(paths: RunPaths) -> Path:
 # ── EXIF extraction ────────────────────────────────────────────────────────────
 
 
-def _extract_exif(image_path: Path) -> dict[str, Any] | None:
+def _extract_exif(image_path: Path, rotate: bool = True) -> dict[str, Any] | None:
     """
     Open image, extract GPS + timestamp from EXIF, auto-rotate portrait images.
     Returns a dict row for msgs_synced.csv, or None on failure.
+
+    rotate=False disables all physical image rotation (useful for ground pipelines
+    where phone images with inconsistent EXIF tags cause display issues).
+
+    When saving rotated images, PIL's native EXIF object is used instead of piexif
+    so that the GPS IFD (coordinates + GPS timestamp) is preserved intact.
+    piexif.dump() can silently strip GPS rational types during re-serialization,
+    which causes subsequent data-sync runs to lose GPS entirely.
     """
+    _ORIENTATION_TAG = 0x0112  # EXIF tag 274
+
     try:
         img = Image.open(image_path)
     except Exception as exc:
@@ -120,21 +178,18 @@ def _extract_exif(image_path: Path) -> dict[str, Any] | None:
     width, height = img.size
     do_rotation = height > width
 
+    # Read EXIF via PIL's _getexif() — returns decoded Python values
     raw_exif = img._getexif() or {}  # type: ignore[attr-defined]
-    try:
-        exif_dict = piexif.load(str(image_path))
-    except Exception:
-        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
 
     latitude = longitude = altitude = None
     unix_ts: float | None = None
     time_string: str | None = None
-    exif_update = False
 
-    # Standard DateTime tags
+    # Standard DateTime tags (DateTimeOriginal, DateTimeDigitized, DateTime)
     for tag_id in [36867, 36868, 306]:
-        if raw_exif.get(tag_id):
-            time_string = raw_exif[tag_id]
+        val = raw_exif.get(tag_id)
+        if val:
+            time_string = val if isinstance(val, str) else val.decode("ascii", errors="replace")
             break
 
     # GPS IFD (tag 34853)
@@ -169,25 +224,47 @@ def _extract_exif(image_path: Path) -> dict[str, Any] | None:
                 time_string = datetime.fromtimestamp(unix_ts).strftime(
                     "%Y:%m:%d %H:%M:%S.%f %z"
                 )
-                # Update EXIF DateTime tags
-                exif_dict["0th"][piexif.ImageIFD.DateTime] = time_string
-                exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = time_string
-                exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = time_string
-                exif_update = True
             except Exception as exc:
                 logger.debug("GPS time parse error in %s: %s", image_path.name, exc)
 
-    # Save if we need to rotate or update EXIF
-    if do_rotation or exif_update:
-        try:
-            if do_rotation:
-                img = img.transpose(Image.ROTATE_270)
-                width, height = img.size
-                logger.info("Rotated portrait image: %s", image_path.name)
-            exif_bytes = piexif.dump(exif_dict)
-            img.save(str(image_path), exif=exif_bytes)
-        except Exception as exc:
-            logger.warning("Could not save updated image %s: %s", image_path.name, exc)
+    # Fallback: parse EXIF DateTime as UTC when GPS time tags are absent
+    if unix_ts is None and time_string:
+        for fmt in ("%Y:%m:%d %H:%M:%S", "%Y:%m:%d %H:%M:%S.%f %z"):
+            try:
+                dt = datetime.strptime(time_string.split("+")[0].strip(), fmt.split("%z")[0].strip())
+                unix_ts = dt.replace(tzinfo=timezone.utc).timestamp()
+                break
+            except ValueError:
+                continue
+
+    if rotate:
+        # Use PIL's native Exif object for saves — it round-trips all IFDs (including
+        # GPS) without the lossy re-serialization that piexif.dump() applies.
+        pil_exif = img.getexif()
+        exif_orientation = pil_exif.get(_ORIENTATION_TAG, 1)
+
+        if exif_orientation not in (None, 1):
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)   # physically correct orientation
+            pil_exif[_ORIENTATION_TAG] = 1       # mark pixels as canonical
+            width, height = img.size
+            do_rotation = False  # dimension-based rotation no longer needed
+            logger.info(
+                "Corrected EXIF orientation %d → 1 for %s (now %dx%d)",
+                exif_orientation, image_path.name, width, height,
+            )
+
+        needs_save = do_rotation or exif_orientation not in (None, 1)
+        if needs_save:
+            try:
+                if do_rotation:
+                    img = img.transpose(Image.ROTATE_270)
+                    width, height = img.size
+                    pil_exif[_ORIENTATION_TAG] = 1
+                    logger.info("Rotated portrait image (no EXIF orientation tag): %s", image_path.name)
+                img.save(str(image_path), exif=pil_exif.tobytes())
+            except Exception as exc:
+                logger.warning("Could not save updated image %s: %s", image_path.name, exc)
 
     return {
         "image_path": str(image_path),
@@ -201,7 +278,7 @@ def _extract_exif(image_path: Path) -> dict[str, Any] | None:
     }
 
 
-def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], None]) -> pd.DataFrame:
+def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], None], rotate: bool = True) -> pd.DataFrame:
     """
     Scan image_dir for drone images, extract EXIF, write msgs_synced.csv.
     Returns the resulting DataFrame.
@@ -224,7 +301,7 @@ def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], N
     for i, f in enumerate(files):
         if str(f) in existing_paths:
             continue
-        row = _extract_exif(f)
+        row = _extract_exif(f, rotate=rotate)
         if row:
             new_rows.append(row)
         if (i + 1) % max(total // 10, 1) == 0:
@@ -470,30 +547,78 @@ def run_data_sync(
       directly and EXIF extraction + platform log parsing are skipped entirely.
       To fall back to auto-generation, delete the file from Metadata/.
     """
+    from app.models.pipeline import Pipeline, PipelineRun
+
+    _run = session.get(PipelineRun, run_id)
+    _pipeline = session.get(Pipeline, _run.pipeline_id) if _run else None
+    _pipeline_type = (_pipeline.type if _pipeline else None) or ""
+    rotate_images = _pipeline_type != "ground"
+
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
 
     emit({"type": "progress", "step": "data_sync", "message": "Starting data sync…", "pct": 0})
+    logger.info("Data sync — pipeline type: %s, rotate_images: %s", _pipeline_type, rotate_images)
 
     # ── Step 1: Determine base msgs_synced.csv (priority order) ──────────────
     #
-    #  1. Intermediate/.../msgs_synced.csv  — already generated (previous run)
-    #  2. Raw/.../Metadata/msgs_synced.csv  — user-uploaded pre-synced file
-    #  3. Auto-generate from drone image EXIF
+    #  1. Intermediate/.../msgs_synced.csv  — already generated WITH GPS data
+    #  2. FileUpload.msgs_synced_path       — bundled GPS file (Farm-ng binary)
+    #  3. Raw/.../Metadata/msgs_synced.csv  — user-uploaded pre-synced file
+    #  4. Auto-generate from drone image EXIF
     #
     # Regardless of source, platform logs are still parsed and merged if present.
+    # Note: an existing Intermediate file with NO GPS rows is treated as stale and
+    # regenerated so that a bundled or user-provided GPS source can be used.
 
     user_msgs_synced = paths.raw_metadata / "msgs_synced.csv"
     msgs_synced_source: str
 
-    if paths.msgs_synced.exists():
-        emit({"type": "progress", "step": "data_sync",
-              "message": "Found existing msgs_synced.csv in Intermediate — skipping EXIF extraction.", "pct": 45})
-        df_msgs = pd.read_csv(paths.msgs_synced)
-        msgs_synced_source = "intermediate"
-        logger.info("Loaded existing msgs_synced.csv from Intermediate (%d rows)", len(df_msgs))
+    # Helper: does this DataFrame have at least one row with valid GPS?
+    def _has_gps(df: "pd.DataFrame") -> bool:
+        return bool(
+            "lat" in df.columns
+            and "lon" in df.columns
+            and df["lat"].notna().any()
+            and df["lon"].notna().any()
+        )
 
-    elif user_msgs_synced.exists():
+    # Check existing Intermediate file — only reuse if it has GPS data
+    if paths.msgs_synced.exists():
+        _df_existing = pd.read_csv(paths.msgs_synced)
+        if _has_gps(_df_existing):
+            emit({"type": "progress", "step": "data_sync",
+                  "message": "Found existing msgs_synced.csv with GPS — skipping EXIF extraction.", "pct": 45})
+            df_msgs = _df_existing
+            msgs_synced_source = "intermediate"
+            logger.info("Loaded existing msgs_synced.csv from Intermediate (%d rows)", len(df_msgs))
+        else:
+            logger.info("Existing msgs_synced.csv has no GPS rows — will regenerate.")
+            df_msgs = None
+            msgs_synced_source = ""
+    else:
+        df_msgs = None
+        msgs_synced_source = ""
+
+    # Farm-ng bundled GPS file via FileUpload record
+    if df_msgs is None:
+        bundled_gps_path = _find_bundled_msgs_synced(session, run_id, paths)
+        if bundled_gps_path is not None and bundled_gps_path.exists():
+            emit({"type": "progress", "step": "data_sync",
+                  "message": f"Using bundled GPS file from upload: {bundled_gps_path.name}", "pct": 40})
+            df_bundled = _normalise_msgs_synced_columns(pd.read_csv(bundled_gps_path))
+            # Normalize image_path values to just filename (Farm-ng paths are like /top/rgb-TIMESTAMP.jpg)
+            if "image_path" in df_bundled.columns:
+                df_bundled["image_path"] = df_bundled["image_path"].apply(
+                    lambda v: Path(str(v)).name if pd.notna(v) else v
+                )
+            df_bundled.to_csv(paths.msgs_synced, index=False)
+            df_msgs = df_bundled
+            msgs_synced_source = "bundled"
+            logger.info("Loaded bundled GPS from %s (%d rows)", bundled_gps_path.name, len(df_msgs))
+
+    # User-provided file in Raw Metadata
+    if df_msgs is None and user_msgs_synced.exists():
         emit({"type": "progress", "step": "data_sync",
               "message": "Found user-provided msgs_synced.csv in Metadata/ — skipping EXIF extraction.", "pct": 45})
         df_msgs = _normalise_msgs_synced_columns(pd.read_csv(user_msgs_synced))
@@ -501,14 +626,15 @@ def run_data_sync(
         msgs_synced_source = "user-provided"
         logger.info("Loaded user-provided msgs_synced.csv from Metadata/ (%d rows)", len(df_msgs))
 
-    else:
+    # Fall back to EXIF extraction
+    if df_msgs is None:
         image_dir = _find_image_dir(paths)
         if not image_dir.exists():
             raise FileNotFoundError(
                 f"No image directory found at {image_dir}. "
                 "Upload drone images before running Data Sync."
             )
-        df_msgs = _build_msgs_synced(image_dir, paths.msgs_synced, emit)
+        df_msgs = _build_msgs_synced(image_dir, paths.msgs_synced, emit, rotate=rotate_images)
         msgs_synced_source = "exif"
 
     if stop_event.is_set():
@@ -567,3 +693,345 @@ def run_data_sync(
         outputs["drone_msgs"] = paths.rel(paths.drone_msgs)
 
     return outputs
+
+
+# ── Lightweight EXIF timestamp extractor (for cross-sensor sync) ───────────────
+
+
+def _extract_exif_timestamp_only(image_path: Path) -> dict[str, Any]:
+    """
+    Extract image path + timestamp only from EXIF. No GPS, no rotation, no write.
+
+    Priority:
+      1. GPS IFD UTC time (tags 29 = date, 7 = time) — most accurate
+      2. EXIF DateTime / DateTimeOriginal / DateTimeDigitized — fallback
+    """
+    unix_ts: float | None = None
+    width = height = None
+
+    try:
+        img = Image.open(image_path)
+        width, height = img.size
+        raw_exif = img._getexif() or {}  # type: ignore[attr-defined]
+    except Exception as exc:
+        logger.warning("Cannot open %s for timestamp extraction: %s", image_path.name, exc)
+        return {"image_path": str(image_path), "timestamp": None, "naturalWidth": None, "naturalHeight": None}
+
+    # Priority 1: GPS IFD UTC time
+    gps_info = raw_exif.get(34853) or {}
+    gps_date = gps_info.get(29)
+    gps_time_tag = gps_info.get(7)
+    if gps_date and gps_time_tag:
+        try:
+            h = int(gps_time_tag[0].numerator / gps_time_tag[0].denominator)
+            m = int(gps_time_tag[1].numerator / gps_time_tag[1].denominator)
+            s = int(gps_time_tag[2].numerator / gps_time_tag[2].denominator)
+            dt = datetime.strptime(
+                f"{gps_date} {h:02d}:{m:02d}:{s:02d}", "%Y:%m:%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc)
+            unix_ts = dt.timestamp()
+        except Exception as exc:
+            logger.debug("GPS time parse error in %s: %s", image_path.name, exc)
+
+    # Priority 2: EXIF DateTime tags
+    if unix_ts is None:
+        time_string: str | None = None
+        for tag_id in [36867, 36868, 306]:
+            if raw_exif.get(tag_id):
+                time_string = raw_exif[tag_id]
+                break
+        if time_string:
+            for fmt in ("%Y:%m:%d %H:%M:%S", "%Y:%m:%d %H:%M:%S.%f"):
+                try:
+                    dt = datetime.strptime(time_string[:19], fmt[:19]).replace(tzinfo=timezone.utc)
+                    unix_ts = dt.timestamp()
+                    break
+                except ValueError:
+                    continue
+
+    return {
+        "image_path": str(image_path),
+        "timestamp": unix_ts,
+        "naturalWidth": width,
+        "naturalHeight": height,
+    }
+
+
+# ── Cross-sensor sync step ─────────────────────────────────────────────────────
+
+
+def run_cross_sensor_sync(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+    source_run_id: str,
+    max_extrapolation_sec: float = 30.0,
+    stop_event: threading.Event,
+    emit: Callable[[dict], None],
+) -> dict[str, Any]:
+    """
+    Sync this run's images to GPS coordinates from a different run's msgs_synced.csv.
+
+    GPS is assigned per image by linearly interpolating the reference sensor's GPS
+    track at each target image's capture timestamp.  Images whose timestamps fall
+    outside the reference coverage window are handled in three tiers:
+
+      1. Within max_extrapolation_sec of the reference boundary
+         → clamp to the nearest endpoint GPS (platform hasn't moved far).
+      2. Beyond max_extrapolation_sec but image has its own EXIF GPS
+         → fall back to the image's own GPS coordinates.
+      3. Beyond max_extrapolation_sec and no EXIF GPS
+         → GPS left as NaN (image still kept, just has no position).
+
+    Images with no parseable timestamp always fall through to tier 2/3.
+    """
+    from scipy.interpolate import interp1d as _interp1d
+    from app.models.pipeline import Pipeline, PipelineRun as _PR
+
+    _run = session.get(_PR, run_id)
+    _pipeline = session.get(Pipeline, _run.pipeline_id) if _run else None
+    _pipeline_type = (_pipeline.type if _pipeline else None) or ""
+    rotate_images = _pipeline_type != "ground"
+    logger.info("Cross-sensor sync — pipeline type: %s, rotate_images: %s", _pipeline_type, rotate_images)
+
+    paths = _get_paths(session, run_id)
+    paths.intermediate_run.mkdir(parents=True, exist_ok=True)
+
+    emit({"type": "progress", "step": "data_sync", "message": "Loading reference GPS data…", "pct": 5})
+
+    # ── Load reference msgs_synced ────────────────────────────────────────────
+    source_run_uuid = uuid.UUID(source_run_id)
+    source_paths = _get_paths(session, source_run_uuid)
+
+    # Prefer Intermediate (already-synced); fall back to bundled GPS from FileUpload
+    ref_gps_file = source_paths.msgs_synced if source_paths.msgs_synced.exists() else None
+    if ref_gps_file is None:
+        ref_gps_file = _find_bundled_msgs_synced(session, source_run_uuid, source_paths)
+    if ref_gps_file is None:
+        raise FileNotFoundError(
+            f"No msgs_synced.csv found for source run {source_run_id}. "
+            "Run Data Sync on the source sensor first, or ensure it has a bundled GPS file."
+        )
+
+    df_ref = _normalise_msgs_synced_columns(pd.read_csv(ref_gps_file))
+    # Normalize image paths to filenames (Farm-ng bundled files use /top/rgb-... paths)
+    if "image_path" in df_ref.columns:
+        df_ref["image_path"] = df_ref["image_path"].apply(
+            lambda v: Path(str(v)).name if pd.notna(v) else v
+        )
+    valid_ref = df_ref[
+        df_ref.get("timestamp", pd.Series(dtype=float)).notna()
+        & df_ref.get("lat", pd.Series(dtype=float)).notna()
+        & df_ref.get("lon", pd.Series(dtype=float)).notna()
+    ].copy()
+
+    if valid_ref.empty:
+        raise ValueError(
+            "Reference msgs_synced.csv has no rows with both a valid timestamp and GPS coordinates. "
+            "Check that the source run completed Data Sync and has GPS data."
+        )
+
+    valid_ref = valid_ref.sort_values("timestamp")
+    ref_ts = valid_ref["timestamp"].values.astype(float)
+    ref_lat = valid_ref["lat"].values.astype(float)
+    ref_lon = valid_ref["lon"].values.astype(float)
+    ref_alt = valid_ref["alt"].fillna(0).values.astype(float) if "alt" in valid_ref.columns else np.zeros(len(valid_ref))
+    ref_ts_min = float(ref_ts[0])
+    ref_ts_max = float(ref_ts[-1])
+    ref_span = ref_ts_max - ref_ts_min
+
+    # Interpolators with NaN for out-of-range (no extrapolation — handled below)
+    interp_lat = _interp1d(ref_ts, ref_lat, kind="linear", bounds_error=False, fill_value=np.nan)
+    interp_lon = _interp1d(ref_ts, ref_lon, kind="linear", bounds_error=False, fill_value=np.nan)
+    interp_alt = _interp1d(ref_ts, ref_alt, kind="linear", bounds_error=False, fill_value=np.nan)
+
+    # Endpoint-clamp interpolators used for the threshold buffer zone
+    interp_lat_clamp = _interp1d(ref_ts, ref_lat, kind="linear", bounds_error=False,
+                                  fill_value=(ref_lat[0], ref_lat[-1]))
+    interp_lon_clamp = _interp1d(ref_ts, ref_lon, kind="linear", bounds_error=False,
+                                  fill_value=(ref_lon[0], ref_lon[-1]))
+    interp_alt_clamp = _interp1d(ref_ts, ref_alt, kind="linear", bounds_error=False,
+                                  fill_value=(ref_alt[0], ref_alt[-1]))
+
+    emit({
+        "type": "progress", "step": "data_sync",
+        "message": (
+            f"Reference GPS loaded ({len(valid_ref)} records, span {ref_span:.1f}s, "
+            f"threshold ±{max_extrapolation_sec}s). Extracting image timestamps…"
+        ),
+        "pct": 20,
+    })
+
+    if stop_event.is_set():
+        raise RuntimeError("Stopped by user")
+
+    # ── Extract timestamps from target images ────────────────────────────────
+    # Prefer an already-generated msgs_synced.csv — it may already have timestamps
+    # (from a prior run_data_sync) and avoids re-scanning potentially modified images.
+    df_target: "pd.DataFrame | None" = None
+    existing_target_csv = paths.msgs_synced
+    if existing_target_csv.exists():
+        try:
+            _df_existing = _normalise_msgs_synced_columns(pd.read_csv(existing_target_csv))
+            if "timestamp" in _df_existing.columns and _df_existing["timestamp"].notna().any():
+                df_target = _df_existing
+                emit({"type": "progress", "step": "data_sync",
+                      "message": f"Using existing msgs_synced.csv ({len(df_target)} images)…",
+                      "pct": 65})
+                logger.info(
+                    "cross_sensor_sync: reusing existing msgs_synced.csv with %d/%d timestamps",
+                    int(df_target["timestamp"].notna().sum()), len(df_target),
+                )
+        except Exception as exc:
+            logger.warning("Could not read existing msgs_synced.csv: %s — falling back to EXIF scan", exc)
+
+    if df_target is None:
+        image_dir = _find_image_dir(paths)
+        if not image_dir.exists():
+            raise FileNotFoundError(
+                f"No image directory found at {image_dir}. "
+                "Upload images before running Data Sync."
+            )
+
+        files = sorted(
+            f for f in image_dir.iterdir()
+            if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
+        )
+        total = len(files)
+        emit({"type": "progress", "step": "data_sync",
+              "message": f"Found {total} images — reading timestamps…", "pct": 25})
+
+        rows: list[dict[str, Any]] = []
+        for i, f in enumerate(files):
+            rows.append(_extract_exif_timestamp_only(f))
+            if (i + 1) % max(total // 10, 1) == 0:
+                pct = 25 + int(40 * (i + 1) / total)
+                emit({"type": "progress", "step": "data_sync",
+                      "message": f"Timestamps {i+1}/{total}", "pct": pct})
+            if stop_event.is_set():
+                raise RuntimeError("Stopped by user")
+
+        df_target = pd.DataFrame(rows)
+
+    # ── Classify each image and assign GPS ───────────────────────────────────
+    emit({"type": "progress", "step": "data_sync",
+          "message": "Interpolating GPS positions…", "pct": 70})
+
+    has_ts = df_target["timestamp"].notna()
+    n_with_ts = int(has_ts.sum())
+
+    n_interpolated = n_clamped = n_exif_fallback = n_no_gps = 0
+
+    if n_with_ts == 0:
+        emit({
+            "type": "warning", "step": "data_sync",
+            "message": (
+                "⚠ None of the target images have a parseable timestamp — "
+                "GPS interpolation cannot proceed. Check image EXIF data."
+            ),
+        })
+    else:
+        target_ts = df_target.loc[has_ts, "timestamp"].values.astype(float)
+
+        # Distance outside reference window (0 when inside, positive when outside)
+        gap = np.maximum(0.0, np.maximum(ref_ts_min - target_ts, target_ts - ref_ts_max))
+
+        in_range   = gap == 0.0
+        in_buffer  = (~in_range) & (gap <= max_extrapolation_sec)
+        out_of_range = gap > max_extrapolation_sec
+
+        ts_idx = df_target.index[has_ts]
+
+        # Tier 1: in-range → standard interpolation
+        if in_range.any():
+            ts_in = target_ts[in_range]
+            idx_in = ts_idx[in_range]
+            df_target.loc[idx_in, "lat"] = interp_lat(ts_in)
+            df_target.loc[idx_in, "lon"] = interp_lon(ts_in)
+            df_target.loc[idx_in, "alt"] = interp_alt(ts_in)
+            n_interpolated = int(in_range.sum())
+
+        # Tier 2: within threshold buffer → clamp to nearest endpoint GPS
+        if in_buffer.any():
+            ts_buf = target_ts[in_buffer]
+            idx_buf = ts_idx[in_buffer]
+            df_target.loc[idx_buf, "lat"] = interp_lat_clamp(ts_buf)
+            df_target.loc[idx_buf, "lon"] = interp_lon_clamp(ts_buf)
+            df_target.loc[idx_buf, "alt"] = interp_alt_clamp(ts_buf)
+            n_clamped = int(in_buffer.sum())
+
+        # Tier 3: beyond threshold → EXIF GPS fallback
+        if out_of_range.any():
+            idx_oor = ts_idx[out_of_range]
+            for row_idx in idx_oor:
+                img_path = Path(str(df_target.at[row_idx, "image_path"]))
+                exif_row = _extract_exif(img_path, rotate=rotate_images)
+                if exif_row and pd.notna(exif_row.get("lat")) and pd.notna(exif_row.get("lon")):
+                    df_target.at[row_idx, "lat"] = exif_row["lat"]
+                    df_target.at[row_idx, "lon"] = exif_row["lon"]
+                    if pd.notna(exif_row.get("alt")):
+                        df_target.at[row_idx, "alt"] = exif_row["alt"]
+                    n_exif_fallback += 1
+                else:
+                    n_no_gps += 1
+
+    # Images with no timestamp at all → EXIF GPS fallback
+    no_ts_idx = df_target.index[~has_ts]
+    for row_idx in no_ts_idx:
+        img_path = Path(str(df_target.at[row_idx, "image_path"]))
+        exif_row = _extract_exif(img_path, rotate=rotate_images)
+        if exif_row and pd.notna(exif_row.get("lat")) and pd.notna(exif_row.get("lon")):
+            df_target.at[row_idx, "lat"] = exif_row["lat"]
+            df_target.at[row_idx, "lon"] = exif_row["lon"]
+            if pd.notna(exif_row.get("alt")):
+                df_target.at[row_idx, "alt"] = exif_row["alt"]
+
+    # Progress summary
+    parts = [f"Interpolated: {n_interpolated}"]
+    if n_clamped:
+        parts.append(f"clamped (≤{max_extrapolation_sec}s out-of-range): {n_clamped}")
+    if n_exif_fallback:
+        parts.append(f"EXIF fallback (>{max_extrapolation_sec}s out-of-range): {n_exif_fallback}")
+    if n_no_gps:
+        parts.append(f"no GPS: {n_no_gps}")
+    emit({"type": "progress", "step": "data_sync",
+          "message": " · ".join(parts), "pct": 85})
+
+    if n_no_gps:
+        emit({
+            "type": "warning", "step": "data_sync",
+            "message": (
+                f"⚠ {n_no_gps} image(s) fell more than {max_extrapolation_sec}s outside the "
+                "reference GPS coverage and had no EXIF GPS — they will have no position data. "
+                "Consider increasing the threshold or using 'Use own metadata' for this sensor."
+            ),
+        })
+
+    # ── Write outputs ────────────────────────────────────────────────────────
+    df_target.to_csv(paths.msgs_synced, index=False)
+    emit({"type": "progress", "step": "data_sync",
+          "message": f"msgs_synced.csv written ({len(df_target)} images)", "pct": 90})
+
+    n_written = _write_geo_txt(df_target, paths.geo_txt)
+    emit({"type": "progress", "step": "data_sync",
+          "message": f"geo.txt written ({n_written} images with GPS)", "pct": 95})
+
+    logger.info(
+        "Cross-sensor sync complete for run %s (source=%s): %d images, "
+        "%d interpolated, %d clamped, %d exif-fallback, %d no-gps, %d geo entries",
+        run_id, source_run_id, len(df_target),
+        n_interpolated, n_clamped, n_exif_fallback, n_no_gps, n_written,
+    )
+
+    return {
+        "msgs_synced": paths.rel(paths.msgs_synced),
+        "msgs_synced_source": f"cross_sensor:{source_run_id}",
+        "geo_txt": paths.rel(paths.geo_txt),
+        "cross_sensor_stats": {
+            "interpolated": n_interpolated,
+            "clamped": n_clamped,
+            "exif_fallback": n_exif_fallback,
+            "no_gps": n_no_gps,
+            "max_extrapolation_sec": max_extrapolation_sec,
+        },
+    }

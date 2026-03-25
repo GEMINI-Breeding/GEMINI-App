@@ -22,6 +22,7 @@ import {
   Plus,
   Trash2,
   X,
+  Layers,
 } from "lucide-react"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -41,6 +42,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { ProcessingService } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -224,10 +233,23 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
       ProcessingService.listImages({ id: runId }) as unknown as Promise<ImageListResponse>,
   })
 
-  const { data: existingData } = useQuery<{ selections: PlotSelection[] }>({
+  const { data: existingData } = useQuery<{ selections: PlotSelection[]; gps_translated: boolean; active_version: number | null }>({
     queryKey: ["plot-marking", runId],
     queryFn: () =>
-      ProcessingService.loadPlotMarking({ id: runId }) as unknown as Promise<{ selections: PlotSelection[] }>,
+      ProcessingService.loadPlotMarking({ id: runId }) as unknown as Promise<{ selections: PlotSelection[]; gps_translated: boolean; active_version: number | null }>,
+  })
+
+  const [activeVersion, setActiveVersion] = useState<number | null>(null)
+
+  const { data: versionList = [], refetch: refetchVersions } = useQuery<{ version: number; name: string; created_at: string; run_label: string; is_active: boolean }[]>({
+    queryKey: ["plot-markings", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      })
+      if (!res.ok) return []
+      return res.json()
+    },
   })
 
   const images = imageData?.images ?? []
@@ -236,6 +258,10 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showGps, setShowGps] = useState(false)
   const [directionWarningOpen, setDirectionWarningOpen] = useState(false)
+  const [pendingSaveAction, setPendingSaveAction] = useState<"save" | "saveAs">("save")
+  const [showGpsTranslatedBanner, setShowGpsTranslatedBanner] = useState(false)
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false)
+  const [saveAsName, setSaveAsName] = useState("")
 
   // plots state: array of PlotSelection
   const [plots, setPlots] = useState<PlotSelection[]>(makePlots(1))
@@ -256,6 +282,12 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
       setPlots(loaded)
       setPlotNavInput("1")
       setPlotPage(0)
+      if (existingData.gps_translated) {
+        setShowGpsTranslatedBanner(true)
+      }
+      if (existingData.active_version != null) {
+        setActiveVersion(existingData.active_version)
+      }
     }
   }, [existingData])
 
@@ -281,7 +313,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - step)), [step])
   const next = useCallback(
     () => setCurrentIdx((i) => Math.min(images.length - 1, i + step)),
-    [images.length]
+    [images.length, step]
   )
 
   const markStart = useCallback(() => {
@@ -355,15 +387,86 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     mutationFn: () =>
       ProcessingService.savePlotMarking({
         id: runId,
-        requestBody: { selections: plots as unknown as { [key: string]: unknown }[] },
+        requestBody: { selections: plots as unknown as { [key: string]: unknown }[], save_as: false } as any,
       }),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
       queryClient.invalidateQueries({ queryKey: ["plot-marking", runId] })
+      refetchVersions()
+      if (data?.version != null) setActiveVersion(data.version)
       showSuccessToast("Plot markings saved")
     },
     onError: () => showErrorToast("Failed to save plot markings"),
   })
+
+  const saveAsMutation = useMutation({
+    mutationFn: (name: string) =>
+      ProcessingService.savePlotMarking({
+        id: runId,
+        requestBody: { selections: plots as unknown as { [key: string]: unknown }[], save_as: true, name: name || undefined } as any,
+      }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+      queryClient.invalidateQueries({ queryKey: ["plot-marking", runId] })
+      refetchVersions()
+      if (data?.version != null) setActiveVersion(data.version)
+      showSuccessToast(`Saved as new version ${data?.version ?? ""}`)
+    },
+    onError: () => showErrorToast("Failed to save new version"),
+  })
+
+  function openSaveAsDialog() {
+    setSaveAsName("")
+    setShowSaveAsDialog(true)
+  }
+
+  function confirmSaveAs() {
+    setShowSaveAsDialog(false)
+    saveAsMutation.mutate(saveAsName.trim())
+  }
+
+  async function loadVersion(version: number) {
+    try {
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/plot-marking?version=${version}`),
+        { headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` } }
+      )
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      const loaded = (data.selections as PlotSelection[]).map((s) => ({
+        plot_id: Number(s.plot_id),
+        start_image: s.start_image ?? null,
+        end_image: s.end_image ?? null,
+        direction: s.direction ?? "",
+      }))
+      setPlots(loaded)
+      setPlotPage(0)
+      setPlotNavInput("1")
+      setActiveVersion(version)
+    } catch {
+      showErrorToast("Failed to load version")
+    }
+  }
+
+  async function deleteVersion(version: number) {
+    try {
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/plot-markings/${version}`),
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+        }
+      )
+      if (!res.ok) throw new Error()
+      refetchVersions()
+      if (activeVersion === version) {
+        const remaining = versionList.filter((v) => v.version !== version)
+        if (remaining.length > 0) loadVersion(remaining[remaining.length - 1].version)
+      }
+    } catch {
+      showErrorToast("Failed to delete version")
+    }
+  }
 
   const imgSrc = currentImage
     ? apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(rawDir + "/" + currentImage)}`)
@@ -390,6 +493,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const doneCount = plots.filter((p) => p.start_image && p.end_image).length
 
   return (
+    <>
     <div className="space-y-3">
       {/* Keyboard hint bar */}
       <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/40 rounded px-3 py-1.5">
@@ -412,6 +516,23 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         </button>
       </div>
 
+      {/* GPS translation warning */}
+      {showGpsTranslatedBanner && (
+        <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded px-3 py-2 text-xs">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-yellow-600" />
+          <span className="flex-1">
+            Plot markers were loaded from a previous run and remapped to the nearest GPS location in this run.
+            Please review the start/end images for each plot and save to confirm.
+          </span>
+          <button
+            onClick={() => setShowGpsTranslatedBanner(false)}
+            className="shrink-0 hover:text-yellow-900"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main layout — [GPS map |] image viewer | plot panel */}
       <div className={`grid gap-4 ${showGps ? "grid-cols-[1fr_3fr_1fr]" : "grid-cols-[3fr_1fr]"}`}>
 
@@ -430,7 +551,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               <img
                 src={imgSrc}
                 alt={currentImage ?? ""}
-                className="max-h-full max-w-full object-contain"
+                className="w-full h-full object-contain"
                 draggable={false}
               />
             ) : (
@@ -458,15 +579,28 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
             <Button variant="outline" size="icon" onClick={prev} disabled={currentIdx === 0}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <div className="flex-1 text-center text-xs text-muted-foreground font-mono truncate px-2">
-              {currentImage ?? "—"}
+            <div className="flex-1 min-w-0 text-center">
+              <div className="text-xs text-muted-foreground font-mono truncate">{currentImage ?? "—"}</div>
+              <div className="text-xs font-semibold tabular-nums flex items-center justify-center gap-1">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={String(currentIdx + 1)}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10)
+                    if (!isNaN(n) && n >= 1 && n <= images.length) setCurrentIdx(n - 1)
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  className="w-10 text-center bg-transparent border-b border-muted-foreground/40 outline-none focus:border-primary"
+                />
+                <span>/ {images.length}</span>
+              </div>
             </div>
             <Button variant="outline" size="icon" onClick={next} disabled={currentIdx === images.length - 1}>
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{currentIdx + 1} / {images.length}</span>
+          <div className="flex items-center justify-end text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
               <span>Step:</span>
               <Select value={String(step)} onValueChange={(v) => setStep(Number(v))}>
@@ -675,16 +809,47 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
             </p>
           )}
 
+          {/* Version selector */}
+          {versionList.length > 0 && (
+            <div className="flex items-center gap-1.5 pt-1 w-72">
+              <Layers className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <select
+                value={activeVersion ?? ""}
+                onChange={(e) => loadVersion(Number(e.target.value))}
+                className="min-w-0 flex-1 border-input bg-background rounded border px-1.5 py-1 text-xs focus:outline-none"
+              >
+                {versionList.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}{v.run_label ? ` — ${v.run_label}` : ""}
+                  </option>
+                ))}
+              </select>
+              {versionList.length > 1 && activeVersion != null && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0"
+                  title="Delete this version"
+                  onClick={() => deleteVersion(activeVersion)}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={onCancel}>
               Back
             </Button>
             <Button
-              className="flex-1"
+              variant="secondary"
+              className="shrink-0 bg-secondary/60 hover:bg-secondary/80"
               disabled={!canSave || saveMutation.isPending}
               onClick={() => {
                 const missingDir = plots.some((p) => !p.direction);
                 if (missingDir) {
+                  setPendingSaveAction("save");
                   setDirectionWarningOpen(true);
                 } else {
                   saveMutation.mutate();
@@ -692,6 +857,20 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               }}
             >
               {saveMutation.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              disabled={!canSave || saveAsMutation.isPending}
+              onClick={() => {
+                const missingDir = plots.some((p) => !p.direction);
+                if (missingDir) {
+                  setPendingSaveAction("saveAs");
+                  setDirectionWarningOpen(true);
+                } else {
+                  openSaveAsDialog();
+                }
+              }}
+            >
+              {saveAsMutation.isPending ? "Saving…" : "Save As"}
             </Button>
           </div>
 
@@ -712,7 +891,11 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                   <Button variant="outline" size="sm" onClick={() => setDirectionWarningOpen(false)}>
                     Go Back
                   </Button>
-                  <Button size="sm" onClick={() => { setDirectionWarningOpen(false); saveMutation.mutate(); }}>
+                  <Button size="sm" onClick={() => {
+                    setDirectionWarningOpen(false)
+                    if (pendingSaveAction === "saveAs") openSaveAsDialog()
+                    else saveMutation.mutate()
+                  }}>
                     Save Anyway
                   </Button>
                 </div>
@@ -722,5 +905,31 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         </div>
       </div>
     </div>
+
+    {/* Save As dialog */}
+    <Dialog open={showSaveAsDialog} onOpenChange={(o) => !o && setShowSaveAsDialog(false)}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Save As New Version</DialogTitle>
+          <DialogDescription>Give this plot marking version a name (optional).</DialogDescription>
+        </DialogHeader>
+        <div className="py-2">
+          <Label htmlFor="pm-save-as-name" className="mb-1 block text-sm">Name</Label>
+          <Input
+            id="pm-save-as-name"
+            placeholder="e.g. final, adjusted, retry"
+            value={saveAsName}
+            onChange={(e) => setSaveAsName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") confirmSaveAs() }}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowSaveAsDialog(false)}>Cancel</Button>
+          <Button onClick={confirmSaveAs}>Save As</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

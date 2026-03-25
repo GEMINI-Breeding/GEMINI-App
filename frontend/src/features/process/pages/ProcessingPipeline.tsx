@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Plus,
   X,
+  Crop,
 } from "lucide-react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
@@ -33,6 +34,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PipelinesService, type PipelinePublic } from "@/client";
 import useCustomToast from "@/hooks/useCustomToast";
+import { EdgeCropTool } from "@/features/process/components/EdgeCropTool";
 
 function InfoTooltip({ text }: { text: ReactNode }) {
   return (
@@ -150,6 +152,7 @@ export function ProcessingPipeline() {
 
   // Step 2 — ground
   const [groundConfig, setGroundConfig] = useState(GROUND_DEFAULT_CONFIG);
+  const [showCropTool, setShowCropTool] = useState(false);
 
   // Step 2 — aerial
   const [aerialConfig, setAerialConfig] = useState(AERIAL_DEFAULT_CONFIG);
@@ -301,6 +304,7 @@ export function ProcessingPipeline() {
   };
 
   return (
+    <>
     <div className="bg-background min-h-screen">
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-8 flex items-center gap-4">
@@ -680,10 +684,24 @@ export function ProcessingPipeline() {
 
                   {/* Edge crop / mask */}
                   <div className="space-y-1.5">
-                    <Label>
-                      Edge Crop (pixels)
-                      <InfoTooltip text="Removes a fixed number of pixels from each image edge before stitching — useful for camera mounts, lens rigs, or static obstructions. Default is 0 for all platforms — only change if your camera has a fixed obstruction." />
-                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label>
+                        Edge Crop (pixels)
+                        <InfoTooltip text="Removes a fixed number of pixels from each image edge before stitching — useful for camera mounts, lens rigs, or static obstructions. Default is 0 for all platforms — only change if your camera has a fixed obstruction." />
+                      </Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setShowCropTool(true)}
+                            className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+                          >
+                            <Crop className="h-5 w-5 text-orange-500" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Open visual crop tool</TooltipContent>
+                      </Tooltip>
+                    </div>
                     <div className="grid grid-cols-4 gap-2 mt-1">
                       {(["mask_left", "mask_right", "mask_top", "mask_bottom"] as const).map((side) => (
                         <div key={side} className="space-y-1">
@@ -957,14 +975,20 @@ export function ProcessingPipeline() {
                       </div>
                     )}
                     {pipelineType === "ground" && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Device:</span>
-                        <span className="font-medium">
-                          {groundConfig.device === "multiprocessing"
-                            ? `Multiprocessing (${groundConfig.num_cpu > 0 ? `${groundConfig.num_cpu} workers` : "auto"})`
-                            : groundConfig.device.toUpperCase()}
-                        </span>
-                      </div>
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Device:</span>
+                          <span className="font-medium">
+                            {groundConfig.device === "multiprocessing"
+                              ? `Multiprocessing (${groundConfig.num_cpu > 0 ? `${groundConfig.num_cpu} workers` : "auto"})`
+                              : groundConfig.device.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Stitch config:</span>
+                          <span className="font-medium capitalize">{groundConfig.platform}</span>
+                        </div>
+                      </>
                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
@@ -1018,5 +1042,26 @@ export function ProcessingPipeline() {
         </div>
       </div>
     </div>
+
+    {showCropTool && (
+      <EdgeCropTool
+        pipelineId={editingPipelineId}
+        initialMask={{
+          mask_left:   groundConfig.agrowstitch_params.mask_left,
+          mask_right:  groundConfig.agrowstitch_params.mask_right,
+          mask_top:    groundConfig.agrowstitch_params.mask_top,
+          mask_bottom: groundConfig.agrowstitch_params.mask_bottom,
+        }}
+        onApply={(mask) =>
+          setGroundConfig({
+            ...groundConfig,
+            platform: "custom",
+            agrowstitch_params: { ...groundConfig.agrowstitch_params, ...mask },
+          })
+        }
+        onClose={() => setShowCropTool(false)}
+      />
+    )}
+    </>
   );
 }

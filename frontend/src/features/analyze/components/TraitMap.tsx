@@ -17,6 +17,7 @@ import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
 import { X, Download, Loader2 } from "lucide-react"
 import { buildColorScale } from "../utils/colorScale"
+import { POSITION_KEY_SET, lookupProperty } from "../utils/traitAliases"
 import { ColorLegend } from "./ColorLegend"
 
 // Satellite base → ortho image overlay → trait polygons
@@ -285,7 +286,7 @@ function PlotImagePanel({
   }
 
   const numericEntries = Object.entries(properties).filter(
-    ([k, v]) => !NON_METRIC_KEYS.has(k) && typeof v === "number",
+    ([k, v]) => !NON_METRIC_KEYS.has(k) && !POSITION_KEY_SET.has(k.toLowerCase()) && typeof v === "number",
   )
 
   return (
@@ -313,8 +314,8 @@ function PlotImagePanel({
 
       {/* Plot info */}
       <div className="px-3 py-2 border-b">
-        {properties.accession != null && (
-          <p className="text-sm text-muted-foreground mb-1.5">{String(properties.accession)}</p>
+        {lookupProperty(properties, "accession") != null && (
+          <p className="text-sm text-muted-foreground mb-1.5">{String(lookupProperty(properties, "accession"))}</p>
         )}
         {selectedMetric && properties[selectedMetric] != null && (
           <p className="text-sm font-medium text-primary mb-1.5">
@@ -351,7 +352,7 @@ function PlotImagePanel({
 
 // ── Tooltip ────────────────────────────────────────────────────────────────────
 
-const NON_METRIC_KEYS = new Set(["plot_id", "plot", "accession"])
+const NON_METRIC_KEYS = new Set(["plot_id", "plot", "accession", ...POSITION_KEY_SET])
 
 function MapTooltip({
   x,
@@ -365,9 +366,10 @@ function MapTooltip({
   selectedMetric: string | null
 }) {
   const numericEntries = Object.entries(properties).filter(
-    ([k, v]) => !NON_METRIC_KEYS.has(k) && typeof v === "number",
+    ([k, v]) => !NON_METRIC_KEYS.has(k) && !POSITION_KEY_SET.has(k.toLowerCase()) && typeof v === "number",
   )
 
+  const accession = lookupProperty(properties, "accession")
   return (
     <div
       className="absolute z-20 pointer-events-none bg-background/95 backdrop-blur-sm border rounded-lg shadow-lg p-4 text-sm max-w-[480px]"
@@ -376,8 +378,8 @@ function MapTooltip({
       <p className="font-semibold mb-1.5">
         Plot {String(properties.plot ?? properties.plot_id ?? "—")}
       </p>
-      {properties.accession != null && (
-        <p className="text-muted-foreground mb-2">{String(properties.accession)}</p>
+      {accession != null && (
+        <p className="text-muted-foreground mb-2">{String(accession)}</p>
       )}
       {selectedMetric && properties[selectedMetric] != null && (
         <p className="font-medium text-primary mb-2">

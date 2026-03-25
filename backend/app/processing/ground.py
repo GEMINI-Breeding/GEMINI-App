@@ -204,6 +204,117 @@ def _build_gps_index(msgs_synced_path: "Path") -> dict[str, tuple[float, float]]
     return index
 
 
+def translate_markers_by_gps(
+    selections: list[dict],
+    current_image_set: set[str],
+    msgs_synced_path: "Path",
+) -> tuple[list[dict], bool]:
+    """
+    When saved plot markers reference images that don't exist in the current run
+    (i.e. the markers came from a different dataset), translate start/end images
+    to the nearest image in the current run using GPS coordinates.
+
+    Returns (translated_selections, any_translated).
+    Each translated row gains  translated=True  so the frontend can warn the user.
+    """
+    import pandas as pd
+    import math
+
+    # Check whether translation is needed at all
+    needs_translation = any(
+        (sel.get("start_image") or "") not in current_image_set
+        or (sel.get("end_image") or "") not in current_image_set
+        for sel in selections
+        if sel.get("start_lat") is not None or sel.get("end_lat") is not None
+    )
+    if not needs_translation:
+        return selections, False
+
+    # Build ordered GPS track for the current run: [(lat, lon, image_name), ...]
+    gps_track: list[tuple[float, float, str]] = []
+    try:
+        df = pd.read_csv(msgs_synced_path, on_bad_lines="skip")
+        df.columns = df.columns.str.strip()
+
+        lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+        lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+        img_col = next(
+            (c for c in df.columns if "top" in c.lower() and "file" in c.lower()), None
+        )
+        if not img_col:
+            img_col = next(
+                (c for c in df.columns if c.lower() in ("image_path", "image", "filename", "file")),
+                None,
+            )
+        if not img_col:
+            img_col = next(
+                (c for c in df.columns if "file" in c.lower() or "path" in c.lower()), None
+            )
+
+        if lat_col and lon_col and img_col:
+            for _, row in df.iterrows():
+                try:
+                    lat = float(row[lat_col])
+                    lon = float(row[lon_col])
+                except (ValueError, TypeError):
+                    continue
+                raw_img = str(row.get(img_col, ""))
+                if raw_img and raw_img != "nan":
+                    name = raw_img.split("/")[-1]
+                    if name in current_image_set:
+                        gps_track.append((lat, lon, name))
+    except Exception:
+        pass
+
+    if not gps_track:
+        return selections, False
+
+    def _nearest(lat: float, lon: float) -> str:
+        best_name = gps_track[0][2]
+        best_dist = math.inf
+        for tlat, tlon, tname in gps_track:
+            d = (tlat - lat) ** 2 + (tlon - lon) ** 2
+            if d < best_dist:
+                best_dist = d
+                best_name = tname
+        return best_name
+
+    out = []
+    any_translated = False
+    for sel in selections:
+        row = dict(sel)
+        translated = False
+
+        start_img = row.get("start_image") or ""
+        if start_img not in current_image_set:
+            s_lat = row.get("start_lat")
+            s_lon = row.get("start_lon")
+            if s_lat is not None and s_lon is not None:
+                try:
+                    row["start_image"] = _nearest(float(s_lat), float(s_lon))
+                    translated = True
+                except (TypeError, ValueError):
+                    pass
+
+        end_img = row.get("end_image") or ""
+        if end_img not in current_image_set:
+            e_lat = row.get("end_lat")
+            e_lon = row.get("end_lon")
+            if e_lat is not None and e_lon is not None:
+                try:
+                    row["end_image"] = _nearest(float(e_lat), float(e_lon))
+                    translated = True
+                except (TypeError, ValueError):
+                    pass
+
+        if translated:
+            row["translated"] = True
+            any_translated = True
+        out.append(row)
+
+    return out, any_translated
+
+
 def save_plot_marking(
     *,
     session: Session,
@@ -268,6 +379,7 @@ def run_stitching(
     stop_event: threading.Event,
     emit: Callable[[dict], None],
     name: str | None = None,
+    plot_marking_version: int | None = None,
 ) -> dict[str, Any]:
     """
     Run AgRowStitch on each plot defined in plot_borders.csv.
@@ -419,9 +531,37 @@ def run_stitching(
         }
     )
 
-    if not paths.plot_borders.exists():
+    # Resolve which plot_borders file to use.
+    # If an explicit version was requested, honour it.
+    # Otherwise fall back to the active version stored in run outputs so the
+    # canonical plot_borders.csv (which may be stale) is never silently used
+    # when versioned files are present.
+    if plot_marking_version is None:
+        plot_marking_version = (run.outputs or {}).get("active_plot_marking_version")
+
+    if plot_marking_version is not None:
+        plot_borders_path = paths.plot_borders_versioned(int(plot_marking_version))
+        if not plot_borders_path.exists():
+            logger.warning(
+                "[stitching] plot_borders_v%d.csv not found at %s — falling back to canonical plot_borders.csv",
+                plot_marking_version,
+                plot_borders_path,
+            )
+            plot_borders_path = paths.plot_borders
+            plot_marking_version = None  # don't log a version that wasn't actually used
+    else:
+        plot_borders_path = paths.plot_borders
+
+    logger.info(
+        "[stitching] using plot borders file: %s (plot_marking_version=%s, active_in_db=%s)",
+        plot_borders_path,
+        plot_marking_version,
+        (run.outputs or {}).get("active_plot_marking_version"),
+    )
+
+    if not plot_borders_path.exists():
         raise FileNotFoundError(
-            f"plot_borders.csv not found at {paths.plot_borders}. "
+            f"plot_borders.csv not found at {plot_borders_path}. "
             "Complete the Plot Marking step first."
         )
 
@@ -434,7 +574,7 @@ def run_stitching(
     images_dir = _find_images_dir(paths)
     msgs_path = _find_msgs_synced(paths)
 
-    with open(paths.plot_borders) as f:
+    with open(plot_borders_path) as f:
         plots = list(csv.DictReader(f))
 
     emit(
@@ -449,6 +589,10 @@ def run_stitching(
     msgs_df = None
     if msgs_path and msgs_path.exists():
         msgs_df = pd.read_csv(msgs_path)
+    # log path to msgs_synced and its columns for debugging
+    logger.info("[stitching] msgs_synced path: %s", msgs_path)
+    if msgs_df is not None:
+        logger.info("[stitching] msgs_synced columns: %s", list(msgs_df.columns))
 
     DIRECTION_MAP = {
         "down": "DOWN",
@@ -573,6 +717,8 @@ def run_stitching(
                         if start_idx > end_idx:
                             start_idx, end_idx = end_idx, start_idx
                         plot_rows = msgs_df.loc[start_idx:end_idx]
+                        # log which images are being copied for this plot
+                        logger.info("[stitching] Plot %s: copying images from %s to %s", plot_id, start_img, end_img)
                         unique_basenames = list(
                             dict.fromkeys(b for b in plot_rows["_basename"] if b)
                         )
@@ -619,6 +765,7 @@ def run_stitching(
             config = dict(base_config)
             config.pop("num_cpu", None)  # passed as arg to run(), not a config key
             config["image_directory"] = str(plot_temp_dir)
+            logger.info(f"Temporary dir for plot {plot_id}: {plot_temp_dir} with {copied} images")
             config["device"] = agrowstitch_device
             config["stitching_direction"] = stitch_dir
 
@@ -974,6 +1121,7 @@ def run_stitching(
             "config": stored_config,
             "plot_count": len(plots),
             "created_at": datetime.now(_tz.utc).isoformat(),
+            "plot_marking_version": plot_marking_version,
         },
         "stitching_version": agrowstitch_version,
     }
@@ -986,6 +1134,7 @@ def run_stitching(
             run_id=run_id,
             stop_event=stop_event,
             emit=emit,
+            plot_borders_path=plot_borders_path,
         )
         stitch_result.update(geo_outputs)
     except Exception as exc:
@@ -1004,6 +1153,7 @@ def run_georeferencing(
     run_id: uuid.UUID,
     stop_event: threading.Event,
     emit: Callable[[dict], None],
+    plot_borders_path: "Path | None" = None,
 ) -> dict[str, Any]:
     """
     Georeference stitched plot PNGs using GPS data from msgs_synced.csv.
@@ -1054,10 +1204,16 @@ def run_georeferencing(
             None,
         )
 
+    # Resolve which plot_borders file to use (versioned takes priority over canonical)
+    if plot_borders_path is None:
+        plot_borders_path = paths.plot_borders
+    _effective_borders = plot_borders_path if plot_borders_path.exists() else paths.plot_borders
+    logger.info("[georeferencing] using plot borders file: %s", _effective_borders)
+
     # Load plot borders for direction info
     plot_directions: dict[str, str] = {}
-    if paths.plot_borders.exists():
-        with open(paths.plot_borders) as f:
+    if _effective_borders.exists():
+        with open(_effective_borders) as f:
             for row in csv.DictReader(f):
                 plot_directions[str(row["plot_id"])] = row.get("direction", "down")
 
@@ -1093,8 +1249,8 @@ def run_georeferencing(
         )
 
         # Filter msgs_df to the rows for this plot
-        if rgb_col and paths.plot_borders.exists():
-            with open(paths.plot_borders) as f:
+        if rgb_col and _effective_borders.exists():
+            with open(_effective_borders) as f:
                 borders = {str(r["plot_id"]): r for r in csv.DictReader(f)}
             border = borders.get(plot_id_str, {})
             start_img = border.get("start_image", "")
@@ -1145,7 +1301,7 @@ def run_georeferencing(
     geojson_path = build_plot_boundaries_geojson(
         out_dir=out_dir,
         plot_ids=plot_ids,
-        plot_borders_csv=paths.plot_borders if paths.plot_borders.exists() else None,
+        plot_borders_csv=_effective_borders if _effective_borders.exists() else None,
     )
 
     outputs: dict = {"georeferencing": paths.rel(out_dir)}

@@ -89,6 +89,137 @@ def _get_active_ortho_tif(paths: RunPaths, outputs: dict) -> Path | None:
     return None
 
 
+# ── Data sync helpers ─────────────────────────────────────────────────────────
+
+def _resolve_sync_step(body: "ExecuteStepRequest", sync_module: Any) -> tuple[Any, dict]:
+    """Return (step_fn, kwargs) for the data_sync step based on sync_mode."""
+    if body.sync_mode == "cross_sensor":
+        if not body.sync_source_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="sync_source_run_id is required when sync_mode is 'cross_sensor'",
+            )
+        return sync_module.run_cross_sensor_sync, {
+            "source_run_id": body.sync_source_run_id,
+            "max_extrapolation_sec": body.sync_max_extrapolation_sec,
+        }
+    return sync_module.run_data_sync, {}
+
+
+@router.get("/pipeline-runs/{id}/available-sync-sources")
+def available_sync_sources(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    """
+    Return all runs in the same workspace whose msgs_synced.csv has both
+    a timestamp column and GPS data — usable as cross-sensor sync sources.
+    The requesting run itself is excluded.
+    """
+    import pandas as pd
+    from sqlmodel import select as _sel
+
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    # All runs in this workspace
+    all_pipelines = session.exec(
+        _sel(Pipeline).where(Pipeline.workspace_id == pipeline.workspace_id)
+    ).all()
+    pipeline_ids = {p.id for p in all_pipelines}
+
+    all_runs = session.exec(
+        _sel(PipelineRun).where(PipelineRun.pipeline_id.in_(pipeline_ids))  # type: ignore[attr-defined]
+    ).all()
+
+    pipeline_map = {p.id: p for p in all_pipelines}
+    results: list[dict[str, Any]] = []
+
+    from app.models.file_upload import FileUpload as _FU
+    from app.core.config import settings as _cfg
+    from app.crud.app_settings import get_setting as _gs
+
+    data_root = Path(_gs(session=session, key="data_root") or _cfg.APP_DATA_ROOT)
+
+    def _find_gps_file(r: PipelineRun) -> "Path | None":
+        """Return the best available GPS file for a run (Intermediate or bundled Raw)."""
+        r_paths = RunPaths.from_db(session=session, run=r, workspace=workspace)
+        # 1. Intermediate msgs_synced (produced by a previous Data Sync)
+        if r_paths.msgs_synced.exists():
+            return r_paths.msgs_synced
+        # 2. Bundled GPS from FileUpload record (Farm-ng binary uploads)
+        fu = session.exec(
+            _sel(_FU).where(
+                _FU.experiment == r.experiment,
+                _FU.location == r.location,
+                _FU.population == r.population,
+                _FU.date == r.date,
+                _FU.platform == r.platform,
+                _FU.sensor == r.sensor,
+                _FU.msgs_synced_path.isnot(None),  # type: ignore[attr-defined]
+            )
+        ).first()
+        if fu and fu.msgs_synced_path:
+            candidate = data_root / fu.msgs_synced_path
+            if candidate.exists():
+                return candidate
+        # 3. Scan Raw upload dir for any Metadata/msgs_synced.csv
+        for candidate in r_paths.raw.rglob("Metadata/msgs_synced.csv"):
+            return candidate
+        return None
+
+    for r in all_runs:
+        if r.id == id:
+            continue
+
+        r_pipeline = pipeline_map.get(r.pipeline_id)
+        if not r_pipeline:
+            continue
+
+        gps_file = _find_gps_file(r)
+        if gps_file is None:
+            continue
+
+        # Normalise column names then check for timestamp + GPS with actual data.
+        # Importing here to avoid circular imports at module load time.
+        try:
+            from app.processing.sync import _normalise_msgs_synced_columns as _norm
+            df = _norm(pd.read_csv(gps_file, nrows=10))
+            has_ts = "timestamp" in df.columns and df["timestamp"].notna().any()
+            has_gps = (
+                "lat" in df.columns and "lon" in df.columns
+                and df["lat"].notna().any() and df["lon"].notna().any()
+            )
+            if not has_ts or not has_gps:
+                continue
+            total_rows = sum(1 for _ in open(gps_file)) - 1
+        except Exception:
+            continue
+
+        results.append({
+            "run_id": str(r.id),
+            "pipeline_id": str(r.pipeline_id),
+            "pipeline_name": r_pipeline.name,
+            "pipeline_type": r_pipeline.type,
+            "date": r.date,
+            "experiment": r.experiment,
+            "location": r.location,
+            "population": r.population,
+            "platform": r.platform,
+            "sensor": r.sensor,
+            "gps_record_count": total_rows,
+            "gps_source": "bundled" if "Metadata" in str(gps_file) and "Intermediate" not in str(gps_file) else "synced",
+        })
+
+    return results
+
+
 # ── Execute step ──────────────────────────────────────────────────────────────
 
 GROUND_COMPUTE_STEPS = {"stitching", "georeferencing", "associate_boundaries"}
@@ -109,6 +240,7 @@ class ExecuteStepRequest(BaseModel):
     models: list[ModelConfig] = []
     # Stitching run name (ground only, optional)
     stitch_name: str | None = None
+    plot_marking_version: int | None = None
     # Orthomosaic run name (aerial only, optional)
     ortho_name: str | None = None
     # Trait extraction / association version overrides
@@ -120,6 +252,10 @@ class ExecuteStepRequest(BaseModel):
     # Inference mode
     inference_mode: str = "cloud"
     local_server_url: str | None = None
+    # Data sync mode: "own_metadata" (default) or "cross_sensor"
+    sync_mode: str = "own_metadata"
+    sync_source_run_id: str | None = None  # required when sync_mode == "cross_sensor"
+    sync_max_extrapolation_sec: float = 30.0  # threshold for out-of-range fallback
 
 
 @router.post("/pipeline-runs/{id}/execute-step")
@@ -142,11 +278,22 @@ def execute_step(
     # Resolve step function
     if ptype == "ground":
         from app.processing import ground, plot_boundary, sync
+        _sync_fn, _sync_kwargs = _resolve_sync_step(body, sync)
         dispatch: dict[str, Any] = {
-            "data_sync": (sync.run_data_sync, {}),
+            "data_sync": (_sync_fn, _sync_kwargs),
             "stitching": (
                 ground.run_stitching,
-                {"name": body.stitch_name},
+                {
+                    "name": body.stitch_name,
+                    # Resolve plot marking version: explicit selection wins; otherwise fall back
+                    # to the active version stored in run.outputs so the canonical plot_borders.csv
+                    # (which may be stale) is never silently used when versioned files exist.
+                    "plot_marking_version": (
+                        body.plot_marking_version
+                        if body.plot_marking_version is not None
+                        else (run.outputs or {}).get("active_plot_marking_version")
+                    ),
+                },
             ),
             "associate_boundaries": (
                 plot_boundary.run_associate_boundaries,
@@ -168,8 +315,9 @@ def execute_step(
         }
     else:
         from app.processing import aerial, sync
+        _sync_fn, _sync_kwargs = _resolve_sync_step(body, sync)
         dispatch = {
-            "data_sync": (sync.run_data_sync, {}),
+            "data_sync": (_sync_fn, _sync_kwargs),
             "orthomosaic": (
                 aerial.run_orthomosaic,
                 {
@@ -284,6 +432,54 @@ def list_outputs(
 
 class PlotMarkingRequest(BaseModel):
     selections: list[dict[str, Any]]  # see ground.save_plot_marking for schema
+    save_as: bool = False
+    name: str | None = None
+
+
+class RenamePlotMarkingRequest(BaseModel):
+    name: str
+
+
+def _get_plot_marking_versions(outputs: dict) -> list[dict]:
+    return list(outputs.get("plot_markings", []))
+
+
+def _discover_pm_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict], int | None]:
+    """Scan disk for plot_borders_v*.csv and merge with stored metadata."""
+    import re
+    stored = {v["version"]: v for v in _get_plot_marking_versions(run_outputs)}
+    active = run_outputs.get("active_plot_marking_version")
+    versions = []
+    if paths.intermediate_year.exists():
+        for p in sorted(paths.intermediate_year.glob("plot_borders_v*.csv")):
+            m = re.search(r"_v(\d+)\.csv$", p.name)
+            if not m:
+                continue
+            n = int(m.group(1))
+            meta = stored.get(n, {})
+            versions.append({
+                "version": n,
+                "name": meta.get("name") or "",
+                "csv_path": paths.rel(p),
+                "created_at": meta.get("created_at") or "",
+                "run_id": meta.get("run_id") or "",
+                "run_label": meta.get("run_label") or "",
+            })
+    return versions, active
+
+
+@router.get("/pipeline-runs/{id}/plot-markings")
+def list_plot_markings(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    versions, active = _discover_pm_versions(paths, dict(run.outputs or {}))
+    for v in versions:
+        v["is_active"] = (v["version"] == active)
+    return versions
 
 
 @router.post("/pipeline-runs/{id}/plot-marking")
@@ -294,6 +490,9 @@ def save_plot_marking(
     id: uuid.UUID,
     body: PlotMarkingRequest,
 ) -> dict[str, Any]:
+    import shutil
+    from datetime import datetime, timezone
+
     run = _get_run_or_404(session, id)
     pipeline = session.get(Pipeline, run.pipeline_id)
     if not pipeline or pipeline.type != "ground":
@@ -301,11 +500,48 @@ def save_plot_marking(
 
     from app.processing.ground import save_plot_marking as _save
 
+    # Write canonical plot_borders.csv
     outputs = _save(session=session, run_id=id, selections=body.selections)
+    paths = _get_paths(session, run)
 
-    # Persist to run.outputs + mark step complete
     existing_outputs = dict(run.outputs or {})
     existing_outputs.update(outputs)
+    existing_versions, active_version = _discover_pm_versions(paths, existing_outputs)
+
+    run_label = f"{run.date} · {run.location} / {run.population} · {run.sensor}"
+
+    if body.save_as or not existing_versions:
+        # Create a new version
+        next_version = (max((v["version"] for v in existing_versions), default=0) + 1)
+        versioned_path = paths.plot_borders_versioned(next_version)
+        shutil.copy2(paths.plot_borders, versioned_path)
+        logger.info("[save_plot_marking] created new version v%d → %s", next_version, versioned_path)
+        created_at = datetime.now(timezone.utc).isoformat()
+        existing_versions.append({
+            "version": next_version,
+            "name": body.name or "",
+            "csv_path": paths.rel(versioned_path),
+            "created_at": created_at,
+            "run_id": str(run.id),
+            "run_label": run_label,
+        })
+        active_version = next_version
+    else:
+        # Overwrite active version in place
+        target_version = active_version or existing_versions[-1]["version"]
+        versioned_path = paths.plot_borders_versioned(target_version)
+        shutil.copy2(paths.plot_borders, versioned_path)
+        logger.info("[save_plot_marking] overwrote active version v%d → %s", target_version, versioned_path)
+        # Update name if provided
+        if body.name:
+            for v in existing_versions:
+                if v["version"] == target_version:
+                    v["name"] = body.name
+        active_version = target_version
+
+    existing_outputs["plot_markings"] = existing_versions
+    existing_outputs["active_plot_marking_version"] = active_version
+
     existing_steps = dict(run.steps_completed or {})
     existing_steps["plot_marking"] = True
 
@@ -317,7 +553,55 @@ def save_plot_marking(
             outputs=existing_outputs,
         ),
     )
-    return {"status": "saved", "outputs": outputs}
+    return {"status": "saved", "version": active_version, "outputs": outputs}
+
+
+@router.patch("/pipeline-runs/{id}/plot-markings/{version}/rename")
+def rename_plot_marking(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    body: RenamePlotMarkingRequest,
+) -> dict:
+    run = _get_run_or_404(session, id)
+    existing_outputs = dict(run.outputs or {})
+    versions = _get_plot_marking_versions(existing_outputs)
+    for v in versions:
+        if v["version"] == version:
+            v["name"] = body.name
+            break
+    existing_outputs["plot_markings"] = versions
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+    return {"status": "renamed"}
+
+
+@router.delete("/pipeline-runs/{id}/plot-markings/{version}", status_code=200)
+def delete_plot_marking_version(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> None:
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    versioned_path = paths.plot_borders_versioned(version)
+    if versioned_path.exists():
+        versioned_path.unlink()
+    existing_outputs = dict(run.outputs or {})
+    versions = [v for v in _get_plot_marking_versions(existing_outputs) if v["version"] != version]
+    existing_outputs["plot_markings"] = versions
+    if existing_outputs.get("active_plot_marking_version") == version:
+        existing_outputs["active_plot_marking_version"] = versions[-1]["version"] if versions else None
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
 
 
 @router.get("/pipeline-runs/{id}/plot-marking")
@@ -326,16 +610,29 @@ def load_plot_marking(
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
+    version: int | None = None,
 ) -> dict[str, Any]:
-    """Return existing plot marking selections from plot_borders.csv, if it exists."""
+    """Return plot marking selections. Pass ?version=N to load a specific version."""
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
 
-    if not paths.plot_borders.exists():
-        return {"selections": []}
+    if version is not None:
+        csv_path = paths.plot_borders_versioned(version)
+    else:
+        # Load from the active versioned file so the tool always shows the version
+        # the user last saved — not the canonical plot_borders.csv which can lag behind.
+        active_version = (run.outputs or {}).get("active_plot_marking_version")
+        if active_version is not None:
+            versioned_path = paths.plot_borders_versioned(int(active_version))
+            csv_path = versioned_path if versioned_path.exists() else paths.plot_borders
+        else:
+            csv_path = paths.plot_borders
+
+    if not csv_path.exists():
+        return {"selections": [], "gps_translated": False}
 
     selections = []
-    with open(paths.plot_borders, newline="") as f:
+    with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             # Convert numeric fields back from strings
@@ -353,7 +650,25 @@ def load_plot_marking(
                         pass
             selections.append(dict(row))
 
-    return {"selections": selections}
+    # Attempt GPS-based translation when markers reference images from a different run
+    msgs_synced_path = _find_msgs_synced(paths)
+    if msgs_synced_path and paths.raw.exists():
+        from app.processing.ground import translate_markers_by_gps as _translate
+        exts = {".jpg", ".jpeg", ".png"}
+        current_image_set: set[str] = set()
+        for p in paths.raw.rglob("*"):
+            if p.is_file() and p.suffix.lower() in exts:
+                current_image_set.add(p.name)
+        selections, gps_translated = _translate(selections, current_image_set, msgs_synced_path)
+    else:
+        gps_translated = False
+
+    active_version = (run.outputs or {}).get("active_plot_marking_version")
+    return {
+        "selections": selections,
+        "gps_translated": gps_translated,
+        "active_version": active_version,
+    }
 
 
 def _find_msgs_synced(paths: RunPaths) -> Path | None:
@@ -2481,6 +2796,41 @@ def inference_results(
         for f in sorted(img_dir.glob("*.png")):
             images.append({"name": f.name, "path": str(f)})
 
+    # Enrich images with plot metadata (row/col/accession) from traits GeoJSON
+    traits_rel = outputs.get("traits_geojson") or outputs.get("traits")
+    traits_path: Any = paths.abs(traits_rel) if traits_rel else None
+    if not traits_path or not traits_path.exists():
+        traits_path = paths.traits_geojson if paths.traits_geojson.exists() else None
+
+    plot_meta: dict[str, dict] = {}
+    if traits_path:
+        try:
+            with open(traits_path) as _gf:
+                _gj = _json.load(_gf)
+            for _feat in _gj.get("features", []):
+                _props = _feat.get("properties") or {}
+                _pid = str(_props.get("Plot") or _props.get("plot") or _props.get("plot_id") or "")
+                if _pid:
+                    plot_meta[_pid] = {
+                        "accession": str(_props.get("Label") or _props.get("label") or _props.get("Accession") or ""),
+                        "row": str(_props.get("Tier") or _props.get("tier") or _props.get("row") or ""),
+                        "col": str(_props.get("Bed") or _props.get("bed") or _props.get("col") or ""),
+                    }
+        except Exception:
+            pass
+
+    if plot_meta:
+        for img in images:
+            stem = img["name"]
+            if stem.endswith(".png"):
+                stem = stem[:-4]
+            plot_id = stem[len("plot_"):] if stem.startswith("plot_") else stem
+            meta = plot_meta.get(plot_id) or plot_meta.get(stem) or {}
+            img["plot"] = plot_id
+            img["row"] = meta.get("row", "")
+            img["col"] = meta.get("col", "")
+            img["accession"] = meta.get("accession", "")
+
     return {
         "available": True,
         "models": available_models,
@@ -2895,18 +3245,22 @@ def get_stitch_outputs(
     if version is not None:
         use_version = version
     else:
-        # For live polling: take the maximum of:
-        #   1. stitching_version written to DB early in the stitching function (before mkdir)
-        #   2. highest-numbered AgRowStitch_v* directory on disk (created right after DB write)
-        # Using max() of both sources handles the brief window between the DB write and mkdir,
-        # and ensures stale directories from failed runs don't win over a freshly-started run.
+        # Prefer the DB-stored stitching_version (written early in run_stitching before
+        # mkdir so it's available even during the brief window before the directory exists).
+        # Only fall back to the highest FS directory when the DB has no record yet — this
+        # avoids picking up stale directories from a different run sharing the same
+        # processed_run path.
         db_version = int((run.outputs or {}).get("stitching_version") or 0)
-        fs_dirs = [
-            p for p in paths.processed_run.glob("AgRowStitch_v*")
-            if p.is_dir() and p.name[len("AgRowStitch_v"):].isdigit()
-        ]
-        fs_versions = sorted(int(p.name[len("AgRowStitch_v"):]) for p in fs_dirs)
-        fs_version = fs_versions[-1] if fs_versions else 0
+        if db_version > 0:
+            fs_versions = []
+            fs_version = db_version
+        else:
+            fs_dirs = [
+                p for p in paths.processed_run.glob("AgRowStitch_v*")
+                if p.is_dir() and p.name[len("AgRowStitch_v"):].isdigit()
+            ]
+            fs_versions = sorted(int(p.name[len("AgRowStitch_v"):]) for p in fs_dirs)
+            fs_version = fs_versions[-1] if fs_versions else 0
         use_version = max(db_version, fs_version) or 1
 
         logger.info(
@@ -2920,12 +3274,10 @@ def get_stitch_outputs(
     if not img_dir.exists():
         return {"plots": [], "version": use_version, "dir": str(img_dir)}
 
-    plots = []
-    for f in sorted(img_dir.glob("*.png")):
-        plots.append({
-            "name": f.name,
-            "url": f"/api/v1/files/serve?path={f}",
-        })
+    # Sort by modification time so live preview reflects stitching order
+    # (AgRowStitch doesn't stitch in filename-alphabetical order)
+    png_files = sorted(img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+    plots = [{"name": f.name, "url": f"/api/v1/files/serve?path={f}"} for f in png_files]
 
     logger.info("[stitch-outputs] version=%s plot_count=%s", use_version, len(plots))
     return {"plots": plots, "version": use_version, "dir": str(img_dir)}
