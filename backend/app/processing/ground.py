@@ -1039,6 +1039,8 @@ def run_stitching(
                 stderr_thread.join(timeout=5)
                 if proc.returncode != 0:
                     code = proc.returncode
+                    stdout_tail = "\n".join(f"  {l}" for l in _last_lines[-5:]) if _last_lines else "  (no stdout)"
+                    stderr_tail = "\n".join(f"  {l}" for l in _last_stderr[-10:]) if _last_stderr else "  (no stderr)"
                     # Negative codes are Unix signals (e.g. -11 = SIGSEGV)
                     if code < 0:
                         import signal as _signal
@@ -1047,15 +1049,14 @@ def run_stitching(
                             sig_name = _signal.Signals(-code).name
                         except ValueError:
                             sig_name = f"signal {-code}"
-                        stdout_tail = "\n".join(f"  {l}" for l in _last_lines[-5:]) if _last_lines else "  (no stdout)"
-                        stderr_tail = "\n".join(f"  {l}" for l in _last_stderr[-10:]) if _last_stderr else "  (no stderr)"
-                        hint = (
-                            f"AgRowStitch crashed with {sig_name}.\n\n"
-                            f"Last stdout:\n{stdout_tail}\n\n"
-                            f"Last stderr:\n{stderr_tail}"
-                        )
-                        raise RuntimeError(hint)
-                    raise RuntimeError(f"AgRowStitch exited with code {code}")
+                        label = f"AgRowStitch crashed with {sig_name}"
+                    else:
+                        label = f"AgRowStitch exited with code {code}"
+                    raise RuntimeError(
+                        f"{label}.\n\n"
+                        f"Last stdout:\n{stdout_tail}\n\n"
+                        f"Last stderr:\n{stderr_tail}"
+                    )
             finally:
                 _vram_stop.set()
                 try:

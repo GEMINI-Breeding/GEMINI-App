@@ -229,11 +229,11 @@ export function WorkspaceDashboard() {
   }
 
   return (
-    <div className="bg-background min-h-screen">
-      <div className="mx-auto max-w-5xl p-8">
-        <div className="mb-6 flex items-center justify-between">
+    <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
+      <div className="flex-shrink-0 px-6 pt-5 pb-3">
+        <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-semibold">Process</h2>
+            <h1 className="text-2xl font-semibold">Process</h1>
             <p className="text-muted-foreground text-sm">
               Create and manage your phenotyping projects
             </p>
@@ -301,7 +301,8 @@ export function WorkspaceDashboard() {
             </Dialog>
           </div>
         </div>
-
+      </div>
+      <div className="flex-1 overflow-auto px-6 pb-6">
         {isLoading ? (
           <div className="text-muted-foreground text-sm">Loading workspaces…</div>
         ) : workspaces.length === 0 ? (
@@ -406,3 +407,4 @@ export function WorkspaceDashboard() {
     </div>
   )
 }
+

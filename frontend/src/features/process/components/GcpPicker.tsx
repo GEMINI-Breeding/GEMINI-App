@@ -299,6 +299,8 @@ export function GcpPicker({
   const [isPanning, setIsPanning] = useState(false);
   const [editingIdx, setEditingIdx] = useState(false);
   const [editIdxValue, setEditIdxValue] = useState("");
+  // Incremented on each image load so getCrosshairPos re-runs with correct naturalWidth/Height
+  const [imgLoadCount, setImgLoadCount] = useState(0);
   const zoomRef = useRef(1);
   const offsetRef = useRef({ x: 0, y: 0 });
   zoomRef.current = zoom;
@@ -638,6 +640,7 @@ export function GcpPicker({
   function getCrosshairPos(
     mark: GcpMarkEntry
   ): { left: number; top: number } | null {
+    void imgLoadCount; // re-run after each image load so naturalWidth/Height are valid
     if (!imgRef.current || !containerRef.current) return null;
     const naturalW = imgRef.current.naturalWidth;
     const naturalH = imgRef.current.naturalHeight;
@@ -1025,6 +1028,7 @@ export function GcpPicker({
                 alt={selectedImage ?? ""}
                 className="h-full w-full object-contain"
                 draggable={false}
+                onLoad={() => setImgLoadCount((n) => n + 1)}
               />
               {/* Crosshairs for all GCP marks on this image */}
               {currentImageMarks.map((m) => {

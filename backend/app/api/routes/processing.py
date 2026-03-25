@@ -474,9 +474,35 @@ def list_plot_markings(
     current_user: CurrentUser,
     id: uuid.UUID,
 ) -> list[dict]:
+    from sqlmodel import select as _select
+    from app.models.pipeline import PipelineRun as _PR
+
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     versions, active = _discover_pm_versions(paths, dict(run.outputs or {}))
+
+    # For versions missing metadata (created by a different dataset run),
+    # scan sibling runs in the same pipeline to find their stored metadata.
+    missing = {v["version"] for v in versions if not v.get("run_label") and not v.get("created_at")}
+    if missing:
+        sibling_runs = session.exec(
+            _select(_PR).where(
+                _PR.pipeline_id == run.pipeline_id,
+                _PR.id != run.id,
+            )
+        ).all()
+        cross_meta: dict[int, dict] = {}
+        for sr in sibling_runs:
+            for pm in (sr.outputs or {}).get("plot_markings", []):
+                vnum = pm.get("version")
+                if vnum in missing and vnum not in cross_meta:
+                    cross_meta[vnum] = pm
+        for v in versions:
+            if v["version"] in cross_meta:
+                fb = cross_meta[v["version"]]
+                v["run_label"] = v["run_label"] or fb.get("run_label", "")
+                v["created_at"] = v["created_at"] or fb.get("created_at", "")
+
     for v in versions:
         v["is_active"] = (v["version"] == active)
     return versions
@@ -2819,17 +2845,20 @@ def inference_results(
         except Exception:
             pass
 
-    if plot_meta:
-        for img in images:
-            stem = img["name"]
-            if stem.endswith(".png"):
-                stem = stem[:-4]
-            plot_id = stem[len("plot_"):] if stem.startswith("plot_") else stem
-            meta = plot_meta.get(plot_id) or plot_meta.get(stem) or {}
-            img["plot"] = plot_id
-            img["row"] = meta.get("row", "")
-            img["col"] = meta.get("col", "")
-            img["accession"] = meta.get("accession", "")
+    import re as _re
+    for img in images:  # always set plot_id; enrich with metadata when available
+        stem = img["name"]
+        if stem.endswith(".png"):
+            stem = stem[:-4]
+        # Ground images are named "full_res_mosaic_temp_plot_1" — extract trailing number.
+        # Also handles simple "plot_1" prefix style.
+        _m = _re.search(r"_(\d+)$", stem)
+        plot_id = _m.group(1) if _m else (stem[len("plot_"):] if stem.startswith("plot_") else stem)
+        meta = plot_meta.get(plot_id) or plot_meta.get(stem) or {}
+        img["plot"] = plot_id
+        img["row"] = meta.get("row", "")
+        img["col"] = meta.get("col", "")
+        img["accession"] = meta.get("accession", "")
 
     return {
         "available": True,

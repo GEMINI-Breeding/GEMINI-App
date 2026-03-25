@@ -38,7 +38,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -3764,23 +3763,6 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
           )}
         </div>
 
-        {/* Data sync progress banner */}
-        {(pipelineType === "aerial" || pipelineType === "ground") &&
-          isRunning &&
-          run.current_step === "data_sync" && (
-            <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-              <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-500" />
-              <div className="flex-1">
-                <span className="font-medium">Running data sync…</span>
-                <span className="text-muted-foreground ml-2">
-                  Syncing image GPS coordinates.
-                </span>
-              </div>
-              {lastProgress !== null && (
-                <Progress value={lastProgress} className="h-1.5 w-24" />
-              )}
-            </div>
-          )}
 
         {/* Data sync dialog */}
         {showSyncDialog && (
@@ -4121,7 +4103,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                       return (
                         <StitchPanel
                           runId={runId}
-                          isRunning={isRunning}
+                          isRunning={isRunning && run?.current_step === "stitching"}
                           onDelete={(v) => deleteStitchMutation.mutate(v)}
                           onRename={(v, name) =>
                             renameStitchMutation.mutate({ version: v, name })

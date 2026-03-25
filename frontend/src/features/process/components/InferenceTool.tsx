@@ -791,7 +791,7 @@ export function InferenceTool({
                     >
                       {filteredImages.map((im) => (
                         <option key={im.name} value={im.name}>
-                          {im.name} ({(predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length)} det)
+                          {im.plot ? `Plot ${im.plot}` : im.name} ({(predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length)} det)
                         </option>
                       ))}
                     </select>

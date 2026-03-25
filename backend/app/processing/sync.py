@@ -287,7 +287,7 @@ def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], N
         f for f in image_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
     )
     total = len(files)
-    emit({"type": "progress", "step": "data_sync", "message": f"Found {total} images — extracting EXIF…", "pct": 5})
+    emit({"event": "progress", "message": f"Found {total} images — extracting EXIF…", "progress": 5})
 
     # Load existing to avoid reprocessing
     existing_paths: set[str] = set()
@@ -306,13 +306,13 @@ def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], N
             new_rows.append(row)
         if (i + 1) % max(total // 10, 1) == 0:
             pct = 5 + int(40 * (i + 1) / total)
-            emit({"type": "progress", "step": "data_sync", "message": f"EXIF {i+1}/{total}", "pct": pct})
+            emit({"event": "progress", "message": f"EXIF {i+1}/{total}", "progress": pct})
 
     all_rows = existing_rows + new_rows
     df = pd.DataFrame(all_rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
-    emit({"type": "progress", "step": "data_sync", "message": f"msgs_synced.csv written ({len(df)} images)", "pct": 45})
+    emit({"event": "progress", "message": f"msgs_synced.csv written ({len(df)} images)", "progress": 45})
     return df
 
 
@@ -431,10 +431,10 @@ def _build_drone_msgs(metadata_dir: Path, out_path: Path, emit: Callable[[dict],
     """
     log_files = [f for f in metadata_dir.iterdir() if f.suffix.lower() in _LOG_EXTS] if metadata_dir.is_dir() else []
     if not log_files:
-        emit({"type": "progress", "step": "data_sync", "message": "No platform logs found — skipping MAVLink sync", "pct": 50})
+        emit({"event": "progress", "message": "No platform logs found — skipping MAVLink sync", "progress": 50})
         return None
 
-    emit({"type": "progress", "step": "data_sync", "message": f"Parsing {len(log_files)} platform log(s)…", "pct": 50})
+    emit({"event": "progress", "message": f"Parsing {len(log_files)} platform log(s)…", "progress": 50})
 
     existing_ts: set[float] = set()
     existing_rows: list[dict] = []
@@ -445,7 +445,7 @@ def _build_drone_msgs(metadata_dir: Path, out_path: Path, emit: Callable[[dict],
 
     new_rows: list[dict] = []
     for i, log_path in enumerate(log_files):
-        emit({"type": "progress", "step": "data_sync", "message": f"Parsing {log_path.name}…", "pct": 50 + i * 5})
+        emit({"event": "progress", "message": f"Parsing {log_path.name}…", "progress": 50 + i * 5})
         try:
             df = _parse_mavlink_log(log_path)
             for _, row in df.iterrows():
@@ -463,7 +463,7 @@ def _build_drone_msgs(metadata_dir: Path, out_path: Path, emit: Callable[[dict],
     df_out = pd.DataFrame(all_rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_out.to_csv(out_path, index=False)
-    emit({"type": "progress", "step": "data_sync", "message": f"drone_msgs.csv written ({len(df_out)} records)", "pct": 65})
+    emit({"event": "progress", "message": f"drone_msgs.csv written ({len(df_out)} records)", "progress": 65})
     return df_out
 
 
@@ -557,7 +557,7 @@ def run_data_sync(
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
 
-    emit({"type": "progress", "step": "data_sync", "message": "Starting data sync…", "pct": 0})
+    emit({"event": "progress", "message": "Starting data sync…", "progress": 0})
     logger.info("Data sync — pipeline type: %s, rotate_images: %s", _pipeline_type, rotate_images)
 
     # ── Step 1: Determine base msgs_synced.csv (priority order) ──────────────
@@ -587,8 +587,8 @@ def run_data_sync(
     if paths.msgs_synced.exists():
         _df_existing = pd.read_csv(paths.msgs_synced)
         if _has_gps(_df_existing):
-            emit({"type": "progress", "step": "data_sync",
-                  "message": "Found existing msgs_synced.csv with GPS — skipping EXIF extraction.", "pct": 45})
+            emit({"event": "progress",
+                  "message": "Found existing msgs_synced.csv with GPS — skipping EXIF extraction.", "progress": 45})
             df_msgs = _df_existing
             msgs_synced_source = "intermediate"
             logger.info("Loaded existing msgs_synced.csv from Intermediate (%d rows)", len(df_msgs))
@@ -604,8 +604,8 @@ def run_data_sync(
     if df_msgs is None:
         bundled_gps_path = _find_bundled_msgs_synced(session, run_id, paths)
         if bundled_gps_path is not None and bundled_gps_path.exists():
-            emit({"type": "progress", "step": "data_sync",
-                  "message": f"Using bundled GPS file from upload: {bundled_gps_path.name}", "pct": 40})
+            emit({"event": "progress",
+                  "message": f"Using bundled GPS file from upload: {bundled_gps_path.name}", "progress": 40})
             df_bundled = _normalise_msgs_synced_columns(pd.read_csv(bundled_gps_path))
             # Normalize image_path values to just filename (Farm-ng paths are like /top/rgb-TIMESTAMP.jpg)
             if "image_path" in df_bundled.columns:
@@ -619,8 +619,8 @@ def run_data_sync(
 
     # User-provided file in Raw Metadata
     if df_msgs is None and user_msgs_synced.exists():
-        emit({"type": "progress", "step": "data_sync",
-              "message": "Found user-provided msgs_synced.csv in Metadata/ — skipping EXIF extraction.", "pct": 45})
+        emit({"event": "progress",
+              "message": "Found user-provided msgs_synced.csv in Metadata/ — skipping EXIF extraction.", "progress": 45})
         df_msgs = _normalise_msgs_synced_columns(pd.read_csv(user_msgs_synced))
         df_msgs.to_csv(paths.msgs_synced, index=False)
         msgs_synced_source = "user-provided"
@@ -648,8 +648,8 @@ def run_data_sync(
 
     # ── Step 3: Merge drone GPS into msgs_synced ──────────────────────────────
     if df_drone is not None and not df_drone.empty:
-        emit({"type": "progress", "step": "data_sync",
-              "message": "Merging platform log GPS into image manifest…", "pct": 70})
+        emit({"event": "progress",
+              "message": "Merging platform log GPS into image manifest…", "progress": 70})
         df_msgs = _merge_drone_gps(df_msgs, df_drone)
         df_msgs.to_csv(paths.msgs_synced, index=False)
 
@@ -673,10 +673,10 @@ def run_data_sync(
         logger.warning("Data sync for run %s: no GPS data available", run_id)
 
     # ── Step 4: Write geo.txt ─────────────────────────────────────────────────
-    emit({"type": "progress", "step": "data_sync", "message": "Writing geo.txt for ODM…", "pct": 90})
+    emit({"event": "progress", "message": "Writing geo.txt for ODM…", "progress": 90})
     n_written = _write_geo_txt(df_msgs, paths.geo_txt)
-    emit({"type": "progress", "step": "data_sync",
-          "message": f"geo.txt written ({n_written} images with GPS)", "pct": 95})
+    emit({"event": "progress",
+          "message": f"geo.txt written ({n_written} images with GPS)", "progress": 95})
 
     logger.info(
         "Data sync complete for run %s (source=%s): %d images, %d drone log records, %d geo entries",
@@ -797,7 +797,7 @@ def run_cross_sensor_sync(
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
 
-    emit({"type": "progress", "step": "data_sync", "message": "Loading reference GPS data…", "pct": 5})
+    emit({"event": "progress", "message": "Loading reference GPS data…", "progress": 5})
 
     # ── Load reference msgs_synced ────────────────────────────────────────────
     source_run_uuid = uuid.UUID(source_run_id)
@@ -854,68 +854,50 @@ def run_cross_sensor_sync(
                                   fill_value=(ref_alt[0], ref_alt[-1]))
 
     emit({
-        "type": "progress", "step": "data_sync",
+        "event": "progress",
         "message": (
             f"Reference GPS loaded ({len(valid_ref)} records, span {ref_span:.1f}s, "
             f"threshold ±{max_extrapolation_sec}s). Extracting image timestamps…"
         ),
-        "pct": 20,
+        "progress": 20,
     })
 
     if stop_event.is_set():
         raise RuntimeError("Stopped by user")
 
     # ── Extract timestamps from target images ────────────────────────────────
-    # Prefer an already-generated msgs_synced.csv — it may already have timestamps
-    # (from a prior run_data_sync) and avoids re-scanning potentially modified images.
-    df_target: "pd.DataFrame | None" = None
-    existing_target_csv = paths.msgs_synced
-    if existing_target_csv.exists():
-        try:
-            _df_existing = _normalise_msgs_synced_columns(pd.read_csv(existing_target_csv))
-            if "timestamp" in _df_existing.columns and _df_existing["timestamp"].notna().any():
-                df_target = _df_existing
-                emit({"type": "progress", "step": "data_sync",
-                      "message": f"Using existing msgs_synced.csv ({len(df_target)} images)…",
-                      "pct": 65})
-                logger.info(
-                    "cross_sensor_sync: reusing existing msgs_synced.csv with %d/%d timestamps",
-                    int(df_target["timestamp"].notna().sum()), len(df_target),
-                )
-        except Exception as exc:
-            logger.warning("Could not read existing msgs_synced.csv: %s — falling back to EXIF scan", exc)
-
-    if df_target is None:
-        image_dir = _find_image_dir(paths)
-        if not image_dir.exists():
-            raise FileNotFoundError(
-                f"No image directory found at {image_dir}. "
-                "Upload images before running Data Sync."
-            )
-
-        files = sorted(
-            f for f in image_dir.iterdir()
-            if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
+    # Always scan fresh from EXIF — reusing an existing msgs_synced.csv is unsafe
+    # because a previous bad run may have written corrupted/missing timestamps.
+    image_dir = _find_image_dir(paths)
+    if not image_dir.exists():
+        raise FileNotFoundError(
+            f"No image directory found at {image_dir}. "
+            "Upload images before running Data Sync."
         )
-        total = len(files)
-        emit({"type": "progress", "step": "data_sync",
-              "message": f"Found {total} images — reading timestamps…", "pct": 25})
 
-        rows: list[dict[str, Any]] = []
-        for i, f in enumerate(files):
-            rows.append(_extract_exif_timestamp_only(f))
-            if (i + 1) % max(total // 10, 1) == 0:
-                pct = 25 + int(40 * (i + 1) / total)
-                emit({"type": "progress", "step": "data_sync",
-                      "message": f"Timestamps {i+1}/{total}", "pct": pct})
-            if stop_event.is_set():
-                raise RuntimeError("Stopped by user")
+    files = sorted(
+        f for f in image_dir.iterdir()
+        if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
+    )
+    total = len(files)
+    emit({"event": "progress",
+          "message": f"Found {total} images — reading timestamps…", "progress": 25})
 
-        df_target = pd.DataFrame(rows)
+    rows: list[dict[str, Any]] = []
+    for i, f in enumerate(files):
+        rows.append(_extract_exif_timestamp_only(f))
+        if (i + 1) % max(total // 10, 1) == 0:
+            pct = 25 + int(40 * (i + 1) / total)
+            emit({"event": "progress",
+                  "message": f"Timestamps {i+1}/{total}", "progress": pct})
+        if stop_event.is_set():
+            raise RuntimeError("Stopped by user")
+
+    df_target = pd.DataFrame(rows)
 
     # ── Classify each image and assign GPS ───────────────────────────────────
-    emit({"type": "progress", "step": "data_sync",
-          "message": "Interpolating GPS positions…", "pct": 70})
+    emit({"event": "progress",
+          "message": "Interpolating GPS positions…", "progress": 70})
 
     has_ts = df_target["timestamp"].notna()
     n_with_ts = int(has_ts.sum())
@@ -994,8 +976,8 @@ def run_cross_sensor_sync(
         parts.append(f"EXIF fallback (>{max_extrapolation_sec}s out-of-range): {n_exif_fallback}")
     if n_no_gps:
         parts.append(f"no GPS: {n_no_gps}")
-    emit({"type": "progress", "step": "data_sync",
-          "message": " · ".join(parts), "pct": 85})
+    emit({"event": "progress",
+          "message": " · ".join(parts), "progress": 85})
 
     if n_no_gps:
         emit({
@@ -1009,12 +991,12 @@ def run_cross_sensor_sync(
 
     # ── Write outputs ────────────────────────────────────────────────────────
     df_target.to_csv(paths.msgs_synced, index=False)
-    emit({"type": "progress", "step": "data_sync",
-          "message": f"msgs_synced.csv written ({len(df_target)} images)", "pct": 90})
+    emit({"event": "progress",
+          "message": f"msgs_synced.csv written ({len(df_target)} images)", "progress": 90})
 
     n_written = _write_geo_txt(df_target, paths.geo_txt)
-    emit({"type": "progress", "step": "data_sync",
-          "message": f"geo.txt written ({n_written} images with GPS)", "pct": 95})
+    emit({"event": "progress",
+          "message": f"geo.txt written ({n_written} images with GPS)", "progress": 95})
 
     logger.info(
         "Cross-sensor sync complete for run %s (source=%s): %d images, "

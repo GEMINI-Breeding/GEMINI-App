@@ -53,7 +53,13 @@ export function orderColumns(
       !ROW_KEY_SET.has(k.toLowerCase()) &&
       deduped.includes(k)
   );
-  const remainingNum = numCols.filter((k) => deduped.includes(k));
+  const remainingNum = numCols.filter(
+    (k) =>
+      deduped.includes(k) &&
+      !priority.includes(k) &&
+      !COL_KEY_SET.has(k.toLowerCase()) &&
+      !ROW_KEY_SET.has(k.toLowerCase())
+  );
 
   return [...priority, ...remainingMeta, ...remainingNum].filter((c) => c !== "");
 }

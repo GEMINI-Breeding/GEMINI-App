@@ -43,7 +43,7 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
     enabled: !!pipelineId,
   })
 
-  const runs: { id: string; date: string; location: string; population: string }[] =
+  const runs: { id: string; date: string; location: string; population: string; platform?: string; sensor?: string }[] =
     (runsData as any)?.data ?? []
 
   // Selected run — defaults to first available
@@ -208,7 +208,7 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
                   <SelectContent>
                     {runs.map((r) => (
                       <SelectItem key={r.id} value={r.id} className="text-xs">
-                        {r.date}{r.location ? ` · ${r.location}` : ""}{r.population ? ` · ${r.population}` : ""}
+                        {r.date}{r.location ? ` · ${r.location}` : ""}{r.population ? ` · ${r.population}` : ""}{r.platform ? ` · ${r.platform}` : ""}{r.sensor ? ` · ${r.sensor}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -26,6 +26,8 @@ import {
   Loader2,
   MousePointer,
   Move,
+  Redo2,
+  Undo2,
   Upload,
 } from "lucide-react";
 
@@ -618,6 +620,57 @@ function deriveGridOptionsFromGeojson(
 
 // ── Grid settings panel ───────────────────────────────────────────────────────
 
+interface FdTransform {
+  flipRows: boolean;
+  flipCols: boolean;
+  swapAxes: boolean;
+}
+
+/** Re-apply field-design labels onto an existing FeatureCollection without touching geometries. */
+function mergeLabelsIntoExisting(
+  existing: GeoJSON.FeatureCollection,
+  fdRows: Record<string, string>[],
+  transform: FdTransform,
+): GeoJSON.FeatureCollection {
+  // Ground pipeline features only have `plot_id` (sequential: "1","2",...), not row/column.
+  // Assign row/column from the fd before applying the transform.
+  const hasRowCol = existing.features.some(
+    (f) => f.properties?.row != null && f.properties?.column != null,
+  );
+
+  let source = existing;
+  if (!hasRowCol && fdRows.length > 0) {
+    const assigned = existing.features.map((feature, idx) => {
+      const plotId = String(feature.properties?.plot_id ?? idx + 1);
+      // Try matching by plot_id column in fd, then fall back to sequential order.
+      const fd =
+        fdRows.find((r) => r.plot_id === plotId) ??
+        fdRows.find((r) => r.plot === plotId) ??
+        fdRows[idx];
+      if (!fd) return feature;
+      const r = parseInt(fd.row) || idx + 1;
+      const c = parseInt(fd.col) || 1;
+      return { ...feature, properties: { ...feature.properties, row: r, column: c } };
+    });
+    source = { ...existing, features: assigned };
+  }
+
+  const maxRow = Math.max(...source.features.map((f) => (f.properties?.row as number) ?? 1));
+  const maxCol = Math.max(...source.features.map((f) => (f.properties?.column as number) ?? 1));
+  const newFeatures = source.features.map((feature) => {
+    let r = (feature.properties?.row as number) ?? 1;
+    let c = (feature.properties?.column as number) ?? 1;
+    if (transform.flipRows) r = maxRow - r + 1;
+    if (transform.flipCols) c = maxCol - c + 1;
+    if (transform.swapAxes) [r, c] = [c, r];
+    const fd = fdRows.find((row) => row.row === String(r) && row.col === String(c));
+    const props: Record<string, any> = { ...feature.properties, ...(fd ?? {}) };
+    if (!props.plot) props.plot = `${r}_${c}`;
+    return { ...feature, properties: props };
+  });
+  return { ...existing, features: newFeatures };
+}
+
 function GridSettingsPanel({
   options,
   onChange,
@@ -633,6 +686,14 @@ function GridSettingsPanel({
   gridGenerated,
   gridVisible,
   onToggleGrid,
+  pipelineType,
+  fdAvailable,
+  fdTransform,
+  onFdTransformChange,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: {
   options: GridOptions;
   onChange: (opts: GridOptions) => void;
@@ -648,13 +709,21 @@ function GridSettingsPanel({
   gridGenerated?: boolean;
   gridVisible?: boolean;
   onToggleGrid?: () => void;
+  pipelineType?: "aerial" | "ground";
+  fdAvailable?: boolean;
+  fdTransform?: FdTransform;
+  onFdTransformChange?: (t: FdTransform) => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   const [minimized, setMinimized] = useState(false);
 
   function field(label: string, key: keyof GridOptions, step = 0.1) {
     return (
       <div>
-        <Label className="text-xs">{label}</Label>
+        <Label className="text-xs text-muted-foreground">{label}</Label>
         <Input
           type="number"
           step={step}
@@ -662,59 +731,79 @@ function GridSettingsPanel({
           onChange={(e) =>
             onChange({ ...options, [key]: parseFloat(e.target.value) || 0 })
           }
-          className="mt-0.5 h-8 text-sm"
+          className="mt-0.5 h-7 text-xs"
         />
       </div>
     );
   }
 
   return (
-    <div className="bg-background/95 absolute bottom-4 left-4 z-[1000] w-64 rounded-lg border shadow-lg">
+    <div className="bg-background/95 absolute bottom-4 right-4 z-[1000] w-60 rounded-lg border shadow-lg">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-2">
-        <p className="text-sm font-medium">Plot Settings</p>
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between border-b px-3 py-1.5">
+        <p className="text-xs font-semibold">Plot Settings</p>
+        <div className="flex items-center gap-0.5">
+          {onUndo && (
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onRedo && (
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Y)"
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          )}
           {onToggleGrid && gridGenerated && (
             <button
               onClick={onToggleGrid}
               title={gridVisible ? "Hide grid" : "Show grid"}
-              className="text-muted-foreground hover:text-foreground"
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
             >
               {gridVisible ? (
-                <Eye className="h-4 w-4" />
+                <Eye className="h-3.5 w-3.5" />
               ) : (
-                <EyeOff className="h-4 w-4" />
+                <EyeOff className="h-3.5 w-3.5" />
               )}
             </button>
           )}
           <button
             onClick={() => setMinimized((m) => !m)}
-            className="text-muted-foreground hover:text-foreground"
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
           >
             {minimized ? (
-              <ChevronUp className="h-4 w-4" />
+              <ChevronUp className="h-3.5 w-3.5" />
             ) : (
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-3.5 w-3.5" />
             )}
           </button>
         </div>
       </div>
 
       {!minimized && (
-        <div className="space-y-3 p-4">
+        <div className="space-y-2 p-3">
           {!hideGridInputs && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
               {field("Width (m)", "width")}
               {field("Length (m)", "length")}
               {field("Rows", "rows", 1)}
               {field("Columns", "columns", 1)}
-              {field("V. Spacing (m)", "verticalSpacing")}
-              {field("H. Spacing (m)", "horizontalSpacing")}
+              {field("V. Spacing", "verticalSpacing")}
+              {field("H. Spacing", "horizontalSpacing")}
             </div>
           )}
           <div>
-            <Label className="text-xs">Angle (°)</Label>
-            <div className="mt-1 flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Angle (°)</Label>
+            <div className="mt-0.5 flex items-center gap-1.5">
               <input
                 type="range"
                 min={-180}
@@ -736,41 +825,71 @@ function GridSettingsPanel({
                   const v = parseFloat(e.target.value);
                   if (!isNaN(v)) onChange({ ...options, angle: Math.max(-180, Math.min(180, v)) });
                 }}
-                className="h-7 w-16 text-xs"
+                className="h-7 w-14 text-xs"
               />
             </div>
           </div>
 
+          {/* TODO: Label orientation — WILL NEED TO REFINE LATER */}
+          {/* {pipelineType === "ground" && fdAvailable && fdTransform && onFdTransformChange && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Label Orientation</Label>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                {(
+                  [
+                    { key: "flipRows", label: "Flip Rows" },
+                    { key: "flipCols", label: "Flip Cols" },
+                    { key: "swapAxes", label: "Swap" },
+                  ] as { key: keyof FdTransform; label: string }[]
+                ).map(({ key, label }) => (
+                  <label key={key} className="flex cursor-pointer items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={fdTransform[key]}
+                      onChange={(e) =>
+                        onFdTransformChange({ ...fdTransform, [key]: e.target.checked })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )} */}
+
           {/* Mode buttons */}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             <Button
               size="sm"
               variant={interactionMode === "select" ? "default" : "outline"}
+              className="h-7 text-xs"
               onClick={() => onModeChange("select")}
             >
-              <MousePointer className="mr-1.5 h-3 w-3" />
+              <MousePointer className="mr-1 h-3 w-3" />
               Select
             </Button>
             <Button
               size="sm"
               variant={interactionMode === "move" ? "default" : "outline"}
+              className="h-7 text-xs"
               onClick={() => onModeChange("move")}
             >
-              <Move className="mr-1.5 h-3 w-3" />
+              <Move className="mr-1 h-3 w-3" />
               Move
             </Button>
           </div>
 
           {/* Select all / clear / delete — shown in select mode when plots exist */}
           {interactionMode === "select" && featureCount > 0 && (
-            <div className="flex flex-col gap-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="sm" variant="outline" onClick={onSelectAll}>
-                  Select All
+            <div className="flex flex-col gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onSelectAll}>
+                  All
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
+                  className="h-7 text-xs"
                   onClick={onClearSelection}
                   disabled={selectedCount === 0}
                 >
@@ -781,7 +900,7 @@ function GridSettingsPanel({
                 <Button
                   size="sm"
                   variant="destructive"
-                  className="w-full"
+                  className="h-7 w-full text-xs"
                   onClick={onDeleteSelected}
                 >
                   Delete {selectedCount} plot{selectedCount !== 1 ? "s" : ""}
@@ -791,17 +910,23 @@ function GridSettingsPanel({
           )}
 
           {onGenerateGrid && (
-            <Button
-              size="sm"
-              className="w-full"
-              variant={gridGenerated ? "outline" : "default"}
-              onClick={onGenerateGrid}
-            >
-              {gridGenerated ? "Regenerate Grid" : "Generate Grid"}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                className="h-7 flex-1 text-xs"
+                variant={gridGenerated ? "outline" : "default"}
+                onClick={onGenerateGrid}
+              >
+                {gridGenerated ? "Regenerate Grid" : "Generate Grid"}
+              </Button>
+              {featureCount > 0 && (
+                <span className="text-muted-foreground text-xs whitespace-nowrap">
+                  {featureCount} plots
+                </span>
+              )}
+            </div>
           )}
-
-          {featureCount > 0 && (
+          {!onGenerateGrid && featureCount > 0 && (
             <p className="text-muted-foreground text-center text-xs">
               {featureCount} plots
               {selectedCount > 0 && ` · ${selectedCount} selected`}
@@ -869,6 +994,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [mapInitialized, setMapInitialized] = useState(false);
   const [noFdWarningOpen, setNoFdWarningOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [fdTransform, setFdTransform] = useState<FdTransform>({ flipRows: false, flipCols: false, swapAxes: false });
 
   // ── Undo / redo history ──────────────────────────────────────────────────
   const historyRef = useRef<GeoJSON.FeatureCollection[]>([]);
@@ -1240,8 +1366,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       }
 
       switch (e.key.toLowerCase()) {
-        case "s": setInteractionMode("select"); break;
-        case "m": setInteractionMode("move"); break;
+        case "s": setInteractionMode(interactionModeRef2.current === "select" ? "view" : "select"); break;
+        case "m": setInteractionMode(interactionModeRef2.current === "move" ? "view" : "move"); break;
         case "a":
           if (previewGeoJsonRef.current) {
             setSelectedIndexes(Array.from({ length: previewGeoJsonRef.current.features.length }, (_, i) => i));
@@ -1277,6 +1403,16 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     // Don't reset selectedIndexes during drag — too disruptive
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridOffset]);
+
+  // Ground pipeline: when label orientation transform changes, re-merge labels onto existing features.
+  useEffect(() => {
+    if (pipelineType !== "ground" || !fdInfo?.rows || !previewGeoJsonRef.current) return;
+    const fc = mergeLabelsIntoExisting(previewGeoJsonRef.current, fdInfo.rows, fdTransform);
+    setPreviewGeoJson(fc);
+    setSelectedIndexes([]);
+    pushHistory(fc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fdTransform]);
 
   // Hide the population boundary (orange) only when the plot grid is actively visible.
   // When the grid is hidden (or no grid exists), restore the orange boundary.
@@ -1752,12 +1888,6 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           </span>
         )}
         <div className="flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
-            ↩
-          </Button>
-          <Button variant="ghost" size="sm" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
-            ↪
-          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1825,6 +1955,14 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             gridGenerated={gridGenerated}
             gridVisible={gridVisible}
             onToggleGrid={() => setGridVisible((v) => !v)}
+            pipelineType={pipelineType}
+            fdAvailable={fdInfo?.available}
+            fdTransform={fdTransform}
+            onFdTransformChange={setFdTransform}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
           />
         )}
         {!hasBoundary && (
@@ -1833,8 +1971,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             field boundary
           </div>
         )}
-        {/* Top-right: stacked version selectors */}
-        <div className="absolute top-2 right-2 z-[1000] flex flex-col gap-1">
+        {/* Bottom-left: stacked version selectors */}
+        <div className="absolute bottom-4 left-4 z-[1000] flex flex-col gap-1">
           {/* Stitch version selector (ground only) */}
           {pipelineType === "ground" && orthoInfo.stitch_versions && orthoInfo.stitch_versions.length > 0 && (
             <select
@@ -1921,18 +2059,26 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         onSaved={async (info) => {
           const result = await refetchFd();
           const newRows = (result.data as FieldDesignInfo | undefined)?.rows;
-          const newOpts = {
-            ...gridOptions,
-            rows: info.row_count || gridOptions.rows,
-            columns: info.col_count || gridOptions.columns,
-          };
-          setGridOptions(newOpts);
-          // Merge field design into existing grid if one has already been generated
-          if (gridGenerated && popBoundary) {
-            const fc = computeGrid(popBoundary, newOpts, gridOffset, newRows);
+          if (pipelineType === "ground" && previewGeoJsonRef.current) {
+            // Ground: keep existing georeferenced boundaries, only re-merge labels
+            const fc = mergeLabelsIntoExisting(previewGeoJsonRef.current, newRows ?? [], fdTransform);
             setPreviewGeoJson(fc);
             setSelectedIndexes([]);
             pushHistory(fc);
+          } else {
+            // Aerial: update row/col counts and regenerate the rectangular grid
+            const newOpts = {
+              ...gridOptions,
+              rows: info.row_count || gridOptions.rows,
+              columns: info.col_count || gridOptions.columns,
+            };
+            setGridOptions(newOpts);
+            if (gridGenerated && popBoundary) {
+              const fc = computeGrid(popBoundary, newOpts, gridOffset, newRows);
+              setPreviewGeoJson(fc);
+              setSelectedIndexes([]);
+              pushHistory(fc);
+            }
           }
         }}
       />
