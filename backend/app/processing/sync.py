@@ -562,43 +562,22 @@ def run_data_sync(
 
     # ── Step 1: Determine base msgs_synced.csv (priority order) ──────────────
     #
-    #  1. Intermediate/.../msgs_synced.csv  — already generated WITH GPS data
-    #  2. FileUpload.msgs_synced_path       — bundled GPS file (Farm-ng binary)
-    #  3. Raw/.../Metadata/msgs_synced.csv  — user-uploaded pre-synced file
-    #  4. Auto-generate from drone image EXIF
+    #  1. FileUpload.msgs_synced_path       — bundled GPS file (Farm-ng binary)
+    #  2. Raw/.../Metadata/msgs_synced.csv  — user-uploaded pre-synced file
+    #  3. Auto-generate from drone image EXIF
     #
-    # Regardless of source, platform logs are still parsed and merged if present.
-    # Note: an existing Intermediate file with NO GPS rows is treated as stale and
-    # regenerated so that a bundled or user-provided GPS source can be used.
+    # Always regenerate from source — never reuse a stale Intermediate file.
+    # Reusing the cached Intermediate file caused re-runs to skip EXIF extraction
+    # and carry forward any incorrect or outdated GPS data.
+
+    if paths.msgs_synced.exists():
+        paths.msgs_synced.unlink()
+        logger.info("Removed stale msgs_synced.csv from Intermediate/ — will regenerate.")
 
     user_msgs_synced = paths.raw_metadata / "msgs_synced.csv"
     msgs_synced_source: str
-
-    # Helper: does this DataFrame have at least one row with valid GPS?
-    def _has_gps(df: "pd.DataFrame") -> bool:
-        return bool(
-            "lat" in df.columns
-            and "lon" in df.columns
-            and df["lat"].notna().any()
-            and df["lon"].notna().any()
-        )
-
-    # Check existing Intermediate file — only reuse if it has GPS data
-    if paths.msgs_synced.exists():
-        _df_existing = pd.read_csv(paths.msgs_synced)
-        if _has_gps(_df_existing):
-            emit({"event": "progress",
-                  "message": "Found existing msgs_synced.csv with GPS — skipping EXIF extraction.", "progress": 45})
-            df_msgs = _df_existing
-            msgs_synced_source = "intermediate"
-            logger.info("Loaded existing msgs_synced.csv from Intermediate (%d rows)", len(df_msgs))
-        else:
-            logger.info("Existing msgs_synced.csv has no GPS rows — will regenerate.")
-            df_msgs = None
-            msgs_synced_source = ""
-    else:
-        df_msgs = None
-        msgs_synced_source = ""
+    df_msgs = None
+    msgs_synced_source = ""
 
     # Farm-ng bundled GPS file via FileUpload record
     if df_msgs is None:

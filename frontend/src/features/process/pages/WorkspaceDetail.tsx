@@ -248,11 +248,13 @@ function NewRunDialog({
                           return (
                             <tr
                               key={u.id}
-                              onClick={() => setSelectedUploadId(u.id)}
-                              className={`cursor-pointer border-t transition-colors ${
-                                u.id === selectedUploadId
-                                  ? "bg-primary/10"
-                                  : "hover:bg-muted/50"
+                              onClick={() => !included && setSelectedUploadId(u.id)}
+                              className={`border-t transition-colors ${
+                                included
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : u.id === selectedUploadId
+                                  ? "bg-primary/10 cursor-pointer"
+                                  : "hover:bg-muted/50 cursor-pointer"
                               }`}
                             >
                               <td className="px-2 py-1.5">
@@ -265,7 +267,7 @@ function NewRunDialog({
                                     />
                                   </TooltipTrigger>
                                   <TooltipContent>
-                                    {included ? "Already included" : "Not Included"}
+                                    {included ? "Already included — delete the run to re-add" : "Not Included"}
                                   </TooltipContent>
                                 </Tooltip>
                               </td>
@@ -294,7 +296,7 @@ function NewRunDialog({
           </Button>
           <Button
             onClick={handleCreate}
-            disabled={!selectedUpload || createMutation.isPending}
+            disabled={!selectedUpload || createMutation.isPending || includedUploadIds.has(selectedUploadId)}
           >
             {createMutation.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

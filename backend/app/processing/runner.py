@@ -267,26 +267,44 @@ def run_step_in_background(
             _emit({"event": "complete", "step": step, "outputs": outputs or {}})
 
         except Exception as exc:
-            logger.exception("Step %s failed for run %s", step, run_id_str)
-            try:
-                from app.models.pipeline import PipelineRun
-                from app.crud.pipeline import update_pipeline_run
-                from app.models.pipeline import PipelineRunUpdate
+            if stop_event.is_set():
+                # User cancelled via the Stop button — revert to pending cleanly.
+                try:
+                    from app.models.pipeline import PipelineRun
+                    from app.crud.pipeline import update_pipeline_run
+                    from app.models.pipeline import PipelineRunUpdate
 
-                run = session.get(PipelineRun, run_id)
-                if run:
-                    update_pipeline_run(
-                        session=session,
-                        db_run=run,
-                        run_in=PipelineRunUpdate(
-                            status="failed",
-                            current_step=step,
-                            error=str(exc)[:2000],
-                        ),
-                    )
-            except Exception:
-                pass
-            _emit({"event": "error", "step": step, "message": str(exc)})
+                    run = session.get(PipelineRun, run_id)
+                    if run:
+                        update_pipeline_run(
+                            session=session,
+                            db_run=run,
+                            run_in=PipelineRunUpdate(status="pending", current_step=None),
+                        )
+                except Exception:
+                    pass
+                _emit({"event": "cancelled", "step": step})
+            else:
+                logger.exception("Step %s failed for run %s", step, run_id_str)
+                try:
+                    from app.models.pipeline import PipelineRun
+                    from app.crud.pipeline import update_pipeline_run
+                    from app.models.pipeline import PipelineRunUpdate
+
+                    run = session.get(PipelineRun, run_id)
+                    if run:
+                        update_pipeline_run(
+                            session=session,
+                            db_run=run,
+                            run_in=PipelineRunUpdate(
+                                status="failed",
+                                current_step=step,
+                                error=str(exc)[:2000],
+                            ),
+                        )
+                except Exception:
+                    pass
+                _emit({"event": "error", "step": step, "message": str(exc)})
         finally:
             _mark_done(run_id_str)
             _deregister_stop_event(run_id_str)
