@@ -60,7 +60,7 @@ Source: "binaries\gemi-backend\*"; \
 
 [Icons]
 Name: "{group}\{#AppName}";    Filename: "{app}\{#AppExeName}"
-Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; \

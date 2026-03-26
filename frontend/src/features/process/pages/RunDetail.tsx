@@ -3494,6 +3494,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
   // Import orthomosaic dialog
   const [showImportOrthoDialog, setShowImportOrthoDialog] = useState(false);
   const [importSelectedId, setImportSelectedId] = useState<string>("");
+  const [importSelectedDemId, setImportSelectedDemId] = useState<string>("");
   const [importSaveMode, setImportSaveMode] = useState<"new_version" | "replace">("new_version");
   const [importName, setImportName] = useState("");
 
@@ -3519,13 +3520,28 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     enabled: showSyncDialog,
   });
 
-  const { data: uploadedOrthosList } = useQuery<{
+  type OrthoUploadEntry = {
     id: string; experiment: string; location: string; population: string;
     date: string; platform: string; sensor: string; file_count: number; tif_files: string[];
-  }[]>({
+  };
+
+  const { data: uploadedOrthosList } = useQuery<OrthoUploadEntry[]>({
     queryKey: ["uploaded-orthos-list"],
     queryFn: async () => {
       const res = await fetch(apiUrl("/api/v1/files/uploaded-orthos"), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: showImportOrthoDialog,
+    staleTime: 30_000,
+  });
+
+  const { data: uploadedDemsList } = useQuery<OrthoUploadEntry[]>({
+    queryKey: ["uploaded-dems-list"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/v1/files/uploaded-dems"), {
         headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
       });
       if (!res.ok) throw new Error("Failed");
@@ -3548,6 +3564,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
           },
           body: JSON.stringify({
             file_upload_id: importSelectedId || null,
+            dem_file_upload_id: importSelectedDemId || null,
             save_mode: importSaveMode,
             name: importName || null,
           }),
@@ -3560,6 +3577,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       }
       setShowImportOrthoDialog(false);
       setImportSelectedId("");
+      setImportSelectedDemId("");
       setImportName("");
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
       queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
@@ -4024,6 +4042,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                         disabled={isExecuting || isRunning}
                         onClick={() => {
                           setImportSelectedId("");
+                          setImportSelectedDemId("");
                           setImportName("");
                           setImportSaveMode("new_version");
                           setShowImportOrthoDialog(true);
@@ -4432,57 +4451,124 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
 
       {/* Docker missing dialog */}
       {/* ── Import Orthomosaic Dialog ── */}
-      <Dialog open={showImportOrthoDialog} onOpenChange={(o) => !o && setShowImportOrthoDialog(false)}>
+      <Dialog open={showImportOrthoDialog} onOpenChange={(o) => { if (!o) { setShowImportOrthoDialog(false); setImportSelectedDemId(""); } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Import Orthomosaic</DialogTitle>
             <DialogDescription>
-              Select an uploaded orthomosaic to import into this run. Any GeoTIFF
-              uploaded via Files → Orthomosaic is available here.
+              Select an RGB orthomosaic (required) and optionally a DEM (for plant height).
+              Upload them via Files → Orthomosaic and Files → Orthomosaic DEM first.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-1">
-            {/* Ortho list */}
-            <div className="border rounded-md overflow-hidden">
-              <div className="max-h-56 overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/60 sticky top-0">
-                    <tr>
-                      {["", "Date", "Experiment", "Location", "Population", "Platform", "Files"].map((h) => (
-                        <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {!uploadedOrthosList ? (
-                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin inline-block mr-1" />Loading…
-                      </td></tr>
-                    ) : uploadedOrthosList.length === 0 ? (
-                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
-                        No orthomosaics uploaded yet. Upload via Files → Orthomosaic first.
-                      </td></tr>
-                    ) : uploadedOrthosList.map((o) => (
-                      <tr
-                        key={o.id}
-                        onClick={() => setImportSelectedId(o.id)}
-                        className={`cursor-pointer border-t transition-colors ${
-                          o.id === importSelectedId ? "bg-primary/10" : "hover:bg-muted/50"
-                        }`}
-                      >
-                        <td className="px-2 py-2">
-                          <input type="radio" readOnly checked={o.id === importSelectedId} className="accent-primary" />
-                        </td>
-                        <td className="px-3 py-2 tabular-nums">{o.date}</td>
-                        <td className="px-3 py-2 font-medium">{o.experiment}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{o.location}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{o.population}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{[o.platform, o.sensor].filter(Boolean).join(" / ") || "—"}</td>
-                        <td className="px-3 py-2 tabular-nums text-muted-foreground">{o.file_count}</td>
+            {/* RGB Ortho list */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">RGB Orthomosaic <span className="text-destructive">*</span></p>
+              <div className="border rounded-md overflow-hidden">
+                <div className="max-h-44 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/60 sticky top-0">
+                      <tr>
+                        {["", "Date", "Experiment", "Location", "Population", "Platform", "Files"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {!uploadedOrthosList ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin inline-block mr-1" />Loading…
+                        </td></tr>
+                      ) : uploadedOrthosList.length === 0 ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          No RGB orthomosaics uploaded yet. Upload via Files → Orthomosaic first.
+                        </td></tr>
+                      ) : uploadedOrthosList.map((o) => (
+                        <tr
+                          key={o.id}
+                          onClick={() => setImportSelectedId(o.id)}
+                          className={`cursor-pointer border-t transition-colors ${
+                            o.id === importSelectedId ? "bg-primary/10" : "hover:bg-muted/50"
+                          }`}
+                        >
+                          <td className="px-2 py-2">
+                            <input type="radio" readOnly checked={o.id === importSelectedId} className="accent-primary" />
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">{o.date}</td>
+                          <td className="px-3 py-2 font-medium">{o.experiment}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{o.location}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{o.population}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{[o.platform, o.sensor].filter(Boolean).join(" / ") || "—"}</td>
+                          <td className="px-3 py-2 tabular-nums text-muted-foreground">{o.file_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* DEM list */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                DEM <span className="text-muted-foreground font-normal">(optional — required for plant height)</span>
+              </p>
+              <div className="border rounded-md overflow-hidden">
+                <div className="max-h-44 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/60 sticky top-0">
+                      <tr>
+                        {["", "Date", "Experiment", "Location", "Population", "Platform", "Files"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!uploadedDemsList ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin inline-block mr-1" />Loading…
+                        </td></tr>
+                      ) : uploadedDemsList.length === 0 ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          No DEMs uploaded yet. Upload via Files → Orthomosaic DEM to enable plant height.
+                        </td></tr>
+                      ) : (
+                        <>
+                          <tr
+                            onClick={() => setImportSelectedDemId("")}
+                            className={`cursor-pointer border-t transition-colors ${
+                              !importSelectedDemId ? "bg-primary/10" : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <td className="px-2 py-2">
+                              <input type="radio" readOnly checked={!importSelectedDemId} className="accent-primary" />
+                            </td>
+                            <td colSpan={6} className="px-3 py-2 text-muted-foreground italic">None</td>
+                          </tr>
+                          {uploadedDemsList.map((o) => (
+                            <tr
+                              key={o.id}
+                              onClick={() => setImportSelectedDemId(o.id)}
+                              className={`cursor-pointer border-t transition-colors ${
+                                o.id === importSelectedDemId ? "bg-primary/10" : "hover:bg-muted/50"
+                              }`}
+                            >
+                              <td className="px-2 py-2">
+                                <input type="radio" readOnly checked={o.id === importSelectedDemId} className="accent-primary" />
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">{o.date}</td>
+                              <td className="px-3 py-2 font-medium">{o.experiment}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{o.location}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{o.population}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{[o.platform, o.sensor].filter(Boolean).join(" / ") || "—"}</td>
+                              <td className="px-3 py-2 tabular-nums text-muted-foreground">{o.file_count}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 

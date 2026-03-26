@@ -14,6 +14,8 @@ interface UploadParams {
   formValues?: Record<string, string>;
   /** Called with absolute dest paths of all successfully uploaded files */
   onComplete?: (destPaths: string[]) => void;
+  /** Called when a Docker-not-found/not-running error occurs during .bin extraction */
+  onDockerError?: (message: string) => void;
 }
 
 function fileNameFromPath(path: string): string {
@@ -33,6 +35,7 @@ export function useFileUpload() {
       reupload = false,
       formValues = {},
       onComplete,
+      onDockerError,
     }: UploadParams) => {
       const items: ProcessItem[] = filePaths.map((p, i) => ({
         id: String(i),
@@ -147,9 +150,19 @@ export function useFileUpload() {
                     });
                     updateProcess(processId, { message: undefined });
                   } else if (data.phase === "error") {
+                    const errMsg: string = data.message || "Extraction failed"
+                    // Detect Docker-not-found / not-running errors and surface them specially
+                    if (
+                      onDockerError &&
+                      /docker/i.test(errMsg) &&
+                      (/not found|not running|not installed|not supported/i.test(errMsg) ||
+                        /start docker/i.test(errMsg))
+                    ) {
+                      onDockerError(errMsg)
+                    }
                     updateProcessItem(processId, String(data.index), {
                       status: "error",
-                      error: data.message || "Extraction failed",
+                      error: errMsg,
                     });
                     updateProcess(processId, { message: undefined });
                   } else {

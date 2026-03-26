@@ -90,6 +90,28 @@ export const dataTypes = {
       "Orthomosaic",
     ],
   },
+  "Orthomosaic DEM": {
+    fields: [
+      "experiment",
+      "location",
+      "population",
+      "date",
+      "platform",
+      "sensor",
+    ],
+    fileType: ".tif",
+    directory: [
+      "Raw",
+      "Year",
+      "Experiment",
+      "Location",
+      "Population",
+      "Date",
+      "Platform",
+      "Sensor",
+      "Orthomosaic",
+    ],
+  },
   "Weather Data": {
     fields: ["experiment", "location", "population", "date"],
     fileType: "*",

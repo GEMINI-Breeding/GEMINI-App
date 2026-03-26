@@ -1696,6 +1696,10 @@ def _import_extract_binary():
 
 _DOCKER_IMAGE = "gemi-bin-extractor:latest"
 
+# Prevents concurrent docker build attempts (e.g. user retries while first build is running).
+_docker_build_lock = threading.Lock()
+_docker_build_in_progress = threading.Event()  # set while a build is running
+
 
 def _docker_build_context() -> tuple[Path, Path]:
     """
@@ -1857,8 +1861,24 @@ def _extract_binary_via_docker(
 
     # ── 2. Build image if missing or outdated ─────────────────────────────────
     if _image_needs_rebuild():
-        logger.info("gemi-bin-extractor image missing or outdated — building now.")
-        _build_bin_extractor_image(emit)
+        # Only one thread should run docker build at a time.  If a build is already
+        # in progress (e.g. user retried while the first build was still running),
+        # wait for it to finish, then re-check before starting another one.
+        with _docker_build_lock:
+            if _image_needs_rebuild():
+                logger.info("gemi-bin-extractor image missing or outdated — building now.")
+                _docker_build_in_progress.set()
+                try:
+                    _build_bin_extractor_image(emit)
+                finally:
+                    _docker_build_in_progress.clear()
+            else:
+                logger.info("gemi-bin-extractor image is now up-to-date (built by concurrent request).")
+    elif _docker_build_in_progress.is_set():
+        # Another thread is currently building — wait for it to finish.
+        logger.info("Docker build in progress — waiting for it to complete…")
+        emit({"event": "progress", "message": "Extraction tool is being built (started by another upload) — please wait…"})
+        _docker_build_in_progress.wait(timeout=1800)  # 30 min max
 
     # ── 3. Run extraction ─────────────────────────────────────────────────────
     logger.info("Running bin extraction via Docker for %s", bin_path.name)

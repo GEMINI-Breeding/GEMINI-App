@@ -6,12 +6,18 @@ import { dataTypes } from "@/config/dataTypes";
 import { useFileUpload } from "@/features/files/hooks/useFileUpload";
 import { FilePreviewDialog } from "./FilePreviewDialog";
 import { OpenAPI } from "@/client";
+import useCustomToast from "@/hooks/useCustomToast";
 
 interface UploadListProps {
   dataType: string | null;
   formValues: Record<string, string>;
   onFilesSelected?: (paths: string[]) => void;
   onUploadComplete?: (destPaths: string[]) => void;
+  onDockerError?: (message: string) => void;
+  /** Optional label shown above the upload zone */
+  label?: string;
+  /** Optional sub-path appended to the target directory (e.g. "DEM") */
+  subDir?: string;
 }
 
 function fileNameFromPath(path: string): string {
@@ -26,15 +32,42 @@ interface PendingUpload {
   existingFiles: string[];
 }
 
-export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete }: UploadListProps) {
+// Map dataTypes fileType → sets of valid lowercase extensions
+const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif"])
+
+function isExtensionAllowed(filePath: string, fileType: string): boolean {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+  if (fileType === "*") return true
+  if (fileType === "image/*") return IMAGE_EXTS.has(ext)
+  // Specific extension(s) like ".tif" or ".csv"
+  return ext === fileType.toLowerCase() || (fileType === ".tif" && ext === ".tiff")
+}
+
+export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete, onDockerError, label, subDir }: UploadListProps) {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const { uploadFiles } = useFileUpload();
+  const { showErrorToast } = useCustomToast();
 
   const addFiles = (paths: string[]) => {
+    if (dataType) {
+      const cfg = dataTypes[dataType as keyof typeof dataTypes]
+      if (cfg?.fileType) {
+        const rejected = paths.filter((p) => !isExtensionAllowed(p, cfg.fileType))
+        if (rejected.length > 0) {
+          const names = rejected.map((p) => p.split(/[\\/]/).pop()).join(", ")
+          showErrorToast(`Wrong file type for "${dataType}": ${names}`)
+          const accepted = paths.filter((p) => isExtensionAllowed(p, cfg.fileType))
+          if (accepted.length === 0) return
+          setSelectedPaths((prev) => [...prev, ...accepted]);
+          onFilesSelected?.(accepted);
+          return
+        }
+      }
+    }
     setSelectedPaths((prev) => [...prev, ...paths]);
     onFilesSelected?.(paths);
   };
@@ -49,9 +82,10 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
     if (!selectedDataType) return null;
     const values = { ...formValues };
     if (values["date"]) values["year"] = values["date"].split("-")[0];
-    const targetRootDir = selectedDataType.directory
+    let targetRootDir = selectedDataType.directory
       .map((field) => values[field.toLowerCase()] || field)
       .join("/");
+    if (subDir) targetRootDir += `/${subDir}`;
     return { values, targetRootDir };
   }
 
@@ -88,7 +122,7 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
   };
 
   function doUpload(filePaths: string[], dt: string, targetRootDir: string, values: Record<string, string>, reupload: boolean) {
-    uploadFiles({ filePaths, dataType: dt, targetRootDir, reupload, formValues: values, onComplete: onUploadComplete });
+    uploadFiles({ filePaths, dataType: dt, targetRootDir, reupload, formValues: values, onComplete: onUploadComplete, onDockerError });
     setSelectedPaths([]);
     setPendingUpload(null);
   }
@@ -96,6 +130,9 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
   return (
     <>
     <div className="space-y-6">
+      {label && (
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      )}
       <UploadZone onFilesAdded={addFiles} />
 
       {selectedPaths.length > 0 && (

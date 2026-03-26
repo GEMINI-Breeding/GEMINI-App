@@ -116,18 +116,14 @@ def read_field_values(
 
 
 # GET /files/uploaded-orthos — list all Orthomosaic uploads for the import picker
-@router.get("/uploaded-orthos")
-def list_uploaded_orthos(
-    session: SessionDep,
-    current_user: CurrentUser,
-) -> list[dict]:
-    """Return all FileUpload records with data_type='Orthomosaic', with TIF filenames."""
+def _ortho_upload_list(session: Any, current_user: Any, data_type: str) -> list[dict]:
+    """Shared helper: list uploads of a given orthomosaic data_type with their TIF filenames."""
     from sqlmodel import select as _sel
     from app.models import FileUpload as _FU
 
     rows = session.exec(
         _sel(_FU)
-        .where(_FU.data_type == "Orthomosaic")
+        .where(_FU.data_type == data_type)
         .where(_FU.owner_id == current_user.id)
     ).all()
 
@@ -155,6 +151,24 @@ def list_uploaded_orthos(
             "tif_files": tifs,
         })
     return result
+
+
+@router.get("/uploaded-orthos")
+def list_uploaded_orthos(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Return all FileUpload records with data_type='Orthomosaic' (RGB), with TIF filenames."""
+    return _ortho_upload_list(session, current_user, "Orthomosaic")
+
+
+@router.get("/uploaded-dems")
+def list_uploaded_dems(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Return all FileUpload records with data_type='Orthomosaic DEM', with TIF filenames."""
+    return _ortho_upload_list(session, current_user, "Orthomosaic DEM")
 
 
 # GET /files/{id} (get single upload)
@@ -227,6 +241,58 @@ def delete_file(
 
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
+
+
+class DeleteImagesRequest(BaseModel):
+    paths: list[str]
+
+
+# DELETE /files/{id}/images — delete specific image files within an upload
+@router.delete("/{id}/images")
+def delete_upload_images(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: DeleteImagesRequest,
+) -> Any:
+    """Delete specific image files from an upload and update file_count."""
+    file = get_file_upload(session=session, id=id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not current_user.is_superuser and file.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    storage_dir = (Path(data_root) / file.storage_path).resolve()
+
+    deleted = 0
+    for raw_path in body.paths:
+        target = Path(raw_path).resolve()
+        # Safety: path must be inside the upload's own storage directory
+        try:
+            target.relative_to(storage_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Path is outside the upload directory: {raw_path}",
+            )
+        if target.is_file() and target.suffix.lower() in _IMAGE_EXTENSIONS:
+            target.unlink()
+            deleted += 1
+            logger.info("Deleted image file: %s", target)
+
+    # Recalculate and persist file_count
+    new_count = sum(
+        1 for p in storage_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS
+    )
+    update_file_upload(
+        session=session,
+        db_file=file,
+        file_in=FileUploadUpdate(file_count=new_count),
+    )
+
+    return {"deleted": deleted, "file_count": new_count}
 
 
 # GET /files/{id}/list-images

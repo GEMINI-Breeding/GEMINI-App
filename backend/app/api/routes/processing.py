@@ -2567,9 +2567,10 @@ def download_crops_for_boundary(
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
 
 class _UseUploadedOrthoRequest(BaseModel):
-    file_upload_id: str | None = None  # FileUpload record id to import from
-    save_mode: str = "new_version"      # "new_version" | "replace"
-    name: str | None = None             # optional name for the version
+    file_upload_id: str | None = None      # RGB orthomosaic FileUpload UUID
+    dem_file_upload_id: str | None = None  # DEM FileUpload UUID (optional)
+    save_mode: str = "new_version"         # "new_version" | "replace"
+    name: str | None = None                # optional name for the version
 
 
 @router.post("/pipeline-runs/{id}/use-uploaded-ortho")
@@ -2636,6 +2637,27 @@ def use_uploaded_ortho(
         raise HTTPException(status_code=404, detail="No TIF files found in the selected upload")
 
     src_tif = tif_files[0]
+
+    # ── Locate the DEM TIF (if a separate DEM upload was selected) ─────────────
+    src_dem: Path | None = None
+    if req.dem_file_upload_id:
+        try:
+            dem_fu_id = uuid.UUID(req.dem_file_upload_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid dem_file_upload_id")
+        dem_fu = _get_fu(session=session, id=dem_fu_id)
+        if not dem_fu:
+            raise HTTPException(status_code=404, detail="DEM file upload not found")
+        dem_src_dir = Path(settings.APP_DATA_ROOT) / dem_fu.storage_path
+        dem_tifs = sorted(
+            p for p in dem_src_dir.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+        )
+        if dem_tifs:
+            src_dem = dem_tifs[0]
+        else:
+            logger.warning("DEM upload %s has no TIF files — DEM will be skipped", req.dem_file_upload_id)
+
     paths.make_dirs()
 
     # ── Determine version ──────────────────────────────────────────────────────
@@ -2653,21 +2675,31 @@ def use_uploaded_ortho(
     dest_tif = paths.aerial_rgb_versioned(target_version)
 
     # Hard-link (instant, same filesystem) or copy
-    try:
-        if dest_tif.exists():
-            dest_tif.unlink()
-        os.link(src_tif, dest_tif)
-    except OSError:
-        shutil.copy2(src_tif, dest_tif)
+    def _link_or_copy(src: Path, dest: Path) -> None:
+        try:
+            if dest.exists():
+                dest.unlink()
+            os.link(src, dest)
+        except OSError:
+            shutil.copy2(src, dest)
 
-    logger.info("Registered uploaded ortho %s → %s (v%d)", src_tif.name, dest_tif.name, target_version)
+    _link_or_copy(src_tif, dest_tif)
+    logger.info("Registered uploaded RGB ortho %s → %s (v%d)", src_tif.name, dest_tif.name, target_version)
+
+    dest_dem: Path | None = None
+    if src_dem:
+        dest_dem = paths.aerial_dem_versioned(target_version)
+        _link_or_copy(src_dem, dest_dem)
+        logger.info("Registered uploaded DEM %s → %s (v%d)", src_dem.name, dest_dem.name, target_version)
+    else:
+        logger.info("No DEM TIF found in upload — plant height will be unavailable for v%d", target_version)
 
     # ── Update outputs list ────────────────────────────────────────────────────
     new_entry = {
         "version": target_version,
         "name": req.name,
         "rgb": paths.rel(dest_tif),
-        "dem": None,
+        "dem": paths.rel(dest_dem) if dest_dem else None,
         "pyramid": None,
         "created_at": _dt.now(_tz.utc).isoformat(),
         "imported": True,

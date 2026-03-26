@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Trash2, X } from "lucide-react"
 import { OpenAPI } from "@/client"
 
 interface ImageViewerDialogProps {
@@ -32,6 +32,8 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
   const [loading, setLoading] = useState(true)
   const [imgLoading, setImgLoading] = useState(true)
   const [imgSrc, setImgSrc] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const blobUrlRef = useRef<string | null>(null)
   const onCloseRef = useRef(onClose)
@@ -108,6 +110,38 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
 
   const filename = images[index] ? images[index].split(/[\\/]/).pop() : ""
 
+  async function deleteCurrentImage() {
+    const path = images[index]
+    if (!path) return
+    setDeleting(true)
+    try {
+      const auth = await authHeader()
+      const res = await fetch(`${apiBase()}/api/v1/files/${uploadId}/images`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(auth ? { Authorization: auth } : {}),
+        },
+        body: JSON.stringify({ paths: [path] }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      // Remove deleted path from local state
+      setSubfolderMap((prev) => {
+        const next = { ...prev }
+        if (activeFolder) {
+          next[activeFolder] = prev[activeFolder].filter((p) => p !== path)
+        }
+        return next
+      })
+      setIndex((i) => Math.max(0, i - 1))
+    } catch (e) {
+      console.error("Failed to delete image:", e)
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={onClose}>
       <div
@@ -139,6 +173,34 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
               <span className="text-muted-foreground text-sm tabular-nums">
                 {index + 1} / {images.length}
               </span>
+            )}
+            {!loading && images.length > 0 && !deleteConfirm && (
+              <button
+                className="text-muted-foreground hover:text-destructive"
+                title="Delete this image"
+                onClick={() => setDeleteConfirm(true)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+            {deleteConfirm && (
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-destructive font-medium">Delete?</span>
+                <button
+                  className="rounded bg-destructive px-2 py-0.5 text-white hover:bg-destructive/80 disabled:opacity-50"
+                  onClick={deleteCurrentImage}
+                  disabled={deleting}
+                >
+                  {deleting ? "…" : "Yes"}
+                </button>
+                <button
+                  className="rounded border px-2 py-0.5 hover:bg-muted"
+                  onClick={() => setDeleteConfirm(false)}
+                  disabled={deleting}
+                >
+                  No
+                </button>
+              </div>
             )}
             <button className="text-muted-foreground hover:text-foreground" onClick={onClose}>
               <X className="h-5 w-5" />
