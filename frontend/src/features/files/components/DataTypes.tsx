@@ -14,7 +14,9 @@ interface DataTypesProps {
 }
 
 export function DataTypes({ onChange }: DataTypesProps) {
-  const fileTypes = Object.keys(dataTypes)
+  const fileTypes = Object.entries(dataTypes)
+    .filter(([, cfg]) => !cfg.hidden)
+    .map(([key]) => key)
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null)
   const dropdownWidth: string = "w-50"
 

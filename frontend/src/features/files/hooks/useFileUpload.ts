@@ -129,6 +129,7 @@ export function useFileUpload() {
                 case "progress":
                   updateProcessItem(processId, String(data.index), {
                     status: data.status,
+                    label: data.status === "running" ? "Copied — extracting…" : undefined,
                   });
                   if (data.status === "completed" && data.dest_path) {
                     completedDestPaths.push(data.dest_path as string);
@@ -151,12 +152,11 @@ export function useFileUpload() {
                     updateProcess(processId, { message: undefined });
                   } else if (data.phase === "error") {
                     const errMsg: string = data.message || "Extraction failed"
-                    // Detect Docker-not-found / not-running errors and surface them specially
+                    // Surface Docker availability errors as a popup
                     if (
                       onDockerError &&
                       /docker/i.test(errMsg) &&
-                      (/not found|not running|not installed|not supported/i.test(errMsg) ||
-                        /start docker/i.test(errMsg))
+                      /not found|not running|to be running|did not respond|not installed|not supported|start docker/i.test(errMsg)
                     ) {
                       onDockerError(errMsg)
                     }
@@ -177,13 +177,22 @@ export function useFileUpload() {
                   break;
 
                 case "complete":
-                  updateProcess(processId, {
-                    status: "completed",
-                    completedAt: new Date(),
-                    title: `Uploaded ${data.count} file(s)`,
-                  });
+                  if (data.has_errors) {
+                    updateProcess(processId, {
+                      status: "error",
+                      completedAt: new Date(),
+                      title: `Upload failed`,
+                      error: "Extraction failed — see file details above",
+                    });
+                  } else {
+                    updateProcess(processId, {
+                      status: "completed",
+                      completedAt: new Date(),
+                      title: `Uploaded ${data.count} file(s)`,
+                    });
+                    onComplete?.(completedDestPaths);
+                  }
                   queryClient.invalidateQueries({ queryKey: ["workspace-card-images"] });
-                  onComplete?.(completedDestPaths);
                   break;
               }
             } catch {

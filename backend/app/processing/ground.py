@@ -1817,18 +1817,9 @@ def _build_bin_extractor_image(emit: Callable[[dict], None]) -> None:
     emit({"event": "progress", "message": "Extraction tool built successfully."})
 
 
-def _extract_binary_via_docker(
-    bin_path: Path,
-    output_dir: Path,
-    emit: Callable[[dict], None],
-) -> None:
+def _ensure_docker_ready(emit: Callable[[dict], None]) -> None:
     """
-    Run .bin extraction inside a Docker container (Windows fallback).
-
-    farm-ng-core cannot be built on Windows (uses GCC/Clang-only headers), so on
-    Windows we delegate to a Linux Docker container that has farm-ng-amiga installed.
-    The image is built automatically on first use and rebuilt when GEMI updates.
-
+    Check Docker daemon is reachable and the extractor image is built.
     Raises RuntimeError with a user-readable message on any failure.
     """
     # ── 1. Docker daemon reachable? ───────────────────────────────────────────
@@ -1861,9 +1852,6 @@ def _extract_binary_via_docker(
 
     # ── 2. Build image if missing or outdated ─────────────────────────────────
     if _image_needs_rebuild():
-        # Only one thread should run docker build at a time.  If a build is already
-        # in progress (e.g. user retried while the first build was still running),
-        # wait for it to finish, then re-check before starting another one.
         with _docker_build_lock:
             if _image_needs_rebuild():
                 logger.info("gemi-bin-extractor image missing or outdated — building now.")
@@ -1875,17 +1863,17 @@ def _extract_binary_via_docker(
             else:
                 logger.info("gemi-bin-extractor image is now up-to-date (built by concurrent request).")
     elif _docker_build_in_progress.is_set():
-        # Another thread is currently building — wait for it to finish.
         logger.info("Docker build in progress — waiting for it to complete…")
         emit({"event": "progress", "message": "Extraction tool is being built (started by another upload) — please wait…"})
-        _docker_build_in_progress.wait(timeout=1800)  # 30 min max
+        _docker_build_in_progress.wait(timeout=1800)
 
-    # ── 3. Run extraction ─────────────────────────────────────────────────────
-    logger.info("Running bin extraction via Docker for %s", bin_path.name)
-    emit({"event": "progress", "message": "Running extraction via Docker…"})
 
-    # Docker Desktop on Windows requires forward-slash paths in volume mounts.
-    # Using as_posix() converts C:\foo\bar → C:/foo/bar which Docker accepts.
+def _run_docker_container(bin_path: Path, output_dir: Path, resource_flags: list[str]) -> None:
+    """
+    Run a single docker container to extract one .bin file into output_dir.
+    output_dir is the per-file temporary directory (not the final destination).
+    Raises RuntimeError on non-zero exit.
+    """
     if sys.platform == "win32":
         host_bin_dir = bin_path.parent.resolve().as_posix()
         host_output_dir = output_dir.resolve().as_posix()
@@ -1895,25 +1883,251 @@ def _extract_binary_via_docker(
 
     cmd = [
         "docker", "run", "--rm",
+        *resource_flags,
         "-v", f"{host_bin_dir}:/input:ro",
         "-v", f"{host_output_dir}:/output",
         _DOCKER_IMAGE,
         f"/input/{bin_path.name}",
         "/output",
     ]
-
-    logger.info("docker run cmd: %s", " ".join(cmd))
+    logger.info("docker run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if proc.stdout:
         for line in proc.stdout.splitlines():
-            logger.info("[docker run] %s", line)
+            logger.info("[docker] %s", line)
     if proc.returncode != 0:
         if proc.stderr:
-            logger.error("[docker run stderr] %s", proc.stderr.strip())
+            logger.error("[docker stderr] %s", proc.stderr.strip())
         detail = proc.stderr.strip() or proc.stdout.strip() or "no output from container"
-        raise RuntimeError(
-            f".bin extraction failed inside Docker:\n{detail}"
+        raise RuntimeError(f".bin extraction failed inside Docker:\n{detail}")
+
+
+def _merge_docker_results(temp_dirs: list[Path], final_output: Path) -> None:
+    """
+    Merge per-file extraction outputs from temp dirs into the final output directory.
+    Each temp dir contains:  RGB/top/*.jpg  RGB/Metadata/msgs_synced.csv  RGB/Metadata/gps_*.csv
+    Images have timestamp-based names and are safe to move without conflict.
+    CSVs are merged and de-duplicated by timestamp.
+    """
+    import shutil
+    import pandas as pd
+
+    final_rgb = final_output / "RGB"
+    final_metadata = final_rgb / "Metadata"
+    final_metadata.mkdir(parents=True, exist_ok=True)
+
+    msgs_dfs: list[pd.DataFrame] = []
+    gps_parts: dict[str, list[pd.DataFrame]] = {"pvt": [], "relposned": []}
+
+    for tmp_dir in temp_dirs:
+        rgb_dir = tmp_dir / "RGB"
+        if not rgb_dir.exists():
+            logger.warning("Expected RGB subdir not found in temp extraction dir: %s", tmp_dir)
+            continue
+
+        # Move image subdirectories (everything except Metadata)
+        for entry in rgb_dir.iterdir():
+            if not entry.is_dir() or entry.name == "Metadata":
+                continue
+            dest_root = final_rgb / entry.name
+            dest_root.mkdir(parents=True, exist_ok=True)
+            for img_file in entry.rglob("*"):
+                if img_file.is_file():
+                    dest = dest_root / img_file.relative_to(entry)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(img_file), str(dest))
+
+        # Collect CSVs and calibration JSON from Metadata
+        meta = rgb_dir / "Metadata"
+        if not meta.exists():
+            continue
+
+        msgs_csv = meta / "msgs_synced.csv"
+        if msgs_csv.exists():
+            try:
+                df = pd.read_csv(msgs_csv)
+                if not df.empty:
+                    msgs_dfs.append(df)
+            except Exception as e:
+                logger.warning("Could not read msgs_synced.csv from %s: %s", tmp_dir, e)
+
+        for k in ("pvt", "relposned"):
+            gps_csv = meta / f"gps_{k}.csv"
+            if gps_csv.exists():
+                try:
+                    gdf = pd.read_csv(gps_csv)
+                    if not gdf.empty:
+                        gps_parts[k].append(gdf)
+                except Exception as e:
+                    logger.warning("Could not read gps_%s.csv from %s: %s", k, tmp_dir, e)
+
+        # Calibration JSON — first-found wins (same for all files in a session)
+        for json_file in meta.glob("*_calibration.json"):
+            dest_json = final_metadata / json_file.name
+            if not dest_json.exists():
+                shutil.copy2(str(json_file), str(dest_json))
+
+    # Write merged msgs_synced.csv
+    if msgs_dfs:
+        merged_msgs = pd.concat(msgs_dfs, ignore_index=True)
+        merged_msgs.to_csv(final_metadata / "msgs_synced.csv", index=False)
+        logger.info("Merged msgs_synced.csv from %d temp extraction dirs", len(msgs_dfs))
+    else:
+        logger.warning("No msgs_synced.csv found in any extraction temp dir — skipping merge")
+
+    # Write merged gps_*.csv
+    for k, parts in gps_parts.items():
+        if parts:
+            gps_merged = (
+                pd.concat(parts, ignore_index=True)
+                .drop_duplicates("stamp")
+                .sort_values("stamp")
+                .reset_index(drop=True)
+            )
+            gps_merged.to_csv(final_metadata / f"gps_{k}.csv", index=False)
+            logger.info("Merged gps_%s.csv from %d sources", k, len(parts))
+
+
+def extract_bin_files_batch(
+    bin_files: list[tuple[int, Path]],
+    output_dir: Path,
+    emit: Callable[[dict], None],
+) -> None:
+    """
+    Extract multiple .bin files in parallel and emit per-file progress events.
+
+    Both native and Docker paths use the same strategy: one thread per file,
+    each writing to its own temporary directory, with results merged afterward.
+    This avoids multiprocessing (which breaks when spawned from within a thread)
+    and prevents CSV conflicts from concurrent writes to the same directory.
+
+    bin_files : list of (sse_index, dest_path)
+    output_dir: final destination directory (same for all files)
+    emit      : callback; dicts must include event, index, file, message
+    """
+    import tempfile
+    import shutil
+    from concurrent.futures import ThreadPoolExecutor
+
+    extract_binary = _import_extract_binary()
+    use_docker = (
+        extract_binary is None
+        and (sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1")
+    )
+
+    if extract_binary is None and not use_docker:
+        msg = (
+            "farm_ng SDK is not available in this environment.\n"
+            "Run: uv pip install farm-ng-amiga"
         )
+        for idx, p in bin_files:
+            emit({"event": "error", "index": idx, "file": p.name, "message": msg})
+        raise RuntimeError(msg)
+
+    # ── Docker: check readiness + fetch resource flags once ───────────────────
+    if use_docker:
+        _ensure_docker_ready(emit)
+        from app.core.db import engine
+        from app.crud.app_settings import get_docker_resource_flags
+        from sqlmodel import Session as _Session
+        with _Session(engine) as _s:
+            resource_flags = get_docker_resource_flags(session=_s)
+        if resource_flags:
+            logger.info("Docker resource limits: %s", " ".join(resource_flags))
+        else:
+            logger.info("Docker resource limits: none")
+    else:
+        resource_flags = []
+
+    max_workers = min(len(bin_files), max(1, (os.cpu_count() or 2) // 2), 4)
+    logger.info("Extracting %d .bin file(s) with up to %d parallel worker(s) [%s]",
+                len(bin_files), max_workers, "Docker" if use_docker else "native")
+
+    temp_base = Path(tempfile.mkdtemp(prefix="gemi_binext_"))
+    temp_dirs: list[Path] = []
+    errors: list[str] = []
+    lock = threading.Lock()
+
+    def _extract_one(idx: int, bin_path: Path, temp_dir: Path) -> None:
+        emit({"event": "progress", "index": idx, "file": bin_path.name,
+              "message": "Running extraction via Docker…" if use_docker else "Extracting…"})
+        try:
+            if use_docker:
+                _run_docker_container(bin_path, temp_dir, resource_flags)
+            else:
+                # Single-file call → sequential mode inside extract_binary (safe,
+                # no multiprocessing.Pool spawned, no conflicts with other threads).
+                assert extract_binary is not None
+                extract_binary([bin_path], temp_dir, granular_progress=False)
+
+            # Delete the .bin immediately after successful extraction — the images
+            # are now in temp_dir; the source binary is no longer needed.
+            try:
+                bin_path.unlink(missing_ok=True)
+                logger.info("Deleted .bin after extraction: %s", bin_path.name)
+            except OSError as e:
+                logger.warning("Could not delete .bin %s: %s", bin_path.name, e)
+
+            emit({"event": "complete", "index": idx, "file": bin_path.name,
+                  "message": f"Extraction complete: {bin_path.name}"})
+        except Exception as exc:
+            with lock:
+                errors.append(str(exc))
+            # Keep .bin on failure so the user can retry without re-uploading
+            emit({"event": "error", "index": idx, "file": bin_path.name,
+                  "message": str(exc)})
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = []
+            for idx, bin_path in bin_files:
+                temp_dir = temp_base / f"file_{idx}"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_dirs.append(temp_dir)
+                futures.append(pool.submit(_extract_one, idx, bin_path, temp_dir))
+            for f in futures:
+                f.result()
+
+        if errors:
+            raise RuntimeError(
+                f"{len(errors)} of {len(bin_files)} extraction(s) failed.\n" + errors[0]
+            )
+
+        emit({"event": "progress", "index": -1, "file": "",
+              "message": "Merging extraction results…"})
+        _merge_docker_results(temp_dirs, output_dir)
+
+    finally:
+        try:
+            shutil.rmtree(temp_base, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _extract_binary_via_docker(
+    bin_path: Path,
+    output_dir: Path,
+    emit: Callable[[dict], None],
+) -> None:
+    """
+    Single-file Docker extraction wrapper (kept for compatibility).
+    For batch uploads prefer extract_bin_files_batch().
+    """
+    _ensure_docker_ready(emit)
+
+    from app.core.db import engine
+    from app.crud.app_settings import get_docker_resource_flags
+    from sqlmodel import Session as _Session
+    with _Session(engine) as _s:
+        resource_flags = get_docker_resource_flags(session=_s)
+    if resource_flags:
+        logger.info("Docker resource limits (bin extractor): %s", " ".join(resource_flags))
+    else:
+        logger.info("Docker resource limits (bin extractor): none (no limits set)")
+
+    logger.info("Running bin extraction via Docker for %s", bin_path.name)
+    emit({"event": "progress", "message": "Running extraction via Docker…"})
+    _run_docker_container(bin_path, output_dir, resource_flags)
 
 
 def extract_bin_file(

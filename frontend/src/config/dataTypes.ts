@@ -111,6 +111,7 @@ export const dataTypes = {
       "Sensor",
       "Orthomosaic",
     ],
+    hidden: true,
   },
   "Weather Data": {
     fields: ["experiment", "location", "population", "date"],

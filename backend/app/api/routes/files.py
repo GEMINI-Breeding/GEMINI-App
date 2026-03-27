@@ -636,52 +636,60 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-def _extract_bin_inline(
-    bin_path: Path, output_dir: Path, idx: int
-) -> Generator[str, None, None]:
+def _extract_bins_batch_inline(
+    bin_files: list[tuple[int, Path]],
+    output_dir: Path,
+) -> Generator[str, None, bool]:
     """
-    Run bin → images extraction in a thread and yield SSE extraction_progress
-    events until it finishes.  Keeps the SSE stream open so the ProcessPanel
-    shows "Extracting…" until the work is actually done.
+    Extract all .bin files in parallel and yield SSE extraction_progress events.
+
+    bin_files: list of (sse_index, dest_path).
+    Returns True on full success, False if any extraction failed.
+    Callers: ``ok = yield from _extract_bins_batch_inline(...)``
     """
     import queue
     import threading
-    from app.processing.ground import extract_bin_file
+    from app.processing.ground import extract_bin_files_batch
 
     event_q: queue.Queue = queue.Queue()
-    stop_event = threading.Event()
+    error_holder: list[str] = []
 
     def _emit(event: dict) -> None:
         event_q.put(event)
 
     def _worker() -> None:
         try:
-            extract_bin_file(
-                bin_path=bin_path,
+            extract_bin_files_batch(
+                bin_files=bin_files,
                 output_dir=output_dir,
-                stop_event=stop_event,
                 emit=_emit,
             )
         except Exception as exc:
-            event_q.put({"event": "error", "message": str(exc)})
+            error_holder.append(str(exc))
         finally:
             event_q.put(None)  # sentinel
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
-    logger.info("Started inline bin extraction for %s", bin_path.name)
+    logger.info("Started batch extraction for %d .bin file(s)", len(bin_files))
 
     while True:
         evt = event_q.get()
         if evt is None:
             break
+        idx = evt.get("index", -1)
+        if idx == -1:
+            # Batch-level coordinator message (e.g. "Merging…") — no process item to update
+            continue
         yield _sse_event({
             "event": "extraction_progress",
             "index": idx,
-            "file": bin_path.name,
+            "file": evt.get("file", ""),
             "phase": evt.get("event"),
             "message": evt.get("message"),
         })
+
+    return len(error_holder) == 0  # True = full success
 
 
 def _copy_local_stream(
@@ -698,7 +706,11 @@ def _copy_local_stream(
 
     uploaded: list[str] = []
     skipped: list[str] = []
+    extraction_failed = False
+    # Collected during the copy phase; extracted in parallel afterward
+    bin_files_to_extract: list[tuple[int, Path]] = []
 
+    # ── Phase 1: copy all files ───────────────────────────────────────────────
     for idx, file_path in enumerate(body.file_paths):
         src = Path(file_path)
         name = src.name
@@ -717,12 +729,10 @@ def _copy_local_stream(
         # Synced Metadata CSVs are always saved as msgs_synced.csv regardless of filename.
         dest_path = dest_dir / ("msgs_synced.csv" if body.data_type == "Synced Metadata" else name)
 
-        # Farm-ng .bin files: always remove any leftover copy before uploading.
-        # extract_bin_file deletes the .bin after extraction, but a previous
-        # crashed/interrupted run may have left one behind.  If we didn't clear
-        # it here the upload would be "skipped" (file already exists) and the
-        # user would see no extraction the next time they try.
-        if src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File" and dest_path.exists():
+        # Farm-ng .bin files: always remove any leftover copy before uploading so
+        # a previous crashed run doesn't cause "skipped" on retry.
+        is_amiga_bin = src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File"
+        if is_amiga_bin and dest_path.exists():
             try:
                 dest_path.unlink()
                 logger.info("Removed stale .bin file before re-upload: %s", dest_path.name)
@@ -739,26 +749,33 @@ def _copy_local_stream(
         try:
             shutil.copy2(src, dest_path)
             uploaded.append(str(dest_path))
-            yield _sse_event(
-                {
-                    "event": "progress",
-                    "file": name,
-                    "status": "completed",
-                    "index": idx,
-                    "dest_path": str(dest_path),
-                }
-            )
 
-            # Amiga .bin files need extraction after copy — run inline
-            # so the SSE stream stays open until extraction finishes.
-            # ArduPilot platform logs (.bin) are left in place for data sync to parse.
-            if src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File":
-                yield from _extract_bin_inline(dest_path, dest_dir, idx)
+            if is_amiga_bin:
+                # Mark as "running" so the counter doesn't jump then fall back.
+                # The item becomes "completed" when extraction finishes.
+                yield _sse_event(
+                    {"event": "progress", "file": name, "status": "running",
+                     "index": idx, "dest_path": None}
+                )
+                bin_files_to_extract.append((idx, dest_path))
+            else:
+                yield _sse_event(
+                    {"event": "progress", "file": name, "status": "completed",
+                     "index": idx, "dest_path": str(dest_path)}
+                )
 
         except Exception as exc:
             yield _sse_event(
                 {"event": "error", "file": name, "message": str(exc), "index": idx}
             )
+
+    # ── Phase 2: extract all .bin files in parallel ───────────────────────────
+    if bin_files_to_extract:
+        extraction_ok: bool = (
+            yield from _extract_bins_batch_inline(bin_files_to_extract, dest_dir)
+        )
+        if not extraction_ok:
+            extraction_failed = True
 
     # Count actual extracted image files (covers .bin extraction output)
     image_count = sum(
@@ -783,13 +800,14 @@ def _copy_local_stream(
             bundled_gps_rel = synced_candidate.relative_to(data_root_path).as_posix()
 
     # Update the FileUpload record with final status
+    final_status = "failed" if extraction_failed else "completed"
     db_file = get_file_upload(session=session, id=file_upload_id)
     if db_file:
         update_file_upload(
             session=session,
             db_file=db_file,
             file_in=FileUploadUpdate(
-                status="completed",
+                status=final_status,
                 file_count=final_count,
                 msgs_synced_path=bundled_gps_rel,
             ),
@@ -801,6 +819,7 @@ def _copy_local_stream(
             "uploaded": uploaded,
             "skipped": skipped,
             "count": len(uploaded),
+            "has_errors": extraction_failed,
         }
     )
 

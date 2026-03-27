@@ -303,11 +303,19 @@ def run_orthomosaic(
 
     container_name = f"ODM-gemi-{run_id!s:.8}"
 
+    from app.crud.app_settings import get_docker_resource_flags
+    resource_flags = get_docker_resource_flags(session=session)
+    if resource_flags:
+        logger.info("Docker resource limits (ODM): %s", " ".join(resource_flags))
+    else:
+        logger.info("Docker resource limits (ODM): none (no limits set)")
+
     docker_bin = _find_docker_bin() or "docker"
     docker_cmd: list[str] = [
         docker_bin, "run",
         "--name", container_name,
         "-i", "--rm",
+        *resource_flags,
         "--security-opt=no-new-privileges",
         *(["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
         "-w", "/datasets",
