@@ -666,6 +666,15 @@ def _extract_bins_batch_inline(
             )
         except Exception as exc:
             error_holder.append(str(exc))
+            # Emit per-file error events so the frontend marks items as failed
+            # (not stuck in "running") and the Docker popup fires if applicable.
+            for idx, bin_path in bin_files:
+                event_q.put({
+                    "event": "error",
+                    "index": idx,
+                    "file": bin_path.name,
+                    "message": str(exc),
+                })
         finally:
             event_q.put(None)  # sentinel
 
