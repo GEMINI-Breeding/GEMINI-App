@@ -1,4 +1,13 @@
-export const dataTypes = {
+type DataTypeConfig = {
+  fields: string[];
+  fileType: string;
+  directory: string[];
+  defaultPlatform?: string;
+  defaultSensor?: string;
+  hidden?: true;
+};
+
+export const dataTypes: Record<string, DataTypeConfig> = {
   "Image Data": {
     fields: [
       "experiment",
