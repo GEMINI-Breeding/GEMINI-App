@@ -696,13 +696,29 @@ def load_plot_marking(
     if msgs_synced_path and paths.raw.exists():
         from app.processing.ground import translate_markers_by_gps as _translate
         exts = {".jpg", ".jpeg", ".png"}
-        current_image_set: set[str] = set()
-        for p in paths.raw.rglob("*"):
-            if p.is_file() and p.suffix.lower() in exts:
-                current_image_set.add(p.name)
+
+        # Use the same image-directory priority as list_images so that current_image_set
+        # only contains images from the active sensor directory.  A plain rglob would
+        # also pick up Amiga top/ frames when the active images are in Images/, causing
+        # needs_translation=False even though the filenames refer to a different run.
+        _images_subdir = paths.raw / "Images"
+        _direct = [p for p in paths.raw.iterdir() if p.is_file() and p.suffix.lower() in exts]
+        if _images_subdir.is_dir() and any(f.suffix.lower() in exts for f in _images_subdir.iterdir()):
+            _image_dir = _images_subdir
+        elif _direct:
+            _image_dir = paths.raw
+        else:
+            _top_dirs = list(paths.raw.rglob("top"))
+            _top_dir = next((d for d in _top_dirs if d.is_dir()), None)
+            _image_dir = _top_dir if _top_dir else paths.raw
+
+        current_image_set: set[str] = {
+            p.name for p in _image_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in exts
+        }
         logger.info(
-            "[load_plot_marking] current_image_set has %d images (raw=%s), msgs_synced=%s",
-            len(current_image_set), paths.raw, msgs_synced_path,
+            "[load_plot_marking] current_image_set has %d images (image_dir=%s), msgs_synced=%s",
+            len(current_image_set), _image_dir, msgs_synced_path,
         )
         if current_image_set:
             sample = sorted(current_image_set)[:3]
