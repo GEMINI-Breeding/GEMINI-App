@@ -734,7 +734,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                         {activePlot.start_image ?? "—"}
                       </span>
                       {activePlot.start_image && !images.includes(activePlot.start_image) && (
-                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" title="Image not found in this run" />
+                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" aria-label="Image not found in this run" />
                       )}
                       {activePlot.start_image && (
                         <>
@@ -757,7 +757,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                         {activePlot.end_image ?? "—"}
                       </span>
                       {activePlot.end_image && !images.includes(activePlot.end_image) && (
-                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" title="Image not found in this run" />
+                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" aria-label="Image not found in this run" />
                       )}
                       {activePlot.end_image && (
                         <>
