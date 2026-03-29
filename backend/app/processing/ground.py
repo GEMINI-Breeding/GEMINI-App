@@ -653,6 +653,9 @@ def run_stitching(
         "west_to_east": "RIGHT",
     }
 
+    failed_plots: list = []
+    succeeded_plots: list = []
+
     for i, plot in enumerate(plots):
         if stop_event.is_set():
             return {}
@@ -1145,16 +1148,35 @@ def run_stitching(
                     "[Plot %s] No stitched output found in %s", plot_id, plot_temp_outer
                 )
 
+        except RuntimeError as _plot_err:
+            _err_msg = str(_plot_err)[:400]
+            failed_plots.append(plot_id)
+            logger.warning("[Plot %s] Stitching failed, skipping: %s", plot_id, _err_msg)
+            emit(
+                {
+                    "event": "progress",
+                    "message": f"Plot {plot_id}: FAILED — skipping. {_err_msg}",
+                }
+            )
+        else:
+            succeeded_plots.append(plot_id)
         finally:
             shutil.rmtree(plot_temp_outer, ignore_errors=True)
 
+    _n_ok = len(succeeded_plots)
+    _n_fail = len(failed_plots)
+    _summary = f"Stitching complete — {_n_ok}/{len(plots)} plot(s) succeeded"
+    if failed_plots:
+        _summary += f", {_n_fail} failed (plot IDs: {failed_plots})"
     emit(
         {
             "event": "progress",
             "progress": 100,
-            "message": f"Stitching complete — {len(plots)} plot(s) processed",
+            "message": _summary,
         }
     )
+    if failed_plots:
+        logger.warning("[stitching] %d plot(s) failed: %s", _n_fail, failed_plots)
 
     # Build stored config (drop temp runtime keys)
     stored_config = dict(base_config)
@@ -1168,6 +1190,8 @@ def run_stitching(
             "dir": paths.rel(out_dir),
             "config": stored_config,
             "plot_count": len(plots),
+            "succeeded_plots": succeeded_plots,
+            "failed_plots": failed_plots,
             "created_at": datetime.now(_tz.utc).isoformat(),
             "plot_marking_version": plot_marking_version,
         },
