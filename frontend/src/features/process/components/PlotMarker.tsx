@@ -142,7 +142,6 @@ function GpsTrajectoryPanel({
       if (!res.ok) throw new Error("Failed to load GPS data")
       return res.json()
     },
-    staleTime: Infinity,
   })
 
   const points = gpsData?.points ?? []
@@ -155,7 +154,7 @@ function GpsTrajectoryPanel({
       [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
       { padding: 40, duration: 600 }
     )
-  }, [points.length])
+  }, [gpsData])
 
   const currentPoint = currentImage
     ? points.find((p) => p.image === currentImage) ?? null
@@ -727,12 +726,19 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
                       <Label className="text-xs text-muted-foreground w-8 shrink-0">Start</Label>
-                      <span className="text-xs font-mono truncate flex-1 min-w-0 text-green-700 dark:text-green-400">
+                      <span className={`text-xs font-mono truncate flex-1 min-w-0 ${
+                        activePlot.start_image && !images.includes(activePlot.start_image)
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-green-700 dark:text-green-400"
+                      }`}>
                         {activePlot.start_image ?? "—"}
                       </span>
+                      {activePlot.start_image && !images.includes(activePlot.start_image) && (
+                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" title="Image not found in this run" />
+                      )}
                       {activePlot.start_image && (
                         <>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" onClick={() => jumpTo(activePlot.start_image)}>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.start_image)} onClick={() => jumpTo(activePlot.start_image)}>
                             <ChevronRight className="w-3 h-3" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
@@ -743,12 +749,19 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                     </div>
                     <div className="flex items-center gap-1">
                       <Label className="text-xs text-muted-foreground w-8 shrink-0">End</Label>
-                      <span className="text-xs font-mono truncate flex-1 min-w-0 text-red-700 dark:text-red-400">
+                      <span className={`text-xs font-mono truncate flex-1 min-w-0 ${
+                        activePlot.end_image && !images.includes(activePlot.end_image)
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-red-700 dark:text-red-400"
+                      }`}>
                         {activePlot.end_image ?? "—"}
                       </span>
+                      {activePlot.end_image && !images.includes(activePlot.end_image) && (
+                        <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" title="Image not found in this run" />
+                      )}
                       {activePlot.end_image && (
                         <>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" onClick={() => jumpTo(activePlot.end_image)}>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.end_image)} onClick={() => jumpTo(activePlot.end_image)}>
                             <ChevronRight className="w-3 h-3" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
@@ -792,6 +805,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                     className={`w-2.5 h-2.5 rounded-full border transition-colors ${
                       i === plotPage
                         ? "bg-primary border-primary"
+                        : p.start_image && p.end_image && (!images.includes(p.start_image) || !images.includes(p.end_image))
+                        ? "bg-amber-400 border-amber-400"
                         : p.start_image && p.end_image
                         ? "bg-green-500 border-green-500"
                         : "bg-muted border-muted-foreground/30 hover:border-primary/50"

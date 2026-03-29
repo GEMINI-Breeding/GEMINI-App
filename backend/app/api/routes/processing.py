@@ -669,11 +669,15 @@ def load_plot_marking(
                     except ValueError:
                         pass
             for key in ("start_lat", "start_lon", "end_lat", "end_lon"):
-                if key in row and row[key]:
-                    try:
-                        row[key] = float(row[key])
-                    except ValueError:
-                        pass
+                if key in row:
+                    val = row[key]
+                    if val:
+                        try:
+                            row[key] = float(val)
+                        except ValueError:
+                            row[key] = None
+                    else:
+                        row[key] = None
             selections.append(dict(row))
 
     # Attempt GPS-based translation when markers reference images from a different run
