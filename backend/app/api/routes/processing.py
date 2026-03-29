@@ -2640,6 +2640,7 @@ def use_uploaded_ortho(
     save_mode="replace" overwrites the currently active version.
     """
     from app.crud.file_upload import get_file_upload as _get_fu
+    from app.crud.app_settings import get_setting as _get_setting
     from datetime import datetime as _dt, timezone as _tz
 
     run = _get_run_or_404(session, id)
@@ -2648,6 +2649,9 @@ def use_uploaded_ortho(
         raise HTTPException(status_code=400, detail="Not an aerial pipeline")
 
     paths = _get_paths(session, run)
+    # Use the user-configured data_root (same logic as _get_paths) so that
+    # FileUpload.storage_path (relative to data_root) resolves correctly.
+    _data_root = Path(_get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
     req = body or _UseUploadedOrthoRequest()
 
     # ── Locate the source TIF ──────────────────────────────────────────────────
@@ -2659,7 +2663,7 @@ def use_uploaded_ortho(
         fu = _get_fu(session=session, id=fu_id)
         if not fu:
             raise HTTPException(status_code=404, detail="File upload not found")
-        src_dir = Path(settings.APP_DATA_ROOT) / fu.storage_path
+        src_dir = _data_root / fu.storage_path
         tif_files = sorted(
             p for p in src_dir.rglob("*")
             if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
@@ -2696,7 +2700,7 @@ def use_uploaded_ortho(
         dem_fu = _get_fu(session=session, id=dem_fu_id)
         if not dem_fu:
             raise HTTPException(status_code=404, detail="DEM file upload not found")
-        dem_src_dir = Path(settings.APP_DATA_ROOT) / dem_fu.storage_path
+        dem_src_dir = _data_root / dem_fu.storage_path
         dem_tifs = sorted(
             p for p in dem_src_dir.rglob("*")
             if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
