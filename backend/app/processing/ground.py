@@ -273,8 +273,9 @@ def translate_markers_by_gps(
                     continue
                 raw_img = str(row.get(img_col, ""))
                 if raw_img and raw_img != "nan":
-                    # Use Path().name to handle both POSIX ("/") and Windows ("\\") separators
-                    name = Path(raw_img).name
+                    # Split on both "/" and "\" so Windows absolute paths stored
+                    # in msgs_synced.csv are handled correctly on Linux/Mac backends.
+                    name = raw_img.replace("\\", "/").split("/")[-1]
                     if name in current_image_set:
                         gps_track.append((lat, lon, name))
                     else:
@@ -289,7 +290,7 @@ def translate_markers_by_gps(
                 for _, row in df.head(3).iterrows():
                     raw_img = str(row.get(img_col, ""))
                     if raw_img and raw_img != "nan":
-                        sample_raw.append(Path(raw_img).name)
+                        sample_raw.append(raw_img.replace("\\", "/").split("/")[-1])
                 logger.warning(
                     "[translate_markers] all rows skipped — sample msgs_synced image names: %s | sample current_image_set: %s",
                     sample_raw, sorted(current_image_set)[:3],
