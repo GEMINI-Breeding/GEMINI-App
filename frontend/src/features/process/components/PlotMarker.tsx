@@ -236,6 +236,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     queryKey: ["plot-marking", runId],
     queryFn: () =>
       ProcessingService.loadPlotMarking({ id: runId }) as unknown as Promise<{ selections: PlotSelection[]; gps_translated: boolean; active_version: number | null }>,
+    refetchOnMount: "always",
   })
 
   const [activeVersion, setActiveVersion] = useState<number | null>(null)

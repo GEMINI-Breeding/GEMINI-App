@@ -654,7 +654,9 @@ def load_plot_marking(
         else:
             csv_path = paths.plot_borders
 
+    logger.info("[load_plot_marking] run=%s reading csv: %s", id, csv_path)
     if not csv_path.exists():
+        logger.warning("[load_plot_marking] csv not found: %s", csv_path)
         return {"selections": [], "gps_translated": False}
 
     selections = []
@@ -680,6 +682,15 @@ def load_plot_marking(
                         row[key] = None
             selections.append(dict(row))
 
+    logger.info("[load_plot_marking] loaded %d selections from %s", len(selections), csv_path)
+    if selections:
+        s0 = selections[0]
+        logger.debug(
+            "[load_plot_marking] first selection: plot_id=%s start_image=%s end_image=%s start_lat=%s start_lon=%s",
+            s0.get("plot_id"), s0.get("start_image"), s0.get("end_image"),
+            s0.get("start_lat"), s0.get("start_lon"),
+        )
+
     # Attempt GPS-based translation when markers reference images from a different run
     msgs_synced_path = _find_msgs_synced(paths)
     if msgs_synced_path and paths.raw.exists():
@@ -689,8 +700,20 @@ def load_plot_marking(
         for p in paths.raw.rglob("*"):
             if p.is_file() and p.suffix.lower() in exts:
                 current_image_set.add(p.name)
+        logger.info(
+            "[load_plot_marking] current_image_set has %d images (raw=%s), msgs_synced=%s",
+            len(current_image_set), paths.raw, msgs_synced_path,
+        )
+        if current_image_set:
+            sample = sorted(current_image_set)[:3]
+            logger.debug("[load_plot_marking] sample images in current_image_set: %s", sample)
         selections, gps_translated = _translate(selections, current_image_set, msgs_synced_path)
+        logger.info("[load_plot_marking] translation result: gps_translated=%s", gps_translated)
     else:
+        logger.warning(
+            "[load_plot_marking] skipping translation — msgs_synced_path=%s raw_exists=%s",
+            msgs_synced_path, paths.raw.exists(),
+        )
         gps_translated = False
 
     active_version = (run.outputs or {}).get("active_plot_marking_version")
@@ -708,13 +731,18 @@ def _find_msgs_synced(paths: RunPaths) -> Path | None:
     (e.g. raw/Images/RGB/Metadata/msgs_synced.csv), so we search recursively
     before falling back to the intermediate run directory.
     """
+    logger.debug("[find_msgs_synced] searching raw dir: %s", paths.raw)
     # Recursive search under raw dir first (covers Amiga nested layout)
     found = next(paths.raw.rglob("msgs_synced.csv"), None)
     if found:
+        logger.debug("[find_msgs_synced] found in raw: %s", found)
         return found
+    logger.debug("[find_msgs_synced] not in raw — checking intermediate: %s", paths.msgs_synced)
     # Fallback: intermediate (aerial / pre-copied)
     if paths.msgs_synced.exists():
+        logger.debug("[find_msgs_synced] found in intermediate: %s", paths.msgs_synced)
         return paths.msgs_synced
+    logger.warning("[find_msgs_synced] msgs_synced.csv not found (raw=%s, intermediate=%s)", paths.raw, paths.msgs_synced)
     return None
 
 

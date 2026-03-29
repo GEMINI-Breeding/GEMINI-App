@@ -227,7 +227,16 @@ def translate_markers_by_gps(
         for sel in selections
         if sel.get("start_lat") is not None or sel.get("end_lat") is not None
     )
+    logger.info("[translate_markers] needs_translation=%s (current_image_set size=%d)", needs_translation, len(current_image_set))
     if not needs_translation:
+        # Log why — show which images were already found
+        for sel in selections[:3]:
+            logger.debug(
+                "[translate_markers] no translation needed — start_image=%s (in_set=%s) end_image=%s (in_set=%s) has_lat=%s",
+                sel.get("start_image"), (sel.get("start_image") or "") in current_image_set,
+                sel.get("end_image"), (sel.get("end_image") or "") in current_image_set,
+                sel.get("start_lat") is not None,
+            )
         return selections, False
 
     # Build ordered GPS track for the current run: [(lat, lon, image_name), ...]
@@ -235,6 +244,7 @@ def translate_markers_by_gps(
     try:
         df = pd.read_csv(msgs_synced_path, on_bad_lines="skip")
         df.columns = df.columns.str.strip()
+        logger.info("[translate_markers] msgs_synced has %d rows, columns: %s", len(df), list(df.columns))
 
         lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
         lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
@@ -251,7 +261,10 @@ def translate_markers_by_gps(
                 (c for c in df.columns if "file" in c.lower() or "path" in c.lower()), None
             )
 
+        logger.info("[translate_markers] detected columns — lat=%s lon=%s img=%s", lat_col, lon_col, img_col)
+
         if lat_col and lon_col and img_col:
+            skipped_no_match = 0
             for _, row in df.iterrows():
                 try:
                     lat = float(row[lat_col])
@@ -263,10 +276,30 @@ def translate_markers_by_gps(
                     name = raw_img.split("/")[-1]
                     if name in current_image_set:
                         gps_track.append((lat, lon, name))
+                    else:
+                        skipped_no_match += 1
+            logger.info(
+                "[translate_markers] GPS track built: %d entries, %d rows skipped (name not in current_image_set)",
+                len(gps_track), skipped_no_match,
+            )
+            if skipped_no_match > 0 and not gps_track:
+                # Sample the names that didn't match to help diagnose
+                sample_raw = []
+                for _, row in df.head(3).iterrows():
+                    raw_img = str(row.get(img_col, ""))
+                    if raw_img and raw_img != "nan":
+                        sample_raw.append(raw_img.split("/")[-1])
+                logger.warning(
+                    "[translate_markers] all rows skipped — sample msgs_synced image names: %s | sample current_image_set: %s",
+                    sample_raw, sorted(current_image_set)[:3],
+                )
+        else:
+            logger.warning("[translate_markers] missing required columns — lat=%s lon=%s img=%s", lat_col, lon_col, img_col)
     except Exception:
-        pass
+        logger.exception("[translate_markers] failed to read msgs_synced: %s", msgs_synced_path)
 
     if not gps_track:
+        logger.warning("[translate_markers] GPS track is empty — cannot translate, returning original selections")
         return selections, False
 
     def _nearest(lat: float, lon: float) -> str:
@@ -289,23 +322,37 @@ def translate_markers_by_gps(
         if start_img not in current_image_set:
             s_lat = row.get("start_lat")
             s_lon = row.get("start_lon")
+            logger.debug(
+                "[translate_markers] plot %s: start_image=%s not in set — lat=%s lon=%s",
+                row.get("plot_id"), start_img, s_lat, s_lon,
+            )
             if s_lat is not None and s_lon is not None:
                 try:
                     row["start_image"] = _nearest(float(s_lat), float(s_lon))
+                    logger.debug("[translate_markers] plot %s: start → %s", row.get("plot_id"), row["start_image"])
                     translated = True
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as exc:
+                    logger.warning("[translate_markers] plot %s: start translation failed — %s", row.get("plot_id"), exc)
+            else:
+                logger.warning("[translate_markers] plot %s: start has no GPS coords — cannot translate", row.get("plot_id"))
 
         end_img = row.get("end_image") or ""
         if end_img not in current_image_set:
             e_lat = row.get("end_lat")
             e_lon = row.get("end_lon")
+            logger.debug(
+                "[translate_markers] plot %s: end_image=%s not in set — lat=%s lon=%s",
+                row.get("plot_id"), end_img, e_lat, e_lon,
+            )
             if e_lat is not None and e_lon is not None:
                 try:
                     row["end_image"] = _nearest(float(e_lat), float(e_lon))
+                    logger.debug("[translate_markers] plot %s: end → %s", row.get("plot_id"), row["end_image"])
                     translated = True
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as exc:
+                    logger.warning("[translate_markers] plot %s: end translation failed — %s", row.get("plot_id"), exc)
+            else:
+                logger.warning("[translate_markers] plot %s: end has no GPS coords — cannot translate", row.get("plot_id"))
 
         if translated:
             row["translated"] = True
