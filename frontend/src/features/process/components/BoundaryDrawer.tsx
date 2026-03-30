@@ -207,7 +207,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
 
       drawnLayers.clearLayers();
       if (features.length > 0) {
-        L.geoJSON({ type: "FeatureCollection", features }, { style: DEFAULT_STYLE }).eachLayer(
+        L.geoJSON({ type: "FeatureCollection", features } as GeoJSON.FeatureCollection, { style: DEFAULT_STYLE }).eachLayer(
           (l) => {
             addLayerListeners(l);
             drawnLayers.addLayer(l);
@@ -255,7 +255,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
     const initialFeatures = orthoInfo.existing_geojson?.features ?? [];
     if (initialFeatures.length > 0) {
       L.geoJSON(
-        { type: "FeatureCollection", features: initialFeatures },
+        { type: "FeatureCollection", features: initialFeatures } as GeoJSON.FeatureCollection,
         { style: DEFAULT_STYLE },
       ).eachLayer((l) => {
         addLayerListeners(l);
