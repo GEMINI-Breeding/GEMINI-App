@@ -1753,27 +1753,23 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
-        # Load the active user-saved versioned boundary file.
-        # Fall back to canonical Plot-Boundary-WGS84.geojson only when no versioned
-        # file exists — the canonical file may be overwritten by auto-georeferencing
-        # and would show stale/incorrect boundaries after a re-stitch.
+        # Only pre-load boundaries that THIS run explicitly saved.  Do not fall
+        # back to the canonical shared file — it may have been written by an
+        # aerial pipeline run on the same population, and showing those polygons
+        # in the ground tool would be confusing and wrong.
         existing_geojson = None
         existing_grid_settings = None
-        _geojson_source = None
-        if _active_pbv is not None:
-            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
+        _active_pbv_own = _outputs.get("active_plot_boundary_version")
+        if _active_pbv_own is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
             if _vf.exists():
-                _geojson_source = _vf
-        if _geojson_source is None and paths.plot_boundary_geojson.exists():
-            _geojson_source = paths.plot_boundary_geojson
-        if _geojson_source is not None:
-            try:
-                raw = json.loads(_geojson_source.read_text())
-                existing_grid_settings = raw.pop("grid_settings", None)
-                raw.pop("_run_meta", None)
-                existing_geojson = raw
-            except Exception:
-                pass
+                try:
+                    raw = json.loads(_vf.read_text())
+                    existing_grid_settings = raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                except Exception:
+                    pass
 
         # Load existing pop boundary if present
         existing_pop = None
@@ -1821,23 +1817,23 @@ def orthomosaic_info(
         _active_v = _outputs.get("active_ortho_version")
         _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
+        # Only pre-load boundaries that THIS aerial run explicitly saved.  Do
+        # not fall back to the canonical shared file — it may have been written
+        # by a ground pipeline run on the same population, and showing those
+        # ground polygons in the aerial boundary drawer would be confusing.
         existing_geojson = None
         existing_grid_settings = None
-        _geojson_source = None
-        if _active_pbv is not None:
-            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
+        _active_pbv_own = _outputs.get("active_plot_boundary_version")
+        if _active_pbv_own is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
             if _vf.exists():
-                _geojson_source = _vf
-        if _geojson_source is None and paths.plot_boundary_geojson.exists():
-            _geojson_source = paths.plot_boundary_geojson
-        if _geojson_source is not None:
-            try:
-                raw = json.loads(_geojson_source.read_text())
-                existing_grid_settings = raw.pop("grid_settings", None)
-                raw.pop("_run_meta", None)
-                existing_geojson = raw
-            except Exception:
-                pass
+                try:
+                    raw = json.loads(_vf.read_text())
+                    existing_grid_settings = raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                except Exception:
+                    pass
 
         existing_pop = None
         if paths.pop_boundary_geojson.exists():

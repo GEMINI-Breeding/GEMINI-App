@@ -60,6 +60,8 @@ interface TraitMapProps {
   recordId?: string | null
   /** When false, polygon layer is hidden */
   showPolygons?: boolean
+  /** Fill opacity for colored polygons, 0-100 (default 70) */
+  plotOpacity?: number
 }
 
 interface TooltipState {
@@ -93,6 +95,7 @@ export function TraitMap({
   filteredIds,
   recordId,
   showPolygons = true,
+  plotOpacity = 70,
 }: TraitMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [viewState, setViewState] = useState({ longitude: 0, latitude: 0, zoom: 2, pitch: 0, bearing: 0 })
@@ -151,16 +154,18 @@ export function TraitMap({
       lineWidthMaxPixels: 1.5,
       getLineColor: [255, 255, 255, 60],
       getFillColor: (f: GeoJSON.Feature) => {
+        const alpha = Math.round((plotOpacity / 100) * 255)
         if (filteredIds != null) {
           const pid = String(f.properties?.plot_id ?? f.properties?.accession ?? "")
-          if (!filteredIds.has(pid)) return [128, 128, 128, 40]
+          if (!filteredIds.has(pid)) return [128, 128, 128, Math.round(alpha * 0.25)]
         }
-        if (!colorFn || !selectedMetric) return [128, 128, 128, 160]
+        if (!colorFn || !selectedMetric) return [128, 128, 128, alpha]
         const v = f.properties?.[selectedMetric] as number | null | undefined
-        return colorFn(v)
+        const color = colorFn(v)
+        return [color[0], color[1], color[2], alpha] as [number, number, number, number]
       },
       updateTriggers: {
-        getFillColor: [selectedMetric, colorFn, filteredIds],
+        getFillColor: [selectedMetric, colorFn, filteredIds, plotOpacity],
       },
       pickable: true,
       onHover: (info: any) => {
@@ -184,7 +189,7 @@ export function TraitMap({
         }
       },
     })
-  }, [geojson, colorFn, selectedMetric, filteredIds, showPolygons, recordId])
+  }, [geojson, colorFn, selectedMetric, filteredIds, showPolygons, plotOpacity, recordId])
 
   const layers = [bitmapLayer, polygonLayer].filter(Boolean)
 

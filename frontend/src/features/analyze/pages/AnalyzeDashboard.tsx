@@ -1455,6 +1455,7 @@ function MapTab({ records }: { records: TraitRecord[] }) {
   );
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [showPolygons, setShowPolygons] = useState(true);
+  const [plotOpacity, setPlotOpacity] = useState(70);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const workspaces = useMemo(
@@ -1635,17 +1636,31 @@ function MapTab({ records }: { records: TraitRecord[] }) {
               <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Color by
               </p>
-              <button
-                onClick={() => setShowPolygons((v) => !v)}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                title={showPolygons ? "Hide polygons" : "Show polygons"}
-              >
-                {showPolygons ? (
-                  <Eye className="h-3.5 w-3.5" />
-                ) : (
-                  <EyeOff className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-1.5">
+                {showPolygons && (
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={plotOpacity}
+                    onChange={(e) => setPlotOpacity(Number(e.target.value))}
+                    title={`Plot opacity: ${plotOpacity}%`}
+                    className="w-20 h-1.5 accent-foreground cursor-pointer"
+                  />
                 )}
-              </button>
+                <button
+                  onClick={() => setShowPolygons((v) => !v)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title={showPolygons ? "Hide polygons" : "Show polygons"}
+                >
+                  {showPolygons ? (
+                    <Eye className="h-3.5 w-3.5" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
             <MetricSelector
               columns={traitsData.metric_columns}
@@ -1690,6 +1705,7 @@ function MapTab({ records }: { records: TraitRecord[] }) {
               filteredIds={null}
               recordId={selectedId}
               showPolygons={showPolygons}
+              plotOpacity={plotOpacity}
             />
             {selectedRecord && (
               <div className="absolute top-2 right-2 z-10 bg-background/80 backdrop-blur-sm border rounded px-2 py-1 text-xs shadow-sm space-y-0.5">

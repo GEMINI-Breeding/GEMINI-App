@@ -511,7 +511,12 @@ def _compute_otsu_criteria(im: np.ndarray, th: int) -> float:
 
 def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
     """
-    Compute Excess Green vegetation mask via Otsu thresholding.
+    Compute Excess Green vegetation mask.
+
+    Uses ExG > 0 as the vegetation threshold: any pixel where the normalised
+    green channel exceeds the average of red and blue is vegetation.  This is
+    more robust than Otsu for dense-canopy plots where most pixels are vegetation
+    (Otsu can split within-vegetation variation and undercount coverage).
 
     rgb_arr: (H, W, 3) uint8 RGB array.
     Returns uint8 mask (0 = background, 255 = vegetation).
@@ -522,14 +527,11 @@ def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
     total = arr[:, :, 0] + arr[:, :, 1] + arr[:, :, 2]
     total = np.where(total == 0, 1.0, total)
     ratio = arr / total[:, :, np.newaxis]
+    # ExG > 0 → green band fraction exceeds the mean of red + blue → vegetation
     exg = 2 * ratio[:, :, 1] - ratio[:, :, 0] - ratio[:, :, 2]
-    exg_norm = cv2.normalize(exg, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+    mask = (exg > 0).astype(np.uint8) * 255
 
-    criterias = [_compute_otsu_criteria(exg_norm, th) for th in range(int(exg_norm.max()) + 1)]
-    best_th = int(np.argmin(criterias))
-    mask = (exg_norm > best_th).astype(np.uint8) * 255
-
-    # Morphological closing to fill gaps
+    # Morphological closing to fill small gaps within canopy
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return mask
@@ -688,7 +690,12 @@ def run_trait_extraction(
                 mask = _calculate_exg_mask(rgb_arr)
                 vf = round(float(np.sum(mask > 0)) / mask.size, 4)
 
-                # Canopy height from DEM
+                # Canopy height from DEM.
+                # Estimate ground level from bare-soil pixels (non-vegetation),
+                # falling back to the 5th-percentile of all valid pixels when the
+                # canopy is dense.  Canopy top = 95th-percentile of vegetation pixels.
+                # height = canopy_top − ground.  Using only vegetation pixels for both
+                # percentiles gives near-zero spread for uniformly tall crops (inverted).
                 height_m: float | None = None
                 if dem_src is not None and gdf_dem is not None:
                     dem_row = gdf_dem.iloc[i]
@@ -696,14 +703,22 @@ def run_trait_extraction(
                     dem_window = _from_bounds(*dem_bounds, dem_src.transform)
                     dem_data = dem_src.read(1, window=dem_window, boundless=True, fill_value=0)
                     if dem_data.size > 0:
-                        # Resize mask to match DEM crop
+                        # Resize vegetation mask to match DEM crop resolution
                         dm = cv2.resize(mask, (dem_data.shape[1], dem_data.shape[0]))
-                        dem_vals = dem_data[dm > 0]
-                        if len(dem_vals) > 0:
-                            height_m = round(
-                                float(np.quantile(dem_vals, 0.95)) - float(np.quantile(dem_vals, 0.05)),
-                                4,
-                            )
+                        valid_mask = dem_data != 0
+                        all_valid = dem_data[valid_mask]
+                        if len(all_valid) > 0:
+                            soil_pixels = dem_data[(dm == 0) & valid_mask]
+                            if len(soil_pixels) >= 10:
+                                ground = float(np.median(soil_pixels))
+                            else:
+                                ground = float(np.quantile(all_valid, 0.05))
+                            veg_pixels = dem_data[(dm > 0) & valid_mask]
+                            if len(veg_pixels) > 0:
+                                canopy_top = float(np.quantile(veg_pixels, 0.95))
+                                h = canopy_top - ground
+                                if h > 0:
+                                    height_m = round(h, 4)
 
                 # Derive plot ID and labels from GeoJSON properties
                 plot_id = (
