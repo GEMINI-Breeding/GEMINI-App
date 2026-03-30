@@ -475,24 +475,29 @@ def list_plot_markings(
     id: uuid.UUID,
 ) -> list[dict]:
     from sqlmodel import select as _select
-    from app.models.pipeline import PipelineRun as _PR
+    from app.models.pipeline import PipelineRun as _PR, Pipeline as _Pipeline
 
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     versions, active = _discover_pm_versions(paths, dict(run.outputs or {}))
 
-    # For versions missing metadata (created by a different dataset run),
-    # scan sibling runs in the same pipeline to find their stored metadata.
+    # For versions missing metadata (created by a different run or pipeline),
+    # search all runs in the same workspace — plot_borders_vN.csv files live in
+    # intermediate_year which is workspace/year/experiment/location/population
+    # scoped, so they are visible across pipelines within the same workspace.
     missing = {v["version"] for v in versions if not v.get("run_label") and not v.get("created_at")}
     if missing:
-        sibling_runs = session.exec(
-            _select(_PR).where(
-                _PR.pipeline_id == run.pipeline_id,
+        current_pipeline = session.get(_Pipeline, run.pipeline_id)
+        workspace_runs = session.exec(
+            _select(_PR)
+            .join(_Pipeline, _PR.pipeline_id == _Pipeline.id)
+            .where(
+                _Pipeline.workspace_id == current_pipeline.workspace_id,
                 _PR.id != run.id,
             )
         ).all()
         cross_meta: dict[int, dict] = {}
-        for sr in sibling_runs:
+        for sr in workspace_runs:
             for pm in (sr.outputs or {}).get("plot_markings", []):
                 vnum = pm.get("version")
                 if vnum in missing and vnum not in cross_meta:

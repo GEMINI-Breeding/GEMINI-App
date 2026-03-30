@@ -15,7 +15,10 @@ function processProgress(process: Process): number {
   const done = process.items.filter(
     (i) => i.status === "completed" || i.status === "skipped",
   ).length
-  return Math.round((done / total) * 100)
+  // Count in-progress items as half-complete so the bar advances during
+  // long extractions (e.g. Docker .bin extraction) instead of staying frozen.
+  const running = process.items.filter((i) => i.status === "running").length
+  return Math.round(((done + running * 0.5) / total) * 100)
 }
 
 function processStatusLabel(process: Process): string {
@@ -29,6 +32,8 @@ function processStatusLabel(process: Process): string {
   const done = process.items.filter(
     (i) => i.status === "completed" || i.status === "skipped",
   ).length
+  const running = process.items.filter((i) => i.status === "running").length
+  if (running > 0) return `${done}/${total} (${running} extracting)`
   return `${done}/${total}`
 }
 

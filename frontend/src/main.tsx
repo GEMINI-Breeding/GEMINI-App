@@ -18,6 +18,22 @@ import { routeTree } from "./routeTree.gen"
 // WebKit cross-origin issues with localhost:PORT requests.
 OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
 
+// Prevent browser zoom (Ctrl+scroll, Ctrl+/-, pinch) from breaking fixed
+// layouts and coordinate calculations in map/canvas tools.
+window.addEventListener(
+  "wheel",
+  (e) => { if (e.ctrlKey) e.preventDefault() },
+  { passive: false },
+)
+window.addEventListener("keydown", (e) => {
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0")
+  ) {
+    e.preventDefault()
+  }
+})
+
 const queryClient = new QueryClient()
 
 const router = createRouter({ routeTree })

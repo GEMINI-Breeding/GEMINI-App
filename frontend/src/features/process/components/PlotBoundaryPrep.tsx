@@ -1159,6 +1159,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         fdInfo?.rows,
       );
       setPreviewGeoJson(fc);
+      pushHistory(fc);
       setGridGenerated(true);
       setGridVisible(true);
     }
@@ -1591,16 +1592,15 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
               });
               return { ...prev, features: newFeatures };
             });
-          } else {
-            setGridOffset((prev) => ({
-              lon: prev.lon + lon,
-              lat: prev.lat + lat,
-            }));
           }
+          // No selection → do nothing; select plots first before dragging in move mode
         });
       }
     }
     function onMouseUp() {
+      if (dragRef.current && previewGeoJsonRef.current) {
+        pushHistory(previewGeoJsonRef.current);
+      }
       dragRef.current = null;
     }
 
@@ -1899,32 +1899,38 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         </div>
       </div>
 
-      <ol className="bg-muted/40 list-inside list-decimal space-y-1.5 rounded-md border px-4 py-3 text-sm">
-        <li>
-          Click the <strong>polygon icon</strong> (⬠) in the{" "}
-          <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
-          <strong>Double-click</strong> to finish. You can edit or redraw it at
-          any time using the toolbar.
-        </li>
-        <li>
-          Adjust plot dimensions in the <strong>Plot Settings</strong> panel
-          (bottom-left), then click <strong>Generate Grid</strong> to preview
-          the plot grid.
-        </li>
-        <li>
-          Use <strong>Move</strong> mode to drag the grid into position, or
-          adjust the <strong>Angle</strong>. After changing settings, click{" "}
-          <strong>Regenerate Grid</strong> to apply.
-        </li>
-        <li>
-          In <strong>Select</strong> mode: <strong>click</strong> a plot to
-          select it, <strong>Shift+click</strong> to add/remove, or{" "}
-          <strong>drag</strong> a rectangle to multi-select.
-        </li>
-        <li>
-          Click <strong>Done</strong> to save and close.
-        </li>
-      </ol>
+      <details className="bg-muted/40 rounded-md border text-sm">
+        <summary className="flex cursor-pointer select-none list-none items-center justify-between px-4 py-2.5 font-medium">
+          Instructions
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform [[open]_&]:rotate-180" />
+        </summary>
+        <ol className="list-inside list-decimal space-y-1.5 px-4 pb-3 pt-1">
+          <li>
+            Click the <strong>polygon icon</strong> (⬠) in the{" "}
+            <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
+            <strong>Double-click</strong> to finish. You can edit or redraw it at
+            any time using the toolbar.
+          </li>
+          <li>
+            Adjust plot dimensions in the <strong>Plot Settings</strong> panel
+            (bottom-right), then click <strong>Generate Grid</strong> to preview
+            the plot grid.
+          </li>
+          <li>
+            Use <strong>Move</strong> mode to drag selected plots into position, or
+            adjust the <strong>Angle</strong>. After changing settings, click{" "}
+            <strong>Regenerate Grid</strong> to apply.
+          </li>
+          <li>
+            In <strong>Select</strong> mode: <strong>click</strong> a plot to
+            select it, <strong>Shift+click</strong> to add/remove, or{" "}
+            <strong>drag</strong> a rectangle to multi-select.
+          </li>
+          <li>
+            Click <strong>Save</strong> to save and close.
+          </li>
+        </ol>
+      </details>
 
       {/* Map with floating grid settings panel */}
       {/* isolation:isolate contains Leaflet's internal z-indices so dialogs render above */}
@@ -1932,7 +1938,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         <div
           ref={mapContainerRef}
           className="w-full overflow-hidden rounded-lg border"
-          style={{ height: 520 }}
+          style={{ height: 600 }}
         />
         {hasBoundary && (
           <GridSettingsPanel

@@ -11,17 +11,16 @@ export function BackendStatus({ onReady }: BackendStatusProps) {
   const [error, setError] = useState<string>("")
 
   const waitForBackend = async () => {
-    // Production Tauri: Rust setup already confirmed backend is healthy.
-    if ((window as any).__GEMI_BACKEND_URL__) {
-      return
-    }
+    const baseUrl = (window as any).__GEMI_BACKEND_URL__ ?? ""
+    // Dev mode uses relative URL through Vite proxy; production uses injected base URL.
+    const healthUrl = baseUrl
+      ? `${baseUrl}/api/v1/utils/health-check/`
+      : "/api/v1/utils/health-check/"
 
-    // Dev mode: use relative URL so it goes through the Vite proxy
-    // (/api → http://127.0.0.1:8000), avoiding WebKit cross-origin issues.
     const maxRetries = 60
     for (let i = 0; i < maxRetries; i++) {
       try {
-        const response = await fetch("/api/v1/utils/health-check/")
+        const response = await fetch(healthUrl)
         if (response.ok) {
           return
         }

@@ -1934,12 +1934,19 @@ def _ensure_docker_ready(emit: Callable[[dict], None]) -> None:
         _docker_build_in_progress.wait(timeout=1800)
 
 
-def _run_docker_container(bin_path: Path, output_dir: Path, resource_flags: list[str]) -> None:
+def _run_docker_container(
+    bin_path: Path,
+    output_dir: Path,
+    resource_flags: list[str],
+    stop_event: "threading.Event | None" = None,
+) -> None:
     """
     Run a single docker container to extract one .bin file into output_dir.
     output_dir is the per-file temporary directory (not the final destination).
-    Raises RuntimeError on non-zero exit.
+    Raises RuntimeError on non-zero exit or cancellation.
     """
+    import uuid as _uuid
+
     if sys.platform == "win32":
         host_bin_dir = bin_path.parent.resolve().as_posix()
         host_output_dir = output_dir.resolve().as_posix()
@@ -1947,8 +1954,12 @@ def _run_docker_container(bin_path: Path, output_dir: Path, resource_flags: list
         host_bin_dir = str(bin_path.parent)
         host_output_dir = str(output_dir)
 
+    # Unique name lets us `docker stop <name>` reliably on cancellation.
+    container_name = f"gemi-binext-{_uuid.uuid4().hex[:12]}"
+
     cmd = [
         "docker", "run", "--rm",
+        "--name", container_name,
         *resource_flags,
         "-v", f"{host_bin_dir}:/input:ro",
         "-v", f"{host_output_dir}:/output",
@@ -1956,16 +1967,88 @@ def _run_docker_container(bin_path: Path, output_dir: Path, resource_flags: list
         f"/input/{bin_path.name}",
         "/output",
     ]
-    logger.info("docker run: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    if proc.stdout:
-        for line in proc.stdout.splitlines():
-            logger.info("[docker] %s", line)
+    logger.info(
+        "docker run [%s]: %s  [input: %s → /input, output: %s → /output]",
+        container_name, " ".join(cmd), host_bin_dir, host_output_dir,
+    )
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    # Poll until the container finishes or the stop_event fires.
+    try:
+        while proc.poll() is None:
+            if stop_event and stop_event.is_set():
+                logger.info("Cancellation requested — stopping Docker container %s", container_name)
+                try:
+                    subprocess.run(
+                        ["docker", "stop", container_name],
+                        timeout=15, capture_output=True,
+                    )
+                except Exception as e:
+                    logger.warning("docker stop %s failed: %s — killing process", container_name, e)
+                finally:
+                    proc.kill()
+                raise RuntimeError(f"Extraction cancelled: {bin_path.name}")
+            stop_event.wait(0.5) if stop_event else __import__("time").sleep(0.5)
+    finally:
+        # Always collect output so it doesn't block on a full pipe buffer.
+        stdout, stderr = proc.communicate()
+
+    if stdout:
+        for line in stdout.splitlines():
+            logger.info("[docker/%s] %s", container_name, line)
     if proc.returncode != 0:
-        if proc.stderr:
-            logger.error("[docker stderr] %s", proc.stderr.strip())
-        detail = proc.stderr.strip() or proc.stdout.strip() or "no output from container"
+        if stderr:
+            logger.error("[docker/%s stderr] %s", container_name, stderr.strip())
+        detail = stderr.strip() or stdout.strip() or "no output from container"
         raise RuntimeError(f".bin extraction failed inside Docker:\n{detail}")
+    logger.info(
+        "Docker container %s exited (rc=0) for %s — output dir: %s",
+        container_name, bin_path.name, output_dir,
+    )
+
+
+def _move_with_retry(src: Path, dst: Path, retries: int = 5, delay: float = 1.0) -> None:
+    """
+    Move a file with retry logic to handle Windows file-locking issues.
+
+    On Windows, files written by Docker (via WSL2 volume mounts) are sometimes
+    briefly locked by Windows Defender or by the WSL2 kernel immediately after
+    the container exits.  shutil.move falls back to copy+delete in that case,
+    and the delete (os.unlink) can raise PermissionError.  Retrying with a short
+    wait resolves it in practice.
+    """
+    import shutil as _shutil
+    import time as _time
+
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            if dst.exists():
+                # Use os.replace for atomic overwrite on Windows (avoids
+                # FileExistsError that os.rename raises on same-device moves).
+                import os as _os
+                _shutil.copy2(str(src), str(dst))
+                _os.unlink(str(src))
+            else:
+                _shutil.move(str(src), str(dst))
+            return
+        except (PermissionError, OSError) as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                logger.warning(
+                    "Move attempt %d/%d failed for %s → %s: %s — retrying in %.1fs",
+                    attempt + 1, retries, src.name, dst, exc, delay,
+                )
+                _time.sleep(delay)
+    raise RuntimeError(
+        f"Failed to move {src} → {dst} after {retries} attempts: {last_exc}"
+    )
 
 
 def _merge_one_into_output(temp_dir: Path, final_output: Path) -> None:
@@ -1988,20 +2071,31 @@ def _merge_one_into_output(temp_dir: Path, final_output: Path) -> None:
 
     rgb_dir = temp_dir / "RGB"
     if not rgb_dir.exists():
-        logger.warning("Expected RGB subdir not found in temp extraction dir: %s", temp_dir)
+        logger.warning(
+            "Expected RGB subdir not found in temp dir — extraction may have written "
+            "to a different path. temp_dir contents: %s",
+            [p.name for p in temp_dir.iterdir()] if temp_dir.exists() else "(missing)",
+        )
         return
 
+    logger.info("Merging temp %s → %s", temp_dir, final_output)
+
     # ── Move images ───────────────────────────────────────────────────────────
+    total_moved = 0
     for entry in rgb_dir.iterdir():
         if not entry.is_dir() or entry.name == "Metadata":
             continue
+        cam_images = [f for f in entry.rglob("*") if f.is_file()]
+        logger.info("  Camera %s: %d image(s) to move", entry.name, len(cam_images))
         dest_root = final_rgb / entry.name
         dest_root.mkdir(parents=True, exist_ok=True)
-        for img_file in entry.rglob("*"):
-            if img_file.is_file():
-                dest = dest_root / img_file.relative_to(entry)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(img_file), str(dest))
+        for img_file in cam_images:
+            dest = dest_root / img_file.relative_to(entry)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            logger.debug("Moving %s → %s", img_file.name, dest)
+            _move_with_retry(img_file, dest)
+            total_moved += 1
+    logger.info("  Images moved: %d", total_moved)
 
     meta = rgb_dir / "Metadata"
     if not meta.exists():
@@ -2064,6 +2158,7 @@ def extract_bin_files_batch(
     bin_files: list[tuple[int, Path]],
     output_dir: Path,
     emit: Callable[[dict], None],
+    stop_event: "threading.Event | None" = None,
 ) -> None:
     """
     Extract multiple .bin files in parallel and emit per-file progress events.
@@ -2112,10 +2207,13 @@ def extract_bin_files_batch(
         resource_flags = []
 
     max_workers = min(len(bin_files), max(1, (os.cpu_count() or 2) // 2), 4)
-    logger.info("Extracting %d .bin file(s) with up to %d parallel worker(s) [%s]",
-                len(bin_files), max_workers, "Docker" if use_docker else "native")
+    logger.info(
+        "Extracting %d .bin file(s) with up to %d parallel worker(s) [%s] — output: %s",
+        len(bin_files), max_workers, "Docker" if use_docker else "native", output_dir,
+    )
 
     temp_base = Path(tempfile.mkdtemp(prefix="gemi_binext_"))
+    logger.info("Temp extraction base: %s", temp_base)
     temp_dirs: list[Path] = []
     errors: list[str] = []
     lock = threading.Lock()
@@ -2135,6 +2233,11 @@ def extract_bin_files_batch(
     merge_lock = threading.Lock()
 
     def _extract_one(idx: int, bin_path: Path, temp_dir: Path) -> None:
+        bin_size_mb = bin_path.stat().st_size / 1_048_576 if bin_path.exists() else 0
+        logger.info(
+            "[bin %d] START  %s  (%.1f MB)  temp: %s",
+            idx, bin_path.name, bin_size_mb, temp_dir,
+        )
         emit({"event": "progress", "index": idx, "file": bin_path.name,
               "message": "Running extraction via Docker…" if use_docker else "Extracting…"})
 
@@ -2143,7 +2246,7 @@ def extract_bin_files_batch(
         _stop_poll = threading.Event()
 
         def _poll_images() -> None:
-            while not _stop_poll.wait(timeout=5.0):
+            while not _stop_poll.wait(timeout=2.0):
                 n = _count_images(temp_dir)
                 if n > 0:
                     emit({"event": "progress", "index": idx, "file": bin_path.name,
@@ -2154,7 +2257,7 @@ def extract_bin_files_batch(
 
         try:
             if use_docker:
-                _run_docker_container(bin_path, temp_dir, resource_flags)
+                _run_docker_container(bin_path, temp_dir, resource_flags, stop_event=stop_event)
             else:
                 # Single-file call → sequential mode inside extract_binary (safe,
                 # no multiprocessing.Pool spawned, no conflicts with other threads).
@@ -2164,17 +2267,34 @@ def extract_bin_files_batch(
             _stop_poll.set()
             poll_thread.join(timeout=2.0)
 
+            # On Windows, Docker writes files via WSL2.  Give the OS a moment
+            # to flush file handles before we try to move them — this prevents
+            # PermissionError from Windows Defender / WSL2 kernel locks.
+            if sys.platform == "win32":
+                import time as _time
+                _time.sleep(2.0)
+
             final_count = _count_images(temp_dir)
+            logger.info(
+                "[bin %d] Extraction done: %s — %d image(s) in temp dir before merge",
+                idx, bin_path.name, final_count,
+            )
+            if final_count == 0:
+                logger.warning(
+                    "[bin %d] No images found in temp dir after extraction — "
+                    "check Docker output or bin file integrity: %s",
+                    idx, temp_dir,
+                )
 
             # Merge images + CSVs into the final output dir immediately so that
             # (a) images appear on disk as each bin completes, and (b) a later
             # crash doesn't lose already-extracted data.
             with merge_lock:
                 _merge_one_into_output(temp_dir, output_dir)
+            running_total = _count_images(output_dir)
             logger.info(
-                "Merged %s into output (%d images). Running total in output: %d",
-                bin_path.name, final_count,
-                _count_images(output_dir),
+                "[bin %d] Merge done: %s (%d images). Running total in output: %d",
+                idx, bin_path.name, final_count, running_total,
             )
 
             # Delete the .bin after successful extraction + merge.
@@ -2191,6 +2311,10 @@ def extract_bin_files_batch(
             poll_thread.join(timeout=2.0)
             with lock:
                 errors.append(str(exc))
+            logger.error(
+                "[bin %d] FAILED %s — %s",
+                idx, bin_path.name, exc, exc_info=True,
+            )
             # Keep .bin on failure so the user can retry without re-uploading
             emit({"event": "error", "index": idx, "file": bin_path.name,
                   "message": str(exc)})

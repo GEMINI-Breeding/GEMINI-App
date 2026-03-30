@@ -655,6 +655,8 @@ def _extract_bins_batch_inline(
 
     event_q: queue.Queue = queue.Queue()
     error_holder: list[str] = []
+    # Signals Docker workers to stop when the client disconnects.
+    stop_event = threading.Event()
 
     def _emit(event: dict) -> None:
         event_q.put(event)
@@ -665,6 +667,7 @@ def _extract_bins_batch_inline(
                 bin_files=bin_files,
                 output_dir=output_dir,
                 emit=_emit,
+                stop_event=stop_event,
             )
         except Exception as exc:
             error_holder.append(str(exc))
@@ -684,21 +687,32 @@ def _extract_bins_batch_inline(
     thread.start()
     logger.info("Started batch extraction for %d .bin file(s)", len(bin_files))
 
-    while True:
-        evt = event_q.get()
-        if evt is None:
-            break
-        idx = evt.get("index", -1)
-        if idx == -1:
-            # Batch-level coordinator message (e.g. "Merging…") — no process item to update
-            continue
-        yield _sse_event({
-            "event": "extraction_progress",
-            "index": idx,
-            "file": evt.get("file", ""),
-            "phase": evt.get("event"),
-            "message": evt.get("message"),
-        })
+    try:
+        while True:
+            try:
+                evt = event_q.get(timeout=1.0)
+            except queue.Empty:
+                # No event yet — loop back and check again.
+                continue
+            if evt is None:
+                break
+            idx = evt.get("index", -1)
+            if idx == -1:
+                # Batch-level coordinator message — no process item to update
+                continue
+            yield _sse_event({
+                "event": "extraction_progress",
+                "index": idx,
+                "file": evt.get("file", ""),
+                "phase": evt.get("event"),
+                "message": evt.get("message"),
+            })
+    finally:
+        # Fires on normal completion AND when the client disconnects (GeneratorExit).
+        # Setting the event tells all running Docker containers to stop.
+        if not stop_event.is_set():
+            logger.info("SSE generator closed — signalling Docker workers to stop")
+            stop_event.set()
 
     return len(error_holder) == 0  # True = full success
 

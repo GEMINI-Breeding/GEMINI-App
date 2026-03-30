@@ -214,12 +214,9 @@ export function RunTool() {
     return unsub
   }, [isRunning, runId, queryClient])
 
-  // Plot marking needs extra width for the 3-column GPS layout
-  const maxWidth = step === "plot_marking" ? "max-w-7xl" : "max-w-5xl"
-
   return (
     <div className="bg-background min-h-screen">
-      <div className={`mx-auto ${maxWidth} p-8`}>
+      <div className="mx-auto max-w-7xl p-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={goBack}>
