@@ -749,15 +749,34 @@ def _copy_local_stream(
             canonical_name = name
         dest_path = dest_dir / canonical_name
 
-        # Farm-ng .bin files: always remove any leftover copy before uploading so
-        # a previous crashed run doesn't cause "skipped" on retry.
         is_amiga_bin = src.suffix.lower() == ".bin" and body.data_type == "Farm-ng Binary File"
+
         if is_amiga_bin and dest_path.exists():
-            try:
-                dest_path.unlink()
-                logger.info("Removed stale .bin file before re-upload: %s", dest_path.name)
-            except OSError as e:
-                logger.warning("Could not remove stale .bin %s: %s", dest_path.name, e)
+            src_size = src.stat().st_size
+            dest_size = dest_path.stat().st_size
+            if src_size == dest_size:
+                # Already fully copied from a previous (interrupted) run — skip the
+                # 5-hour re-upload and send straight to extraction.
+                logger.info(
+                    "Resuming extraction for already-copied .bin: %s (%d bytes)",
+                    dest_path.name, dest_size,
+                )
+                yield _sse_event(
+                    {"event": "progress", "file": name, "status": "running",
+                     "index": idx, "dest_path": None}
+                )
+                bin_files_to_extract.append((idx, dest_path))
+                continue
+            else:
+                # Partial / mismatched copy — delete and re-upload.
+                logger.info(
+                    "Stale .bin (src=%d dest=%d bytes) — removing before re-upload: %s",
+                    src_size, dest_size, dest_path.name,
+                )
+                try:
+                    dest_path.unlink()
+                except OSError as e:
+                    logger.warning("Could not remove stale .bin %s: %s", dest_path.name, e)
 
         if dest_path.exists() and not body.reupload:
             skipped.append(name)

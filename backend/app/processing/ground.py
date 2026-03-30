@@ -2114,9 +2114,34 @@ def extract_bin_files_batch(
     errors: list[str] = []
     lock = threading.Lock()
 
+    def _count_images(directory: Path) -> int:
+        """Count extracted image files recursively in a directory."""
+        try:
+            return sum(
+                1 for p in directory.rglob("*")
+                if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            )
+        except OSError:
+            return 0
+
     def _extract_one(idx: int, bin_path: Path, temp_dir: Path) -> None:
         emit({"event": "progress", "index": idx, "file": bin_path.name,
               "message": "Running extraction via Docker…" if use_docker else "Extracting…"})
+
+        # Background thread: poll temp_dir every 5 s and emit image-count progress
+        # so the UI shows live progress instead of staying stuck at 0%.
+        _stop_poll = threading.Event()
+
+        def _poll_images() -> None:
+            while not _stop_poll.wait(timeout=5.0):
+                n = _count_images(temp_dir)
+                if n > 0:
+                    emit({"event": "progress", "index": idx, "file": bin_path.name,
+                          "message": f"Extracting… {n} image(s) found"})
+
+        poll_thread = threading.Thread(target=_poll_images, daemon=True)
+        poll_thread.start()
+
         try:
             if use_docker:
                 _run_docker_container(bin_path, temp_dir, resource_flags)
@@ -2126,6 +2151,9 @@ def extract_bin_files_batch(
                 assert extract_binary is not None
                 extract_binary([bin_path], temp_dir, granular_progress=False)
 
+            _stop_poll.set()
+            poll_thread.join(timeout=2.0)
+
             # Delete the .bin immediately after successful extraction — the images
             # are now in temp_dir; the source binary is no longer needed.
             try:
@@ -2134,9 +2162,12 @@ def extract_bin_files_batch(
             except OSError as e:
                 logger.warning("Could not delete .bin %s: %s", bin_path.name, e)
 
+            final_count = _count_images(temp_dir)
             emit({"event": "complete", "index": idx, "file": bin_path.name,
-                  "message": f"Extraction complete: {bin_path.name}"})
+                  "message": f"Extraction complete: {bin_path.name} ({final_count} images)"})
         except Exception as exc:
+            _stop_poll.set()
+            poll_thread.join(timeout=2.0)
             with lock:
                 errors.append(str(exc))
             # Keep .bin on failure so the user can retry without re-uploading
@@ -2162,6 +2193,11 @@ def extract_bin_files_batch(
         emit({"event": "progress", "index": -1, "file": "",
               "message": "Merging extraction results…"})
         _merge_docker_results(temp_dirs, output_dir)
+        total_images = sum(
+            1 for p in output_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        )
+        logger.info("Extraction + merge complete: %d total images in %s", total_images, output_dir)
 
     finally:
         try:
