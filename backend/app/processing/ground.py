@@ -1968,12 +1968,16 @@ def _run_docker_container(bin_path: Path, output_dir: Path, resource_flags: list
         raise RuntimeError(f".bin extraction failed inside Docker:\n{detail}")
 
 
-def _merge_docker_results(temp_dirs: list[Path], final_output: Path) -> None:
+def _merge_one_into_output(temp_dir: Path, final_output: Path) -> None:
     """
-    Merge per-file extraction outputs from temp dirs into the final output directory.
-    Each temp dir contains:  RGB/top/*.jpg  RGB/Metadata/msgs_synced.csv  RGB/Metadata/gps_*.csv
-    Images have timestamp-based names and are safe to move without conflict.
-    CSVs are merged and de-duplicated by timestamp.
+    Merge a single bin extraction temp dir immediately into the final output directory.
+
+    Safe to call from multiple threads concurrently **only if the caller holds a
+    per-batch merge lock** — image filenames are timestamp-unique so moves don't
+    conflict, but CSV read-modify-write must be serialised.
+
+    Each temp dir contains:  RGB/<subdir>/*.jpg  RGB/Metadata/msgs_synced.csv
+                             RGB/Metadata/gps_*.csv  RGB/Metadata/*_calibration.json
     """
     import shutil
     import pandas as pd
@@ -1982,76 +1986,78 @@ def _merge_docker_results(temp_dirs: list[Path], final_output: Path) -> None:
     final_metadata = final_rgb / "Metadata"
     final_metadata.mkdir(parents=True, exist_ok=True)
 
-    msgs_dfs: list[pd.DataFrame] = []
-    gps_parts: dict[str, list[pd.DataFrame]] = {"pvt": [], "relposned": []}
+    rgb_dir = temp_dir / "RGB"
+    if not rgb_dir.exists():
+        logger.warning("Expected RGB subdir not found in temp extraction dir: %s", temp_dir)
+        return
 
-    for tmp_dir in temp_dirs:
-        rgb_dir = tmp_dir / "RGB"
-        if not rgb_dir.exists():
-            logger.warning("Expected RGB subdir not found in temp extraction dir: %s", tmp_dir)
+    # ── Move images ───────────────────────────────────────────────────────────
+    for entry in rgb_dir.iterdir():
+        if not entry.is_dir() or entry.name == "Metadata":
             continue
+        dest_root = final_rgb / entry.name
+        dest_root.mkdir(parents=True, exist_ok=True)
+        for img_file in entry.rglob("*"):
+            if img_file.is_file():
+                dest = dest_root / img_file.relative_to(entry)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(img_file), str(dest))
 
-        # Move image subdirectories (everything except Metadata)
-        for entry in rgb_dir.iterdir():
-            if not entry.is_dir() or entry.name == "Metadata":
-                continue
-            dest_root = final_rgb / entry.name
-            dest_root.mkdir(parents=True, exist_ok=True)
-            for img_file in entry.rglob("*"):
-                if img_file.is_file():
-                    dest = dest_root / img_file.relative_to(entry)
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(img_file), str(dest))
+    meta = rgb_dir / "Metadata"
+    if not meta.exists():
+        return
 
-        # Collect CSVs and calibration JSON from Metadata
-        meta = rgb_dir / "Metadata"
-        if not meta.exists():
+    # ── Incrementally merge msgs_synced.csv ───────────────────────────────────
+    msgs_csv = meta / "msgs_synced.csv"
+    if msgs_csv.exists():
+        try:
+            new_df = pd.read_csv(msgs_csv)
+            final_csv = final_metadata / "msgs_synced.csv"
+            if final_csv.exists():
+                existing = pd.read_csv(final_csv)
+                combined = pd.concat([existing, new_df], ignore_index=True)
+            else:
+                combined = new_df
+            # Deduplicate by first column (typically a timestamp) if possible
+            if not combined.empty:
+                dedup_col = combined.columns[0]
+                combined = (
+                    combined.drop_duplicates(dedup_col)
+                    .sort_values(dedup_col)
+                    .reset_index(drop=True)
+                )
+            combined.to_csv(final_csv, index=False)
+        except Exception as e:
+            logger.warning("Could not merge msgs_synced.csv from %s: %s", temp_dir, e)
+
+    # ── Incrementally merge gps_*.csv ─────────────────────────────────────────
+    for k in ("pvt", "relposned"):
+        gps_csv = meta / f"gps_{k}.csv"
+        if not gps_csv.exists():
             continue
+        try:
+            new_gdf = pd.read_csv(gps_csv)
+            final_gps = final_metadata / f"gps_{k}.csv"
+            if final_gps.exists():
+                existing_gps = pd.read_csv(final_gps)
+                combined_gps = pd.concat([existing_gps, new_gdf], ignore_index=True)
+            else:
+                combined_gps = new_gdf
+            if not combined_gps.empty and "stamp" in combined_gps.columns:
+                combined_gps = (
+                    combined_gps.drop_duplicates("stamp")
+                    .sort_values("stamp")
+                    .reset_index(drop=True)
+                )
+            combined_gps.to_csv(final_gps, index=False)
+        except Exception as e:
+            logger.warning("Could not merge gps_%s.csv from %s: %s", k, temp_dir, e)
 
-        msgs_csv = meta / "msgs_synced.csv"
-        if msgs_csv.exists():
-            try:
-                df = pd.read_csv(msgs_csv)
-                if not df.empty:
-                    msgs_dfs.append(df)
-            except Exception as e:
-                logger.warning("Could not read msgs_synced.csv from %s: %s", tmp_dir, e)
-
-        for k in ("pvt", "relposned"):
-            gps_csv = meta / f"gps_{k}.csv"
-            if gps_csv.exists():
-                try:
-                    gdf = pd.read_csv(gps_csv)
-                    if not gdf.empty:
-                        gps_parts[k].append(gdf)
-                except Exception as e:
-                    logger.warning("Could not read gps_%s.csv from %s: %s", k, tmp_dir, e)
-
-        # Calibration JSON — first-found wins (same for all files in a session)
-        for json_file in meta.glob("*_calibration.json"):
-            dest_json = final_metadata / json_file.name
-            if not dest_json.exists():
-                shutil.copy2(str(json_file), str(dest_json))
-
-    # Write merged msgs_synced.csv
-    if msgs_dfs:
-        merged_msgs = pd.concat(msgs_dfs, ignore_index=True)
-        merged_msgs.to_csv(final_metadata / "msgs_synced.csv", index=False)
-        logger.info("Merged msgs_synced.csv from %d temp extraction dirs", len(msgs_dfs))
-    else:
-        logger.warning("No msgs_synced.csv found in any extraction temp dir — skipping merge")
-
-    # Write merged gps_*.csv
-    for k, parts in gps_parts.items():
-        if parts:
-            gps_merged = (
-                pd.concat(parts, ignore_index=True)
-                .drop_duplicates("stamp")
-                .sort_values("stamp")
-                .reset_index(drop=True)
-            )
-            gps_merged.to_csv(final_metadata / f"gps_{k}.csv", index=False)
-            logger.info("Merged gps_%s.csv from %d sources", k, len(parts))
+    # ── Calibration JSON — first-found wins ───────────────────────────────────
+    for json_file in meta.glob("*_calibration.json"):
+        dest_json = final_metadata / json_file.name
+        if not dest_json.exists():
+            shutil.copy2(str(json_file), str(dest_json))
 
 
 def extract_bin_files_batch(
@@ -2124,6 +2130,10 @@ def extract_bin_files_batch(
         except OSError:
             return 0
 
+    # Serialises the read-modify-write CSV merge so concurrent threads don't
+    # corrupt msgs_synced.csv / gps_*.csv while images move concurrently.
+    merge_lock = threading.Lock()
+
     def _extract_one(idx: int, bin_path: Path, temp_dir: Path) -> None:
         emit({"event": "progress", "index": idx, "file": bin_path.name,
               "message": "Running extraction via Docker…" if use_docker else "Extracting…"})
@@ -2154,15 +2164,26 @@ def extract_bin_files_batch(
             _stop_poll.set()
             poll_thread.join(timeout=2.0)
 
-            # Delete the .bin immediately after successful extraction — the images
-            # are now in temp_dir; the source binary is no longer needed.
+            final_count = _count_images(temp_dir)
+
+            # Merge images + CSVs into the final output dir immediately so that
+            # (a) images appear on disk as each bin completes, and (b) a later
+            # crash doesn't lose already-extracted data.
+            with merge_lock:
+                _merge_one_into_output(temp_dir, output_dir)
+            logger.info(
+                "Merged %s into output (%d images). Running total in output: %d",
+                bin_path.name, final_count,
+                _count_images(output_dir),
+            )
+
+            # Delete the .bin after successful extraction + merge.
             try:
                 bin_path.unlink(missing_ok=True)
                 logger.info("Deleted .bin after extraction: %s", bin_path.name)
             except OSError as e:
                 logger.warning("Could not delete .bin %s: %s", bin_path.name, e)
 
-            final_count = _count_images(temp_dir)
             emit({"event": "complete", "index": idx, "file": bin_path.name,
                   "message": f"Extraction complete: {bin_path.name} ({final_count} images)"})
         except Exception as exc:
@@ -2190,14 +2211,8 @@ def extract_bin_files_batch(
                 f"{len(errors)} of {len(bin_files)} extraction(s) failed.\n" + errors[0]
             )
 
-        emit({"event": "progress", "index": -1, "file": "",
-              "message": "Merging extraction results…"})
-        _merge_docker_results(temp_dirs, output_dir)
-        total_images = sum(
-            1 for p in output_dir.rglob("*")
-            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
-        )
-        logger.info("Extraction + merge complete: %d total images in %s", total_images, output_dir)
+        total_images = _count_images(output_dir)
+        logger.info("All extractions complete: %d total images in %s", total_images, output_dir)
 
     finally:
         try:
