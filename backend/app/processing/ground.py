@@ -264,37 +264,30 @@ def translate_markers_by_gps(
         logger.info("[translate_markers] detected columns — lat=%s lon=%s img=%s", lat_col, lon_col, img_col)
 
         if lat_col and lon_col and img_col:
-            skipped_no_match = 0
+            skipped_no_lat = 0
             for _, row in df.iterrows():
                 try:
                     lat = float(row[lat_col])
                     lon = float(row[lon_col])
                 except (ValueError, TypeError):
+                    skipped_no_lat += 1
                     continue
                 raw_img = str(row.get(img_col, ""))
                 if raw_img and raw_img != "nan":
-                    # Split on both "/" and "\" so Windows absolute paths stored
-                    # in msgs_synced.csv are handled correctly on Linux/Mac backends.
+                    # Normalise to forward-slashes before splitting so that Windows
+                    # absolute paths (D:\...\file.jpg) stored in msgs_synced.csv are
+                    # handled correctly on any OS.
                     name = raw_img.replace("\\", "/").split("/")[-1]
-                    if name in current_image_set:
+                    if name:
                         gps_track.append((lat, lon, name))
-                    else:
-                        skipped_no_match += 1
+            # Log a sample of extracted names to confirm basename extraction worked
+            sample_extracted = [e[2] for e in gps_track[:3]]
             logger.info(
-                "[translate_markers] GPS track built: %d entries, %d rows skipped (name not in current_image_set)",
-                len(gps_track), skipped_no_match,
+                "[translate_markers] GPS track built: %d entries, %d rows skipped (bad lat/lon); "
+                "sample names: %s | sample current_image_set: %s",
+                len(gps_track), skipped_no_lat,
+                sample_extracted, sorted(current_image_set)[:3],
             )
-            if skipped_no_match > 0 and not gps_track:
-                # Sample the names that didn't match to help diagnose
-                sample_raw = []
-                for _, row in df.head(3).iterrows():
-                    raw_img = str(row.get(img_col, ""))
-                    if raw_img and raw_img != "nan":
-                        sample_raw.append(raw_img.replace("\\", "/").split("/")[-1])
-                logger.warning(
-                    "[translate_markers] all rows skipped — sample msgs_synced image names: %s | sample current_image_set: %s",
-                    sample_raw, sorted(current_image_set)[:3],
-                )
         else:
             logger.warning("[translate_markers] missing required columns — lat=%s lon=%s img=%s", lat_col, lon_col, img_col)
     except Exception:

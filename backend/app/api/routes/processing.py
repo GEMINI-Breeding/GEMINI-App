@@ -2653,6 +2653,10 @@ def use_uploaded_ortho(
     # FileUpload.storage_path (relative to data_root) resolves correctly.
     _data_root = Path(_get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
     req = body or _UseUploadedOrthoRequest()
+    logger.info(
+        "[use_uploaded_ortho] run=%s data_root=%s file_upload_id=%s dem_file_upload_id=%s save_mode=%s",
+        id, _data_root, req.file_upload_id, req.dem_file_upload_id, req.save_mode,
+    )
 
     # ── Locate the source TIF ──────────────────────────────────────────────────
     if req.file_upload_id:
@@ -2664,13 +2668,16 @@ def use_uploaded_ortho(
         if not fu:
             raise HTTPException(status_code=404, detail="File upload not found")
         src_dir = _data_root / fu.storage_path
+        logger.info("[use_uploaded_ortho] RGB src_dir=%s (exists=%s)", src_dir, src_dir.exists())
         tif_files = sorted(
             p for p in src_dir.rglob("*")
             if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
         )
+        logger.info("[use_uploaded_ortho] RGB tif_files found: %s", [p.name for p in tif_files])
     else:
         # Backward-compat: run's own Raw dir
         ortho_dir = paths.raw / "Orthomosaic"
+        logger.info("[use_uploaded_ortho] backward-compat path: ortho_dir=%s (exists=%s)", ortho_dir, ortho_dir.exists())
         if not ortho_dir.exists():
             raise HTTPException(
                 status_code=404,
@@ -2684,11 +2691,15 @@ def use_uploaded_ortho(
             p for p in ortho_dir.rglob("*")
             if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
         )
+        logger.info("[use_uploaded_ortho] backward-compat tif_files: %s", [p.name for p in tif_files])
 
     if not tif_files:
+        logger.error("[use_uploaded_ortho] No TIF files found — file_upload_id=%s src_dir=%s",
+                     req.file_upload_id, _data_root / fu.storage_path if req.file_upload_id and fu else "N/A")
         raise HTTPException(status_code=404, detail="No TIF files found in the selected upload")
 
     src_tif = tif_files[0]
+    logger.info("[use_uploaded_ortho] selected RGB src_tif=%s", src_tif)
 
     # ── Locate the DEM TIF (if a separate DEM upload was selected) ─────────────
     src_dem: Path | None = None
@@ -2701,14 +2712,16 @@ def use_uploaded_ortho(
         if not dem_fu:
             raise HTTPException(status_code=404, detail="DEM file upload not found")
         dem_src_dir = _data_root / dem_fu.storage_path
+        logger.info("[use_uploaded_ortho] DEM src_dir=%s (exists=%s)", dem_src_dir, dem_src_dir.exists())
         dem_tifs = sorted(
             p for p in dem_src_dir.rglob("*")
             if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
         )
+        logger.info("[use_uploaded_ortho] DEM tif_files found: %s", [p.name for p in dem_tifs])
         if dem_tifs:
             src_dem = dem_tifs[0]
         else:
-            logger.warning("DEM upload %s has no TIF files — DEM will be skipped", req.dem_file_upload_id)
+            logger.warning("[use_uploaded_ortho] DEM upload %s has no TIF files — DEM will be skipped", req.dem_file_upload_id)
 
     paths.make_dirs()
 
@@ -2728,15 +2741,19 @@ def use_uploaded_ortho(
 
     # Hard-link (instant, same filesystem) or copy
     def _link_or_copy(src: Path, dest: Path) -> None:
+        logger.info("[use_uploaded_ortho] copying %s → %s", src, dest)
         try:
             if dest.exists():
                 dest.unlink()
             os.link(src, dest)
-        except OSError:
+            logger.info("[use_uploaded_ortho] hard-linked successfully")
+        except OSError as _link_err:
+            logger.info("[use_uploaded_ortho] hard-link failed (%s), falling back to copy", _link_err)
             shutil.copy2(src, dest)
+            logger.info("[use_uploaded_ortho] copy completed")
 
     _link_or_copy(src_tif, dest_tif)
-    logger.info("Registered uploaded RGB ortho %s → %s (v%d)", src_tif.name, dest_tif.name, target_version)
+    logger.info("[use_uploaded_ortho] registered RGB ortho %s → %s (v%d)", src_tif.name, dest_tif.name, target_version)
 
     dest_dem: Path | None = None
     if src_dem:
@@ -2798,16 +2815,22 @@ def check_uploaded_ortho(
     current_user: CurrentUser,
     id: uuid.UUID,
 ) -> dict[str, Any]:
-    """Check whether an uploaded orthomosaic TIF exists for this run (non-destructive)."""
+    """Check whether an uploaded orthomosaic TIF exists for this run (non-destructive).
+    Only checks the backward-compat Raw/.../Orthomosaic/ folder — NOT the FileUpload system.
+    The Import dialog (use-uploaded-ortho with file_upload_id) covers FileUpload records.
+    """
+    from app.crud.app_settings import get_setting as _gs
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     ortho_dir = paths.raw / "Orthomosaic"
+    logger.info("[check-uploaded-ortho] run=%s ortho_dir=%s exists=%s", id, ortho_dir, ortho_dir.exists())
     if not ortho_dir.exists():
         return {"available": False, "filename": None}
     tif_files = sorted(
         p for p in ortho_dir.iterdir()
         if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
     )
+    logger.info("[check-uploaded-ortho] tif_files in ortho_dir: %s", [p.name for p in tif_files])
     if not tif_files:
         return {"available": False, "filename": None}
     return {"available": True, "filename": tif_files[0].name}

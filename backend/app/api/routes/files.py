@@ -127,7 +127,9 @@ def _ortho_upload_list(session: Any, current_user: Any, data_type: str) -> list[
         .where(_FU.owner_id == current_user.id)
     ).all()
 
-    data_root = Path(settings.APP_DATA_ROOT)
+    # Use the user-configured data_root so that storage_path (relative to data_root)
+    # resolves correctly on systems with a custom data directory.
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
     result = []
     for r in rows:
         storage = data_root / r.storage_path
