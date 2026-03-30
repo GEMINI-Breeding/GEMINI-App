@@ -2343,9 +2343,12 @@ def orthomosaic_version_preview(
 
     # Prefer pyramid → rgb
     tif_rel = target.get("pyramid") or target.get("rgb")
+    logger.info("[ortho-preview] run=%s version=%s stored_rgb=%s stored_pyramid=%s → tif_rel=%s",
+                id, version, target.get("rgb"), target.get("pyramid"), tif_rel)
     if not tif_rel:
         raise HTTPException(404, "No TIF file for this version")
     tif = paths.abs(tif_rel)
+    logger.info("[ortho-preview] resolved tif path=%s exists=%s", tif, tif.exists())
     if not tif.exists():
         raise HTTPException(404, "TIF file not found on disk")
 
@@ -2651,7 +2654,8 @@ def use_uploaded_ortho(
     paths = _get_paths(session, run)
     # Use the user-configured data_root (same logic as _get_paths) so that
     # FileUpload.storage_path (relative to data_root) resolves correctly.
-    _data_root = Path(_get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    from app.core.config import settings as _settings
+    _data_root = Path(_get_setting(session=session, key="data_root") or _settings.APP_DATA_ROOT)
     req = body or _UseUploadedOrthoRequest()
     logger.info(
         "[use_uploaded_ortho] run=%s data_root=%s file_upload_id=%s dem_file_upload_id=%s save_mode=%s",
@@ -2670,11 +2674,19 @@ def use_uploaded_ortho(
             raise HTTPException(status_code=404, detail="File upload not found")
         src_dir = _data_root / fu.storage_path
         logger.info("[use_uploaded_ortho] RGB src_dir=%s (exists=%s)", src_dir, src_dir.exists())
-        tif_files = sorted(
+        _all_fu_tifs = sorted(
             p for p in src_dir.rglob("*")
-            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+            if p.suffix.lower() in {".tif", ".tiff"}
+            and ".original" not in p.stem
+            and ".converting" not in p.stem
         )
-        logger.info("[use_uploaded_ortho] RGB tif_files found: %s", [p.name for p in tif_files])
+        logger.info("[use_uploaded_ortho] all tif_files in src_dir: %s", [p.name for p in _all_fu_tifs])
+        # RGB and DEM share the same Orthomosaic/ folder — classify to avoid picking
+        # the DEM (which sorts before RGB alphabetically: D < R).
+        tif_files = [p for p in _all_fu_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        if not tif_files:
+            tif_files = _all_fu_tifs  # fallback: no classification possible, take first
+        logger.info("[use_uploaded_ortho] RGB tif_files (after classification): %s", [p.name for p in tif_files])
     else:
         # Backward-compat: run's own Raw dir
         ortho_dir = paths.raw / "Orthomosaic"

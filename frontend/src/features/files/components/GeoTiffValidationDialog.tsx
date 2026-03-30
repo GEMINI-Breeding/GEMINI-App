@@ -116,7 +116,11 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
   }
 
   const nonWgs84 = infos.filter((i) => !i.is_wgs84)
-  const allConverted = nonWgs84.length > 0 && nonWgs84.every((i) => convertStates[i.path] === "done")
+  // allConverted: at least one file was converted AND no non-WGS84 files remain.
+  // Cannot use nonWgs84.length > 0 because setInfos marks converted files as
+  // is_wgs84:true immediately, emptying nonWgs84 before allConverted is re-evaluated.
+  const someConverted = Object.values(convertStates).some((s) => s === "done")
+  const allConverted = someConverted && nonWgs84.length === 0
   const open = checkState !== "ok" || !allConverted
 
   return (
