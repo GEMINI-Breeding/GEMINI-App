@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -8,7 +9,10 @@ from pydantic import BaseModel
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
 from app.crud.app_settings import get_setting, set_setting
+from app.crud.file_upload import sync_file_uploads
 from app.models.app_settings import AppSettingPublic, AppSettingUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -33,6 +37,17 @@ def update_data_root(
     setting = set_setting(
         session=session, key=DATA_ROOT_KEY, value=setting_in.value
     )
+    # Automatically sync file uploads against the new data root so that files
+    # already present in the directory are discovered without a manual sync.
+    try:
+        result = sync_file_uploads(
+            session=session,
+            data_root=setting_in.value,
+            owner_id=current_user.id,
+        )
+        logger.info("data_root changed to %s — auto-sync result: %s", setting_in.value, result)
+    except Exception as exc:
+        logger.warning("data_root auto-sync failed (non-fatal): %s", exc)
     return setting
 
 
