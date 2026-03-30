@@ -2841,6 +2841,9 @@ export function RunDetail() {
   const { data: uploadedOrthoCheck } = useQuery<{
     available: boolean;
     filename: string | null;
+    rgb_files: string[];
+    dem_files: string[];
+    needs_selection: boolean;
   }>({
     queryKey: ["check-uploaded-ortho", runId],
     queryFn: () =>
@@ -3916,9 +3919,23 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                     Uploaded orthomosaic detected
                   </p>
                   <p className="text-muted-foreground mt-0.5 text-xs">
-                    <strong>{uploadedOrthoCheck.filename}</strong> was found in
-                    the Orthomosaic folder. Use it directly (skips GCP selection
-                    and ODM generation) or generate a new one.
+                    {uploadedOrthoCheck.needs_selection ? (
+                      <>
+                        <strong>{uploadedOrthoCheck.rgb_files.length} RGB</strong> orthomosaic(s) found in the Orthomosaic folder.
+                        {uploadedOrthoCheck.dem_files.length > 0 && (
+                          <> <strong>{uploadedOrthoCheck.dem_files.length} DEM</strong> file(s) also found.</>
+                        )}
+                        {" "}Use the Import dialog to select which version to use.
+                      </>
+                    ) : (
+                      <>
+                        <strong>{uploadedOrthoCheck.filename}</strong> was found in the Orthomosaic folder.
+                        {uploadedOrthoCheck.dem_files.length > 0 && (
+                          <> DEM (<strong>{uploadedOrthoCheck.dem_files[0]}</strong>) also detected.</>
+                        )}
+                        {" "}Use it directly (skips GCP selection and ODM generation) or generate a new one.
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
@@ -3927,14 +3944,9 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                     variant="outline"
                     disabled={isRegisteringOrtho || isRunning}
                     onClick={() => {
-                      /* dismiss — user wants to run ODM normally */
-                      queryClient.setQueryData(
-                        ["check-uploaded-ortho", runId],
-                        {
-                          available: false,
-                          filename: null,
-                        }
-                      );
+                      queryClient.setQueryData(["check-uploaded-ortho", runId], {
+                        available: false, filename: null, rgb_files: [], dem_files: [], needs_selection: false,
+                      });
                     }}
                   >
                     Generate with ODM
@@ -3942,12 +3954,27 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                   <Button
                     size="sm"
                     disabled={isRegisteringOrtho || isRunning}
-                    onClick={handleUseUploadedOrtho}
+                    onClick={() => {
+                      if (uploadedOrthoCheck.needs_selection) {
+                        // Multiple RGB files — open Import dialog so user can choose
+                        setImportName("");
+                        setImportSaveMode("new_version");
+                        setImportSelectedId("");
+                        setImportSelectedDemId("");
+                        setShowImportOrthoDialog(true);
+                      } else {
+                        handleUseUploadedOrtho();
+                      }
+                    }}
                   >
                     {isRegisteringOrtho && (
                       <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                     )}
-                    {isRegisteringOrtho ? "Registering…" : "Use Uploaded"}
+                    {isRegisteringOrtho
+                      ? "Registering…"
+                      : uploadedOrthoCheck.needs_selection
+                      ? "Choose & Import…"
+                      : "Use Uploaded"}
                   </Button>
                 </div>
               </div>

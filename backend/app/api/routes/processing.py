@@ -2659,6 +2659,7 @@ def use_uploaded_ortho(
     )
 
     # ── Locate the source TIF ──────────────────────────────────────────────────
+    _bc_dem_tifs: list = []  # populated by backward-compat branch; used by DEM auto-detection below
     if req.file_upload_id:
         try:
             fu_id = uuid.UUID(req.file_upload_id)
@@ -2687,11 +2688,19 @@ def use_uploaded_ortho(
                     "platform/sensor), or select an existing upload."
                 ),
             )
-        tif_files = sorted(
+        _all_tifs = sorted(
             p for p in ortho_dir.rglob("*")
-            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+            if p.suffix.lower() in {".tif", ".tiff"}
+            and ".original" not in p.stem
+            and ".converting" not in p.stem
         )
-        logger.info("[use_uploaded_ortho] backward-compat tif_files: %s", [p.name for p in tif_files])
+        logger.info("[use_uploaded_ortho] backward-compat all tif_files: %s", [p.name for p in _all_tifs])
+        # Classify by canonical name ({date}-RGB.tif / {date}-DEM.tif) with
+        # fallback to "dem" stem check for any pre-existing non-canonical files.
+        tif_files = [p for p in _all_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        _bc_dem_tifs = [p for p in _all_tifs if p.stem.endswith("-DEM") or ("dem" in p.stem.lower() and not p.stem.endswith("-RGB"))]
+        logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s",
+                    [p.name for p in tif_files], [p.name for p in _bc_dem_tifs])
 
     if not tif_files:
         logger.error("[use_uploaded_ortho] No TIF files found — file_upload_id=%s src_dir=%s",
@@ -2701,7 +2710,8 @@ def use_uploaded_ortho(
     src_tif = tif_files[0]
     logger.info("[use_uploaded_ortho] selected RGB src_tif=%s", src_tif)
 
-    # ── Locate the DEM TIF (if a separate DEM upload was selected) ─────────────
+    # ── Locate the DEM TIF ────────────────────────────────────────────────────
+    # Priority: explicit dem_file_upload_id → auto-detected from same Orthomosaic folder
     src_dem: Path | None = None
     if req.dem_file_upload_id:
         try:
@@ -2715,13 +2725,19 @@ def use_uploaded_ortho(
         logger.info("[use_uploaded_ortho] DEM src_dir=%s (exists=%s)", dem_src_dir, dem_src_dir.exists())
         dem_tifs = sorted(
             p for p in dem_src_dir.rglob("*")
-            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+            if p.suffix.lower() in {".tif", ".tiff"}
+            and ".original" not in p.stem
+            and ".converting" not in p.stem
         )
         logger.info("[use_uploaded_ortho] DEM tif_files found: %s", [p.name for p in dem_tifs])
         if dem_tifs:
             src_dem = dem_tifs[0]
         else:
             logger.warning("[use_uploaded_ortho] DEM upload %s has no TIF files — DEM will be skipped", req.dem_file_upload_id)
+    elif not req.file_upload_id and _bc_dem_tifs:
+        # Backward-compat: auto-pick DEM from the same Orthomosaic folder
+        src_dem = _bc_dem_tifs[0]
+        logger.info("[use_uploaded_ortho] auto-detected DEM from Orthomosaic folder: %s", src_dem.name)
 
     paths.make_dirs()
 
@@ -2815,25 +2831,46 @@ def check_uploaded_ortho(
     current_user: CurrentUser,
     id: uuid.UUID,
 ) -> dict[str, Any]:
-    """Check whether an uploaded orthomosaic TIF exists for this run (non-destructive).
-    Only checks the backward-compat Raw/.../Orthomosaic/ folder — NOT the FileUpload system.
-    The Import dialog (use-uploaded-ortho with file_upload_id) covers FileUpload records.
+    """Check whether an uploaded orthomosaic TIF exists in Raw/.../Orthomosaic/.
+
+    Files are classified as DEM or RGB by filename: any TIF whose stem contains
+    "dem" (case-insensitive) is treated as a DEM; all others are treated as RGB.
+
+    Returns:
+      available      – True if at least one RGB TIF was found
+      filename       – name of the first RGB TIF (display only)
+      rgb_files      – sorted list of RGB TIF filenames
+      dem_files      – sorted list of DEM TIF filenames (may be empty)
+      needs_selection – True when >1 RGB file exists (user must choose via Import dialog)
     """
-    from app.crud.app_settings import get_setting as _gs
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     ortho_dir = paths.raw / "Orthomosaic"
     logger.info("[check-uploaded-ortho] run=%s ortho_dir=%s exists=%s", id, ortho_dir, ortho_dir.exists())
     if not ortho_dir.exists():
-        return {"available": False, "filename": None}
+        return {"available": False, "filename": None, "rgb_files": [], "dem_files": [], "needs_selection": False}
     tif_files = sorted(
         p for p in ortho_dir.iterdir()
-        if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+        if p.suffix.lower() in {".tif", ".tiff"}
+        and ".original" not in p.stem
+        and ".converting" not in p.stem
     )
     logger.info("[check-uploaded-ortho] tif_files in ortho_dir: %s", [p.name for p in tif_files])
-    if not tif_files:
-        return {"available": False, "filename": None}
-    return {"available": True, "filename": tif_files[0].name}
+    # Canonical names: {date}-RGB.tif and {date}-DEM.tif (set by upload handler).
+    # Fall back to "dem" stem check for any pre-existing non-canonical files.
+    rgb_files = [p for p in tif_files if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+    dem_files = [p for p in tif_files if p.stem.endswith("-DEM") or ("dem" in p.stem.lower() and not p.stem.endswith("-RGB"))]
+    logger.info("[check-uploaded-ortho] classified — rgb: %s  dem: %s",
+                [p.name for p in rgb_files], [p.name for p in dem_files])
+    if not rgb_files:
+        return {"available": False, "filename": None, "rgb_files": [], "dem_files": [p.name for p in dem_files], "needs_selection": False}
+    return {
+        "available": True,
+        "filename": rgb_files[0].name,
+        "rgb_files": [p.name for p in rgb_files],
+        "dem_files": [p.name for p in dem_files],
+        "needs_selection": len(rgb_files) > 1,
+    }
 
 
 # ── Shared: inference results ────────────────────────────────────────────────

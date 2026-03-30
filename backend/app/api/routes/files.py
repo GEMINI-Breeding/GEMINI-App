@@ -737,8 +737,17 @@ def _copy_local_stream(
             )
             continue
 
-        # Synced Metadata CSVs are always saved as msgs_synced.csv regardless of filename.
-        dest_path = dest_dir / ("msgs_synced.csv" if body.data_type == "Synced Metadata" else name)
+        # Rename to a canonical filename based on data type so downstream import
+        # logic can reliably identify files without relying on user-chosen names.
+        if body.data_type == "Synced Metadata":
+            canonical_name = "msgs_synced.csv"
+        elif body.data_type == "Orthomosaic" and body.date:
+            canonical_name = f"{body.date}-RGB.tif"
+        elif body.data_type == "Orthomosaic DEM" and body.date:
+            canonical_name = f"{body.date}-DEM.tif"
+        else:
+            canonical_name = name
+        dest_path = dest_dir / canonical_name
 
         # Farm-ng .bin files: always remove any leftover copy before uploading so
         # a previous crashed run doesn't cause "skipped" on retry.
