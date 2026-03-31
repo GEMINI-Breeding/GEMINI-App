@@ -144,7 +144,31 @@ def sync_file_uploads(
     synced = 0
     removed = 0
 
+    # Deduplicate: if multiple records share the same storage_path (and owner),
+    # keep the one with the highest file_count and delete the rest.  This cleans
+    # up rows created by repeated upload attempts before the fix.
+    from collections import defaultdict as _dd
+    path_groups: dict[tuple, list] = _dd(list)
     for record in records:
+        norm = record.storage_path.replace("\\", "/")
+        key = (str(record.owner_id) if record.owner_id else "", norm)
+        path_groups[key].append(record)
+    deleted_ids: set = set()
+    for key, group in path_groups.items():
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda r: (r.file_count or 0, str(r.id)), reverse=True)
+        for dup in group[1:]:
+            logger.info("sync: removing duplicate record for %s (id=%s)", key[1], dup.id)
+            session.delete(dup)
+            deleted_ids.add(dup.id)
+            removed += 1
+    if deleted_ids:
+        session.commit()
+
+    for record in records:
+        if record.id in deleted_ids:
+            continue
         dir_path = root / record.storage_path
         dir_gone = not dir_path.exists() or not dir_path.is_dir()
         # Use rglob so subdirectory layouts (e.g. Amiga RGB/Images/) are counted correctly

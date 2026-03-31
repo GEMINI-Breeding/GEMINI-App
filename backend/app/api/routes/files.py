@@ -953,21 +953,34 @@ def copy_local_files_stream(
 ) -> StreamingResponse:
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
 
-    # Create a FileUpload record with status="processing"
-    file_upload = create_file_upload(
-        session=session,
-        file_in=FileUploadCreate(
-            data_type=body.data_type,
-            experiment=body.experiment or "",
-            location=body.location or "",
-            population=body.population or "",
-            date=body.date or "",
-            platform=body.platform,
-            sensor=body.sensor,
-            storage_path=body.target_root_dir,
-        ),
-        owner_id=current_user.id,
-    )
+    # Reuse an existing record for this storage_path (e.g. a retry after cancel)
+    # so the user doesn't accumulate duplicate rows in Manage Data.
+    from sqlmodel import select as _sel
+    from app.models import FileUpload as _FU
+    _norm_path = body.target_root_dir.replace("\\", "/")
+    file_upload = session.exec(
+        _sel(_FU).where(
+            (_FU.owner_id == current_user.id)
+            & ((_FU.storage_path == body.target_root_dir) | (_FU.storage_path == _norm_path))
+        )
+    ).first()
+
+    if file_upload is None:
+        file_upload = create_file_upload(
+            session=session,
+            file_in=FileUploadCreate(
+                data_type=body.data_type,
+                experiment=body.experiment or "",
+                location=body.location or "",
+                population=body.population or "",
+                date=body.date or "",
+                platform=body.platform,
+                sensor=body.sensor,
+                storage_path=body.target_root_dir,
+            ),
+            owner_id=current_user.id,
+        )
+
     update_file_upload(
         session=session,
         db_file=file_upload,
