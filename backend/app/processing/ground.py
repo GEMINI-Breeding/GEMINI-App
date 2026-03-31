@@ -1979,11 +1979,28 @@ def _run_docker_container(
         text=True,
     )
 
+    # Drain stdout/stderr in background threads to prevent pipe buffer deadlock.
+    # If nothing reads from the pipes and Docker writes >~64 KB, the subprocess
+    # blocks waiting for the buffer to drain and proc.poll() never returns.
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def _drain(pipe, collector: list) -> None:
+        for line in pipe:
+            collector.append(line.rstrip())
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_lines), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_lines), daemon=True)
+    t_out.start()
+    t_err.start()
+
     # Poll until the container finishes or the stop_event fires.
+    cancelled = False
     try:
         while proc.poll() is None:
             if stop_event and stop_event.is_set():
                 logger.info("Cancellation requested — stopping Docker container %s", container_name)
+                cancelled = True
                 try:
                     subprocess.run(
                         ["docker", "stop", container_name],
@@ -1993,11 +2010,18 @@ def _run_docker_container(
                     logger.warning("docker stop %s failed: %s — killing process", container_name, e)
                 finally:
                     proc.kill()
-                raise RuntimeError(f"Extraction cancelled: {bin_path.name}")
+                break
             stop_event.wait(0.5) if stop_event else __import__("time").sleep(0.5)
     finally:
-        # Always collect output so it doesn't block on a full pipe buffer.
-        stdout, stderr = proc.communicate()
+        t_out.join(timeout=5.0)
+        t_err.join(timeout=5.0)
+        proc.wait()
+
+    if cancelled:
+        raise RuntimeError(f"Extraction cancelled: {bin_path.name}")
+
+    stdout = "\n".join(stdout_lines)
+    stderr = "\n".join(stderr_lines)
 
     if stdout:
         for line in stdout.splitlines():
