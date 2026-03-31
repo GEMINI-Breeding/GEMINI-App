@@ -1944,8 +1944,18 @@ def _run_docker_container(
     Run a single docker container to extract one .bin file into output_dir.
     output_dir is the per-file temporary directory (not the final destination).
     Raises RuntimeError on non-zero exit or cancellation.
+
+    Uses ``docker run -d`` (detached, no --rm) + ``docker wait`` so that the
+    waiting process is a lightweight ``docker wait`` call rather than an attached
+    ``docker run`` session.  On Windows/WSL2 the attached ``docker run --rm``
+    form frequently hangs after the container exits (the client waits for daemon
+    confirmation of the --rm cleanup), causing an infinite poll loop.  The
+    detached approach eliminates that entirely: the container stays in Docker
+    until we explicitly ``docker rm`` it, so ``docker wait`` always connects and
+    returns the real exit code.
     """
     import uuid as _uuid
+    import queue as _queue
 
     if sys.platform == "win32":
         host_bin_dir = bin_path.parent.resolve().as_posix()
@@ -1954,11 +1964,10 @@ def _run_docker_container(
         host_bin_dir = str(bin_path.parent)
         host_output_dir = str(output_dir)
 
-    # Unique name lets us `docker stop <name>` reliably on cancellation.
     container_name = f"gemi-binext-{_uuid.uuid4().hex[:12]}"
 
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "-d",          # detached: returns immediately with container ID
         "--name", container_name,
         *resource_flags,
         "-v", f"{host_bin_dir}:/input:ro",
@@ -1972,118 +1981,98 @@ def _run_docker_container(
         container_name, " ".join(cmd), host_bin_dir, host_output_dir,
     )
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    # Start the container.  This returns as soon as Docker confirms the
+    # container is running — no blocking on stdout/stderr pipes.
+    start = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if start.returncode != 0:
+        raise RuntimeError(
+            f"docker run -d failed to start container:\n"
+            f"{start.stderr.strip() or start.stdout.strip()}"
+        )
+    logger.info("Container %s started (detached).", container_name)
 
-    # Drain stdout/stderr in background threads to prevent pipe buffer deadlock.
-    # If nothing reads from the pipes and Docker writes >~64 KB, the subprocess
-    # blocks waiting for the buffer to drain and proc.poll() never returns.
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
+    # ``docker wait <name>`` blocks until the container exits, then prints its
+    # exit code.  Run it in a background thread so we can check stop_event.
+    _result_q: _queue.Queue = _queue.Queue()
 
-    def _drain(pipe, collector: list) -> None:
-        for line in pipe:
-            collector.append(line.rstrip())
-
-    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_lines), daemon=True)
-    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_lines), daemon=True)
-    t_out.start()
-    t_err.start()
-
-    # Watchdog: on Windows/WSL2, `docker run --rm` sometimes stays alive after
-    # the container exits (the client process hangs waiting for daemon confirmation
-    # of the --rm removal).  We run `docker wait <name>` in a background thread;
-    # when it returns (container gone) we give the `docker run` process 15 s to
-    # exit on its own, then kill it to prevent an infinite poll loop.
-    # _watchdog_killed[0] = True means we killed proc because the container
-    # succeeded but docker run hung — treat non-zero returncode as success.
-    _watchdog_killed: list[bool] = [False]
-
-    def _container_exit_watchdog() -> None:
+    def _docker_wait() -> None:
         try:
-            result = subprocess.run(
+            r = subprocess.run(
                 ["docker", "wait", container_name],
-                capture_output=True, timeout=7200,
+                capture_output=True, text=True,
             )
-        except Exception:
-            return  # container may have been removed before docker wait connected
-        # `docker wait` returns the container's exit code as stdout.
-        # Only proceed if the container itself exited 0 (success).
-        container_rc_str = (result.stdout or b"").decode().strip()
-        container_rc = int(container_rc_str) if container_rc_str.isdigit() else -1
-        if container_rc != 0:
-            return  # container failed — let the normal poll loop handle it
-        # Container succeeded — give docker run a moment to exit cleanly.
-        import time as _t
-        deadline = _t.monotonic() + 15
-        while _t.monotonic() < deadline:
-            if proc.poll() is not None:
-                return
-            _t.sleep(0.5)
-        if proc.poll() is None:
-            logger.warning(
-                "docker run [%s] still alive %ds after container exited successfully — "
-                "killing (Windows/WSL2 --rm cleanup hang)", container_name, 15,
-            )
-            _watchdog_killed[0] = True
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            _result_q.put(("done", r))
+        except Exception as exc:
+            _result_q.put(("error", exc))
 
-    watchdog = threading.Thread(target=_container_exit_watchdog, daemon=True)
-    watchdog.start()
+    wait_thread = threading.Thread(target=_docker_wait, daemon=True)
+    wait_thread.start()
 
-    # Poll until the container finishes or the stop_event fires.
     cancelled = False
-    try:
-        while proc.poll() is None:
+    wait_result = None
+    while True:
+        try:
+            kind, val = _result_q.get(timeout=0.5)
+        except _queue.Empty:
             if stop_event and stop_event.is_set():
-                logger.info("Cancellation requested — stopping Docker container %s", container_name)
+                logger.info("Cancellation requested — stopping container %s", container_name)
                 cancelled = True
                 try:
                     subprocess.run(
                         ["docker", "stop", container_name],
-                        timeout=15, capture_output=True,
+                        timeout=30, capture_output=True,
                     )
                 except Exception as e:
-                    logger.warning("docker stop %s failed: %s — killing process", container_name, e)
-                finally:
-                    proc.kill()
-                break
-            stop_event.wait(0.5) if stop_event else __import__("time").sleep(0.5)
-    finally:
-        t_out.join(timeout=5.0)
-        t_err.join(timeout=5.0)
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            logger.warning("proc.wait() timed out for %s — killing", container_name)
-            proc.kill()
-            proc.wait()
+                    logger.warning("docker stop %s failed: %s", container_name, e)
+                wait_thread.join(timeout=15)
+            else:
+                continue
+            break
 
-    if cancelled:
-        raise RuntimeError(f"Extraction cancelled: {bin_path.name}")
+        if kind == "error":
+            raise RuntimeError(f"docker wait failed for {container_name}: {val}")
+        wait_result = val
+        break
 
-    stdout = "\n".join(stdout_lines)
-    stderr = "\n".join(stderr_lines)
+    # Collect logs before removing the container.
+    stdout = stderr = ""
+    try:
+        logs = subprocess.run(
+            ["docker", "logs", container_name],
+            capture_output=True, text=True, timeout=30,
+        )
+        stdout = logs.stdout or ""
+        stderr = logs.stderr or ""
+    except Exception as e:
+        logger.warning("docker logs %s failed: %s", container_name, e)
 
     if stdout:
         for line in stdout.splitlines():
             logger.info("[docker/%s] %s", container_name, line)
-    # If the watchdog killed docker run after a successful container exit, treat
-    # the non-zero returncode as success (the container itself returned 0).
-    if proc.returncode != 0 and not _watchdog_killed[0]:
+
+    # Remove the container now that we have logs and the exit code.
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            capture_output=True, timeout=30,
+        )
+    except Exception as e:
+        logger.warning("docker rm %s failed: %s", container_name, e)
+
+    if cancelled:
+        raise RuntimeError(f"Extraction cancelled: {bin_path.name}")
+
+    exit_code_str = (wait_result.stdout or "").strip() if wait_result else ""
+    exit_code = int(exit_code_str) if exit_code_str.lstrip("-").isdigit() else -1
+
+    if exit_code != 0:
         if stderr:
             logger.error("[docker/%s stderr] %s", container_name, stderr.strip())
         detail = stderr.strip() or stdout.strip() or "no output from container"
         raise RuntimeError(f".bin extraction failed inside Docker:\n{detail}")
+
     logger.info(
-        "Docker container %s exited (rc=0) for %s — output dir: %s",
+        "Container %s exited (rc=0) for %s — output dir: %s",
         container_name, bin_path.name, output_dir,
     )
 
