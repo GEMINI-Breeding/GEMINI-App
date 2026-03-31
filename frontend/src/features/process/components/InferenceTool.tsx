@@ -570,129 +570,131 @@ export function InferenceTool({
   }, [inferenceComplete, isRunning, images.length])
 
   return (
-    <div className="space-y-6">
-      {/* Configured models (read-only) */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Models</p>
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Settings className="w-3 h-3" />
-            Configure in pipeline settings
-          </span>
-        </div>
-        {configuredModels.length === 0 ? (
-          <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
-            No models configured. Open pipeline settings to add Roboflow models.
-          </p>
-        ) : (
-          <div className="rounded-md border divide-y">
-            {configuredModels.map((m, i) => (
-              <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
-                <span className="font-medium">{m.label || m.roboflow_model_id}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-mono">{m.roboflow_model_id}</span>
-                  <Badge variant="outline" className="text-xs">{m.task_type}</Badge>
+    <div className="space-y-4">
+
+      {/* ── Config row: two cards + actions ── */}
+      <div className="flex items-stretch gap-4">
+
+        {/* Models card */}
+        <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Models</p>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Settings className="w-3 h-3" />Configure in pipeline settings
+            </span>
+          </div>
+          {configuredModels.length === 0 ? (
+            <p className="text-xs text-muted-foreground rounded border border-dashed p-2">
+              No models configured. Open pipeline settings to add Roboflow models.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {configuredModels.map((m, i) => (
+                <div key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5">
+                  <span className="text-xs font-medium">{m.label || m.roboflow_model_id}</span>
+                  <Badge variant="outline" className="text-xs h-4">{m.task_type}</Badge>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Mode:{" "}
-          <span className="font-medium">
-            {inferenceMode === "local"
-              ? `Local (${localServerUrl ?? "http://localhost:9001"})`
-              : "Cloud (Roboflow)"}
-          </span>
-        </p>
-      </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Mode:{" "}
+            <span className="font-medium">
+              {inferenceMode === "local"
+                ? `Local (${localServerUrl ?? "http://localhost:9001"})`
+                : "Cloud (Roboflow)"}
+            </span>
+          </p>
+        </div>
 
-      {/* Version selectors */}
-      {isGround && (
-        <div className="rounded-md border bg-muted/30 p-3 space-y-3">
-          <p className="text-xs font-medium text-muted-foreground">Input Versions</p>
-          <div className="grid grid-cols-2 gap-3">
-            {(stitchVersions?.length ?? 0) > 0 && (
-              <div className="space-y-1">
-                <Label className="text-xs">Stitch Version</Label>
+        {/* Input Versions card */}
+        {(isGround || isAerial) && (
+          <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Input Versions</p>
+            {isGround && (
+              <div className="space-y-1.5">
+                {(stitchVersions?.length ?? 0) > 0 && (
+                  <div className="space-y-0.5">
+                    <Label className="text-xs text-muted-foreground">Stitch</Label>
+                    <select
+                      className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                      value={selectedStitchVersion ?? ""}
+                      onChange={(e) => setSelectedStitchVersion(Number(e.target.value))}
+                    >
+                      {stitchVersions!.map((sv) => (
+                        <option key={sv.version} value={sv.version}>
+                          {sv.name ? `${sv.name} (v${sv.version})` : `v${sv.version}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {(associationVersions?.length ?? 0) > 0 && (
+                  <div className="space-y-0.5">
+                    <Label className="text-xs text-muted-foreground">Association</Label>
+                    <select
+                      className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                      value={selectedAssocVersion ?? ""}
+                      onChange={(e) => setSelectedAssocVersion(Number(e.target.value))}
+                    >
+                      {associationVersions!.map((av) => (
+                        <option key={av.version} value={av.version}>
+                          v{av.version} (stitch v{av.stitch_version ?? "?"} · boundary v{av.boundary_version ?? "?"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+            {isAerial && (
+              <div className="space-y-0.5">
+                <Label className="text-xs text-muted-foreground">Trait Extraction</Label>
                 <select
-                  className="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
-                  value={selectedStitchVersion ?? ""}
-                  onChange={(e) => setSelectedStitchVersion(Number(e.target.value))}
+                  className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                  value={selectedTraitVersion ?? ""}
+                  onChange={(e) => setSelectedTraitVersion(Number(e.target.value))}
                 >
-                  {stitchVersions!.map((sv) => (
-                    <option key={sv.version} value={sv.version}>
-                      {sv.name ? `${sv.name} (v${sv.version})` : `v${sv.version}`}
-                    </option>
-                  ))}
+                  {traitVersions!.map((tv) => {
+                    const ortho = tv.ortho_name ? `${tv.ortho_name} (v${tv.ortho_version ?? "?"})` : `ortho v${tv.ortho_version ?? "?"}`
+                    const boundary = tv.boundary_version != null
+                      ? (tv.boundary_name ? `${tv.boundary_name} (v${tv.boundary_version})` : `boundary v${tv.boundary_version}`)
+                      : "canonical boundary"
+                    return (
+                      <option key={tv.version} value={tv.version}>
+                        v{tv.version} — {ortho} · {boundary} · {tv.plot_count} plots
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
             )}
-            {(associationVersions?.length ?? 0) > 0 && (
-              <div className="space-y-1">
-                <Label className="text-xs">Association Version</Label>
-                <select
-                  className="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
-                  value={selectedAssocVersion ?? ""}
-                  onChange={(e) => setSelectedAssocVersion(Number(e.target.value))}
-                >
-                  {associationVersions!.map((av) => (
-                    <option key={av.version} value={av.version}>
-                      v{av.version} (stitch v{av.stitch_version ?? "?"} · boundary v{av.boundary_version ?? "?"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
-        </div>
-      )}
-
-      {isAerial && (
-        <div className="rounded-md border bg-muted/30 p-3 space-y-1">
-          <p className="text-xs font-medium text-muted-foreground mb-2">Input Versions</p>
-          <Label className="text-xs">Trait Extraction Version</Label>
-          <select
-            className="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
-            value={selectedTraitVersion ?? ""}
-            onChange={(e) => setSelectedTraitVersion(Number(e.target.value))}
-          >
-            {traitVersions!.map((tv) => {
-              const ortho = tv.ortho_name ? `${tv.ortho_name} (v${tv.ortho_version ?? "?"})` : `ortho v${tv.ortho_version ?? "?"}`
-              const boundary = tv.boundary_version != null
-                ? (tv.boundary_name ? `${tv.boundary_name} (v${tv.boundary_version})` : `boundary v${tv.boundary_version}`)
-                : "canonical boundary"
-              return (
-                <option key={tv.version} value={tv.version}>
-                  v{tv.version} — {ortho} · {boundary} · {tv.plot_count} plots
-                </option>
-              )
-            })}
-          </select>
-        </div>
-      )}
-
-      {/* Run / Stop */}
-      <div>
-        {isRunning ? (
-          <Button variant="destructive" disabled={isStopping} onClick={onStop}>
-            {isStopping
-              ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Stopping…</>
-              : <><Square className="w-4 h-4 mr-2" />Stop</>}
-          </Button>
-        ) : (
-          <Button disabled={!configuredModels.length} onClick={handleRun}>
-            {inferenceComplete ? "Re-run Inference" : "Run Inference"}
-          </Button>
         )}
+
+        {/* Run / Stop + Close */}
+        <div className="shrink-0 flex flex-col items-end gap-2">
+          {isRunning ? (
+            <Button variant="destructive" disabled={isStopping} onClick={onStop}>
+              {isStopping
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Stopping…</>
+                : <><Square className="w-4 h-4 mr-2" />Stop</>}
+            </Button>
+          ) : (
+            <Button disabled={!configuredModels.length} onClick={handleRun}>
+              {inferenceComplete ? "Re-run Inference" : "Run Inference"}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onCancel}>Close</Button>
+        </div>
       </div>
 
-      {/* Inline log panel */}
+      {/* ── Log panel ── */}
       {(isRunning || logLines.length > 0) && (
-        <div className="space-y-1">
+        <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-muted-foreground">
-              {isRunning ? "Running…" : "Last run log"}
+              {isRunning ? "Running…" : "Last run"}
               {logTotal != null && logTotal > 0 && (
                 <span className="ml-2 font-mono">{logDone}/{logTotal}</span>
               )}
@@ -700,7 +702,7 @@ export function InferenceTool({
             {isRunning && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
           </div>
           {logTotal != null && logTotal > 0 && (
-            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
               <div
                 className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${Math.round((logDone / logTotal) * 100)}%` }}
@@ -709,7 +711,7 @@ export function InferenceTool({
           )}
           <div
             ref={logRef}
-            className="rounded-md border bg-muted/40 p-2 h-40 overflow-y-auto font-mono text-xs space-y-0.5"
+            className="rounded border bg-muted/40 p-2 h-32 overflow-y-auto font-mono text-xs space-y-0.5"
           >
             {logLines.length === 0 ? (
               <span className="text-muted-foreground">Waiting for output…</span>
@@ -722,7 +724,7 @@ export function InferenceTool({
         </div>
       )}
 
-      {/* Results */}
+      {/* ── Results ── */}
       {inferenceComplete && !isRunning && (
         <>
           {isLoading ? (
@@ -733,7 +735,7 @@ export function InferenceTool({
           ) : !available ? (
             <p className="text-sm text-muted-foreground">No prediction results found.</p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {/* Model selector */}
               {availableModels.length > 1 ? (
                 <Select value={currentModelLabel} onValueChange={setActiveModel}>
@@ -744,59 +746,62 @@ export function InferenceTool({
                     {availableModels.map((m) => (
                       <SelectItem key={m} value={m}>{m}</SelectItem>
                     ))}
-                </SelectContent>
+                  </SelectContent>
                 </Select>
               ) : (
-                <h3 className="font-medium">{currentModelLabel}</h3>
+                <h3 className="text-sm font-semibold">{currentModelLabel}</h3>
               )}
 
               {/* 2-column layout: image (left) + controls (right) */}
-              <div className="grid grid-cols-[1fr_280px] gap-4 items-start">
+              <div className="grid grid-cols-[1fr_300px] gap-4 items-start">
 
                 {/* ── Left: image + navigation ── */}
                 <div className="space-y-2">
-                  {/* Navigation row */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="outline" size="icon" className="h-7 w-7"
-                        onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
-                        disabled={imageIdx === 0}
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                      </Button>
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {imageIdx + 1} / {filteredImages.length}
-                        {filteredImages.length !== images.length && (
-                          <span className="ml-1 text-muted-foreground/60">(of {images.length})</span>
-                        )}
-                      </span>
-                      <Button
-                        variant="outline" size="icon" className="h-7 w-7"
-                        onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
-                        disabled={imageIdx === filteredImages.length - 1}
-                      >
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-
-                    {/* Plot dropdown */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline" size="icon" className="h-7 w-7"
+                      onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
+                      disabled={imageIdx === 0}
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground font-mono shrink-0">
+                      {imageIdx + 1} / {filteredImages.length}
+                      {filteredImages.length !== images.length && (
+                        <span className="text-muted-foreground/60"> (of {images.length})</span>
+                      )}
+                    </span>
+                    <Button
+                      variant="outline" size="icon" className="h-7 w-7"
+                      onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
+                      disabled={imageIdx === filteredImages.length - 1}
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </Button>
                     <select
-                      className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0 max-w-xs"
+                      className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0"
                       value={currentImage?.name ?? ""}
                       onChange={(e) => {
                         const idx = filteredImages.findIndex((im) => im.name === e.target.value)
                         if (idx >= 0) setImageIdx(idx)
                       }}
                     >
-                      {filteredImages.map((im) => (
-                        <option key={im.name} value={im.name}>
-                          {im.plot ? `Plot ${im.plot}` : im.name} ({(predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length)} det)
-                        </option>
-                      ))}
+                      {filteredImages.map((im) => {
+                        const detCount = predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length
+                        const parts: string[] = []
+                        if (im.plot) parts.push(`Plot ${im.plot}`)
+                        if (im.col) parts.push(`Col ${im.col}`)
+                        if (im.row) parts.push(`Row ${im.row}`)
+                        if (im.accession) parts.push(im.accession)
+                        const label = parts.length > 0 ? parts.join(" · ") : im.name
+                        return (
+                          <option key={im.name} value={im.name}>
+                            {label} ({detCount} det)
+                          </option>
+                        )
+                      })}
                     </select>
-
-                    <span className="text-xs text-muted-foreground shrink-0">← → to navigate</span>
+                    <span className="text-xs text-muted-foreground shrink-0">← → navigate</span>
                   </div>
 
                   {currentImage && (
@@ -810,52 +815,30 @@ export function InferenceTool({
                 </div>
 
                 {/* ── Right: controls panel ── */}
-                <div className="space-y-5 rounded-lg border p-4">
-                  {/* Plot metadata filters (only shown when metadata exists) */}
+                <div className="space-y-4 rounded-lg border p-4">
+
+                  {/* Filter plots */}
                   {hasPlotMeta && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold">Filter Plots</p>
                       <div className="grid grid-cols-2 gap-1.5">
-                        <div>
-                          <label className="text-xs text-muted-foreground">Column</label>
-                          <input
-                            type="text"
-                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
-                            placeholder="e.g. 1"
-                            value={filterCol}
-                            onChange={(e) => setFilterCol(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Row</label>
-                          <input
-                            type="text"
-                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
-                            placeholder="e.g. 3"
-                            value={filterRow}
-                            onChange={(e) => setFilterRow(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Accession</label>
-                          <input
-                            type="text"
-                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
-                            placeholder="Search…"
-                            value={filterAccession}
-                            onChange={(e) => setFilterAccession(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Plot</label>
-                          <input
-                            type="text"
-                            className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
-                            placeholder="e.g. 101"
-                            value={filterPlot}
-                            onChange={(e) => setFilterPlot(e.target.value)}
-                          />
-                        </div>
+                        {([
+                          { label: "Column", value: filterCol, set: setFilterCol, placeholder: "e.g. 1" },
+                          { label: "Row", value: filterRow, set: setFilterRow, placeholder: "e.g. 3" },
+                          { label: "Accession", value: filterAccession, set: setFilterAccession, placeholder: "Search…" },
+                          { label: "Plot", value: filterPlot, set: setFilterPlot, placeholder: "e.g. 101" },
+                        ] as const).map(({ label, value, set, placeholder }) => (
+                          <div key={label}>
+                            <label className="text-xs text-muted-foreground">{label}</label>
+                            <input
+                              type="text"
+                              className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                              placeholder={placeholder}
+                              value={value}
+                              onChange={(e) => set(e.target.value)}
+                            />
+                          </div>
+                        ))}
                       </div>
                       {(filterCol || filterRow || filterAccession || filterPlot) && (
                         <button
@@ -868,13 +851,12 @@ export function InferenceTool({
                     </div>
                   )}
 
-                  <div>
-                    <p className="text-sm font-semibold mb-3">Detection Controls</p>
-
-                    {/* Confidence threshold */}
-                    <div className="space-y-2 mb-4">
+                  {/* Detection controls */}
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold">Detection Controls</p>
+                    <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs">Confidence threshold</Label>
+                        <Label className="text-xs">Confidence</Label>
                         <span className="text-xs font-mono font-medium">{confThreshold}%</span>
                       </div>
                       <input
@@ -886,16 +868,9 @@ export function InferenceTool({
                         onChange={(e) => setConfThreshold(Number(e.target.value))}
                         className="w-full h-1.5 accent-primary"
                       />
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>0%</span>
-                        <span>50%</span>
-                        <span>100%</span>
-                      </div>
                     </div>
-
-                    {/* Mask/box toggle (only shown when segmentation exists) */}
                     {hasSegmentation && (
-                      <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center justify-between">
                         <Label className="text-xs">Show masks</Label>
                         <button
                           onClick={() => setShowMasks((v) => !v)}
@@ -909,9 +884,9 @@ export function InferenceTool({
 
                   {/* Class legend */}
                   {allClasses.length > 0 && (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <p className="text-xs font-semibold">Classes</p>
-                      <div className="space-y-1.5">
+                      <div className="space-y-1">
                         {allClasses.map((cls) => {
                           const isHidden = hiddenClasses.has(cls)
                           const count = currentClassCounts[cls] ?? 0
@@ -936,43 +911,45 @@ export function InferenceTool({
                     </div>
                   )}
 
-                  {/* Detection summary */}
-                  <div className="space-y-1 border-t pt-4">
-                    <p className="text-xs font-semibold mb-2">This plot</p>
-                    <div className="space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Total detections</span>
+                  {/* Stats: this plot + all plots side-by-side */}
+                  <div className="border-t pt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1">
+                      <p className="font-semibold">This plot</p>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Detections</span>
                         <span className="font-mono">{currentImage ? predictions.filter((p) => p.image === currentImage.name).length : 0}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Above threshold</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Above threshold</span>
                         <span className="font-mono">{currentPreds.length}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Classes</span>
-                        <span className="font-mono">{allClasses.length - hiddenClasses.size} / {allClasses.length}</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Classes</span>
+                        <span className="font-mono">{allClasses.length - hiddenClasses.size}/{allClasses.length}</span>
                       </div>
                     </div>
-                    <div className="border-t mt-2 pt-2 space-y-1 text-xs">
-                      <p className="text-xs font-semibold mb-1">All plots</p>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Total detections</span>
+                    <div className="space-y-1">
+                      <p className="font-semibold">All plots</p>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Detections</span>
                         <span className="font-mono">
                           {visiblePreds.filter((p) => filteredImages.some((im) => im.name === p.image)).length}
                         </span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Plots shown</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Shown</span>
                         <span className="font-mono">
                           {filteredImages.length}
-                          {filteredImages.length !== images.length && <span className="text-muted-foreground/60"> / {images.length}</span>}
+                          {filteredImages.length !== images.length && (
+                            <span className="text-muted-foreground/60">/{images.length}</span>
+                          )}
                         </span>
                       </div>
                     </div>
                   </div>
 
                   {/* Traits output */}
-                  <div className="border-t pt-4 space-y-2">
+                  <div className="border-t pt-3 space-y-2">
                     <p className="text-xs font-semibold">Traits Output</p>
                     {availableModels.length > 1 && (
                       <select
@@ -1020,14 +997,6 @@ export function InferenceTool({
           )}
         </>
       )}
-
-
-      {/* Close */}
-      <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Close
-        </Button>
-      </div>
     </div>
   )
 }

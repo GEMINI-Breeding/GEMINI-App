@@ -2995,7 +2995,7 @@ def inference_results(
                 _pid = str(_props.get("Plot") or _props.get("plot") or _props.get("plot_id") or "")
                 if _pid:
                     plot_meta[_pid] = {
-                        "accession": str(_props.get("Label") or _props.get("label") or _props.get("Accession") or ""),
+                        "accession": str(_props.get("Label") or _props.get("label") or _props.get("accession") or _props.get("Accession") or ""),
                         "row": str(_props.get("Tier") or _props.get("tier") or _props.get("row") or ""),
                         "col": str(_props.get("Bed") or _props.get("bed") or _props.get("col") or ""),
                     }
