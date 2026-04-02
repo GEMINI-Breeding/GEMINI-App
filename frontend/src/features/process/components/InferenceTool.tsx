@@ -40,6 +40,16 @@ import {
   FullscreenModal,
 } from "@/components/Common/ExpandableSection"
 import { cn } from "@/lib/utils"
+import { openUrl } from "@/lib/platform"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { UtilsService } from "@/client"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -442,6 +452,8 @@ export function InferenceTool({
   const [traitsStatus, setTraitsStatus] = useState<{ loading: boolean; message: string | null }>({ loading: false, message: null })
   const [logLines, setLogLines] = useState<string[]>([])
   const [logTotal, setLogTotal] = useState<number | null>(null)
+  const [showDockerDialog, setShowDockerDialog] = useState(false)
+  const [dockerDenied, setDockerDenied] = useState(false)
   const [logDone, setLogDone] = useState(0)
   const logRef = useRef<HTMLDivElement>(null)
 
@@ -492,8 +504,20 @@ export function InferenceTool({
     }
   }
 
-  function handleRun() {
+  async function handleRun() {
     if (!configuredModels.length) return
+    if (inferenceMode === "local") {
+      try {
+        const result = await UtilsService.dockerCheck()
+        if (!result.available) {
+          setDockerDenied((result as any).reason === "permission_denied")
+          setShowDockerDialog(true)
+          return
+        }
+      } catch {
+        // If the check fails, proceed — the backend will surface Docker errors via SSE
+      }
+    }
     onRunInference({
       models: configuredModels,
       stitch_version: selectedStitchVersion,
@@ -926,6 +950,7 @@ export function InferenceTool({
   }
 
   return (
+    <>
     <div className="space-y-4">
 
       {/* ── Config row: two cards + actions ── */}
@@ -957,7 +982,7 @@ export function InferenceTool({
             Mode:{" "}
             <span className="font-medium">
               {inferenceMode === "local"
-                ? `Local (${localServerUrl ?? "http://localhost:9001"})`
+                ? `Local (${localServerUrl ?? "http://localhost:9002"})`
                 : "Cloud (Roboflow)"}
             </span>
           </p>
@@ -1124,5 +1149,51 @@ export function InferenceTool({
         </>
       )}
     </div>
+
+      {/* Docker required dialog for local inference mode */}
+      <Dialog open={showDockerDialog} onOpenChange={setShowDockerDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Docker Required for Local Inference</DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-muted-foreground space-y-3 text-sm">
+                <p>
+                  Local inference runs the{" "}
+                  <strong className="text-foreground">Roboflow Inference Server</strong>{" "}
+                  as a Docker container on your machine — no data leaves your network.
+                </p>
+                {dockerDenied ? (
+                  <p>
+                    Docker is installed but your user does not have permission to access it.
+                    On Linux, add your user to the{" "}
+                    <code className="text-foreground">docker</code> group:{" "}
+                    <code className="text-foreground text-xs">sudo usermod -aG docker $USER</code>{" "}
+                    then log out and back in.
+                  </p>
+                ) : (
+                  <p>
+                    Docker was not found or is not running. Install Docker Desktop and make
+                    sure it is running before retrying. The inference server image will
+                    download automatically on first use.
+                  </p>
+                )}
+                <p>
+                  Alternatively, switch to <strong className="text-foreground">Cloud</strong>{" "}
+                  inference mode in the pipeline settings — no Docker needed.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => setShowDockerDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>
+              Download Docker Desktop
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

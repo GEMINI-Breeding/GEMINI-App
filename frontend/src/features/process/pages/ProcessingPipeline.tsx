@@ -162,7 +162,7 @@ export function ProcessingPipeline() {
     EMPTY_MODEL(),
   ]);
   const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud");
-  const [localServerUrl, setLocalServerUrl] = useState("http://localhost:9001");
+  const [localServerUrl, setLocalServerUrl] = useState("http://localhost:9002");
 
   // Load existing pipeline when editing
   const { data: existingPipeline } = useQuery<PipelinePublic>({
@@ -214,7 +214,7 @@ export function ProcessingPipeline() {
       }]);
     }
     setInferenceMode((cfg.inference_mode as "cloud" | "local") ?? "cloud");
-    setLocalServerUrl((cfg.local_server_url as string) ?? "http://localhost:9001");
+    setLocalServerUrl((cfg.local_server_url as string) ?? "http://localhost:9002");
   }, [existingPipeline]);
 
   const steps = [
@@ -942,7 +942,7 @@ export function ProcessingPipeline() {
                         className="h-8 text-sm font-mono"
                         value={localServerUrl}
                         onChange={(e) => setLocalServerUrl(e.target.value)}
-                        placeholder="http://localhost:9001"
+                        placeholder="http://localhost:9002"
                       />
                       <p className="text-xs text-muted-foreground">
                         The server will be auto-started if not already running.

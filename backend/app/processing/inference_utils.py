@@ -21,6 +21,7 @@ from typing import Any
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 # ── Image cropping ─────────────────────────────────────────────────────────────
@@ -156,15 +157,28 @@ def apply_nms(predictions: list[dict], iou_threshold: float = 0.5) -> list[dict]
 # ── Local inference server helpers ─────────────────────────────────────────────
 
 CLOUD_API_URL = "https://detect.roboflow.com"
-LOCAL_API_URL = "http://localhost:9001"
+LOCAL_API_URL = "http://localhost:9002"
 
 
-def _is_local_server_running(host: str = "localhost", port: int = 9001) -> bool:
-    import socket
+def _is_local_server_running(host: str = "localhost", port: int = 9002) -> bool:
+    """
+    Returns True only if a Roboflow inference server is responding on the given
+    host/port.  A plain TCP connection check is not sufficient because other
+    services (e.g. the GEMI frontend dev server) may occupy the port.
+    """
+    import requests
     try:
-        with socket.create_connection((host, port), timeout=1):
-            return True
-    except OSError:
+        # Use /info which returns JSON on the Roboflow inference server.
+        # Avoid checking / because newer inference server versions serve an HTML
+        # Swagger/welcome page there, which would be falsely rejected.
+        resp = requests.get(f"http://{host}:{port}/info", timeout=2)
+        logger.debug(
+            "_is_local_server_running %s:%s → status=%s content-type=%r",
+            host, port, resp.status_code, resp.headers.get("content-type", ""),
+        )
+        return resp.status_code < 500
+    except Exception as exc:
+        logger.debug("_is_local_server_running %s:%s → exception: %s", host, port, exc)
         return False
 
 
@@ -188,7 +202,7 @@ def _find_docker() -> str | None:
     return found
 
 
-def _start_local_server() -> None:
+def _start_local_server(host_port: int = 9002) -> None:
     """Start the Roboflow inference server via Docker (no pip conflict)."""
     import subprocess
     import time
@@ -203,40 +217,191 @@ def _start_local_server() -> None:
             "and ensure it is running."
         )
 
+    # Verify Docker daemon is reachable before doing anything else
+    ping = subprocess.run(
+        [docker, "info"],
+        capture_output=True, text=True,
+    )
+    if ping.returncode != 0:
+        raise RuntimeError(
+            f"Docker daemon is not running or not accessible.\n{ping.stderr[:400]}\n"
+            "Start Docker Desktop and retry."
+        )
+
     # Remove any stopped container with the same name to avoid conflicts
     subprocess.run(
         [docker, "rm", "-f", "gemi-inference"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
     )
 
-    # Pull image if not present (skipped quickly if already cached)
-    logger.info("Pulling %s (skipped if already cached)…", ROBOFLOW_DOCKER_IMAGE_CPU)
-    subprocess.run(
-        [docker, "pull", ROBOFLOW_DOCKER_IMAGE_CPU],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=120,
+    # Only pull if the image isn't already cached locally
+    inspect = subprocess.run(
+        [docker, "image", "inspect", ROBOFLOW_DOCKER_IMAGE_CPU],
+        capture_output=True,
     )
+    if inspect.returncode != 0:
+        logger.info(
+            "Image %s not found locally — pulling (this may take several minutes on first run)…",
+            ROBOFLOW_DOCKER_IMAGE_CPU,
+        )
+        pull = subprocess.run(
+            [docker, "pull", ROBOFLOW_DOCKER_IMAGE_CPU],
+            capture_output=True, text=True, timeout=1800,  # 30 min for large image
+        )
+        if pull.returncode != 0:
+            raise RuntimeError(
+                f"Failed to pull {ROBOFLOW_DOCKER_IMAGE_CPU}:\n{pull.stderr[:400]}"
+            )
+    else:
+        logger.info("Image %s already cached locally — skipping pull.", ROBOFLOW_DOCKER_IMAGE_CPU)
 
-    subprocess.Popen(
+    run_result = subprocess.run(
         [
             docker, "run", "--rm", "-d",
-            "-p", "9001:9001",
+            "-p", "9002:9001",
             "--name", "gemi-inference",
             ROBOFLOW_DOCKER_IMAGE_CPU,
         ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True, text=True,
     )
+    if run_result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to start gemi-inference container:\n{run_result.stderr[:400]}"
+        )
+    logger.info("Container started: %s", run_result.stdout.strip())
 
     # Wait up to 60 s for the server to become available
-    for _ in range(60):
-        if _is_local_server_running():
-            logger.info("Local inference server is ready.")
+    for i in range(60):
+        if _is_local_server_running(port=host_port):
+            logger.info("Local inference server is ready (waited %ds).", i)
             return
         time.sleep(1)
-    raise RuntimeError("Roboflow inference server Docker container did not start within 60 seconds.")
+    # Capture container logs to help diagnose why it didn't come up
+    logs = subprocess.run(
+        [docker, "logs", "gemi-inference"],
+        capture_output=True, text=True,
+    )
+    raise RuntimeError(
+        "Roboflow inference server did not become available within 60 seconds.\n"
+        f"Container logs:\n{logs.stdout[-1000:]}\n{logs.stderr[-500:]}"
+    )
+
+
+# ── Inference callables ────────────────────────────────────────────────────────
+
+class _InferenceConfigError(RuntimeError):
+    """Raised when inference fails due to a config error (bad API key / model ID)."""
+
+
+def _make_cloud_infer_fn(
+    api_key: str,
+    model_id: str,
+    confidence_threshold: float,
+):
+    """
+    Return a callable(crop_path) -> list[dict] that calls the Roboflow cloud
+    REST API (v0 format) directly: base64-encoded image sent as raw POST body.
+    This bypasses inference_sdk's v1 auto-detection which breaks against the
+    cloud endpoint.
+    """
+    import base64
+    import requests
+
+    # model_id may be "workspace/model/version" or "workspace/model" (latest)
+    endpoint = f"{CLOUD_API_URL}/{model_id}"
+
+    def _call(crop_path: str) -> list[dict]:
+        with open(crop_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("ascii")
+        resp = requests.post(
+            endpoint,
+            params={"api_key": api_key, "confidence": confidence_threshold},
+            data=img_b64,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        if resp.status_code == 401:
+            raise _InferenceConfigError(
+                f"Roboflow API returned 401 Unauthorized for model '{model_id}'. "
+                "Check your API key in the pipeline settings."
+            )
+        if resp.status_code == 404:
+            raise _InferenceConfigError(
+                f"Roboflow model '{model_id}' not found (404). "
+                "Check the model ID in the pipeline settings."
+            )
+        if not resp.ok:
+            raise _InferenceConfigError(
+                f"Roboflow API returned {resp.status_code} for model '{model_id}': {resp.text[:200]}"
+            )
+        if not resp.text:
+            raise RuntimeError(
+                f"Roboflow returned an empty body (status {resp.status_code}) — "
+                "possible rate limit or transient error."
+            )
+        body = resp.json()
+        return body.get("predictions", [])
+
+    return _call
+
+
+def _make_local_infer_fn(
+    api_key: str,
+    model_id: str,
+    confidence_threshold: float,
+    local_server_url: str | None,
+):
+    """
+    Return a callable(crop_path) -> list[dict] using the local inference server.
+
+    The Roboflow inference Docker container exposes the same v0 HTTP API as the
+    cloud endpoint, so we use the identical direct-HTTP approach — avoiding
+    inference_sdk's infer_from_api_v1 which calls list_loaded_models() first and
+    crashes when that endpoint returns empty on a freshly-started container.
+    """
+    import base64
+    import requests
+
+    api_url = (local_server_url or LOCAL_API_URL).rstrip("/")
+    host = api_url.split("://")[-1].split(":")[0]
+    port_str = api_url.split(":")[-1].rstrip("/") if ":" in api_url.split("://")[-1] else "9001"
+    try:
+        port = int(port_str)
+    except ValueError:
+        port = 9001
+
+    if not _is_local_server_running(host, port):
+        _start_local_server(host_port=port)
+
+    endpoint = f"{api_url}/{model_id}"
+
+    def _call(crop_path: str) -> list[dict]:
+        with open(crop_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("ascii")
+        resp = requests.post(
+            endpoint,
+            params={"api_key": api_key, "confidence": confidence_threshold},
+            data=img_b64,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        logger.debug(
+            "[local-infer] %s status=%s body_len=%d body_preview=%r",
+            crop_path, resp.status_code, len(resp.text), resp.text[:120],
+        )
+        if not resp.ok:
+            raise _InferenceConfigError(
+                f"Local inference server returned {resp.status_code} for model '{model_id}': {resp.text[:200]}"
+            )
+        if not resp.text.strip():
+            raise RuntimeError(
+                f"Local inference server returned an empty body (status {resp.status_code}) — "
+                "the model may still be loading. Retry in a moment."
+            )
+        body = resp.json()
+        return body.get("predictions", [])
+
+    return _call
 
 
 # ── Main inference entry point ─────────────────────────────────────────────────
@@ -268,23 +433,19 @@ def run_inference_on_image(
 
     Returns a list of prediction dicts with image-level (x, y, width, height).
     """
-    from inference_sdk import InferenceHTTPClient, InferenceConfiguration
-
     if inference_mode == "local":
-        api_url = local_server_url or LOCAL_API_URL
-        host = api_url.split("://")[-1].split(":")[0]
-        port_str = api_url.split(":")[-1].rstrip("/") if ":" in api_url.split("://")[-1] else "9001"
-        try:
-            port = int(port_str)
-        except ValueError:
-            port = 9001
-        if not _is_local_server_running(host, port):
-            _start_local_server()
+        _infer_fn = _make_local_infer_fn(
+            api_key=api_key,
+            model_id=model_id,
+            confidence_threshold=confidence_threshold,
+            local_server_url=local_server_url,
+        )
     else:
-        api_url = CLOUD_API_URL
-
-    client = InferenceHTTPClient(api_url=api_url, api_key=api_key)
-    client.configure(InferenceConfiguration(confidence_threshold=confidence_threshold))
+        _infer_fn = _make_cloud_infer_fn(
+            api_key=api_key,
+            model_id=model_id,
+            confidence_threshold=confidence_threshold,
+        )
 
     crops = crop_image_with_overlap(image_path, crop_size=crop_size, overlap=overlap)
     if not crops:
@@ -295,17 +456,42 @@ def run_inference_on_image(
     temp_dir = crops[0]["temp_dir"]
 
     try:
-        for crop_info in crops:
+        # Preflight on crop 0 — fail fast on config errors before processing all images.
+        first_crop = crops[0]
+        try:
+            raw = _infer_fn(first_crop["crop_path"])
+            all_predictions.extend(_transform_to_image_coords(raw, first_crop))
+        except _InferenceConfigError:
+            raise
+        except Exception as exc:
+            crop_errors += 1
+            msg = f"Crop {first_crop['crop_id']}/{len(crops)} failed: {exc}"
+            logger.warning("Inference failed on crop %d of %s: %s", first_crop["crop_id"], image_path, exc)
+            if on_warning:
+                on_warning(msg)
+
+        consecutive_failures = 0
+        for crop_info in crops[1:]:
             try:
-                result = client.infer(crop_info["crop_path"], model_id=model_id)
-                raw = result.get("predictions", []) if isinstance(result, dict) else []
+                raw = _infer_fn(crop_info["crop_path"])
                 all_predictions.extend(_transform_to_image_coords(raw, crop_info))
+                consecutive_failures = 0
+            except _InferenceConfigError:
+                raise
             except Exception as exc:
                 crop_errors += 1
+                consecutive_failures += 1
                 msg = f"Crop {crop_info['crop_id']}/{len(crops)} failed: {exc}"
                 logger.warning("Inference failed on crop %d of %s: %s", crop_info["crop_id"], image_path, exc)
                 if on_warning:
                     on_warning(msg)
+                if consecutive_failures >= 5:
+                    logger.warning(
+                        "5 consecutive crop failures on %s — skipping remaining crops. "
+                        "Check API key, model ID, and rate limits.",
+                        Path(image_path).name,
+                    )
+                    break
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
