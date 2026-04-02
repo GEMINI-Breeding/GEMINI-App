@@ -953,7 +953,7 @@ function StitchPanel({
         : { status: "completed", progress: 100, message: "Cancelled" }
       );
     } catch {
-      updateProcess(pid, { status: "failed", message: "Download failed" });
+      updateProcess(pid, { status: "error", message: "Download failed" });
     } finally {
       setDownloadingVersion(null);
     }
