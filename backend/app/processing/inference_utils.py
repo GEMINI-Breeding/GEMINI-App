@@ -168,19 +168,75 @@ def _is_local_server_running(host: str = "localhost", port: int = 9001) -> bool:
         return False
 
 
+ROBOFLOW_DOCKER_IMAGE_CPU = "roboflow/roboflow-inference-server-cpu:latest"
+ROBOFLOW_DOCKER_IMAGE_GPU = "roboflow/roboflow-inference-server-gpu:latest"
+
+
+def _find_docker() -> str | None:
+    """Return path to docker binary, checking common install locations."""
+    import shutil
+    common = [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/usr/bin/docker",
+        shutil.which("docker") or "",
+    ]
+    for p in common:
+        if p and shutil.which(p) is not None:
+            return p
+    found = shutil.which("docker")
+    return found
+
+
 def _start_local_server() -> None:
-    """Attempt to start the Roboflow local inference server."""
+    """Start the Roboflow inference server via Docker (no pip conflict)."""
     import subprocess
     import time
-    logger.info("Starting local Roboflow inference server…")
-    subprocess.Popen(["inference", "server", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Wait up to 30 s for it to become available
-    for _ in range(30):
+
+    logger.info("Starting Roboflow inference server via Docker…")
+
+    docker = _find_docker()
+    if docker is None:
+        raise RuntimeError(
+            "Docker not found. The local inference server runs as a Docker container.\n"
+            "Install Docker Desktop from https://www.docker.com/products/docker-desktop/ "
+            "and ensure it is running."
+        )
+
+    # Remove any stopped container with the same name to avoid conflicts
+    subprocess.run(
+        [docker, "rm", "-f", "gemi-inference"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Pull image if not present (skipped quickly if already cached)
+    logger.info("Pulling %s (skipped if already cached)…", ROBOFLOW_DOCKER_IMAGE_CPU)
+    subprocess.run(
+        [docker, "pull", ROBOFLOW_DOCKER_IMAGE_CPU],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=120,
+    )
+
+    subprocess.Popen(
+        [
+            docker, "run", "--rm", "-d",
+            "-p", "9001:9001",
+            "--name", "gemi-inference",
+            ROBOFLOW_DOCKER_IMAGE_CPU,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait up to 60 s for the server to become available
+    for _ in range(60):
         if _is_local_server_running():
             logger.info("Local inference server is ready.")
             return
         time.sleep(1)
-    raise RuntimeError("Local Roboflow inference server did not start within 30 seconds.")
+    raise RuntimeError("Roboflow inference server Docker container did not start within 60 seconds.")
 
 
 # ── Main inference entry point ─────────────────────────────────────────────────

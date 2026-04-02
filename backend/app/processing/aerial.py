@@ -509,14 +509,13 @@ def _compute_otsu_criteria(im: np.ndarray, th: int) -> float:
     return w0 * float(np.var(val0)) + w1 * float(np.var(val1))
 
 
-def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
+def _calculate_exg_mask(rgb_arr: np.ndarray, threshold: float = 0.1) -> np.ndarray:
     """
     Compute Excess Green vegetation mask.
 
-    Uses ExG > 0 as the vegetation threshold: any pixel where the normalised
-    green channel exceeds the average of red and blue is vegetation.  This is
-    more robust than Otsu for dense-canopy plots where most pixels are vegetation
-    (Otsu can split within-vegetation variation and undercount coverage).
+    ExG = 2·g - r - b (normalised channels).  Pixels where ExG > threshold
+    are classified as vegetation.  Default threshold of 0.1 filters soil and
+    shadow pixels; adjust via the threshold parameter.
 
     rgb_arr: (H, W, 3) uint8 RGB array.
     Returns uint8 mask (0 = background, 255 = vegetation).
@@ -527,16 +526,152 @@ def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
     total = arr[:, :, 0] + arr[:, :, 1] + arr[:, :, 2]
     total = np.where(total == 0, 1.0, total)
     ratio = arr / total[:, :, np.newaxis]
-    # ExG > 0.1 → green band fraction clearly exceeds red + blue → vegetation.
-    # Threshold of 0.1 filters out soil and shadow pixels that have a slight
-    # green tint (ExG near 0), which would otherwise inflate vegetation fraction.
     exg = 2 * ratio[:, :, 1] - ratio[:, :, 0] - ratio[:, :, 2]
-    mask = (exg > 0.1).astype(np.uint8) * 255
+    mask = (exg > threshold).astype(np.uint8) * 255
 
     # Morphological closing to fill small gaps within canopy
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return mask
+
+
+def preview_trait_extraction(
+    *,
+    paths: Any,
+    run_outputs: dict[str, Any],
+    ortho_version: int | None = None,
+    boundary_version: int | None = None,
+    plot_index: int = 0,
+    threshold: float = 0.1,
+) -> dict[str, Any]:
+    """
+    Crop a single plot from the orthomosaic, apply ExG mask at the given threshold,
+    and return a composite preview image (original + green overlay) as base64 JPEG,
+    along with the vegetation fraction and estimated height.
+
+    Used by the interactive threshold tuning UI before running full extraction.
+    """
+    import base64
+    import cv2
+    import rasterio
+    from rasterio.windows import from_bounds as _from_bounds
+    import geopandas as gpd
+
+    # Resolve ortho path
+    orthos = run_outputs.get("orthomosaics", [])
+    if ortho_version is not None:
+        ortho_entry = next((o for o in orthos if o["version"] == ortho_version), None)
+    else:
+        ortho_entry = orthos[-1] if orthos else None
+
+    if not ortho_entry:
+        raise FileNotFoundError("No orthomosaic found")
+
+    rgb_path = paths.abs(ortho_entry["rgb"]) if "rgb" in ortho_entry else None
+    if rgb_path is None or not rgb_path.exists():
+        raise FileNotFoundError(f"Orthomosaic RGB not found: {rgb_path}")
+
+    dem_path: Any = None
+    if ortho_entry.get("dem"):
+        _dem = paths.abs(ortho_entry["dem"])
+        if _dem.exists():
+            dem_path = _dem
+
+    # Resolve boundary path
+    from app.api.routes.processing import _discover_pb_versions  # type: ignore
+    _pb_versions_list, _active_pbv = _discover_pb_versions(paths, run_outputs)
+    _pb_by_version = {v["version"]: v for v in _pb_versions_list}
+    _effective_bv = boundary_version if boundary_version is not None else _active_pbv
+    boundary_path = paths.plot_boundary_geojson
+    if _effective_bv is not None and _effective_bv in _pb_by_version:
+        _candidate = paths.abs(_pb_by_version[_effective_bv]["geojson_path"])
+        if _candidate.exists():
+            boundary_path = _candidate
+
+    if not boundary_path.exists():
+        raise FileNotFoundError("Plot boundary not found")
+
+    gdf = gpd.read_file(str(boundary_path))
+    n_plots = len(gdf)
+    if n_plots == 0:
+        raise ValueError("Boundary file has no features")
+
+    plot_index = max(0, min(plot_index, n_plots - 1))
+
+    vf: float = 0.0
+    height_m: float | None = None
+    overlay_b64: str = ""
+
+    with rasterio.open(str(rgb_path)) as rgb_src:
+        # Reproject boundaries to raster CRS (same as run_trait_extraction does)
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:4326")
+        gdf_raster = gdf.to_crs(rgb_src.crs) if gdf.crs != rgb_src.crs else gdf
+        row = gdf_raster.iloc[plot_index]
+        orig_row = gdf.iloc[plot_index]
+
+        bounds = row.geometry.bounds
+        logger.debug(
+            "preview_trait_extraction: plot %d bounds=%s raster_crs=%s boundary_crs=%s",
+            plot_index, bounds, rgb_src.crs, gdf.crs,
+        )
+        window = _from_bounds(*bounds, rgb_src.transform)
+        rgb_data = rgb_src.read([1, 2, 3], window=window, boundless=True, fill_value=0)
+        rgb_arr = np.transpose(rgb_data, (1, 2, 0))
+
+        if rgb_arr.size == 0 or rgb_arr.shape[0] == 0 or rgb_arr.shape[1] == 0:
+            raise ValueError("Plot crop is empty — check boundary alignment with orthomosaic")
+
+        mask = _calculate_exg_mask(rgb_arr, threshold=threshold)
+        vf = round(float(np.sum(mask > 0)) / mask.size, 4)
+
+        # Height estimate from DEM
+        if dem_path is not None:
+            try:
+                with rasterio.open(str(dem_path)) as dem_src:
+                    gdf_dem = gdf.to_crs(dem_src.crs) if gdf.crs != dem_src.crs else gdf
+                    dem_row = gdf_dem.iloc[plot_index]
+                    dem_win = _from_bounds(*dem_row.geometry.bounds, dem_src.transform)
+                    dem_data = dem_src.read(1, window=dem_win, boundless=True, fill_value=0)
+                    if dem_data.size > 0:
+                        dm = cv2.resize(mask, (dem_data.shape[1], dem_data.shape[0]))
+                        valid = dem_data != 0
+                        all_v = dem_data[valid]
+                        if len(all_v) > 0:
+                            soil_px = dem_data[(dm == 0) & valid]
+                            ground = float(np.median(soil_px)) if len(soil_px) >= 10 else float(np.quantile(all_v, 0.05))
+                            veg_px = dem_data[(dm > 0) & valid]
+                            if len(veg_px) > 0:
+                                canopy_top = float(np.quantile(veg_px, 0.95))
+                                h = canopy_top - ground
+                                if h > 0:
+                                    height_m = round(h, 4)
+            except Exception:
+                pass
+
+        # Build overlay: vegetation pixels tinted green, rest original
+        overlay = rgb_arr.copy()
+        veg_mask = mask > 0
+        # Blend: 60% original + 40% green tint on vegetation pixels
+        overlay[veg_mask, 0] = (rgb_arr[veg_mask, 0] * 0.4).astype(np.uint8)
+        overlay[veg_mask, 1] = np.clip(rgb_arr[veg_mask, 1] * 0.4 + 150, 0, 255).astype(np.uint8)
+        overlay[veg_mask, 2] = (rgb_arr[veg_mask, 2] * 0.4).astype(np.uint8)
+
+        bgr = cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
+        _, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        overlay_b64 = base64.b64encode(buf.tobytes()).decode()
+
+    plot_id = _prop(orig_row, "Plot", "plot", "plot_id", "id", "ID") or str(plot_index + 1)
+
+    return {
+        "total_plots": n_plots,
+        "plot_index": plot_index,
+        "plot_id": str(plot_id),
+        "vf": vf,
+        "height_m": height_m,
+        "overlay_b64": overlay_b64,
+        "threshold": threshold,
+    }
 
 
 def _prop(row: Any, *keys: str) -> Any:
@@ -563,6 +698,7 @@ def run_trait_extraction(
     emit: Callable[[dict], None],
     ortho_version: int | None = None,
     boundary_version: int | None = None,
+    exg_threshold: float = 0.1,
 ) -> dict[str, Any]:
     """
     Extract vegetation fraction, height, and temperature per plot.
@@ -689,7 +825,7 @@ def run_trait_extraction(
                     continue
 
                 # Vegetation fraction
-                mask = _calculate_exg_mask(rgb_arr)
+                mask = _calculate_exg_mask(rgb_arr, threshold=exg_threshold)
                 vf = round(float(np.sum(mask > 0)) / mask.size, 4)
 
                 # Canopy height from DEM.

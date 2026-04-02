@@ -246,6 +246,7 @@ class ExecuteStepRequest(BaseModel):
     # Trait extraction / association version overrides
     ortho_version: int | None = None
     boundary_version: int | None = None
+    exg_threshold: float = 0.1  # ExG vegetation threshold for trait extraction
     stitch_version: int | None = None
     association_version: int | None = None
     trait_version: int | None = None
@@ -338,6 +339,7 @@ def execute_step(
                 {
                     "ortho_version": body.ortho_version,
                     "boundary_version": body.boundary_version,
+                    "exg_threshold": body.exg_threshold,
                 },
             ),
             "inference": (
@@ -1125,6 +1127,37 @@ def save_plot_grid(
     )
 
     return {"status": "saved" if not body.save_as else "saved_as", "feature_count": len(body.geojson.get("features", []))}
+
+
+@router.get("/pipeline-runs/{id}/trait-extraction-preview")
+def trait_extraction_preview(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    ortho_version: int | None = None,
+    boundary_version: int | None = None,
+    plot_index: int = 0,
+    threshold: float = 0.1,
+) -> dict[str, Any]:
+    """Return a preview image + metrics for a single plot at a given ExG threshold."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    try:
+        from app.processing import aerial
+        return aerial.preview_trait_extraction(
+            paths=paths,
+            run_outputs=run.outputs or {},
+            ortho_version=ortho_version,
+            boundary_version=boundary_version,
+            plot_index=plot_index,
+            threshold=threshold,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        logger.warning("trait_extraction_preview 404: %s", exc)
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.exception("trait_extraction_preview 500")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/pipeline-runs/{id}/generate-plot-grid")
@@ -2606,7 +2639,7 @@ def delete_plot_boundary(
     )
 
 
-@router.post("/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops")
+@router.get("/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops")
 def download_crops_for_boundary(
     session: SessionDep,
     current_user: CurrentUser,
@@ -3657,7 +3690,7 @@ def delete_inference_result(
 
 # ── Shared: download crops as ZIP ────────────────────────────────────────────
 
-@router.post("/pipeline-runs/{id}/download-crops")
+@router.get("/pipeline-runs/{id}/download-crops")
 def download_crops(
     session: SessionDep,
     current_user: CurrentUser,

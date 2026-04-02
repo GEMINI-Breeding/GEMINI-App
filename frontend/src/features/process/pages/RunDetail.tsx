@@ -25,7 +25,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribe } from "@/lib/sseManager";
 import { downloadFile, openUrl } from "@/lib/platform";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -793,6 +793,7 @@ function StitchPanel({
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<
     number | null
   >(null);
+  const { addProcess, updateProcess } = useProcess();
   const [downloadingVersion, setDownloadingVersion] = useState<number | null>(
     null
   );
@@ -933,13 +934,29 @@ function StitchPanel({
       selectedAssocVersion != null
         ? `?association_version=${selectedAssocVersion}`
         : "";
-    await tauriDownload(
-      `/api/v1/pipeline-runs/${runId}/stitchings/${stitch.version}/download${assocParam}`,
-      `stitching_${label}.zip`,
-      "GET",
-      [{ name: "ZIP Archive", extensions: ["zip"] }]
-    );
-    setDownloadingVersion(null);
+    const pid = addProcess({
+      type: "processing",
+      title: `Downloading stitched plots ${label}…`,
+      status: "running",
+      items: [],
+      progress: 30,
+    });
+    try {
+      const saved = await tauriDownload(
+        `/api/v1/pipeline-runs/${runId}/stitchings/${stitch.version}/download${assocParam}`,
+        `stitching_${label}.zip`,
+        "GET",
+        [{ name: "ZIP Archive", extensions: ["zip"] }]
+      );
+      updateProcess(pid, saved
+        ? { status: "completed", progress: 100, message: "Download complete" }
+        : { status: "completed", progress: 100, message: "Cancelled" }
+      );
+    } catch {
+      updateProcess(pid, { status: "failed", message: "Download failed" });
+    } finally {
+      setDownloadingVersion(null);
+    }
   }
 
   // ── During run: page viewer ────────────────────────────────────────────────
@@ -3380,12 +3397,58 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
 
   // Trait extraction version selection dialog
   const [showTraitDialog, setShowTraitDialog] = useState(false);
-  const [traitOrthoVersion, setTraitOrthoVersion] = useState<number | null>(
-    null
-  );
-  const [traitBoundaryVersion, setTraitBoundaryVersion] = useState<
-    number | null
-  >(null);
+  const [traitOrthoVersion, setTraitOrthoVersion] = useState<number | null>(null);
+  const [traitBoundaryVersion, setTraitBoundaryVersion] = useState<number | null>(null);
+  const [traitExgThreshold, setTraitExgThreshold] = useState(0.10);
+  const [traitPreviewIndex, setTraitPreviewIndex] = useState(0);
+  const [traitPreviewData, setTraitPreviewData] = useState<{
+    total_plots: number; plot_id: string; vf: number; height_m: number | null; overlay_b64: string;
+  } | null>(null);
+  const [traitPreviewLoading, setTraitPreviewLoading] = useState(false);
+
+  // Debounced preview fetch for trait extraction dialog
+  const fetchTraitPreview = useCallback(async (
+    threshold: number,
+    plotIndex: number,
+    orthoVer: number | null,
+    boundaryVer: number | null,
+  ) => {
+    if (!runId) return;
+    setTraitPreviewLoading(true);
+    try {
+      const params = new URLSearchParams({ threshold: threshold.toString(), plot_index: plotIndex.toString() });
+      if (orthoVer != null) params.set("ortho_version", orthoVer.toString());
+      if (boundaryVer != null) params.set("boundary_version", boundaryVer.toString());
+      const url = apiUrl(`/api/v1/pipeline-runs/${runId}/trait-extraction-preview?${params}`);
+      console.log("[TraitPreview] fetching", url, { threshold, plotIndex, orthoVer, boundaryVer });
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      console.log("[TraitPreview] response status", res.status);
+      if (res.ok) {
+        const data = await res.json();
+        console.log("[TraitPreview] success", { total_plots: data.total_plots, vf: data.vf, has_image: !!data.overlay_b64 });
+        setTraitPreviewData(data);
+      } else {
+        const text = await res.text();
+        console.error("[TraitPreview] error response", res.status, text);
+        setTraitPreviewData(null);
+      }
+    } catch (err) {
+      console.error("[TraitPreview] fetch threw", err);
+      setTraitPreviewData(null);
+    } finally {
+      setTraitPreviewLoading(false);
+    }
+  }, [runId]);
+
+  useEffect(() => {
+    if (!showTraitDialog) return;
+    const timer = setTimeout(() => {
+      fetchTraitPreview(traitExgThreshold, traitPreviewIndex, traitOrthoVersion, traitBoundaryVersion);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [showTraitDialog, traitExgThreshold, traitPreviewIndex, traitOrthoVersion, traitBoundaryVersion, fetchTraitPreview]);
 
   // Associate boundaries version selection dialog
   const [showAssocDialog, setShowAssocDialog] = useState(false);
@@ -3425,22 +3488,12 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       return;
     }
     if (step === "trait_extraction") {
-      // If there are versioned orthos or boundaries, prompt which to use
-      const hasMultipleOrthos = (orthoVersions?.length ?? 0) > 1;
-      const hasMultipleBoundaries = (plotBoundaryVersions?.length ?? 0) > 1;
-      if (hasMultipleOrthos || hasMultipleBoundaries) {
-        setTraitOrthoVersion(orthoVersions?.[0]?.version ?? null);
-        setTraitBoundaryVersion(plotBoundaryVersions?.[0]?.version ?? null);
-        setShowTraitDialog(true);
-        return;
-      }
-      // Single versions — pass them explicitly so the TraitRecord is recorded correctly
-      stopWasRequestedRef.current = false;
-      executeMutation.mutate({
-        step,
-        ortho_version: orthoVersions?.[0]?.version ?? undefined,
-        boundary_version: plotBoundaryVersions?.[0]?.version ?? undefined,
-      } as any);
+      setTraitOrthoVersion(orthoVersions?.[0]?.version ?? null);
+      setTraitBoundaryVersion(plotBoundaryVersions?.[0]?.version ?? null);
+      setTraitExgThreshold(0.10);
+      setTraitPreviewIndex(0);
+      setTraitPreviewData(null);
+      setShowTraitDialog(true);
       return;
     }
     if (step === "orthomosaic") {
@@ -3478,6 +3531,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       step: "trait_extraction",
       ortho_version: traitOrthoVersion ?? undefined,
       boundary_version: traitBoundaryVersion ?? undefined,
+      exg_threshold: traitExgThreshold,
     } as any);
   }
 
@@ -4415,57 +4469,127 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
         </DialogContent>
       </Dialog>
 
-      {/* Trait extraction version selection dialog */}
+      {/* Trait extraction version selection + threshold preview dialog */}
       <Dialog
         open={showTraitDialog}
         onOpenChange={(open) => !open && setShowTraitDialog(false)}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Select Versions for Trait Extraction</DialogTitle>
+            <DialogTitle>Configure Trait Extraction</DialogTitle>
             <DialogDescription>
-              Choose which orthomosaic and plot boundary version to use.
+              Adjust the ExG threshold to separate vegetation from soil, then run extraction.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            {(orthoVersions?.length ?? 0) > 0 && (
-              <div className="space-y-1">
-                <Label className="text-sm">Orthomosaic</Label>
-                <select
-                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
-                  value={traitOrthoVersion ?? ""}
-                  onChange={(e) => setTraitOrthoVersion(Number(e.target.value))}
-                >
-                  {orthoVersions!.map((ov) => (
-                    <option key={ov.version} value={ov.version}>
-                      {ov.name
-                        ? `${ov.name} (v${ov.version})`
-                        : `v${ov.version}`}
-                    </option>
-                  ))}
-                </select>
+          <div className="grid grid-cols-2 gap-6 py-2">
+            {/* Left column — settings */}
+            <div className="space-y-4">
+              {(orthoVersions?.length ?? 0) > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-sm">Orthomosaic</Label>
+                  <select
+                    className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                    value={traitOrthoVersion ?? ""}
+                    onChange={(e) => setTraitOrthoVersion(Number(e.target.value))}
+                  >
+                    {orthoVersions!.map((ov) => (
+                      <option key={ov.version} value={ov.version}>
+                        {ov.name ? `${ov.name} (v${ov.version})` : `v${ov.version}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {(plotBoundaryVersions?.length ?? 0) > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-sm">Plot Boundaries</Label>
+                  <select
+                    className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                    value={traitBoundaryVersion ?? ""}
+                    onChange={(e) => setTraitBoundaryVersion(Number(e.target.value))}
+                  >
+                    {plotBoundaryVersions!.map((bv) => (
+                      <option key={bv.version} value={bv.version}>
+                        {bv.name ? `${bv.name} (v${bv.version})` : `v${bv.version}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">ExG Threshold</Label>
+                  <span className="text-muted-foreground font-mono text-sm">{traitExgThreshold.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={traitExgThreshold}
+                  onChange={(e) => setTraitExgThreshold(parseFloat(e.target.value))}
+                  className="w-full accent-green-600"
+                />
+                <p className="text-muted-foreground text-xs">
+                  Lower = more vegetation detected. Higher = stricter (less noise). Green overlay shows detected vegetation.
+                </p>
               </div>
-            )}
-            {(plotBoundaryVersions?.length ?? 0) > 0 && (
-              <div className="space-y-1">
-                <Label className="text-sm">Plot Boundaries</Label>
-                <select
-                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
-                  value={traitBoundaryVersion ?? ""}
-                  onChange={(e) =>
-                    setTraitBoundaryVersion(Number(e.target.value))
-                  }
-                >
-                  {plotBoundaryVersions!.map((bv) => (
-                    <option key={bv.version} value={bv.version}>
-                      {bv.name
-                        ? `${bv.name} (v${bv.version})`
-                        : `v${bv.version}`}
-                    </option>
-                  ))}
-                </select>
+              {traitPreviewData && (
+                <div className="bg-muted rounded-lg p-3 space-y-1">
+                  <p className="text-xs font-medium">Plot: {traitPreviewData.plot_id}</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground text-xs">Veg. Fraction</span>
+                      <p className="font-semibold">{(traitPreviewData.vf * 100).toFixed(1)}%</p>
+                    </div>
+                    {traitPreviewData.height_m != null && (
+                      <div>
+                        <span className="text-muted-foreground text-xs">Plant Height</span>
+                        <p className="font-semibold">{traitPreviewData.height_m.toFixed(2)} m</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right column — preview */}
+            <div className="flex flex-col gap-2">
+              <div className="bg-muted flex aspect-square w-full items-center justify-center rounded-lg overflow-hidden border">
+                {traitPreviewLoading ? (
+                  <div className="text-muted-foreground text-xs">Loading preview…</div>
+                ) : traitPreviewData ? (
+                  <img
+                    src={`data:image/jpeg;base64,${traitPreviewData.overlay_b64}`}
+                    alt="Threshold preview"
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <div className="text-muted-foreground text-xs text-center px-4">Preview unavailable — ensure an orthomosaic and plot boundary are selected.</div>
+                )}
               </div>
-            )}
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={traitPreviewIndex <= 0 || traitPreviewLoading}
+                  onClick={() => setTraitPreviewIndex((i) => Math.max(0, i - 1))}
+                >
+                  ← Prev
+                </Button>
+                <span className="text-muted-foreground text-xs">
+                  Plot {traitPreviewIndex + 1}{traitPreviewData ? ` / ${traitPreviewData.total_plots}` : ""}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={traitPreviewLoading || (traitPreviewData != null && traitPreviewIndex >= traitPreviewData.total_plots - 1)}
+                  onClick={() => setTraitPreviewIndex((i) => i + 1)}
+                >
+                  Next →
+                </Button>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowTraitDialog(false)}>
