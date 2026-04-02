@@ -11,7 +11,7 @@
  *  - Map:    satellite → ortho image overlay → trait polygons.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import {
   type ColumnDef,
@@ -40,6 +40,11 @@ import {
   Search,
   Table2,
 } from "lucide-react";
+import {
+  useExpandable,
+  ExpandButton,
+  FullscreenModal,
+} from "@/components/Common/ExpandableSection";
 import { analyzeApi, versionLabel, type TraitRecord } from "../api";
 import {
   COL_KEY_SET,
@@ -152,6 +157,36 @@ function getPlotId(
 // matchesTextFilter, PLOT_FILTER_FIELDS, PlotFilterKey — all imported from
 // ../utils/traitAliases
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Prediction {
+  image: string
+  class: string
+  confidence: number
+  x: number
+  y: number
+  width: number
+  height: number
+  points?: Array<{ x: number; y: number }>
+}
+
+const CLASS_COLOURS = [
+  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+]
+
+function classColour(cls: string): string {
+  let hash = 0
+  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
+  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const c = hex.replace("#", "")
+  const num = parseInt(c.length === 3 ? c.split("").map((ch) => ch + ch).join("") : c, 16)
+  return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`
+}
+
 // ── Version badge ──────────────────────────────────────────────────────────────
 
 function VersionBadge({
@@ -181,20 +216,55 @@ function PlotViewDialog({
   plotId,
   properties,
   metricColumns,
+  runId,
   onClose,
 }: {
   recordId: string;
   plotId: string;
   properties: Record<string, unknown>;
   metricColumns: string[];
+  runId?: string;
   onClose: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [showDetections, setShowDetections] = useState(true);
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+
+  // Fetch inference results (re-runs when model changes)
+  const { data: inferenceData } = useQuery({
+    queryKey: ["inference-plot-dialog", runId, selectedModel],
+    queryFn: async () => {
+      const token = localStorage.getItem("access_token") || "";
+      const modelParam = selectedModel ? `?model=${encodeURIComponent(selectedModel)}` : "";
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results${modelParam}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!runId,
+    staleTime: 60_000,
+  });
+
+  const availableModels: string[] = inferenceData?.models ?? [];
+
+  // Build predictions for this specific plot from inference data
+  const predictions = useMemo<Prediction[]>(() => {
+    if (!inferenceData?.available) return [];
+    const imgList: Array<{ name: string; plot?: string }> = inferenceData.images ?? [];
+    const preds: Prediction[] = inferenceData.predictions ?? [];
+    const imgToPlot = new Map(imgList.map((im) => [im.name, String(im.plot ?? "")]));
+    return preds.filter((p) => imgToPlot.get(p.image) === plotId);
+  }, [inferenceData, plotId]);
 
   useEffect(() => {
     setBlobUrl(null);
     setError(false);
+    setDims(null);
     const endpoint = apiUrl(
       `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
     );
@@ -216,49 +286,204 @@ function PlotViewDialog({
     };
   }, [recordId, plotId]);
 
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-sm">Plot {plotId}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          {/* Image */}
-          <div className="bg-muted/30 rounded-lg flex items-center justify-center min-h-32">
-            {error ? (
-              <p className="text-xs text-muted-foreground py-4">Image not available</p>
-            ) : !blobUrl ? (
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            ) : (
+  const exp = useExpandable();
+
+  // Draw detection boxes on canvas — accounts for object-contain letterboxing
+  function drawCanvas(canvas: HTMLCanvasElement) {
+    const img = imgRef.current;
+    if (!img || !dims) { canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height); return; }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const rect = img.getBoundingClientRect();
+    const elemW = rect.width;
+    const elemH = rect.height;
+    canvas.width = elemW;
+    canvas.height = elemH;
+    ctx.clearRect(0, 0, elemW, elemH);
+    if (!showDetections || !predictions?.length) return;
+    // Compute actual rendered image bounds inside element (object-contain)
+    const imgAspect = dims.w / dims.h;
+    const elemAspect = elemW / elemH;
+    let scale: number, offsetX: number, offsetY: number;
+    if (imgAspect > elemAspect) {
+      scale = elemW / dims.w;
+      offsetX = 0;
+      offsetY = (elemH - dims.h * scale) / 2;
+    } else {
+      scale = elemH / dims.h;
+      offsetX = (elemW - dims.w * scale) / 2;
+      offsetY = 0;
+    }
+    for (const pred of predictions) {
+      const color = classColour(pred.class);
+      const hasPoints = (pred.points?.length ?? 0) >= 3;
+      if (hasPoints && pred.points) {
+        ctx.beginPath();
+        pred.points.forEach((pt, idx) => {
+          const px = pt.x * scale + offsetX;
+          const py = pt.y * scale + offsetY;
+          if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.fillStyle = hexToRgba(color, 0.25);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+      } else {
+        const x = (pred.x - pred.width / 2) * scale + offsetX;
+        const y = (pred.y - pred.height / 2) * scale + offsetY;
+        const w = pred.width * scale;
+        const h = pred.height * scale;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`;
+        ctx.font = "11px monospace";
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y - 16, tw + 6, 16);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, x + 3, y - 3);
+      }
+    }
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawCanvas(canvas);
+  }, [dims, predictions, showDetections]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const hasDetections = (predictions?.length ?? 0) > 0;
+
+  const accession = lookupProperty(properties, "accession");
+
+  function PlotContent({ maxImgClass }: { maxImgClass: string }) {
+    return (
+      <div className="space-y-3">
+        {/* Image */}
+        <div className="bg-muted/30 rounded-lg overflow-hidden">
+          {error ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">Image not available</p>
+          ) : !blobUrl ? (
+            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <div className="relative">
               <img
+                ref={imgRef}
                 src={blobUrl}
                 alt={`Plot ${plotId}`}
-                className="w-full rounded-lg object-contain max-h-72"
+                className={`w-full object-contain ${maxImgClass}`}
+                onLoad={() => {
+                  const el = imgRef.current;
+                  if (el) setDims({ w: el.naturalWidth, h: el.naturalHeight });
+                  if (canvasRef.current) drawCanvas(canvasRef.current);
+                }}
               />
+              {hasDetections && (
+                <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }} />
+              )}
+            </div>
+          )}
+        </div>
+        {/* Stats */}
+        {accession != null && (
+          <p className="text-xs text-muted-foreground">Accession: {String(accession)}</p>
+        )}
+        <div className="space-y-1">
+          {metricColumns.map((col) => {
+            const v = properties[col];
+            if (typeof v !== "number") return null;
+            return (
+              <div key={col} className="flex justify-between text-xs">
+                <span className="text-muted-foreground">{col.replace(/_/g, " ")}</span>
+                <span className="font-mono">{v.toFixed(3)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Dialog open={!exp.isExpanded} onOpenChange={(o) => !o && onClose()}>
+        {/* Hide the auto-generated shadcn close button; we render our own below */}
+        <DialogContent className="max-w-lg [&>button:last-child]:hidden">
+          <DialogHeader>
+            <DialogTitle asChild>
+              <div className="flex items-center gap-2 pr-1">
+                <span className="text-sm font-semibold flex-1">Plot {plotId}</span>
+                {availableModels.length > 1 && (
+                  <select
+                    className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
+                    value={selectedModel ?? inferenceData?.active_model ?? ""}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                  >
+                    {availableModels.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                )}
+                {hasDetections && (
+                  <button
+                    onClick={() => setShowDetections((v) => !v)}
+                    className={`text-xs px-2 py-0.5 rounded border transition-colors whitespace-nowrap ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
+                    title={showDetections ? "Hide detections" : "Show detections"}
+                  >
+                    {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
+                  </button>
+                )}
+                <div className="flex items-center gap-0.5 border-l pl-2 ml-1">
+                  <ExpandButton onClick={exp.open} title="Expand to fullscreen" />
+                  <button
+                    onClick={onClose}
+                    className="h-7 w-7 flex items-center justify-center rounded-sm opacity-70 hover:opacity-100 transition-opacity"
+                    title="Close"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <PlotContent maxImgClass="max-h-72" />
+        </DialogContent>
+      </Dialog>
+      <FullscreenModal open={exp.isExpanded} onClose={() => { exp.close(); onClose(); }} title={`Plot ${plotId}`}
+        headerExtra={
+          <div className="flex items-center gap-2">
+            {availableModels.length > 1 && (
+              <select
+                className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
+                value={selectedModel ?? inferenceData?.active_model ?? ""}
+                onChange={(e) => setSelectedModel(e.target.value)}
+              >
+                {availableModels.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            )}
+            {hasDetections && (
+              <button
+                onClick={() => setShowDetections((v) => !v)}
+                className={`text-xs px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
+              >
+                {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
+              </button>
             )}
           </div>
-
-          {/* Stats */}
-          {lookupProperty(properties, "accession") != null && (
-            <p className="text-sm text-muted-foreground">{String(lookupProperty(properties, "accession"))}</p>
-          )}
-          <div className="space-y-1">
-            {metricColumns.map((col) => {
-              const v = properties[col];
-              if (typeof v !== "number") return null;
-              return (
-                <div key={col} className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {col.replace(/_/g, " ")}
-                  </span>
-                  <span className="font-mono">{v.toFixed(3)}</span>
-                </div>
-              );
-            })}
+        }
+      >
+        <div className="flex flex-col items-center justify-center h-full p-4">
+          <div className="max-w-3xl w-full">
+            <PlotContent maxImgClass="max-h-[70vh]" />
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </FullscreenModal>
+    </>
   );
 }
 
@@ -274,7 +499,7 @@ interface KeptPlot {
   recordLabel: string;
 }
 
-function ExpandedPlotTable({ recordId }: { recordId: string }) {
+function ExpandedPlotTable({ recordId, runId }: { recordId: string; runId?: string }) {
   const [textFilters, setTextFilters] = useState<Record<PlotFilterKey, string>>(
     { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
   );
@@ -282,7 +507,10 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
   const [viewingPlot, setViewingPlot] = useState<{
     plotId: string;
     properties: Record<string, unknown>;
+    showDetections?: boolean;
   } | null>(null);
+
+
 
   const { data, isLoading } = useQuery({
     queryKey: ["trait-record-geojson", recordId],
@@ -484,6 +712,7 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
           plotId={viewingPlot.plotId}
           properties={viewingPlot.properties}
           metricColumns={numCols}
+          runId={runId}
           onClose={() => setViewingPlot(null)}
         />
       )}
@@ -675,7 +904,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                   {expandedId === r.id && (
                     <TableRow key={`${r.id}-expanded`}>
                       <TableCell colSpan={7} className="p-0">
-                        <ExpandedPlotTable recordId={r.id} />
+                        <ExpandedPlotTable recordId={r.id} runId={r.run_id} />
                       </TableCell>
                     </TableRow>
                   )}
@@ -709,6 +938,7 @@ function PlotImageCard({
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const exp = useExpandable();
 
   useEffect(() => {
     setBlobUrl(null);
@@ -740,102 +970,115 @@ function PlotImageCard({
     setDownloading(false);
   }
 
+  const accession = lookupProperty(properties, "accession");
+  const statRows = metricColumns.filter((col) => typeof properties[col] === "number");
+
+  function CardImage({ maxH }: { maxH: string }) {
+    return error ? (
+      <div className="flex flex-col items-center gap-1 py-5 px-3 text-center">
+        <ImageOff className="h-6 w-6 text-muted-foreground/50" />
+        <p className="text-xs text-muted-foreground">No image available</p>
+      </div>
+    ) : !blobUrl ? (
+      <div className="flex items-center justify-center py-6">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    ) : (
+      <img src={blobUrl} alt={`Plot ${plotId}`} className={`w-full object-contain ${maxH}`} />
+    );
+  }
+
   return (
-    <div className="border rounded-lg overflow-hidden bg-background shadow-sm">
-      {/* Header */}
-      <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold truncate">Plot {plotId}</p>
-          {lookupProperty(properties, "accession") != null && (
-            <p className="text-xs text-muted-foreground truncate">
-              {String(lookupProperty(properties, "accession"))}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {onKeep && (
+    <>
+      <div className="border rounded-lg overflow-hidden bg-background shadow-sm">
+        {/* Header */}
+        <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold truncate">Plot {plotId}</p>
+            {accession != null && (
+              <p className="text-xs text-muted-foreground truncate">
+                Accession: {String(accession)}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {onKeep && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                title={isKept ? "Remove from comparison" : "Keep for comparison"}
+                onClick={onKeep}
+                style={isKept ? { color: "hsl(var(--primary))" } : {}}
+              >
+                {isKept ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+              </Button>
+            )}
+            <ExpandButton onClick={exp.open} title="Expand plot" />
             <Button
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              title={isKept ? "Remove from comparison" : "Keep for comparison"}
-              onClick={onKeep}
-              style={isKept ? { color: "hsl(var(--primary))" } : {}}
+              title={downloading ? "Downloading…" : "Download image"}
+              disabled={downloading}
+              onClick={handleDownload}
             >
-              {isKept ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+              {downloading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            title={downloading ? "Downloading…" : "Download image"}
-            disabled={downloading}
-            onClick={handleDownload}
-          >
-            {downloading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Download className="h-3 w-3" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      {/* Image */}
-      <div
-        className="bg-muted/20 flex items-center justify-center"
-        style={{ minHeight: 120 }}
-      >
-        {error ? (
-          <div className="flex flex-col items-center gap-1 py-5 px-3 text-center">
-            <ImageOff className="h-6 w-6 text-muted-foreground/50" />
-            <p className="text-xs text-muted-foreground">No image available</p>
-            <p className="text-[10px] text-muted-foreground/60 leading-tight">
-              Run trait extraction to generate plot images
-            </p>
           </div>
-        ) : !blobUrl ? (
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        ) : (
-          <img
-            src={blobUrl}
-            alt={`Plot ${plotId}`}
-            className="w-full object-contain max-h-48"
-          />
-        )}
-      </div>
+        </div>
 
-      {/* Stats */}
-      {(() => {
-        const statRows = metricColumns.filter(
-          (col) => typeof properties[col] === "number"
-        );
-        if (statRows.length === 0) {
-          return error ? (
-            <div className="px-3 py-2 border-t">
-              <p className="text-[10px] text-muted-foreground/60 italic">
-                No trait data — this plot is from the field design only
-              </p>
-            </div>
-          ) : null;
-        }
-        return (
+        {/* Image */}
+        <div className="bg-muted/20" style={{ minHeight: 120 }}>
+          <CardImage maxH="max-h-48" />
+        </div>
+
+        {/* Stats */}
+        {statRows.length > 0 && (
           <div className="px-3 py-2 space-y-0.5">
             {statRows.map((col) => (
               <div key={col} className="flex justify-between gap-2 text-xs">
-                <span className="text-muted-foreground truncate">
-                  {col.replace(/_/g, " ")}
-                </span>
-                <span className="font-mono flex-shrink-0">
-                  {(properties[col] as number).toFixed(3)}
-                </span>
+                <span className="text-muted-foreground truncate">{col.replace(/_/g, " ")}</span>
+                <span className="font-mono flex-shrink-0">{(properties[col] as number).toFixed(3)}</span>
               </div>
             ))}
           </div>
-        );
-      })()}
-    </div>
+        )}
+        {statRows.length === 0 && error && (
+          <div className="px-3 py-2 border-t">
+            <p className="text-[10px] text-muted-foreground/60 italic">No trait data</p>
+          </div>
+        )}
+      </div>
+
+      {/* Fullscreen expand */}
+      <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Plot ${plotId}`}>
+        <div className="flex flex-col items-center justify-center h-full p-6">
+        <div className="max-w-3xl w-full space-y-4">
+          {accession != null && (
+            <p className="text-sm text-muted-foreground">Accession: {String(accession)}</p>
+          )}
+          <div className="bg-muted/20 rounded-lg overflow-hidden">
+            <CardImage maxH="max-h-[70vh]" />
+          </div>
+          {statRows.length > 0 && (
+            <div className="space-y-1">
+              {statRows.map((col) => (
+                <div key={col} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{col.replace(/_/g, " ")}</span>
+                  <span className="font-mono">{(properties[col] as number).toFixed(3)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        </div>
+      </FullscreenModal>
+    </>
   );
 }
 
@@ -848,6 +1091,7 @@ function ComparisonSection({
   plots: KeptPlot[];
   onRemove: (key: string) => void;
 }) {
+  const exp = useExpandable();
   if (plots.length === 0) return null;
 
   // Collect all metric columns present across all kept plots
@@ -855,98 +1099,102 @@ function ComparisonSection({
     new Set(plots.flatMap((p) => p.metricColumns.filter((c) => typeof p.properties[c] === "number")))
   );
 
+  function ComparisonContent() {
+    return (
+      <>
+        {/* Plot image cards grid — 3 columns */}
+        <div className="grid grid-cols-3 gap-4">
+          {plots.map((p) => {
+            const key = `${p.recordId}:${p.plotId}`;
+            return (
+              <div
+                key={key}
+                className="border rounded-lg overflow-hidden bg-background shadow-sm"
+              >
+                <div className="px-2 py-1.5 border-b bg-muted/30 flex items-start justify-between gap-1">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate">Plot {p.plotId}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{p.recordLabel}</p>
+                  </div>
+                  <button
+                    onClick={() => onRemove(key)}
+                    className="text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5"
+                    title="Remove from comparison"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </button>
+                </div>
+                <PlotImageCard
+                  recordId={p.recordId}
+                  plotId={p.plotId}
+                  properties={p.properties}
+                  metricColumns={p.metricColumns}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Metrics comparison table */}
+        {allMetrics.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="text-xs w-full border-collapse">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-1.5 pr-4 text-muted-foreground font-medium w-40">Metric</th>
+                  {plots.map((p) => (
+                    <th key={`${p.recordId}:${p.plotId}`} className="text-right py-1.5 px-3 font-semibold min-w-[80px]">
+                      Plot {p.plotId}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allMetrics.map((metric) => {
+                  const vals = plots.map((p) =>
+                    typeof p.properties[metric] === "number" ? (p.properties[metric] as number) : null
+                  );
+                  const defined = vals.filter((v): v is number => v !== null);
+                  const max = defined.length ? Math.max(...defined) : null;
+                  return (
+                    <tr key={metric} className="border-b border-border/50 hover:bg-muted/30">
+                      <td className="py-1.5 pr-4 text-muted-foreground truncate max-w-[160px]">{metric.replace(/_/g, " ")}</td>
+                      {vals.map((v, i) => (
+                        <td key={i} className="text-right py-1.5 px-3 font-mono"
+                          style={v !== null && v === max && defined.length > 1 ? { color: "hsl(var(--primary))", fontWeight: 700 } : {}}
+                        >
+                          {v !== null ? v.toFixed(3) : <span className="text-muted-foreground/50">—</span>}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
+    <>
     <div className="space-y-3 border-t pt-4">
       <div className="flex items-center gap-2">
         <Pin className="h-4 w-4 text-primary" />
         <p className="text-sm font-semibold">Comparison ({plots.length})</p>
-        <p className="text-xs text-muted-foreground">— select plots using the pin button above</p>
+        <p className="text-xs text-muted-foreground flex-1">— select plots using the pin button above</p>
+        <ExpandButton onClick={exp.open} title="Expand comparison" />
       </div>
 
-      {/* Plot image cards row */}
-      <div className="flex gap-3 overflow-x-auto pb-1">
-        {plots.map((p) => {
-          const key = `${p.recordId}:${p.plotId}`;
-          return (
-            <div
-              key={key}
-              className="border rounded-lg overflow-hidden bg-background shadow-sm flex-shrink-0"
-              style={{ width: 200 }}
-            >
-              <div className="px-2 py-1.5 border-b bg-muted/30 flex items-start justify-between gap-1">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold truncate">Plot {p.plotId}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{p.recordLabel}</p>
-                </div>
-                <button
-                  onClick={() => onRemove(key)}
-                  className="text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5"
-                  title="Remove from comparison"
-                >
-                  <XIcon className="h-3 w-3" />
-                </button>
-              </div>
-              <PlotImageCard
-                recordId={p.recordId}
-                plotId={p.plotId}
-                properties={p.properties}
-                metricColumns={p.metricColumns}
-              />
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Metrics comparison table */}
-      {allMetrics.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="text-xs w-full border-collapse">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left py-1.5 pr-4 text-muted-foreground font-medium w-40">Metric</th>
-                {plots.map((p) => (
-                  <th
-                    key={`${p.recordId}:${p.plotId}`}
-                    className="text-right py-1.5 px-3 font-semibold min-w-[80px]"
-                  >
-                    Plot {p.plotId}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {allMetrics.map((metric) => {
-                const vals = plots.map((p) =>
-                  typeof p.properties[metric] === "number" ? (p.properties[metric] as number) : null
-                );
-                const defined = vals.filter((v): v is number => v !== null);
-                const max = defined.length ? Math.max(...defined) : null;
-                return (
-                  <tr key={metric} className="border-b border-border/50 hover:bg-muted/30">
-                    <td className="py-1.5 pr-4 text-muted-foreground truncate max-w-[160px]">
-                      {metric.replace(/_/g, " ")}
-                    </td>
-                    {vals.map((v, i) => (
-                      <td
-                        key={i}
-                        className="text-right py-1.5 px-3 font-mono"
-                        style={
-                          v !== null && v === max && defined.length > 1
-                            ? { color: "hsl(var(--primary))", fontWeight: 700 }
-                            : {}
-                        }
-                      >
-                        {v !== null ? v.toFixed(3) : <span className="text-muted-foreground/50">—</span>}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <ComparisonContent />
     </div>
+    <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Comparison (${plots.length})`}>
+      <div className="p-4 space-y-4 overflow-auto">
+        <ComparisonContent />
+      </div>
+    </FullscreenModal>
+    </>
   );
 }
 
@@ -968,7 +1216,15 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
   );
   const [results, setResults] = useState<GeoJSON.Feature[] | null>(null);
   const [hasQueried, setHasQueried] = useState(false);
-  const [keptPlots, setKeptPlots] = useState<KeptPlot[]>([]);
+  const [keptPlots, setKeptPlots] = useState<KeptPlot[]>(() => {
+    try {
+      const saved = localStorage.getItem("query-comparison-plots");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    localStorage.setItem("query-comparison-plots", JSON.stringify(keptPlots));
+  }, [keptPlots]);
 
   const { data: geojsonData, isLoading: geojsonLoading } = useQuery({
     queryKey: ["trait-record-geojson", selectedId],
@@ -1150,6 +1406,16 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
 
   return (
     <div className="space-y-4">
+      {/* Comparison section — always visible, persists across data source changes */}
+      <ComparisonSection
+        plots={keptPlots}
+        onRemove={(key) =>
+          setKeptPlots((prev) =>
+            prev.filter((p) => `${p.recordId}:${p.plotId}` !== key)
+          )
+        }
+      />
+
       {/* Step 1: Data source */}
       <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -1406,15 +1672,6 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
         </div>
       )}
 
-      {/* Comparison section */}
-      <ComparisonSection
-        plots={keptPlots}
-        onRemove={(key) =>
-          setKeptPlots((prev) =>
-            prev.filter((p) => `${p.recordId}:${p.plotId}` !== key)
-          )
-        }
-      />
     </div>
   );
 }
@@ -1704,6 +1961,7 @@ function MapTab({ records }: { records: TraitRecord[] }) {
               selectedMetric={effectiveMetric}
               filteredIds={null}
               recordId={selectedId}
+              runId={selectedRecord?.run_id ?? null}
               showPolygons={showPolygons}
               plotOpacity={plotOpacity}
             />

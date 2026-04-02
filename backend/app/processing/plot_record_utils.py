@@ -192,6 +192,81 @@ def upsert_plot_records_from_features(
     return inserted
 
 
+def sync_detection_counts_to_plot_records(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+    predictions: list[dict],
+    images: list[dict],
+) -> int:
+    """
+    Populate PlotRecord.detection_count and detection_class_summary from
+    inference results for a given run.
+
+    Called lazily (e.g. when the inference-results endpoint is fetched) so the
+    DB stays in sync without requiring a separate migration step.
+
+    Returns the number of PlotRecord rows updated.
+    """
+    from app.models.plot_record import PlotRecord
+
+    if not predictions:
+        return 0
+
+    # Build image_name → plot_id mapping from the images list
+    img_to_plot: dict[str, str] = {}
+    for img in images:
+        plot = img.get("plot") or img.get("plot_id") or ""
+        name = img.get("name") or img.get("image") or ""
+        if plot and name:
+            img_to_plot[name] = str(plot)
+
+    if not img_to_plot:
+        return 0
+
+    # Aggregate detections per plot_id
+    plot_counts: dict[str, int] = {}
+    plot_classes: dict[str, dict[str, int]] = {}
+    for pred in predictions:
+        img_name = pred.get("image", "")
+        plot_id = img_to_plot.get(img_name)
+        if not plot_id:
+            continue
+        cls = str(pred.get("class", "unknown"))
+        plot_counts[plot_id] = plot_counts.get(plot_id, 0) + 1
+        plot_classes.setdefault(plot_id, {})[cls] = plot_classes[plot_id].get(cls, 0) + 1
+
+    if not plot_counts:
+        return 0
+
+    # Update matching PlotRecord rows for this run
+    records = session.exec(
+        select(PlotRecord).where(PlotRecord.run_id == run_id)
+    ).all()
+
+    updated = 0
+    for record in records:
+        pid = record.plot_id
+        if pid in plot_counts:
+            record.detection_count = plot_counts[pid]
+            record.detection_class_summary = plot_classes.get(pid, {})
+            session.add(record)
+            updated += 1
+        elif record.detection_count is None:
+            # Mark as "no detections" so we don't keep querying
+            record.detection_count = 0
+            session.add(record)
+
+    if updated or records:
+        session.commit()
+
+    logger.info(
+        "sync_detection_counts: run=%s  plots_with_detections=%d  total_updated=%d",
+        run_id, updated, len(records),
+    )
+    return updated
+
+
 def delete_plot_records_for_trait_record(
     session: Session,
     trait_record_id: uuid.UUID,

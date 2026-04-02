@@ -4,12 +4,18 @@
  * Shows two sections:
  *  1. Config form  → read-only model list, version selectors, run/stop
  *  2. Results      → 2-column viewer: image+canvas overlay (left), controls (right)
+ *
+ * Controls panel sections are collapsible.
+ * Results can be expanded to fullscreen via the ExpandButton in the nav bar.
  */
 
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Loader2,
+  PanelRightClose,
+  PanelRightOpen,
   Settings,
   Square,
   ZoomIn,
@@ -28,6 +34,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  useExpandable,
+  ExpandButton,
+  FullscreenModal,
+} from "@/components/Common/ExpandableSection"
+import { cn } from "@/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -123,6 +135,31 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`
 }
 
+// ── Collapsible section header ────────────────────────────────────────────────
+
+function SectionHeader({
+  label,
+  open,
+  onToggle,
+}: {
+  label: string
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center justify-between text-xs font-semibold py-0.5 hover:text-foreground/80 transition-colors"
+      onClick={onToggle}
+    >
+      {label}
+      <ChevronDown
+        className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-150", open && "rotate-180")}
+      />
+    </button>
+  )
+}
+
 // ── Image viewer with canvas overlay, zoom/pan ────────────────────────────────
 
 interface ImageViewerProps {
@@ -130,9 +167,11 @@ interface ImageViewerProps {
   predictions: Prediction[]
   hiddenClasses: Set<string>
   showMasks: boolean
+  /** When true, uses a taller image area (fullscreen mode) */
+  fullscreen?: boolean
 }
 
-function ImageViewer({ image, predictions, hiddenClasses, showMasks }: ImageViewerProps) {
+function ImageViewer({ image, predictions, hiddenClasses, showMasks, fullscreen }: ImageViewerProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -286,9 +325,7 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks }: ImageView
   }
 
   function fitScreen() { setZoom(1); setPanX(0); setPanY(0) }
-  function zoomIn() {
-    setZoom((z) => Math.min(10, z * 1.25))
-  }
+  function zoomIn() { setZoom((z) => Math.min(10, z * 1.25)) }
   function zoomOut() {
     setZoom((z) => {
       const nz = Math.max(1, z / 1.25)
@@ -302,20 +339,22 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks }: ImageView
     ? `${base}/api/v1/files/serve?path=${encodeURIComponent(image.path)}`
     : `/api/v1/files/serve?path=${encodeURIComponent(image.path)}`
 
+  const containerHeight = fullscreen ? "calc(100vh - 160px)" : 480
+
   return (
     <div className="space-y-1">
       {/* Zoom toolbar */}
       <div className="flex items-center gap-1 justify-end">
-        <Button variant="outline" size="icon" className="h-7 w-7" onClick={zoomOut} disabled={zoom <= 1}>
+        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={zoomOut} disabled={zoom <= 1}>
           <ZoomOut className="h-3.5 w-3.5" />
         </Button>
         <span className="text-xs text-muted-foreground w-12 text-center font-mono">
           {Math.round(zoom * 100)}%
         </span>
-        <Button variant="outline" size="icon" className="h-7 w-7" onClick={zoomIn} disabled={zoom >= 10}>
+        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={zoomIn} disabled={zoom >= 10}>
           <ZoomIn className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="outline" size="icon" className="h-7 w-7" onClick={fitScreen} disabled={zoom === 1} title="Fit to view">
+        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={fitScreen} disabled={zoom === 1} title="Fit to view">
           <Maximize2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -325,7 +364,7 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks }: ImageView
         ref={containerRef}
         className="relative w-full rounded border overflow-hidden bg-muted/20"
         style={{
-          height: 480,
+          height: containerHeight,
           cursor: zoom > 1 ? (isDragging ? "grabbing" : "grab") : "default",
         }}
         onWheel={handleWheel}
@@ -406,6 +445,13 @@ export function InferenceTool({
   const [logDone, setLogDone] = useState(0)
   const logRef = useRef<HTMLDivElement>(null)
 
+  // Collapsible section states
+  const [showFilters, setShowFilters] = useState(true)
+  const [showDetectionControls, setShowDetectionControls] = useState(true)
+  const [showClasses, setShowClasses] = useState(true)
+  const [showStats, setShowStats] = useState(true)
+  const [showTraitsOutput, setShowTraitsOutput] = useState(false)
+
   const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | undefined>(
     stitchVersions?.[0]?.version
   )
@@ -415,6 +461,10 @@ export function InferenceTool({
   const [selectedTraitVersion, setSelectedTraitVersion] = useState<number | undefined>(
     traitVersions?.[0]?.version
   )
+
+  // Expand / fullscreen
+  const exp = useExpandable()
+  const [showControls, setShowControls] = useState(true)
 
   const configuredModels = (initialModels ?? []).filter((m) => m.roboflow_model_id.trim())
   const isGround = (stitchVersions?.length ?? 0) > 0 || (associationVersions?.length ?? 0) > 0
@@ -469,7 +519,6 @@ export function InferenceTool({
           if (data.total != null) setLogTotal(data.total)
           if (data.done != null) setLogDone(data.done)
         }
-        // progress events keep the bar in sync even if log events arrive out of order
         if (data.event === "progress" && typeof data.progress === "number") {
           setLogDone((prev) => {
             if (logTotal != null) return Math.round(data.progress / 100 * logTotal)
@@ -568,6 +617,313 @@ export function InferenceTool({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [inferenceComplete, isRunning, images.length])
+
+  // ── Navigation bar ────────────────────────────────────────────────────────
+
+  const navBar = (
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline" size="icon" className="h-7 w-7"
+        onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
+        disabled={imageIdx <= 0}
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </Button>
+      <span className="text-xs text-muted-foreground font-mono shrink-0">
+        {imageIdx + 1} / {filteredImages.length}
+        {filteredImages.length !== images.length && (
+          <span className="text-muted-foreground/60"> (of {images.length})</span>
+        )}
+      </span>
+      <Button
+        type="button"
+        variant="outline" size="icon" className="h-7 w-7"
+        onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
+        disabled={filteredImages.length === 0 || imageIdx >= filteredImages.length - 1}
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </Button>
+      <select
+        className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0"
+        value={currentImage?.name ?? ""}
+        onChange={(e) => {
+          const idx = filteredImages.findIndex((im) => im.name === e.target.value)
+          if (idx >= 0) setImageIdx(idx)
+        }}
+      >
+        {filteredImages.map((im) => {
+          const detCount = predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length
+          const parts: string[] = []
+          if (im.plot) parts.push(`Plot ${im.plot}`)
+          if (im.col) parts.push(`Col ${im.col}`)
+          if (im.row) parts.push(`Row ${im.row}`)
+          if (im.accession) parts.push(im.accession)
+          const label = parts.length > 0 ? parts.join(" · ") : im.name
+          return (
+            <option key={im.name} value={im.name}>
+              {label} ({detCount} det)
+            </option>
+          )
+        })}
+      </select>
+      <span className="text-xs text-muted-foreground shrink-0">← → keys</span>
+      {/* Expand button — opens results in fullscreen */}
+      <ExpandButton onClick={exp.open} title="Expand viewer to fullscreen" />
+      {/* Toggle controls panel */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        title={showControls ? "Hide controls panel" : "Show controls panel"}
+        onClick={() => setShowControls((v) => !v)}
+      >
+        {showControls
+          ? <PanelRightClose className="h-4 w-4" />
+          : <PanelRightOpen className="h-4 w-4" />}
+      </Button>
+    </div>
+  )
+
+  // ── Controls panel ────────────────────────────────────────────────────────
+
+  const controlsPanel = (
+    <div className="space-y-3 rounded-lg border p-4">
+
+      {/* Filter plots */}
+      {hasPlotMeta && (
+        <div className="space-y-1.5">
+          <SectionHeader label="Filter Plots" open={showFilters} onToggle={() => setShowFilters(v => !v)} />
+          {showFilters && (
+            <>
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  { label: "Column", value: filterCol, set: setFilterCol, placeholder: "e.g. 1" },
+                  { label: "Row", value: filterRow, set: setFilterRow, placeholder: "e.g. 3" },
+                  { label: "Accession", value: filterAccession, set: setFilterAccession, placeholder: "Search…" },
+                  { label: "Plot", value: filterPlot, set: setFilterPlot, placeholder: "e.g. 101" },
+                ] as const).map(({ label, value, set, placeholder }) => (
+                  <div key={label}>
+                    <label className="text-xs text-muted-foreground">{label}</label>
+                    <input
+                      type="text"
+                      className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
+                      placeholder={placeholder}
+                      value={value}
+                      onChange={(e) => set(e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+              {(filterCol || filterRow || filterAccession || filterPlot) && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  onClick={() => { setFilterCol(""); setFilterRow(""); setFilterAccession(""); setFilterPlot("") }}
+                >
+                  Clear filters
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Detection controls */}
+      <div className="space-y-2">
+        <SectionHeader label="Detection Controls" open={showDetectionControls} onToggle={() => setShowDetectionControls(v => !v)} />
+        {showDetectionControls && (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Confidence</Label>
+                <span className="text-xs font-mono font-medium">{confThreshold}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={confThreshold}
+                onChange={(e) => setConfThreshold(Number(e.target.value))}
+                className="w-full h-1.5 accent-primary"
+              />
+            </div>
+            {hasSegmentation && (
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Show masks</Label>
+                <button
+                  type="button"
+                  onClick={() => setShowMasks((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${showMasks ? "bg-primary" : "bg-muted"}`}
+                >
+                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showMasks ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Class legend */}
+      {allClasses.length > 0 && (
+        <div className="space-y-1.5">
+          <SectionHeader label="Classes" open={showClasses} onToggle={() => setShowClasses(v => !v)} />
+          {showClasses && (
+            <>
+              <div className="space-y-1">
+                {allClasses.map((cls) => {
+                  const isHidden = hiddenClasses.has(cls)
+                  const count = currentClassCounts[cls] ?? 0
+                  const color = classColour(cls)
+                  return (
+                    <button
+                      type="button"
+                      key={cls}
+                      onClick={() => toggleClass(cls)}
+                      className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs transition-opacity hover:bg-muted/50 ${isHidden ? "opacity-40" : "opacity-100"}`}
+                    >
+                      <span
+                        className="inline-block h-3 w-3 shrink-0 rounded-sm border"
+                        style={{ background: color, borderColor: color }}
+                      />
+                      <span className="flex-1 text-left font-medium">{cls}</span>
+                      <span className="font-mono text-muted-foreground">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">Click to toggle visibility</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="space-y-1.5">
+        <SectionHeader label="Stats" open={showStats} onToggle={() => setShowStats(v => !v)} />
+        {showStats && (
+          <div className="border-t pt-2 grid grid-cols-2 gap-3 text-xs">
+            <div className="space-y-1">
+              <p className="font-semibold">This plot</p>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Detections</span>
+                <span className="font-mono">{currentImage ? predictions.filter((p) => p.image === currentImage.name).length : 0}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Above threshold</span>
+                <span className="font-mono">{currentPreds.length}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Classes</span>
+                <span className="font-mono">{allClasses.length - hiddenClasses.size}/{allClasses.length}</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold">All plots</p>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Detections</span>
+                <span className="font-mono">
+                  {visiblePreds.filter((p) => filteredImages.some((im) => im.name === p.image)).length}
+                </span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Shown</span>
+                <span className="font-mono">
+                  {filteredImages.length}
+                  {filteredImages.length !== images.length && (
+                    <span className="text-muted-foreground/60">/{images.length}</span>
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Traits output */}
+      <div className="space-y-2 border-t pt-2">
+        <SectionHeader label="Traits Output" open={showTraitsOutput} onToggle={() => setShowTraitsOutput(v => !v)} />
+        {showTraitsOutput && (
+          <>
+            {availableModels.length > 1 && (
+              <select
+                className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                value={selectedTraitsModel || availableModels[0]}
+                onChange={(e) => { setSelectedTraitsModel(e.target.value); setTraitsStatus({ loading: false, message: null }) }}
+              >
+                {availableModels.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={traitsThreshold}
+                onChange={(e) => { setTraitsThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
+                className="flex-1 h-1.5 accent-primary"
+              />
+              <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full h-7 text-xs"
+              disabled={traitsStatus.loading}
+              onClick={handleApplyThreshold}
+            >
+              {traitsStatus.loading
+                ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Applying…</>
+                : `Apply ${traitsThreshold}%`}
+            </Button>
+            {traitsStatus.message && (
+              <p className={`text-xs ${traitsStatus.message.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"}`}>
+                {traitsStatus.message}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  // ── Results grid (shared between inline and fullscreen) ────────────────────
+
+  function ResultsGrid({ fullscreen }: { fullscreen?: boolean }) {
+    return (
+      <div className={cn(
+        "grid gap-4 items-start",
+        showControls
+          ? fullscreen
+            ? "grid-cols-[1fr_320px] p-4 h-full"
+            : "grid-cols-[1fr_300px]"
+          : "grid-cols-[1fr]"
+      )}>
+        {/* Left: image + navigation */}
+        <div className="space-y-2">
+          {navBar}
+          {currentImage && (
+            <ImageViewer
+              key={currentImage.name}
+              image={currentImage}
+              predictions={currentPreds}
+              hiddenClasses={hiddenClasses}
+              showMasks={showMasks}
+              fullscreen={fullscreen}
+            />
+          )}
+        </div>
+        {/* Right: controls (collapsible) */}
+        {showControls && controlsPanel}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -675,17 +1031,17 @@ export function InferenceTool({
         {/* Run / Stop + Close */}
         <div className="shrink-0 flex flex-col items-end gap-2">
           {isRunning ? (
-            <Button variant="destructive" disabled={isStopping} onClick={onStop}>
+            <Button type="button" variant="destructive" disabled={isStopping} onClick={onStop}>
               {isStopping
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Stopping…</>
                 : <><Square className="w-4 h-4 mr-2" />Stop</>}
             </Button>
           ) : (
-            <Button disabled={!configuredModels.length} onClick={handleRun}>
+            <Button type="button" disabled={!configuredModels.length} onClick={handleRun}>
               {inferenceComplete ? "Re-run Inference" : "Run Inference"}
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={onCancel}>Close</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Close</Button>
         </div>
       </div>
 
@@ -752,247 +1108,17 @@ export function InferenceTool({
                 <h3 className="text-sm font-semibold">{currentModelLabel}</h3>
               )}
 
-              {/* 2-column layout: image (left) + controls (right) */}
-              <div className="grid grid-cols-[1fr_300px] gap-4 items-start">
+              {/* Inline results grid (hidden when expanded) */}
+              {!exp.isExpanded && <ResultsGrid />}
 
-                {/* ── Left: image + navigation ── */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline" size="icon" className="h-7 w-7"
-                      onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
-                      disabled={imageIdx === 0}
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                    </Button>
-                    <span className="text-xs text-muted-foreground font-mono shrink-0">
-                      {imageIdx + 1} / {filteredImages.length}
-                      {filteredImages.length !== images.length && (
-                        <span className="text-muted-foreground/60"> (of {images.length})</span>
-                      )}
-                    </span>
-                    <Button
-                      variant="outline" size="icon" className="h-7 w-7"
-                      onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
-                      disabled={imageIdx === filteredImages.length - 1}
-                    >
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </Button>
-                    <select
-                      className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0"
-                      value={currentImage?.name ?? ""}
-                      onChange={(e) => {
-                        const idx = filteredImages.findIndex((im) => im.name === e.target.value)
-                        if (idx >= 0) setImageIdx(idx)
-                      }}
-                    >
-                      {filteredImages.map((im) => {
-                        const detCount = predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length
-                        const parts: string[] = []
-                        if (im.plot) parts.push(`Plot ${im.plot}`)
-                        if (im.col) parts.push(`Col ${im.col}`)
-                        if (im.row) parts.push(`Row ${im.row}`)
-                        if (im.accession) parts.push(im.accession)
-                        const label = parts.length > 0 ? parts.join(" · ") : im.name
-                        return (
-                          <option key={im.name} value={im.name}>
-                            {label} ({detCount} det)
-                          </option>
-                        )
-                      })}
-                    </select>
-                    <span className="text-xs text-muted-foreground shrink-0">← → navigate</span>
-                  </div>
-
-                  {currentImage && (
-                    <ImageViewer
-                      image={currentImage}
-                      predictions={currentPreds}
-                      hiddenClasses={hiddenClasses}
-                      showMasks={showMasks}
-                    />
-                  )}
-                </div>
-
-                {/* ── Right: controls panel ── */}
-                <div className="space-y-4 rounded-lg border p-4">
-
-                  {/* Filter plots */}
-                  {hasPlotMeta && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold">Filter Plots</p>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {([
-                          { label: "Column", value: filterCol, set: setFilterCol, placeholder: "e.g. 1" },
-                          { label: "Row", value: filterRow, set: setFilterRow, placeholder: "e.g. 3" },
-                          { label: "Accession", value: filterAccession, set: setFilterAccession, placeholder: "Search…" },
-                          { label: "Plot", value: filterPlot, set: setFilterPlot, placeholder: "e.g. 101" },
-                        ] as const).map(({ label, value, set, placeholder }) => (
-                          <div key={label}>
-                            <label className="text-xs text-muted-foreground">{label}</label>
-                            <input
-                              type="text"
-                              className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
-                              placeholder={placeholder}
-                              value={value}
-                              onChange={(e) => set(e.target.value)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      {(filterCol || filterRow || filterAccession || filterPlot) && (
-                        <button
-                          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                          onClick={() => { setFilterCol(""); setFilterRow(""); setFilterAccession(""); setFilterPlot("") }}
-                        >
-                          Clear filters
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Detection controls */}
-                  <div className="space-y-3">
-                    <p className="text-xs font-semibold">Detection Controls</p>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Confidence</Label>
-                        <span className="text-xs font-mono font-medium">{confThreshold}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={confThreshold}
-                        onChange={(e) => setConfThreshold(Number(e.target.value))}
-                        className="w-full h-1.5 accent-primary"
-                      />
-                    </div>
-                    {hasSegmentation && (
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Show masks</Label>
-                        <button
-                          onClick={() => setShowMasks((v) => !v)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${showMasks ? "bg-primary" : "bg-muted"}`}
-                        >
-                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showMasks ? "translate-x-4" : "translate-x-0"}`} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Class legend */}
-                  {allClasses.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold">Classes</p>
-                      <div className="space-y-1">
-                        {allClasses.map((cls) => {
-                          const isHidden = hiddenClasses.has(cls)
-                          const count = currentClassCounts[cls] ?? 0
-                          const color = classColour(cls)
-                          return (
-                            <button
-                              key={cls}
-                              onClick={() => toggleClass(cls)}
-                              className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs transition-opacity hover:bg-muted/50 ${isHidden ? "opacity-40" : "opacity-100"}`}
-                            >
-                              <span
-                                className="inline-block h-3 w-3 shrink-0 rounded-sm border"
-                                style={{ background: color, borderColor: color }}
-                              />
-                              <span className="flex-1 text-left font-medium">{cls}</span>
-                              <span className="font-mono text-muted-foreground">{count}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Click to toggle visibility</p>
-                    </div>
-                  )}
-
-                  {/* Stats: this plot + all plots side-by-side */}
-                  <div className="border-t pt-3 grid grid-cols-2 gap-3 text-xs">
-                    <div className="space-y-1">
-                      <p className="font-semibold">This plot</p>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Detections</span>
-                        <span className="font-mono">{currentImage ? predictions.filter((p) => p.image === currentImage.name).length : 0}</span>
-                      </div>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Above threshold</span>
-                        <span className="font-mono">{currentPreds.length}</span>
-                      </div>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Classes</span>
-                        <span className="font-mono">{allClasses.length - hiddenClasses.size}/{allClasses.length}</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="font-semibold">All plots</p>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Detections</span>
-                        <span className="font-mono">
-                          {visiblePreds.filter((p) => filteredImages.some((im) => im.name === p.image)).length}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Shown</span>
-                        <span className="font-mono">
-                          {filteredImages.length}
-                          {filteredImages.length !== images.length && (
-                            <span className="text-muted-foreground/60">/{images.length}</span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Traits output */}
-                  <div className="border-t pt-3 space-y-2">
-                    <p className="text-xs font-semibold">Traits Output</p>
-                    {availableModels.length > 1 && (
-                      <select
-                        className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
-                        value={selectedTraitsModel || availableModels[0]}
-                        onChange={(e) => { setSelectedTraitsModel(e.target.value); setTraitsStatus({ loading: false, message: null }) }}
-                      >
-                        {availableModels.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={traitsThreshold}
-                        onChange={(e) => { setTraitsThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
-                        className="flex-1 h-1.5 accent-primary"
-                      />
-                      <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full h-7 text-xs"
-                      disabled={traitsStatus.loading}
-                      onClick={handleApplyThreshold}
-                    >
-                      {traitsStatus.loading
-                        ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Applying…</>
-                        : `Apply ${traitsThreshold}%`}
-                    </Button>
-                    {traitsStatus.message && (
-                      <p className={`text-xs ${traitsStatus.message.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"}`}>
-                        {traitsStatus.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              {/* Fullscreen modal */}
+              <FullscreenModal
+                open={exp.isExpanded}
+                onClose={exp.close}
+                title={`Inference Results — ${currentModelLabel}`}
+              >
+                <ResultsGrid fullscreen />
+              </FullscreenModal>
             </div>
           )}
         </>

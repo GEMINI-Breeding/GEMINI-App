@@ -1021,9 +1021,12 @@ def save_plot_grid(
     body: SavePlotGridRequest,
 ) -> dict[str, Any]:
     """Save a pre-computed plot grid GeoJSON from the frontend (bypasses backend computation)."""
+    import re as _re
     from datetime import datetime as _dt
 
     run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    pipeline_type = pipeline.type if pipeline else "aerial"
     paths = _get_paths(session, run)
     paths.intermediate_year.mkdir(parents=True, exist_ok=True)
 
@@ -1047,6 +1050,7 @@ def save_plot_grid(
         "date": paths.date,
         "stitch_version": body.stitch_version,
         "ortho_version": body.ortho_version,
+        "pipeline_type": pipeline_type,
     }
 
     existing_outputs = dict(run.outputs or {})
@@ -1054,8 +1058,18 @@ def save_plot_grid(
     now = _dt.utcnow().isoformat()
 
     if body.save_as or not versions:
-        # Create new version
-        new_version = max((v["version"] for v in versions), default=0) + 1
+        # Determine next version number from ALL existing versioned files in the
+        # shared population directory — prevents overwriting versions created by
+        # a different pipeline type (e.g. ground Save As clobbering aerial v1).
+        shared_dir = paths.intermediate_shared_pop
+        existing_file_versions = [
+            int(m.group(1))
+            for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson")
+            if (m := _re.match(r"Plot-Boundary-WGS84_v(\d+)\.geojson", f.name))
+        ]
+        all_known_versions = existing_file_versions + [v["version"] for v in versions]
+        new_version = max(all_known_versions, default=0) + 1
+
         versioned_path = paths.plot_boundary_geojson_versioned(new_version)
         versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
         entry = {
@@ -1068,6 +1082,20 @@ def save_plot_grid(
         }
         versions.append(entry)
         existing_outputs["active_plot_boundary_version"] = new_version
+
+        # On Save As: only update the canonical file if this pipeline owns it (or it
+        # doesn't exist yet), so we don't clobber another pipeline's canonical boundary.
+        canonical_owned = True
+        if paths.plot_boundary_geojson.exists():
+            try:
+                existing_meta = json.loads(paths.plot_boundary_geojson.read_text()).get("_run_meta", {})
+                existing_pt = existing_meta.get("pipeline_type")
+                if existing_pt and existing_pt != pipeline_type:
+                    canonical_owned = False
+            except Exception:
+                pass
+        if canonical_owned:
+            paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
     else:
         # Overwrite the current active version
         active_v = existing_outputs.get("active_plot_boundary_version")
@@ -1078,8 +1106,8 @@ def save_plot_grid(
             target["ortho_version"] = body.ortho_version
             target["stitch_version"] = body.stitch_version
 
-    # Always write canonical file for backward compat (trait extraction uses it)
-    paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
+        # Overwrite always updates the canonical (this run explicitly chose to save here)
+        paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
 
     existing_outputs["plot_boundaries"] = versions
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
@@ -1758,18 +1786,36 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
-        # Only pre-load boundaries that THIS run explicitly saved.  Do not fall
-        # back to the canonical shared file — it may have been written by an
-        # aerial pipeline run on the same population, and showing those polygons
-        # in the ground tool would be confusing and wrong.
         existing_geojson = None
         existing_grid_settings = None
+
+        # First choice: load the boundary this run explicitly saved.
         _active_pbv_own = _outputs.get("active_plot_boundary_version")
         if _active_pbv_own is not None:
             _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
             if _vf.exists():
                 try:
                     raw = json.loads(_vf.read_text())
+                    existing_grid_settings = raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                except Exception:
+                    pass
+
+        # Fallback: if this run has no own boundary yet, load the most recent
+        # boundary from the shared population directory (e.g. one saved by the
+        # aerial pipeline) so the user has a starting point to edit and Save As.
+        if existing_geojson is None and _pb_versions:
+            _aerial_versions = [
+                v for v in _pb_versions
+                if (v.get("run_meta") or {}).get("pipeline_type") == "aerial"
+            ]
+            # Prefer aerial; fall back to any version (older files may lack pipeline_type)
+            _fallback_v = _aerial_versions[-1] if _aerial_versions else _pb_versions[-1]
+            _vf2 = paths.abs(_fallback_v["geojson_path"])
+            if _vf2.exists():
+                try:
+                    raw = json.loads(_vf2.read_text())
                     existing_grid_settings = raw.pop("grid_settings", None)
                     raw.pop("_run_meta", None)
                     existing_geojson = raw
@@ -3016,6 +3062,19 @@ def inference_results(
         img["row"] = meta.get("row", "")
         img["col"] = meta.get("col", "")
         img["accession"] = meta.get("accession", "")
+
+    # Lazily sync detection counts to PlotRecord rows so the Analyze tab can
+    # quickly show which plots have detections without reading inference CSVs.
+    try:
+        from app.processing.plot_record_utils import sync_detection_counts_to_plot_records as _sync
+        _sync(
+            session=session,
+            run_id=id,
+            predictions=rows,
+            images=images,
+        )
+    except Exception as _sync_err:
+        logger.warning("inference_results: detection sync failed (non-fatal): %s", _sync_err)
 
     return {
         "available": True,

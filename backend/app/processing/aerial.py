@@ -527,9 +527,11 @@ def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
     total = arr[:, :, 0] + arr[:, :, 1] + arr[:, :, 2]
     total = np.where(total == 0, 1.0, total)
     ratio = arr / total[:, :, np.newaxis]
-    # ExG > 0 → green band fraction exceeds the mean of red + blue → vegetation
+    # ExG > 0.1 → green band fraction clearly exceeds red + blue → vegetation.
+    # Threshold of 0.1 filters out soil and shadow pixels that have a slight
+    # green tint (ExG near 0), which would otherwise inflate vegetation fraction.
     exg = 2 * ratio[:, :, 1] - ratio[:, :, 0] - ratio[:, :, 2]
-    mask = (exg > 0).astype(np.uint8) * 255
+    mask = (exg > 0.1).astype(np.uint8) * 255
 
     # Morphological closing to fill small gaps within canopy
     kernel = np.ones((5, 5), np.uint8)

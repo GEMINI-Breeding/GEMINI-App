@@ -625,6 +625,10 @@ def process_single_binary_file(args):
         calib_topics = [t for t in topics if 'calibration' in t.lower()]
         gps_topics = [t for t in topics if any(g in t.lower() for g in GPS_TYPES)]
         image_topics = [t for t in topics if any(i in t.lower() for i in IMAGE_TYPES)]
+        # Only extract the top camera (oak0). Left (oak1) and right (oak2) cameras
+        # are not currently used downstream, so skip them to save time and disk space.
+        _top_cams = {k for k, v in CAMERA_POSITIONS.items() if v == "top"}
+        image_topics = [t for t in image_topics if any(cam in t for cam in _top_cams)]
         # count events for progress granularity (only in sequential mode where progress_meta present)
         progress_tracker = None
         if progress_meta:

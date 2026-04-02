@@ -240,6 +240,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   })
 
   const [activeVersion, setActiveVersion] = useState<number | null>(null)
+  // Track whether we've done the initial load so saves don't reset the viewer position
+  const hasLoadedRef = useRef(false)
 
   const { data: versionList = [], refetch: refetchVersions } = useQuery<{ version: number; name: string; created_at: string; run_label: string; is_active: boolean }[]>({
     queryKey: ["plot-markings", runId],
@@ -270,7 +272,9 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   // editable nav input (shows current plot number, used to jump)
   const [plotNavInput, setPlotNavInput] = useState("1")
 
-  // Load existing selections when data arrives
+  // Load existing selections when data arrives.
+  // Only reset the viewer position on the first load — subsequent refetches
+  // (e.g. after a save) should keep the user on the same plot/image.
   useEffect(() => {
     if (existingData?.selections && existingData.selections.length > 0) {
       const loaded = existingData.selections.map((s) => ({
@@ -280,8 +284,11 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         direction: s.direction ?? "",
       }))
       setPlots(loaded)
-      setPlotNavInput("1")
-      setPlotPage(0)
+      if (!hasLoadedRef.current) {
+        hasLoadedRef.current = true
+        setPlotNavInput("1")
+        setPlotPage(0)
+      }
       if (existingData.gps_translated) {
         setShowGpsTranslatedBanner(true)
       }
@@ -363,10 +370,24 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     })
   }, [plotPage])
 
+  const incomplete = plots.filter((p) => !p.start_image || !p.end_image)
+  const canSave = incomplete.length === 0 && plots.length > 0
+  // Refs let the keyboard handler always read current values without being
+  // listed in the useEffect dependency array (avoids declaration-order issues).
+  const canSaveRef = useRef(false)
+  canSaveRef.current = canSave
+  const saveMutateRef = useRef<() => void>(() => {})
+
   // Keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      // Ctrl/Cmd+S → save (takes priority over plain S → mark start)
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault()
+        if (canSaveRef.current) saveMutateRef.current()
+        return
+      }
       if (e.key === "ArrowLeft")  { e.preventDefault(); prev() }
       if (e.key === "ArrowRight") { e.preventDefault(); next() }
       if (e.key === "s" || e.key === "S") { e.preventDefault(); markStart() }
@@ -377,9 +398,6 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [prev, next, markStart, markEnd, addPlot, deletePlot])
-
-  const incomplete = plots.filter((p) => !p.start_image || !p.end_image)
-  const canSave = incomplete.length === 0 && plots.length > 0
 
   const { showSuccessToast } = useCustomToast()
 
@@ -398,6 +416,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     },
     onError: () => showErrorToast("Failed to save plot markings"),
   })
+  // Keep the keyboard shortcut ref pointed at the current mutate function
+  saveMutateRef.current = () => saveMutation.mutate()
 
   const saveAsMutation = useMutation({
     mutationFn: (name: string) =>
@@ -503,7 +523,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           <kbd className="bg-background border rounded px-1">S</kbd> start ·{" "}
           <kbd className="bg-background border rounded px-1">E</kbd> end ·{" "}
           <kbd className="bg-background border rounded px-1">N</kbd> new plot ·{" "}
-          <kbd className="bg-background border rounded px-1">D</kbd> delete plot
+          <kbd className="bg-background border rounded px-1">D</kbd> delete plot ·{" "}
+          <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">S</kbd> save
         </span>
         <button
           onClick={() => setShowGps((v) => !v)}

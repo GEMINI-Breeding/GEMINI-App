@@ -82,6 +82,15 @@ class PlotRecord(SQLModel, table=True):
     # ── Relative path to cropped plot image ───────────────────────────────────
     image_rel_path: str | None = Field(default=None, max_length=1000)
 
+    # ── Detection / inference results (populated after inference step) ─────────
+    # Number of detections above the applied confidence threshold for this plot.
+    # Non-null when inference has been run and synced; None means unknown.
+    detection_count: int | None = Field(default=None)
+    # Per-class detection counts: {"classA": 3, "classB": 1} — JSON dict.
+    detection_class_summary: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON)
+    )
+
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

@@ -9,6 +9,7 @@ import { TraitMap } from "../components/TraitMap"
 import { RunSidebar } from "../components/RunSidebar"
 import { TraitsTable } from "../components/TraitsTable"
 import { TraitHistogram } from "../components/TraitHistogram"
+import { QueryTab } from "../components/QueryTab"
 
 // ── CSV export ─────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,14 @@ export function AnalyzeRun() {
     queryKey: ["analyze-ortho", runId],
     queryFn: () => analyzeApi.getOrthoInfo(runId),
   })
+
+  // Fetch trait records to get recordId (used for plot images in Map and Query tabs)
+  const { data: traitRecords } = useQuery({
+    queryKey: ["trait-records-by-run", runId],
+    queryFn: () => analyzeApi.listTraitRecordsByRun(runId),
+    staleTime: 60_000,
+  })
+  const recordId = traitRecords?.[0]?.id ?? null
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +151,7 @@ export function AnalyzeRun() {
         <TabsList className="mx-4 mt-3 self-start">
           <TabsTrigger value="map">Map</TabsTrigger>
           <TabsTrigger value="stats">Stats</TabsTrigger>
+          <TabsTrigger value="query">Query</TabsTrigger>
         </TabsList>
 
         {/* MAP TAB */}
@@ -164,6 +174,8 @@ export function AnalyzeRun() {
                   orthoInfo={orthoInfo ?? null}
                   selectedMetric={effectiveMetric}
                   filteredIds={filteredIds}
+                  recordId={recordId}
+                  runId={runId}
                 />
               </div>
               {runMeta && (
@@ -200,7 +212,11 @@ export function AnalyzeRun() {
             <div className="space-y-8 max-w-5xl">
               <section>
                 <h2 className="text-sm font-semibold mb-3">Table</h2>
-                <TraitsTable geojson={geojson} />
+                <TraitsTable
+                  geojson={geojson}
+                  runId={runId}
+                  recordId={recordId}
+                />
               </section>
               <section>
                 <h2 className="text-sm font-semibold mb-3">Distribution</h2>
@@ -211,6 +227,27 @@ export function AnalyzeRun() {
                 />
               </section>
             </div>
+          )}
+        </TabsContent>
+
+        {/* QUERY TAB */}
+        <TabsContent value="query" className="flex-1 overflow-auto mt-0 p-0">
+          {traitsLoading ? (
+            <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Loading traits…
+            </div>
+          ) : traitsError || !geojson ? (
+            <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground">
+              <AlertCircle className="w-8 h-8" />
+              <p className="text-sm">No trait data available for this run.</p>
+            </div>
+          ) : (
+            <QueryTab
+              geojson={geojson}
+              metricColumns={metricColumns}
+              runId={runId}
+            />
           )}
         </TabsContent>
       </Tabs>

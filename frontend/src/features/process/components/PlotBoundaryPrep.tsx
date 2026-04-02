@@ -1536,6 +1536,17 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       plotLayer.addLayer(leafletLayer);
       plotLayersRef.current.push(leafletLayer);
     });
+
+    // Re-apply selection highlight after layers are recreated (e.g. after a move).
+    // selectedIndexesRef2 is always current (assigned during render, not in an effect).
+    const selSet = new Set(selectedIndexesRef2.current);
+    if (selSet.size > 0) {
+      plotLayersRef.current.forEach((layer, idx) => {
+        if (selSet.has(idx)) {
+          layer.setStyle({ color: "#dc2626", weight: 2.5, fillColor: "#ef4444", fillOpacity: 0.4 });
+        }
+      });
+    }
   }, [previewGeoJson]);
 
   // Update only styles when selection changes — no layer recreation
@@ -1930,6 +1941,16 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             Click <strong>Save</strong> to save and close.
           </li>
         </ol>
+        <div className="border-t px-4 py-2.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Keyboard shortcuts: </span>
+          <kbd className="bg-background border rounded px-1">S</kbd> select mode ·{" "}
+          <kbd className="bg-background border rounded px-1">M</kbd> move mode ·{" "}
+          <kbd className="bg-background border rounded px-1">A</kbd> select all ·{" "}
+          <kbd className="bg-background border rounded px-1">C</kbd> clear selection ·{" "}
+          <kbd className="bg-background border rounded px-1">D</kbd> delete selected ·{" "}
+          <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">Z</kbd> undo ·{" "}
+          <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">Y</kbd> redo
+        </div>
       </details>
 
       {/* Map with floating grid settings panel */}

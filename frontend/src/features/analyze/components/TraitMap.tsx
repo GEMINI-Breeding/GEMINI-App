@@ -15,7 +15,9 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
-import { X, Download, Loader2 } from "lucide-react"
+import { X, Download, Loader2, ZoomIn } from "lucide-react"
+import { useExpandable, ExpandButton, FullscreenModal } from "@/components/Common/ExpandableSection"
+import { useQuery } from "@tanstack/react-query"
 import { buildColorScale } from "../utils/colorScale"
 import { POSITION_KEY_SET, lookupProperty } from "../utils/traitAliases"
 import { ColorLegend } from "./ColorLegend"
@@ -50,6 +52,14 @@ interface OrthoInfo {
   preview_url?: string | null
 }
 
+interface Prediction {
+  image: string
+  class: string
+  confidence: number
+  x: number; y: number; width: number; height: number
+  points?: Array<{ x: number; y: number }>
+}
+
 interface TraitMapProps {
   geojson: GeoJSON.FeatureCollection | null
   orthoInfo: OrthoInfo | null
@@ -58,6 +68,8 @@ interface TraitMapProps {
   filteredIds: Set<string> | null
   /** TraitRecord id — used to fetch plot images on click */
   recordId?: string | null
+  /** Pipeline run ID — used to fetch inference/detection results */
+  runId?: string | null
   /** When false, polygon layer is hidden */
   showPolygons?: boolean
   /** Fill opacity for colored polygons, 0-100 (default 70) */
@@ -94,6 +106,7 @@ export function TraitMap({
   selectedMetric,
   filteredIds,
   recordId,
+  runId,
   showPolygons = true,
   plotOpacity = 70,
 }: TraitMapProps) {
@@ -101,6 +114,35 @@ export function TraitMap({
   const [viewState, setViewState] = useState({ longitude: 0, latitude: 0, zoom: 2, pitch: 0, bearing: 0 })
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [plotImage, setPlotImage] = useState<PlotImageState | null>(null)
+
+  // Fetch inference results to enable detection overlay in plot popup
+  const { data: inferenceData } = useQuery({
+    queryKey: ["inference-results-analyze", runId],
+    queryFn: async () => {
+      const token = localStorage.getItem("access_token") || ""
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return null
+      return res.json()
+    },
+    enabled: !!runId,
+    staleTime: 60_000,
+  })
+
+  // Build plotId → predictions map
+  const predsByPlot = useMemo<Record<string, Prediction[]>>(() => {
+    if (!inferenceData?.available) return {}
+    const images: Array<{ name: string; plot?: string }> = inferenceData.images ?? []
+    const predictions: Prediction[] = inferenceData.predictions ?? []
+    const map: Record<string, Prediction[]> = {}
+    for (const img of images) {
+      if (!img.plot) continue
+      const preds = predictions.filter((p) => p.image === img.name)
+      if (preds.length > 0) map[img.plot] = preds
+    }
+    return map
+  }, [inferenceData])
 
   // Fit view to ortho bounds whenever orthoInfo changes
   useEffect(() => {
@@ -220,6 +262,7 @@ export function TraitMap({
           plotId={plotImage.plotId}
           properties={plotImage.properties}
           selectedMetric={selectedMetric}
+          predictions={predsByPlot[plotImage.plotId] ?? []}
           onClose={() => setPlotImage(null)}
         />
       )}
@@ -229,26 +272,85 @@ export function TraitMap({
 
 // ── Plot image panel ────────────────────────────────────────────────────────────
 
+const CLASS_COLOURS = [
+  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+]
+
+function classColour(cls: string): string {
+  let hash = 0
+  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
+  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
+}
+
 function PlotImagePanel({
   recordId,
   plotId,
   properties,
   selectedMetric,
+  predictions,
   onClose,
 }: {
   recordId: string
   plotId: string
   properties: Record<string, unknown>
   selectedMetric: string | null
+  predictions: Prediction[]
   onClose: () => void
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [showDetections, setShowDetections] = useState(false)
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const hasDetections = predictions.length > 0
+  const exp = useExpandable()
+
+  // Draw detection overlay — accounts for object-contain letterboxing
+  function drawCanvas() {
+    const canvas = canvasRef.current
+    const img = imgRef.current
+    if (!canvas || !img || !dims) {
+      canvasRef.current?.getContext("2d")?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0)
+      return
+    }
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    const rect = img.getBoundingClientRect()
+    const elemW = rect.width, elemH = rect.height
+    canvas.width = elemW; canvas.height = elemH
+    ctx.clearRect(0, 0, elemW, elemH)
+    if (!showDetections || predictions.length === 0) return
+    const imgAspect = dims.w / dims.h
+    const elemAspect = elemW / elemH
+    let scale: number, offsetX: number, offsetY: number
+    if (imgAspect > elemAspect) {
+      scale = elemW / dims.w; offsetX = 0; offsetY = (elemH - dims.h * scale) / 2
+    } else {
+      scale = elemH / dims.h; offsetX = (elemW - dims.w * scale) / 2; offsetY = 0
+    }
+    for (const p of predictions) {
+      const color = classColour(p.class)
+      const x = (p.x - p.width / 2) * scale + offsetX
+      const y = (p.y - p.height / 2) * scale + offsetY
+      const w = p.width * scale, h = p.height * scale
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h)
+      const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
+      ctx.font = "11px monospace"
+      const tw = ctx.measureText(label).width
+      ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
+      ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
+    }
+  }
+
+  useEffect(() => { drawCanvas() }, [dims, predictions, showDetections]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setBlobUrl(null)
     setError(false)
+    setDims(null)
     const endpoint = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
     const token = localStorage.getItem("access_token") || ""
     let revoked = false
@@ -294,33 +396,37 @@ function PlotImagePanel({
     ([k, v]) => !NON_METRIC_KEYS.has(k) && !POSITION_KEY_SET.has(k.toLowerCase()) && typeof v === "number",
   )
 
-  return (
-    <div
-      className="absolute z-30 bg-background/95 backdrop-blur-sm border rounded-lg shadow-xl overflow-hidden"
-      style={{ bottom: 16, right: 16, width: 480, maxHeight: "calc(100% - 32px)" }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-sm font-semibold">Plot {plotId}</span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={handleDownload}
-            disabled={downloading || error || !blobUrl}
-            title="Download plot image"
-            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-          >
-            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-          </button>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+  const accession = lookupProperty(properties, "accession")
 
-      {/* Plot info */}
+  function PanelImage({ maxH }: { maxH: string }) {
+    return error ? (
+      <p className="text-xs text-muted-foreground text-center py-4 px-3">Image not available</p>
+    ) : !blobUrl ? (
+      <div className="flex items-center justify-center py-6">
+        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+      </div>
+    ) : (
+      <div className="relative">
+        <img
+          ref={imgRef}
+          src={blobUrl}
+          alt={`Plot ${plotId}`}
+          className={`w-full object-contain ${maxH}`}
+          onLoad={(e) => {
+            setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+            drawCanvas()
+          }}
+        />
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }} />
+      </div>
+    )
+  }
+
+  function PanelInfo() {
+    return (
       <div className="px-3 py-2 border-b">
-        {lookupProperty(properties, "accession") != null && (
-          <p className="text-sm text-muted-foreground mb-1.5">{String(lookupProperty(properties, "accession"))}</p>
+        {accession != null && (
+          <p className="text-xs text-muted-foreground mb-1.5">Accession: {String(accession)}</p>
         )}
         {selectedMetric && properties[selectedMetric] != null && (
           <p className="text-sm font-medium text-primary mb-1.5">
@@ -340,18 +446,68 @@ function PlotImagePanel({
           </div>
         )}
       </div>
+    )
+  }
 
-      {/* Image */}
-      {error ? (
-        <p className="text-xs text-muted-foreground text-center py-4 px-3">Image not available</p>
-      ) : !blobUrl ? (
-        <div className="flex items-center justify-center py-6">
-          <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+  return (
+    <>
+    <div
+      className="absolute z-30 bg-background/95 backdrop-blur-sm border rounded-lg shadow-xl overflow-hidden"
+      style={{ bottom: 16, right: 16, width: 480, maxHeight: "calc(100% - 32px)" }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <span className="text-sm font-semibold">Plot {plotId}</span>
+        <div className="flex items-center gap-1">
+          {hasDetections && (
+            <button
+              type="button"
+              onClick={() => setShowDetections((v) => !v)}
+              title={showDetections ? "Hide detections" : "Show detections"}
+              className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+          )}
+          <ExpandButton onClick={exp.open} title="Expand plot" className="h-7 w-7" />
+          <button
+            onClick={handleDownload}
+            disabled={downloading || error || !blobUrl}
+            title="Download plot image"
+            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+          >
+            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          </button>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      ) : (
-        <img src={blobUrl} alt={`Plot ${plotId}`} className="w-full object-contain max-h-64" />
-      )}
+      </div>
+
+      <PanelInfo />
+      <PanelImage maxH="max-h-64" />
     </div>
+
+    <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Plot ${plotId}`}
+      headerExtra={hasDetections ? (
+        <button
+          type="button"
+          onClick={() => setShowDetections((v) => !v)}
+          className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
+        >
+          <ZoomIn className="h-3 w-3" />
+          {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
+        </button>
+      ) : undefined}
+    >
+      <div className="flex flex-col items-center justify-center h-full p-4">
+        <div className="max-w-3xl w-full space-y-3">
+          <PanelInfo />
+          <PanelImage maxH="max-h-[70vh]" />
+        </div>
+      </div>
+    </FullscreenModal>
+    </>
   )
 }
 
@@ -384,7 +540,7 @@ function MapTooltip({
         Plot {String(properties.plot ?? properties.plot_id ?? "—")}
       </p>
       {accession != null && (
-        <p className="text-muted-foreground mb-2">{String(accession)}</p>
+        <p className="text-muted-foreground mb-2">Accession: {String(accession)}</p>
       )}
       {selectedMetric && properties[selectedMetric] != null && (
         <p className="font-medium text-primary mb-2">

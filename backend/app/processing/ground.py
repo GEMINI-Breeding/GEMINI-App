@@ -1362,24 +1362,7 @@ def run_georeferencing(
     emit({"event": "progress", "message": "Combining plot mosaics…"})
     combine_utm_tiffs_to_mosaic(out_dir, plot_ids)
 
-    emit({"event": "progress", "message": "Building plot boundary GeoJSON…"})
-    from app.processing.geo_utils import build_plot_boundaries_geojson
-
-    geojson_path = build_plot_boundaries_geojson(
-        out_dir=out_dir,
-        plot_ids=plot_ids,
-        plot_borders_csv=_effective_borders if _effective_borders.exists() else None,
-    )
-
     outputs: dict = {"georeferencing": paths.rel(out_dir)}
-    if geojson_path:
-        outputs["plot_boundaries_geojson"] = paths.rel(geojson_path)
-        # Write to canonical location so the boundary tool can open it directly.
-        # Use read_bytes/write_bytes instead of shutil.copy2 — more portable on Windows.
-        paths.plot_boundary_geojson.parent.mkdir(parents=True, exist_ok=True)
-        paths.plot_boundary_geojson.write_bytes(geojson_path.read_bytes())
-        outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
-        outputs["_mark_steps_complete"] = ["plot_boundary_prep"]
     return outputs
 
 
