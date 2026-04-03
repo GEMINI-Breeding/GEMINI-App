@@ -270,10 +270,17 @@ def _start_local_server(host_port: int = 9002) -> None:
         )
     logger.info("Container started: %s", run_result.stdout.strip())
 
-    # Wait up to 60 s for the server to become available
-    for i in range(60):
+    # Give the container a moment to bind its port before we start polling.
+    # WSL2/Windows adds significant startup overhead.
+    time.sleep(5)
+
+    # Wait up to 3 minutes for the server to become available.
+    # The Roboflow image loads PyTorch + models on first request, which can
+    # take 2+ minutes on Windows/WSL2.
+    max_wait = 180
+    for i in range(max_wait):
         if _is_local_server_running(port=host_port):
-            logger.info("Local inference server is ready (waited %ds).", i)
+            logger.info("Local inference server is ready (waited %ds).", i + 5)
             return
         time.sleep(1)
     # Capture container logs to help diagnose why it didn't come up
@@ -282,7 +289,7 @@ def _start_local_server(host_port: int = 9002) -> None:
         capture_output=True, text=True,
     )
     raise RuntimeError(
-        "Roboflow inference server did not become available within 60 seconds.\n"
+        f"Roboflow inference server did not become available within {max_wait} seconds.\n"
         f"Container logs:\n{logs.stdout[-1000:]}\n{logs.stderr[-500:]}"
     )
 
