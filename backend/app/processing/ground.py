@@ -1486,6 +1486,18 @@ def run_inference(
     global_total = len(models) * len(plot_images)
     global_done = 0
 
+    # Initialize Traits-WGS84.geojson from the ground-specific boundary before the
+    # inference loop. Done unconditionally so re-runs always pick up the correct geometry
+    # (inside the loop the per-model code only merges detection counts into this file).
+    import shutil as _shutil
+    traits_path = paths.traits_geojson
+    _ground_boundary_rel = outputs.get("plot_boundaries_geojson")
+    _boundary_src = paths.abs(_ground_boundary_rel) if _ground_boundary_rel else paths.plot_boundary_geojson
+    if _boundary_src.exists():
+        traits_path.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_boundary_src, traits_path)
+        logger.info("Initialized Traits-WGS84.geojson from ground boundary (%s)", _boundary_src.name)
+
     for model in models:
         if stop_event.is_set():
             return {}
@@ -1570,14 +1582,7 @@ def run_inference(
         emit({"event": "log", "message": summary})
         logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
 
-        # Merge detection counts into Traits GeoJSON if a plot boundary exists
-        traits_path = paths.traits_geojson
-        boundary_path = paths.plot_boundary_geojson
-        if boundary_path.exists() and not traits_path.exists():
-            import shutil as _shutil
-            traits_path.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(boundary_path, traits_path)
-            logger.info("Copied plot boundary → %s for inference trait merge", traits_path.name)
+        # Merge detection counts into Traits GeoJSON (boundary geometry already initialized above)
         if traits_path.exists():
             merge_inference_into_geojson(
                 traits_path, all_rows, model_label=label,

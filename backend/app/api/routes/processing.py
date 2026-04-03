@@ -1822,18 +1822,29 @@ def orthomosaic_info(
         existing_geojson = None
         existing_grid_settings = None
 
-        # First choice: load the boundary this run explicitly saved.
-        _active_pbv_own = _outputs.get("active_plot_boundary_version")
-        if _active_pbv_own is not None:
-            _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
-            if _vf.exists():
+        # First choice (ground): load the run-specific boundary saved by PlotBoundaryPrep.
+        _ground_boundary_rel = _outputs.get("plot_boundaries_geojson")
+        if _ground_boundary_rel:
+            _ground_boundary_path = paths.abs(_ground_boundary_rel)
+            if _ground_boundary_path.exists():
                 try:
-                    raw = json.loads(_vf.read_text())
-                    existing_grid_settings = raw.pop("grid_settings", None)
-                    raw.pop("_run_meta", None)
-                    existing_geojson = raw
+                    existing_geojson = json.loads(_ground_boundary_path.read_text())
                 except Exception:
                     pass
+
+        # Second choice: load the boundary this run explicitly saved via the versioned system.
+        if existing_geojson is None:
+            _active_pbv_own = _outputs.get("active_plot_boundary_version")
+            if _active_pbv_own is not None:
+                _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
+                if _vf.exists():
+                    try:
+                        raw = json.loads(_vf.read_text())
+                        existing_grid_settings = raw.pop("grid_settings", None)
+                        raw.pop("_run_meta", None)
+                        existing_geojson = raw
+                    except Exception:
+                        pass
 
         # Fallback: if this run has no own boundary yet, load the most recent
         # boundary from the shared population directory (e.g. one saved by the
