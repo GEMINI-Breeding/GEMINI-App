@@ -3196,14 +3196,25 @@ def apply_inference_threshold(
             continue
 
         rows: list[dict] = []
+        all_rows: list[dict] = []
+        fieldnames: list[str] = []
         with open(csv_path, newline="") as f:
-            for row in _csv.DictReader(f):
+            reader = _csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            for row in reader:
+                all_rows.append(row)
                 try:
                     conf = float(row.get("confidence", 0))
                 except (ValueError, TypeError):
                     conf = 0.0
                 if conf >= body.confidence_threshold:
                     rows.append(row)
+
+        # Overwrite the CSV so inference-summary reflects the filtered count
+        with open(csv_path, "w", newline="") as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
 
         merge_inference_into_geojson(
             traits_path, rows,

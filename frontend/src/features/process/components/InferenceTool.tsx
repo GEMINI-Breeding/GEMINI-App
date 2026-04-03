@@ -23,7 +23,7 @@ import {
   Maximize2,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
@@ -435,6 +435,7 @@ export function InferenceTool({
   associationVersions,
   traitVersions,
 }: InferenceToolProps) {
+  const queryClient = useQueryClient()
   const [imageIdx, setImageIdx] = useState(0)
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined)
   // 0–100 integer threshold applied client-side; API always returns at confidence ≥ 0.1
@@ -498,6 +499,7 @@ export function InferenceTool({
         const data = await res.json()
         const applied = (data.applied as string[]).join(", ")
         setTraitsStatus({ loading: false, message: `Applied ${traitsThreshold}% → ${applied}` })
+        queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] })
       }
     } catch (e) {
       setTraitsStatus({ loading: false, message: `Error: ${String(e)}` })
