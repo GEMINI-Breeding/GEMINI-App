@@ -1772,9 +1772,13 @@ def _docker_build_context() -> tuple[Path, Path]:
 
 def _dockerfile_hash() -> str:
     """Short MD5 of Dockerfile + run_extraction.py — used to detect when a rebuild is needed."""
-    dockerfile_dir, _ = _docker_build_context()
+    dockerfile_dir, bin_to_images_src = _docker_build_context()
     content = (dockerfile_dir / "Dockerfile").read_bytes()
     content += (dockerfile_dir / "run_extraction.py").read_bytes()
+    # Include bin_to_images.py so changes to the extraction script trigger a rebuild
+    bin_script = bin_to_images_src / "bin_to_images.py"
+    if bin_script.exists():
+        content += bin_script.read_bytes()
     return hashlib.md5(content).hexdigest()[:16]  # noqa: S324
 
 

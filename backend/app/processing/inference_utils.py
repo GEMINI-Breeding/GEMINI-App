@@ -159,6 +159,11 @@ def apply_nms(predictions: list[dict], iou_threshold: float = 0.5) -> list[dict]
 CLOUD_API_URL = "https://detect.roboflow.com"
 LOCAL_API_URL = "http://localhost:9002"
 
+# Prevents two concurrent inference jobs from both trying to start the Docker
+# container at the same time (race condition: both would docker rm -f each other).
+import threading as _threading
+_docker_start_lock = _threading.Lock()
+
 
 def _is_local_server_running(host: str = "localhost", port: int = 9002) -> bool:
     """
@@ -378,7 +383,10 @@ def _make_local_infer_fn(
         port = 9001
 
     if not _is_local_server_running(host, port):
-        _start_local_server(host_port=port)
+        with _docker_start_lock:
+            # Re-check inside the lock — another thread may have started it
+            if not _is_local_server_running(host, port):
+                _start_local_server(host_port=port)
 
     endpoint = f"{api_url}/{model_id}"
 
@@ -396,14 +404,28 @@ def _make_local_infer_fn(
             "[local-infer] %s status=%s body_len=%d body_preview=%r",
             crop_path, resp.status_code, len(resp.text), resp.text[:120],
         )
+        if resp.status_code == 503 or not resp.text.strip():
+            # Server is still loading the model — wait and retry up to 3 minutes
+            import time as _time
+            for _attempt in range(36):  # 36 × 5 s = 3 min
+                _time.sleep(5)
+                resp = requests.post(
+                    endpoint,
+                    params={"api_key": api_key, "confidence": confidence_threshold},
+                    data=img_b64,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=30,
+                )
+                if resp.status_code != 503 and resp.text.strip():
+                    break
+            else:
+                raise RuntimeError(
+                    f"Local inference server still returned {resp.status_code} after 3 minutes — "
+                    "model may have failed to load."
+                )
         if not resp.ok:
             raise _InferenceConfigError(
                 f"Local inference server returned {resp.status_code} for model '{model_id}': {resp.text[:200]}"
-            )
-        if not resp.text.strip():
-            raise RuntimeError(
-                f"Local inference server returned an empty body (status {resp.status_code}) — "
-                "the model may still be loading. Retry in a moment."
             )
         body = resp.json()
         return body.get("predictions", [])
