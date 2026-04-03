@@ -588,7 +588,18 @@ def get_ortho_info(
         preview_url = f"/api/v1/pipeline-runs/{run.id}/mosaic-preview?stitch_version={stitch_v}"
         return {"available": True, "path": None, "bounds": bounds, "preview_url": preview_url}
     else:
-        tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
+        # Resolve the active versioned ortho from run outputs, falling back to
+        # legacy unversioned paths for backward compatibility.
+        orthos = outputs.get("orthomosaics", [])
+        active_v = outputs.get("active_ortho_version")
+        active_ortho = next((o for o in orthos if o["version"] == active_v), None)
+        if active_ortho:
+            # Prefer pyramid (downsampled) for display; fall back to full RGB
+            pyramid_rel = active_ortho.get("pyramid") or active_ortho.get("rgb")
+            tif = paths.abs(pyramid_rel) if pyramid_rel else paths.aerial_rgb_pyramid
+        else:
+            # Legacy: single unversioned file
+            tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
 
     if not tif.exists():
         return not_available
