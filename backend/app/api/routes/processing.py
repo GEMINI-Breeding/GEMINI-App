@@ -3206,14 +3206,20 @@ def apply_inference_threshold(
             logger.warning("apply_inference_threshold: CSV not found at %s", csv_path)
             continue
 
+        # Keep the original (unfiltered) CSV as a backup so thresholds can be
+        # re-applied at any confidence level without re-running inference.
+        original_csv_path = csv_path.with_stem(csv_path.stem + "_original")
+        if not original_csv_path.exists():
+            import shutil as _shutil
+            _shutil.copy2(csv_path, original_csv_path)
+            logger.info("apply_inference_threshold: backed up original CSV → %s", original_csv_path.name)
+
         rows: list[dict] = []
-        all_rows: list[dict] = []
         fieldnames: list[str] = []
-        with open(csv_path, newline="") as f:
+        with open(original_csv_path, newline="") as f:
             reader = _csv.DictReader(f)
             fieldnames = list(reader.fieldnames or [])
             for row in reader:
-                all_rows.append(row)
                 try:
                     conf = float(row.get("confidence", 0))
                 except (ValueError, TypeError):
@@ -3221,7 +3227,7 @@ def apply_inference_threshold(
                 if conf >= body.confidence_threshold:
                     rows.append(row)
 
-        # Overwrite the CSV so inference-summary reflects the filtered count
+        # Write filtered rows to the active CSV so inference-summary reflects the threshold
         with open(csv_path, "w", newline="") as f:
             writer = _csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()

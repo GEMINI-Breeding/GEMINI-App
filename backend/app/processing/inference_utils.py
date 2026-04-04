@@ -562,6 +562,8 @@ def merge_inference_into_geojson(
     with open(geojson_path) as f:
         gj = _json.load(f)
 
+    model_prefix = f"{model_label}/"
+
     # Count predictions per plot_id and class
     counts: dict[str, dict[str, int]] = {}
     for row in predictions:
@@ -572,26 +574,28 @@ def merge_inference_into_geojson(
             inner[cls] = inner.get(cls, 0) + 1
 
     all_classes = sorted({cls for class_counts in counts.values() for cls in class_counts})
-    if not all_classes:
-        return  # Nothing to merge
 
     for feat in gj.get("features", []):
         props = feat.get("properties") or {}
-        # Match feature to a plot_id using the configured property key
-        pid = str(
-            props.get(feature_match_prop)
-            or props.get(feature_match_prop.lower())
-            or ""
-        )
-        plot_counts = counts.get(pid, {})
-        for cls in all_classes:
-            props[f"{model_label}/{cls}"] = plot_counts.get(cls, 0)
+        # Always clear stale columns for this model so re-runs don't leave old values
+        for k in [k for k in props if k.startswith(model_prefix)]:
+            del props[k]
+        if all_classes:
+            # Match feature to a plot_id using the configured property key
+            pid = str(
+                props.get(feature_match_prop)
+                or props.get(feature_match_prop.lower())
+                or ""
+            )
+            plot_counts = counts.get(pid, {})
+            for cls in all_classes:
+                props[f"{model_label}/{cls}"] = plot_counts.get(cls, 0)
         feat["properties"] = props
 
     with open(geojson_path, "w") as f:
         _json.dump(gj, f)
 
     logger.info(
-        "merge_inference_into_geojson: added %d class columns (%s) to %s",
-        len(all_classes), ", ".join(all_classes), geojson_path.name,
+        "merge_inference_into_geojson: cleared stale %s/* columns, added %d class columns (%s) to %s",
+        model_label, len(all_classes), ", ".join(all_classes), geojson_path.name,
     )

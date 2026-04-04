@@ -350,10 +350,13 @@ function PlotViewDialog({
   }
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    drawCanvas(canvas);
-  }, [dims, predictions, showDetections]); // eslint-disable-line react-hooks/exhaustive-deps
+    const id = requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      drawCanvas(canvas);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [dims, predictions, showDetections, exp.isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasDetections = (predictions?.length ?? 0) > 0;
 
@@ -927,6 +930,7 @@ function PlotImageCard({
   metricColumns,
   onKeep,
   isKept,
+  runId,
 }: {
   recordId: string;
   plotId: string;
@@ -934,11 +938,12 @@ function PlotImageCard({
   metricColumns: string[];
   onKeep?: () => void;
   isKept?: boolean;
+  runId?: string;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const exp = useExpandable();
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     setBlobUrl(null);
@@ -1014,7 +1019,7 @@ function PlotImageCard({
                 {isKept ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
               </Button>
             )}
-            <ExpandButton onClick={exp.open} title="Expand plot" />
+            <ExpandButton onClick={() => setDialogOpen(true)} title="View plot &amp; detections" />
             <Button
               variant="ghost"
               size="icon"
@@ -1055,29 +1060,16 @@ function PlotImageCard({
         )}
       </div>
 
-      {/* Fullscreen expand */}
-      <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Plot ${plotId}`}>
-        <div className="flex flex-col items-center justify-center h-full p-6">
-        <div className="max-w-3xl w-full space-y-4">
-          {accession != null && (
-            <p className="text-sm text-muted-foreground">Accession: {String(accession)}</p>
-          )}
-          <div className="bg-muted/20 rounded-lg overflow-hidden">
-            <CardImage maxH="max-h-[70vh]" />
-          </div>
-          {statRows.length > 0 && (
-            <div className="space-y-1">
-              {statRows.map((col) => (
-                <div key={col} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{col.replace(/_/g, " ")}</span>
-                  <span className="font-mono">{(properties[col] as number).toFixed(3)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </div>
-      </FullscreenModal>
+      {dialogOpen && (
+        <PlotViewDialog
+          recordId={recordId}
+          plotId={plotId}
+          properties={properties}
+          metricColumns={metricColumns}
+          runId={runId}
+          onClose={() => setDialogOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -1662,6 +1654,7 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
                     plotId={plotId}
                     properties={f.properties ?? {}}
                     metricColumns={metricCols}
+                    runId={records.find((r) => r.id === selectedId)?.run_id}
                     onKeep={() => toggleKeep(plotId, f.properties ?? {})}
                     isKept={keptPlots.some((p) => `${p.recordId}:${p.plotId}` === keepKey)}
                   />

@@ -115,12 +115,16 @@ export function TraitMap({
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [plotImage, setPlotImage] = useState<PlotImageState | null>(null)
 
-  // Fetch inference results to enable detection overlay in plot popup
+  // Model selector for the detection overlay (shared across all plot popups)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
+
+  // Fetch inference results for the selected model
   const { data: inferenceData } = useQuery({
-    queryKey: ["inference-results-analyze", runId],
+    queryKey: ["inference-results-analyze", runId, selectedModel],
     queryFn: async () => {
       const token = localStorage.getItem("access_token") || ""
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), {
+      const modelParam = selectedModel ? `?model=${encodeURIComponent(selectedModel)}` : ""
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results${modelParam}`), {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) return null
@@ -129,6 +133,8 @@ export function TraitMap({
     enabled: !!runId,
     staleTime: 60_000,
   })
+
+  const availableModels: string[] = inferenceData?.models ?? []
 
   // Build plotId → predictions map
   const predsByPlot = useMemo<Record<string, Prediction[]>>(() => {
@@ -263,6 +269,9 @@ export function TraitMap({
           properties={plotImage.properties}
           selectedMetric={selectedMetric}
           predictions={predsByPlot[plotImage.plotId] ?? []}
+          availableModels={availableModels}
+          selectedModel={selectedModel ?? inferenceData?.active_model ?? null}
+          onModelChange={setSelectedModel}
           onClose={() => setPlotImage(null)}
         />
       )}
@@ -289,6 +298,9 @@ function PlotImagePanel({
   properties,
   selectedMetric,
   predictions,
+  availableModels,
+  selectedModel,
+  onModelChange,
   onClose,
 }: {
   recordId: string
@@ -296,6 +308,9 @@ function PlotImagePanel({
   properties: Record<string, unknown>
   selectedMetric: string | null
   predictions: Prediction[]
+  availableModels?: string[]
+  selectedModel?: string | null
+  onModelChange?: (model: string) => void
   onClose: () => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -345,7 +360,10 @@ function PlotImagePanel({
     }
   }
 
-  useEffect(() => { drawCanvas() }, [dims, predictions, showDetections]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const id = requestAnimationFrame(() => drawCanvas())
+    return () => cancelAnimationFrame(id)
+  }, [dims, predictions, showDetections, exp.isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setBlobUrl(null)
@@ -459,6 +477,17 @@ function PlotImagePanel({
       <div className="flex items-center justify-between px-3 py-2 border-b">
         <span className="text-sm font-semibold">Plot {plotId}</span>
         <div className="flex items-center gap-1">
+          {availableModels && availableModels.length > 1 && onModelChange && (
+            <select
+              className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
+              value={selectedModel ?? ""}
+              onChange={(e) => onModelChange(e.target.value)}
+            >
+              {availableModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
           {hasDetections && (
             <button
               type="button"
@@ -489,16 +518,31 @@ function PlotImagePanel({
     </div>
 
     <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Plot ${plotId}`}
-      headerExtra={hasDetections ? (
-        <button
-          type="button"
-          onClick={() => setShowDetections((v) => !v)}
-          className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
-        >
-          <ZoomIn className="h-3 w-3" />
-          {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
-        </button>
-      ) : undefined}
+      headerExtra={
+        <div className="flex items-center gap-2">
+          {availableModels && availableModels.length > 1 && onModelChange && (
+            <select
+              className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
+              value={selectedModel ?? ""}
+              onChange={(e) => onModelChange(e.target.value)}
+            >
+              {availableModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
+          {hasDetections && (
+            <button
+              type="button"
+              onClick={() => setShowDetections((v) => !v)}
+              className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
+            >
+              <ZoomIn className="h-3 w-3" />
+              {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
+            </button>
+          )}
+        </div>
+      }
     >
       <div className="flex flex-col items-center justify-center h-full p-4">
         <div className="max-w-3xl w-full space-y-3">

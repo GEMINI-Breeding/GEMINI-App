@@ -1443,6 +1443,256 @@ function GroundInferencePanel({
   );
 }
 
+// ── Ground: unified inference + trait versions panel ─────────────────────────
+
+function GroundVersionsPanel({
+  runId,
+  onDeleteRecord,
+  onDeleteInference,
+  isDeletingRecord,
+  isDeletingInference,
+}: {
+  runId: string;
+  onDeleteRecord: (id: string) => void;
+  onDeleteInference: (label: string) => void;
+  isDeletingRecord: boolean;
+  isDeletingInference: boolean;
+}) {
+  const [expandedVersions, setExpandedVersions] = useState<Set<number>>(new Set());
+  const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<string | null>(null);
+  const [confirmDeleteInference, setConfirmDeleteInference] = useState<string | null>(null);
+
+  const { data: records = [], isLoading: loadingRecords } = useQuery({
+    queryKey: ["trait-records-run", runId],
+    queryFn: () => analyzeApi.listTraitRecordsByRun(runId),
+    staleTime: 30_000,
+  });
+
+  const { data: inferenceResults = [], isLoading: loadingInference } = useQuery<InferenceResult[]>({
+    queryKey: ["inference-summary", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`));
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data?.results ?? []);
+    },
+    staleTime: 30_000,
+  });
+
+  // Group inference results by trait_version
+  const inferenceByVersion = inferenceResults.reduce<Record<number, InferenceResult[]>>(
+    (acc, r) => {
+      const v = r.trait_version ?? -1;
+      acc[v] = [...(acc[v] ?? []), r];
+      return acc;
+    },
+    {}
+  );
+
+  function toggleExpanded(version: number) {
+    setExpandedVersions((prev) => {
+      const next = new Set(prev);
+      if (next.has(version)) next.delete(version);
+      else next.add(version);
+      return next;
+    });
+  }
+
+  if (loadingRecords || loadingInference) {
+    return (
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading inference records…
+      </div>
+    );
+  }
+
+  if (records.length === 0 && inferenceResults.length === 0) return null;
+
+  const confirmRecord = records.find((r: TraitRecord) => r.id === confirmDeleteRecord);
+
+  return (
+    <>
+      <div className="mt-3 overflow-hidden rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-xs">
+              <TableHead className="w-6 py-2" />
+              <TableHead className="w-10 py-2 text-xs">v</TableHead>
+              <TableHead className="py-2 text-xs">Stitch</TableHead>
+              <TableHead className="py-2 text-xs">Boundary</TableHead>
+              <TableHead className="py-2 text-right text-xs">Plots</TableHead>
+              <TableHead className="py-2 text-xs">Detections</TableHead>
+              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {records.map((r: TraitRecord) => {
+              const versionInferences = inferenceByVersion[r.version] ?? [];
+              const isExpanded = expandedVersions.has(r.version);
+              return (
+                <>
+                  <TableRow key={r.id} className="text-xs">
+                    <TableCell className="py-1.5">
+                      {versionInferences.length > 0 && (
+                        <button
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => toggleExpanded(r.version)}
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground py-1.5 font-mono">
+                      v{r.version}
+                    </TableCell>
+                    <TableCell className="py-1.5 font-mono">
+                      {versionLabel(r.stitch_version, r.stitch_name)}
+                    </TableCell>
+                    <TableCell className="py-1.5 font-mono">
+                      {r.boundary_version != null
+                        ? versionLabel(r.boundary_version, r.boundary_name)
+                        : "default"}
+                    </TableCell>
+                    <TableCell className="py-1.5 text-right font-mono">
+                      {r.plot_count}
+                    </TableCell>
+                    <TableCell className="py-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {versionInferences.length === 0 ? (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        ) : (
+                          versionInferences.flatMap((inf) =>
+                            Object.entries(inf.classes).map(([cls, count]) => (
+                              <Badge
+                                key={`${inf.label}/${cls}`}
+                                variant="outline"
+                                className="px-1 py-0 text-[10px]"
+                              >
+                                {cls}: {count}
+                              </Badge>
+                            ))
+                          )
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-1.5 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-red-500 hover:text-red-600"
+                        disabled={isDeletingRecord}
+                        onClick={() => setConfirmDeleteRecord(r.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Expanded sub-rows: one per model */}
+                  {isExpanded &&
+                    versionInferences.map((inf) => (
+                      <TableRow
+                        key={`${r.id}-${inf.label}`}
+                        className="bg-muted/30 text-xs"
+                      >
+                        <TableCell />
+                        <TableCell />
+                        <TableCell colSpan={2} className="py-1.5">
+                          <span className="text-muted-foreground pl-2 font-medium">
+                            {inf.label}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-1.5 text-right font-mono">
+                          {inf.plot_count}
+                        </TableCell>
+                        <TableCell className="py-1.5">
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(inf.classes).map(([cls, count]) => (
+                              <Badge
+                                key={cls}
+                                variant="secondary"
+                                className="px-1 py-0 text-[10px]"
+                              >
+                                {cls}: {count}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-1.5 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              title="Download CSV"
+                              onClick={() =>
+                                tauriDownload(
+                                  `/api/v1/files/serve?path=${encodeURIComponent(inf.csv_rel_path)}`,
+                                  `${inf.label}_predictions.csv`,
+                                  "GET",
+                                  [{ name: "CSV", extensions: ["csv"] }]
+                                )
+                              }
+                            >
+                              <Download className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive h-6 w-6"
+                              title="Delete inference results"
+                              disabled={isDeletingInference}
+                              onClick={() => setConfirmDeleteInference(inf.label)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteRecord !== null}
+        title="Delete trait record?"
+        description={
+          confirmRecord
+            ? `This will permanently delete the traits GeoJSON for Stitch ${versionLabel(confirmRecord.stitch_version, confirmRecord.stitch_name)} / Boundary ${confirmRecord.boundary_version != null ? versionLabel(confirmRecord.boundary_version, confirmRecord.boundary_name) : "default"} (${confirmRecord.plot_count} plots). This cannot be undone.`
+            : "This will permanently delete the trait record. This cannot be undone."
+        }
+        isDeleting={isDeletingRecord}
+        onConfirm={() => {
+          if (confirmDeleteRecord) onDeleteRecord(confirmDeleteRecord);
+          setConfirmDeleteRecord(null);
+        }}
+        onCancel={() => setConfirmDeleteRecord(null)}
+      />
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteInference !== null}
+        title="Delete inference results"
+        description={`Delete inference results for "${confirmDeleteInference}"? This will remove the predictions CSV.`}
+        isDeleting={isDeletingInference}
+        onConfirm={() => {
+          if (confirmDeleteInference) onDeleteInference(confirmDeleteInference);
+          setConfirmDeleteInference(null);
+        }}
+        onCancel={() => setConfirmDeleteInference(null)}
+      />
+    </>
+  );
+}
+
 // ── Ground: plot marking versions panel ──────────────────────────────────────
 
 function PlotMarkingVersionsPanel({
@@ -4228,12 +4478,16 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                     }
                     if (step.key === "inference" && pipelineType === "ground") {
                       return (
-                        <GroundInferencePanel
+                        <GroundVersionsPanel
                           runId={runId}
-                          onDelete={(label) =>
+                          onDeleteRecord={(id) =>
+                            deleteTraitRecordMutation.mutate(id)
+                          }
+                          onDeleteInference={(label) =>
                             deleteInferenceMutation.mutate(label)
                           }
-                          isDeleting={deleteInferenceMutation.isPending}
+                          isDeletingRecord={deleteTraitRecordMutation.isPending}
+                          isDeletingInference={deleteInferenceMutation.isPending}
                         />
                       );
                     }

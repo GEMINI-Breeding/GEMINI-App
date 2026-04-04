@@ -1642,6 +1642,16 @@ def run_inference(
             logger.info("Created TraitRecord v%d for ground run %s (%d plots, %d trait columns)",
                         _max_v + 1, run_id, len(_features), len(_trait_cols))
 
+            # Back-fill trait_version into the inference entries for the new models
+            _new_labels = {e["label"] for e in new_entries}
+            _updated_inference = outputs.get("inference", [])
+            for _entry in _updated_inference:
+                if _entry.get("label") in _new_labels:
+                    _entry["trait_version"] = _max_v + 1
+            outputs["inference"] = _updated_inference
+            run = session.get(PipelineRun, run_id)
+            update_pipeline_run(session=session, db_run=run, run_in=PipelineRunUpdate(outputs=outputs))
+
             # ── Populate PlotRecord table ─────────────────────────────────────
             try:
                 from sqlmodel import select as _sel_pr2

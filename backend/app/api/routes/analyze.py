@@ -437,6 +437,37 @@ def get_trait_record_plot_image(
         if matches:
             img_path = matches[0]
 
+    # For ground pipelines, images live in the AgRowStitch_v{N}/ directory, not cropped_images/.
+    # Try all stitch version dirs if the aerial crop_dir didn't have it.
+    if not img_path.exists() and pipeline and pipeline.type == "ground":
+        _outputs = run.outputs or {}
+        # Gather all stitch versions to search (most recent first)
+        _stitch_versions: list[int] = []
+        _stitchings = _outputs.get("stitchings") or []
+        for _s in reversed(_stitchings):
+            v = _s.get("version")
+            if v is not None:
+                _stitch_versions.append(int(v))
+        _cur_v = _outputs.get("stitching_version")
+        if _cur_v is not None and int(_cur_v) not in _stitch_versions:
+            _stitch_versions.insert(0, int(_cur_v))
+        if not _stitch_versions:
+            _stitch_versions = [1]
+        for _v in _stitch_versions:
+            _stitch_dir = paths.agrowstitch_dir(_v)
+            if not _stitch_dir.exists():
+                continue
+            # Primary pattern used by ground stitching
+            _candidate = _stitch_dir / f"full_res_mosaic_temp_plot_{plot_id}.png"
+            if _candidate.exists():
+                img_path = _candidate
+                break
+            # Fallback: any PNG containing the plot_id
+            _matches = sorted(_stitch_dir.glob(f"*_{plot_id}.png"))
+            if _matches:
+                img_path = _matches[0]
+                break
+
     if not img_path.exists():
         raise HTTPException(status_code=404, detail=f"Plot image not found for plot {plot_id}. Re-run trait extraction to regenerate.")
 
@@ -467,6 +498,8 @@ def get_trait_record_image_plot_ids(
     workspace = session.get(Workspace, pipeline.workspace_id)
     paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
 
+    import re as _re
+
     crop_dir = paths.cropped_images_dir
     plot_ids: list[str] = []
     if crop_dir.exists():
@@ -474,6 +507,33 @@ def get_trait_record_image_plot_ids(
             stem = p.stem  # e.g. "plot_1_1"
             if stem.startswith("plot_"):
                 plot_ids.append(stem[5:])  # strip leading "plot_"
+
+    # For ground pipelines, images live in AgRowStitch_v{N}/ directories
+    if not plot_ids and pipeline and pipeline.type == "ground":
+        _outputs = run.outputs or {}
+        _stitch_versions: list[int] = []
+        _stitchings = _outputs.get("stitchings") or []
+        for _s in _stitchings:
+            v = _s.get("version")
+            if v is not None:
+                _stitch_versions.append(int(v))
+        _cur_v = _outputs.get("stitching_version")
+        if _cur_v is not None and int(_cur_v) not in _stitch_versions:
+            _stitch_versions.append(int(_cur_v))
+        if not _stitch_versions:
+            _stitch_versions = [1]
+        seen: set[str] = set()
+        for _v in _stitch_versions:
+            _stitch_dir = paths.agrowstitch_dir(_v)
+            if not _stitch_dir.exists():
+                continue
+            for _p in sorted(_stitch_dir.glob("*.png")):
+                _m = _re.search(r"_(\d+)$", _p.stem)
+                if _m:
+                    pid = _m.group(1)
+                    if pid not in seen:
+                        seen.add(pid)
+                        plot_ids.append(pid)
 
     return {"plot_ids": plot_ids}
 
