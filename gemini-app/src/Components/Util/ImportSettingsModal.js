@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { calculateMaxMinusMin, convertToMeters } from "../../utils/fieldDesignUtils";
 import {
     TextField,
     Button,
@@ -30,11 +31,6 @@ const ImportSettingsModal = ({ importedData, onClose, open }) => {
         });
     }, [importedData]);
 
-    const calculateMaxMinusMin = (data, field) => {
-        const values = data.map((row) => row[field]).filter((val) => val != null);
-        return Math.max(...values) - Math.min(...values) + 1;
-    };
-
     const handleChange = (event) => {
         const { name, value } = event.target;
         setModalOptions({
@@ -47,17 +43,13 @@ const ImportSettingsModal = ({ importedData, onClose, open }) => {
         setUnit(event.target.value);
     };
 
-    const convertToMeters = (value) => {
-        return unit === "feet" ? value * 0.3048 : value;
-    };
-
     const handleSubmit = (event) => {
         event.preventDefault();
         const convertedOptions = {
-            width: convertToMeters(modalOptions.width),
-            length: convertToMeters(modalOptions.length),
-            verticalSpacing: convertToMeters(modalOptions.verticalSpacing),
-            horizontalSpacing: convertToMeters(modalOptions.horizontalSpacing),
+            width: convertToMeters(modalOptions.width, unit),
+            length: convertToMeters(modalOptions.length, unit),
+            verticalSpacing: convertToMeters(modalOptions.verticalSpacing, unit),
+            horizontalSpacing: convertToMeters(modalOptions.horizontalSpacing, unit),
             angle: modalOptions.angle,
             rows: modalOptions.rows,
             columns: modalOptions.columns,

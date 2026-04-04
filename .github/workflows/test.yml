@@ -1,0 +1,75 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemini-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gemini-app/package-lock.json
+
+      - run: npm ci --legacy-peer-deps
+
+      - run: npm run test:unit
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemini-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gemini-app/package-lock.json
+
+      - run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      # Start the gemini-framework backend services
+      # --wait blocks until all services with health checks report healthy
+      - name: Start backend services
+        working-directory: gemini-framework
+        run: |
+          cp gemini/pipeline/.env.example gemini/pipeline/.env
+          docker compose -f gemini/pipeline/docker-compose.yaml up -d --build --wait
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          REACT_APP_BACKEND_MODE: framework
+          REACT_APP_FRAMEWORK_PORT: 7777
+          REACT_APP_FRAMEWORK_HOST: localhost
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: gemini-app/playwright-report
+          retention-days: 14
+
+      - name: Stop backend services
+        if: always()
+        working-directory: gemini-framework
+        run: docker compose -f gemini/pipeline/docker-compose.yaml down

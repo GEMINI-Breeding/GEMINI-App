@@ -18,7 +18,7 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { centerOfMass, booleanContains, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
 
-function parseCsv(csvText) {
+export function parseCsv(csvText) {
     const lines = csvText.trim().split("\n");
     const headers = lines[0].split(",");
     return lines.slice(1).map((line) => {
@@ -48,7 +48,7 @@ function getAndParseFieldDesign(
 }
 
 // Merge CSV data with GeoJSON data correctly and ensure field design is updated.
-function mergeCsvDataWithGeoJson(featureCollection, csvData) {
+export function mergeCsvDataWithGeoJson(featureCollection, csvData) {
     const csvKeys = Object.keys(csvData[0]);
 
     featureCollection.features.forEach((feature) => {
@@ -75,7 +75,7 @@ function mergeCsvDataWithGeoJson(featureCollection, csvData) {
     });
 }
 
-function fillPolygonWithRectangles(mainPolygon, options) {
+export function fillPolygonWithRectangles(mainPolygon, options) {
     // Options
     const { width, length, rows, columns, verticalSpacing, horizontalSpacing, angle } = options;
 

@@ -15,7 +15,8 @@ export function geojsonToCSV(geojson) {
         const row = headers
             .map((header) => {
                 // Ensure value is present, else empty string
-                return feature.properties[header] ? `${feature.properties[header]}` : "";
+                const val = feature.properties[header];
+                return val != null ? `${val}` : "";
             })
             .join(",");
         csvString += row + "\n";

@@ -101,6 +101,43 @@ Ports and the data directory are configured in `gemini-app/.env` (see `.env.exam
 
 ---
 
+## 🧪 Testing
+
+### Unit tests
+Unit tests cover pure utility functions (CSV parsing, geospatial calculations, unit conversion) using Jest and React Testing Library. No mocking — these test real logic only.
+
+```bash
+cd gemini-app
+npm run test:unit          # Single run
+npm run test:unit:watch    # Watch mode
+```
+
+### E2E tests
+End-to-end tests use Playwright against the real gemini-framework backend (no mocking). They cover app startup, sidebar navigation, and user workflows.
+
+```bash
+# 1. Start the gemini-framework backend
+cd gemini-framework
+cp gemini/pipeline/.env.example gemini/pipeline/.env
+docker compose -f gemini/pipeline/docker-compose.yaml up -d --build
+# Wait for REST API to be ready (check logs)
+docker logs gemini-rest-api -f  # Look for "Uvicorn running on http://0.0.0.0:7777"
+
+# 2. Run E2E tests
+cd gemini-app
+npm run test:e2e           # Headless
+npm run test:e2e:headed    # With visible browser
+
+# 3. Stop backend when done
+cd gemini-framework
+docker compose -f gemini/pipeline/docker-compose.yaml down
+```
+
+### CI
+Both test suites run automatically on push/PR to `main` and `develop` via GitHub Actions (`.github/workflows/test.yml`).
+
+---
+
 ## 🔍 Pipeline Overview
 
 ![Sensing Pipeline](assets/sensing_pipeline.png)
