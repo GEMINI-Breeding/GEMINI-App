@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Autocomplete, TextField, Snackbar } from "@mui/material";
 import { useDataState, useDataSetters, fetchData } from "../../DataContext";
+import { BACKEND_MODE } from "../../api/config";
+import { getExperiments, getExperimentHierarchy } from "../../api/entities";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
@@ -23,8 +25,12 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         version: "",
     });
 
+    // Framework mode: store experiment list and hierarchy data
+    const [experiments, setExperiments] = useState([]);
+    const [hierarchy, setHierarchy] = useState(null);
+
     //////////////////////////////////////////
-    // Fetch nested structure
+    // Fetch data based on backend mode
     //////////////////////////////////////////
     const getData = async (url) => {
         const response = await fetch(url);
@@ -35,32 +41,42 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     };
 
     useEffect(() => {
-        getData(`${flaskUrl}list_dirs_nested_processed`)
-            .then((data) => setNestedStructure(data))
-            .catch((error) => console.error("Error fetching nested structure:", error));
-
-        console.log("nestedStructure", nestedStructure);
+        if (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') {
+            // Framework mode: fetch experiment list
+            getExperiments()
+                .then((data) => setExperiments(data))
+                .catch((error) => console.error("Error fetching experiments:", error));
+        } else {
+            // Flask mode: fetch nested directory structure
+            getData(`${flaskUrl}list_dirs_nested_processed`)
+                .then((data) => setNestedStructure(data))
+                .catch((error) => console.error("Error fetching nested structure:", error));
+        }
     }, []);
 
-    //////////////////////////////////////////
-    // Helper functions
-    //////////////////////////////////////////
-
-    const handleGenotypeChange = (event, newValue) => {
-        if (newValue.includes("All Genotypes") && newValue.length > 1) {
-            if (selectedGenotypes.includes("All Genotypes")) {
-                newValue = newValue.filter((val) => val !== "All Genotypes");
-            } else {
-                newValue = ["All Genotypes"];
+    // Framework mode: fetch hierarchy when experiment is selected
+    useEffect(() => {
+        if ((BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') && selectedValues.experiment) {
+            const exp = experiments.find(e => e.experiment_name === selectedValues.experiment);
+            if (exp) {
+                getExperimentHierarchy(exp.id)
+                    .then((data) => setHierarchy(data))
+                    .catch((error) => console.error("Error fetching experiment hierarchy:", error));
             }
         }
-        setSelectedGenotypes(newValue);
-    };
+    }, [selectedValues.experiment, experiments]);
 
     //////////////////////////////////////////
     // Function to get options based on the current path
     //////////////////////////////////////////
     const getOptionsForField = (field) => {
+        if (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') {
+            return getFrameworkOptionsForField(field);
+        }
+        return getFlaskOptionsForField(field);
+    };
+
+    const getFlaskOptionsForField = (field) => {
         let options = [];
         let currentLevel = nestedStructure;
         const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
@@ -75,6 +91,30 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         }
 
         return options;
+    };
+
+    const getFrameworkOptionsForField = (field) => {
+        if (field === "experiment") {
+            return experiments.map(e => e.experiment_name);
+        }
+        if (!hierarchy) return [];
+
+        switch (field) {
+            case "year":
+                return hierarchy.seasons.map(s => s.season_name);
+            case "location":
+                return hierarchy.sites.map(s => s.site_name);
+            case "population":
+                return hierarchy.populations.map(p => p.population_name);
+            case "date":
+                return [...new Set(hierarchy.datasets.map(d => d.collection_date))].filter(Boolean).sort();
+            case "platform":
+                return hierarchy.sensor_platforms.map(sp => sp.sensor_platform_name);
+            case "sensor":
+                return hierarchy.sensors.map(s => s.sensor_name);
+            default:
+                return [];
+        }
     };
 
     //////////////////////////////////////////
@@ -105,7 +145,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
 
                 const data = await response.json();
                 setAvailableVersions(data);
-                
+
                 // Auto-select first version if only one available
                 if (data.length === 1) {
                     setSelectedValues(prev => ({ ...prev, version: data[0].versionName }));
@@ -127,8 +167,8 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
             setAvailableVersions([]);
             setSelectedValues(prev => ({ ...prev, version: "" }));
         }
-    }, [selectedValues["sensor"], selectedValues["year"], selectedValues["experiment"], 
-        selectedValues["location"], selectedValues["population"], selectedValues["date"], 
+    }, [selectedValues["sensor"], selectedValues["year"], selectedValues["experiment"],
+        selectedValues["location"], selectedValues["population"], selectedValues["date"],
         selectedValues["platform"]]);
 
     //////////////////////////////////////////
@@ -138,7 +178,9 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         const newSelectedValues = { ...selectedValues, [field]: value };
 
         // Reset subsequent selections
-        const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor", "version"];
+        const fieldsOrder = (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid')
+            ? ["experiment", "year", "location", "population", "date", "platform", "sensor", "version"]
+            : ["year", "experiment", "location", "population", "date", "platform", "sensor", "version"];
         const currentIndex = fieldsOrder.indexOf(field);
         fieldsOrder.slice(currentIndex + 1).forEach((key) => {
             newSelectedValues[key] = "";
@@ -154,10 +196,10 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         if (selectedValues["version"] && availableVersions.length > 0) {
             // Find the selected version details
             const selectedVersionData = availableVersions.find(v => v.versionName === selectedValues["version"]);
-            
+
             let newTilePath;
             let newGeoJsonPath;
-            
+
             if (selectedVersionData) {
                 // GeoJSON path is the same for both versions
                 newGeoJsonPath = `${flaskUrl}${selectedVersionData.path}`;
@@ -171,12 +213,9 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                     newTilePath = `files/Processed/${selectedValues["year"]}/${selectedValues["experiment"]}/${selectedValues["location"]}/${selectedValues["population"]}/${selectedValues["date"]}/${selectedValues["platform"]}/${selectedValues["sensor"]}/${selectedValues["date"]}-RGB-Pyramid.tif`;
                 }
 
-                console.log("New GeoJSON Path:", newGeoJsonPath);
-                console.log("New Tile Path:", newTilePath);
-
                 onTilePathChange(newTilePath);
                 onGeoJsonPathChange(newGeoJsonPath);
-                
+
                 // Fetch data for GeoJSON
                 fetchData(newGeoJsonPath)
                     .then((data) => {
@@ -184,7 +223,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                         const metricColumns = Object.keys(data.features[0].properties);
                         const excludedColumns = ["Tier", "Bed", "Plot", "Label", "Group", "geometry", "lon", "lat", "row", "column", "location", "plot", "population", "accession", "col"];
                         const metrics = metricColumns.filter((col) => !excludedColumns.includes(col));
-                        console.log("metrics: ", metrics);
                         setMetricOptions(metrics);
                         const uniqueTraitOutputLabels = [...new Set(traitOutputLabels)];
                         uniqueTraitOutputLabels.unshift("All Genotypes");
@@ -248,9 +286,22 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     //////////////////////////////////////////
     // Dynamically render Autocomplete components
     //////////////////////////////////////////
-    const fieldsOrder = ["year", "experiment", "location", "population", "date", "platform", "sensor"];
-    const autocompleteComponents = fieldsOrder.map((field, index) => {
-        const label = field.charAt(0).toUpperCase() + field.slice(1); // Capitalize the first letter
+    const fieldsOrder = (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid')
+        ? ["experiment", "year", "location", "population", "date", "platform", "sensor"]
+        : ["year", "experiment", "location", "population", "date", "platform", "sensor"];
+
+    const fieldLabels = {
+        year: "Year",
+        experiment: "Experiment",
+        location: "Location",
+        population: "Population",
+        date: "Date",
+        platform: "Platform",
+        sensor: "Sensor",
+    };
+
+    const autocompleteComponents = fieldsOrder.map((field) => {
+        const label = fieldLabels[field];
         const options = getOptionsForField(field);
 
         return (

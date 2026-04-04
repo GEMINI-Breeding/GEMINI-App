@@ -15,7 +15,10 @@ export const getExperiment = (name) =>
     fetchJson(`${FRAMEWORK_URL}/experiments?experiment_name=${encodeURIComponent(name)}`);
 
 export const getExperimentById = (id) =>
-    fetchJson(`${FRAMEWORK_URL}/experiments/${id}`);
+    fetchJson(`${FRAMEWORK_URL}/experiments/id/${id}`);
+
+export const getExperimentHierarchy = (id) =>
+    fetchJson(`${FRAMEWORK_URL}/experiments/id/${id}/hierarchy`);
 
 // -- Seasons --
 
