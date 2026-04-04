@@ -24,6 +24,7 @@ import { useFormik } from "formik";
 import { useDataState, useDataSetters } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
+import { BACKEND_MODE, FLASK_URL, FRAMEWORK_URL } from "../../api/config";
 import Box from "@mui/material/Box";
 import { TableComponent } from "./TableComponent";
 
@@ -186,6 +187,12 @@ const FileUploadComponent = ({ actionType = null }) => {
     
     // Effect to fetch nested directories on component mount
     useEffect(() => {
+        if (BACKEND_MODE === 'framework') {
+            // Framework mode: directory structure comes from entity queries, not filesystem
+            setIsLoading(false);
+            setUploadedData(true);
+            return;
+        }
         setIsLoading(true);
         setUploadedData(true);
         fetch(`${flaskUrl}list_dirs_nested`)
@@ -241,17 +248,31 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     const uploadChunkWithoutTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath, renamedFileName = null) => {
         const formData = new FormData();
-        formData.append("fileChunk", chunk);
-        formData.append("chunkIndex", index);
-        formData.append("totalChunks", totalChunks);
-        formData.append("fileIdentifier", renamedFileName || fileIdentifier);
-        formData.append("dirPath", localDirPath);
+
+        if (BACKEND_MODE === 'framework') {
+            // Framework mode: upload chunks to MinIO via framework API
+            formData.append("file_chunk", chunk);
+            formData.append("chunk_index", index);
+            formData.append("total_chunks", totalChunks);
+            formData.append("file_identifier", renamedFileName || fileIdentifier);
+            formData.append("object_name", `${localDirPath}/${renamedFileName || fileIdentifier}`);
+        } else {
+            // Flask mode: original field names
+            formData.append("fileChunk", chunk);
+            formData.append("chunkIndex", index);
+            formData.append("totalChunks", totalChunks);
+            formData.append("fileIdentifier", renamedFileName || fileIdentifier);
+            formData.append("dirPath", localDirPath);
+        }
+
+        const uploadUrl = BACKEND_MODE === 'framework'
+            ? `${FRAMEWORK_URL}/files/upload_chunk`
+            : `${flaskUrl}upload_chunk`;
 
         try {
-            const response = await fetch(`${flaskUrl}upload_chunk`, {
+            const response = await fetch(uploadUrl, {
                 method: "POST",
                 body: formData
-                // No `signal` = no timeout or abort controller
             });
             return response;
         } catch (error) {
@@ -355,23 +376,31 @@ const FileUploadComponent = ({ actionType = null }) => {
     };
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
+        const checkUrl = BACKEND_MODE === 'framework'
+            ? `${FRAMEWORK_URL}/files/check_uploaded_chunks`
+            : `${flaskUrl}check_uploaded_chunks`;
+        const body = BACKEND_MODE === 'framework'
+            ? { file_identifier: fileIdentifier, total_chunks: 0 }
+            : { fileIdentifier, localDirPath };
+
         try {
-          const response = await fetch(`${flaskUrl}check_uploaded_chunks`, {
+          const response = await fetch(checkUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileIdentifier, localDirPath }),
+            body: JSON.stringify(body),
           });
           if (response.ok) {
             const data = await response.json();
-            // Assuming the server returns a JSON object with the count of uploaded chunks
-            return data.uploadedChunksCount;
+            return BACKEND_MODE === 'framework'
+                ? data.uploaded_chunks
+                : data.uploadedChunksCount;
           } else {
             console.error("Failed to retrieve uploaded chunks count");
-            return 0; // If unable to retrieve, assume no chunks uploaded
+            return 0;
           }
         } catch (error) {
           console.error("Error checking uploaded chunks:", error);
-          return 0; // On error, assume no chunks uploaded
+          return 0;
         }
       }
 
@@ -382,11 +411,18 @@ const FileUploadComponent = ({ actionType = null }) => {
             localDirPath = dirPath;
         }
 
+        const clearUrl = BACKEND_MODE === 'framework'
+            ? `${FRAMEWORK_URL}/files/clear_upload_cache`
+            : `${flaskUrl}clear_upload_cache`;
+        const body = BACKEND_MODE === 'framework'
+            ? { file_identifier: localDirPath }
+            : { localDirPath };
+
         console.log("Clearing cache of uploaded files in: ", localDirPath);
-        fetch(`${flaskUrl}clear_upload_cache`, {
+        fetch(clearUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ localDirPath }),
+            body: JSON.stringify(body),
         })
         .then((response) => response.json())
         .then((data) => {
