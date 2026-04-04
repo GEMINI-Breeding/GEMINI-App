@@ -1,5 +1,6 @@
 // DataContext.js
 import React, { createContext, useContext, useState } from "react";
+import { FLASK_URL, FRAMEWORK_URL, TILE_SERVER_URL, BACKEND_MODE } from "./api/config";
 
 const DataStateContext = createContext();
 const DataSettersContext = createContext();
@@ -28,32 +29,9 @@ export const useDataSetters = () => {
     return context;
 };
 
-// Helper function to get runtime config with fallbacks
-const getRuntimeConfig = () => {
-    // Runtime config (production/docker)
-    if (window.RUNTIME_CONFIG) {
-        return {
-            flaskPort: window.RUNTIME_CONFIG.FLASK_PORT,
-            tileServerPort: window.RUNTIME_CONFIG.TILE_SERVER_PORT,
-            flaskHost: window.RUNTIME_CONFIG.FLASK_HOST,
-            tileServerHost: window.RUNTIME_CONFIG.TILE_SERVER_HOST
-        };
-    }
-    // Development - use .env
-    return {
-        flaskPort: process.env.REACT_APP_FLASK_PORT || '5000',
-        tileServerPort: process.env.REACT_APP_TILE_SERVER_PORT || '8091',
-        flaskHost: 'localhost',
-        tileServerHost: 'localhost'
-    };
-};
-
-const config = getRuntimeConfig();
-const flaskUrl = `http://${config.flaskHost}:${config.flaskPort}/flask_app`;
-const tileServerUrl = `http://${config.tileServerHost}:${config.tileServerPort}`;
 export const TILE_URL_TEMPLATE =
-     tileServerUrl + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-export const BOUNDS_URL_TEMPLATE = tileServerUrl + "/cog/bounds?url=${FILE_PATH}";
+     TILE_SERVER_URL + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
+export const BOUNDS_URL_TEMPLATE = TILE_SERVER_URL + "/cog/bounds?url=${FILE_PATH}";
 
 export const DataProvider = ({ children }) => {
     const initialViewState = {
@@ -223,9 +201,11 @@ export const DataProvider = ({ children }) => {
     const [selectedPlatformQuery, setSelectedPlatformQuery] = useState(null);
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
-    // Backend - use runtime config
-    const [flaskUrl, setFlaskUrl] = useState(`http://${config.flaskHost}:${config.flaskPort}/flask_app/`);
-    // const [tileServerUrl, setTileServerUrl] = useState(`http://${config.tileServerHost}:${config.tileServerPort}/`);
+    // Backend URLs - centralized in api/config.js
+    // Backend URLs — flaskUrl kept for backward compatibility with existing components
+    const [flaskUrl] = useState(FLASK_URL);
+    const [frameworkUrl] = useState(FRAMEWORK_URL);
+    const [backendMode] = useState(BACKEND_MODE);
 
     return (
         <DataStateContext.Provider
@@ -377,7 +357,8 @@ export const DataProvider = ({ children }) => {
 
                 // Backend
                 flaskUrl,
-                //tileServerUrl,
+                frameworkUrl,
+                backendMode,
             }}
         >
             <DataSettersContext.Provider
@@ -526,8 +507,6 @@ export const DataProvider = ({ children }) => {
                     setSelectedPlatformQuery,
                     setSelectedSensorQuery,
 
-                    // Backend
-                    setFlaskUrl,
                     //setTileServerUrl,
                 }}
             >
