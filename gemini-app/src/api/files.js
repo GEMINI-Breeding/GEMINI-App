@@ -4,7 +4,7 @@
  */
 
 import { fetchJson, postJson, postFormData } from './client';
-import { getBaseUrl } from './config';
+import { getBaseUrl, BACKEND_MODE, FRAMEWORK_URL } from './config';
 
 const baseUrl = () => getBaseUrl('files');
 
@@ -24,11 +24,31 @@ export const listFiles = (dirPath) =>
 
 // -- File serving --
 
-export const getFileUrl = (filePath) =>
-    `${baseUrl()}files/${filePath}`;
+export const getFileUrl = (filePath) => {
+    if (BACKEND_MODE === 'framework') {
+        return `${FRAMEWORK_URL}/files/download/${filePath}`;
+    }
+    return `${baseUrl()}files/${filePath}`;
+};
 
-export const getImageUrl = (filePath) =>
-    `${baseUrl()}images/${filePath}`;
+export const getImageUrl = (filePath) => {
+    if (BACKEND_MODE === 'framework') {
+        return `${FRAMEWORK_URL}/files/download/${filePath}`;
+    }
+    return `${baseUrl()}images/${filePath}`;
+};
+
+/**
+ * Get a presigned URL for direct MinIO access (framework mode only).
+ * Falls back to getFileUrl in Flask mode.
+ */
+export const getPresignedUrl = async (filePath) => {
+    if (BACKEND_MODE === 'framework') {
+        const data = await fetchJson(`${FRAMEWORK_URL}/files/presign/${filePath}`);
+        return data.url;
+    }
+    return getFileUrl(filePath);
+};
 
 export const fetchDataRootDir = () =>
     fetchJson(`${baseUrl()}fetch_data_root_dir`);
