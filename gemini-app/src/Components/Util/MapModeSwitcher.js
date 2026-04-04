@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { drawPolygonMode, modifyMode, translateMode, viewMode, selectionMode } from "../GCP/TabComponents/BoundaryMap";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
 import { Button } from "@mui/material";
 import { save } from "@loaders.gl/core";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -139,12 +140,18 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
             filename: filename,
         };
 
-        const response = await fetch(`${flaskUrl}save_geojson`, {
+        const saveUrl = BACKEND_MODE === 'framework'
+            ? `${FRAMEWORK_URL}/geojson/save`
+            : `${flaskUrl}save_geojson`;
+        const saveBody = BACKEND_MODE === 'framework'
+            ? { file_path: `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${filename}`, geojson: fc }
+            : payload;
+        const response = await fetch(saveUrl, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(saveBody),
         });
         const data = await response.json();
         console.log(data);

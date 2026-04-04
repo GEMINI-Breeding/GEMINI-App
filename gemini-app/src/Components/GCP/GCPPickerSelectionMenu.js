@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { Autocomplete, TextField, Button } from "@mui/material";
 
 import { fetchData, useDataSetters, useDataState } from "../../DataContext";
+import { BACKEND_MODE } from "../../api/config";
+import { getExperiments, getExperimentHierarchy } from "../../api/entities";
 
 const GCPPickerSelectionMenu = () => {
     const {
@@ -41,13 +43,42 @@ const GCPPickerSelectionMenu = () => {
         setIsGCPReady
     } = useDataSetters();
 
+    // State for framework experiment list and hierarchy
+    const [experiments, setExperiments] = useState([]);
+    const [hierarchy, setHierarchy] = useState(null);
+
     useEffect(() => {
-        fetchData(`${flaskUrl}list_dirs/Raw/`)
-            .then(setYearOptionsGCP)
-            .catch((error) => console.error("Error:", error));
+        if (BACKEND_MODE === 'framework') {
+            getExperiments()
+                .then((data) => {
+                    setExperiments(data);
+                    setExperimentOptionsGCP(data.map(e => e.experiment_name));
+                })
+                .catch((error) => console.error("Error:", error));
+        } else {
+            fetchData(`${flaskUrl}list_dirs/Raw/`)
+                .then(setYearOptionsGCP)
+                .catch((error) => console.error("Error:", error));
+        }
     }, []);
 
     useEffect(() => {
+        if (BACKEND_MODE === 'framework') {
+            if (selectedExperimentGCP) {
+                const exp = experiments.find(e => e.experiment_name === selectedExperimentGCP);
+                if (exp) {
+                    getExperimentHierarchy(exp.id)
+                        .then((data) => {
+                            setHierarchy(data);
+                            setYearOptionsGCP(data.seasons.map(s => s.season_name));
+                            setLocationOptionsGCP(data.sites.map(s => s.site_name));
+                            setPopulationOptionsGCP(data.populations.map(p => p.population_name));
+                        })
+                        .catch((error) => console.error("Error:", error));
+                }
+            }
+            return;
+        }
         if (selectedYearGCP) {
             fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/`)
                 .then(setExperimentOptionsGCP)
@@ -55,9 +86,10 @@ const GCPPickerSelectionMenu = () => {
         } else {
             setExperimentOptionsGCP([]);
         }
-    }, [selectedYearGCP]);
+    }, [selectedYearGCP, selectedExperimentGCP]);
 
     useEffect(() => {
+        if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
         if (selectedYearGCP && selectedExperimentGCP) {
             fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/`)
                 .then(setLocationOptionsGCP)
@@ -68,6 +100,7 @@ const GCPPickerSelectionMenu = () => {
     }, [selectedYearGCP, selectedExperimentGCP]);
 
     useEffect(() => {
+        if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP) {
             fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/`)
                 .then(setPopulationOptionsGCP)

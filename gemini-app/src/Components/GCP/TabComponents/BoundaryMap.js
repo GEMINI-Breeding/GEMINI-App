@@ -5,6 +5,7 @@ import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../../DataContext";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../../api/config";
 import GeoJsonTooltip from "../../Map/ToolTip";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
@@ -194,12 +195,18 @@ function BoundaryMap({ task }) {
 
                 console.log("data for load json ", data);
 
-                const response = await fetch(`${flaskUrl}load_geojson`, {
+                const loadUrl = BACKEND_MODE === 'framework'
+                    ? `${FRAMEWORK_URL}/geojson/load`
+                    : `${flaskUrl}load_geojson`;
+                const response = await fetch(loadUrl, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
-                    body: JSON.stringify(data),
+                    body: JSON.stringify(BACKEND_MODE === 'framework'
+                        ? { file_path: `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${filename}` }
+                        : data
+                    ),
                 });
                 if (response.ok) {
                     console.log("response", response);

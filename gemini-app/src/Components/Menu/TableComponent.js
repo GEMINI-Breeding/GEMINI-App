@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
 import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button, LinearProgress, Box, Typography, CircularProgress } from '@mui/material';
@@ -86,20 +87,43 @@ export const TableComponent = () => {
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
         setLoading(true);
-        fetch(`${flaskUrl}list_dirs_nested`)
-            .then((response) => response.json())
-            .then((data) => {
-                setData(data);
-                const transformedData = transformNestedData(data);
-                setProcData(transformedData);
-                setFilteredData(transformedData);
-                setLoading(false);
-            })
-            .catch((error) => {
-                console.error("Error fetching nested directories:", error);
-                setError(error);
-                setLoading(false);
-            });
+
+        if (BACKEND_MODE === 'framework') {
+            // Framework mode: fetch experiments and build table data from entity hierarchy
+            fetch(`${FRAMEWORK_URL}/experiments/all`)
+                .then((response) => response.json())
+                .then((data) => {
+                    // Transform experiment list into table-compatible format
+                    const transformedData = Array.isArray(data) ? data.map(exp => ({
+                        id: exp.id,
+                        experiment: exp.experiment_name,
+                        info: exp.experiment_info,
+                    })) : [];
+                    setProcData(transformedData);
+                    setFilteredData(transformedData);
+                    setLoading(false);
+                })
+                .catch((error) => {
+                    console.error("Error fetching experiments:", error);
+                    setError(error);
+                    setLoading(false);
+                });
+        } else {
+            fetch(`${flaskUrl}list_dirs_nested`)
+                .then((response) => response.json())
+                .then((data) => {
+                    setData(data);
+                    const transformedData = transformNestedData(data);
+                    setProcData(transformedData);
+                    setFilteredData(transformedData);
+                    setLoading(false);
+                })
+                .catch((error) => {
+                    console.error("Error fetching nested directories:", error);
+                    setError(error);
+                    setLoading(false);
+                });
+        }
     }, [flaskUrl]);
     
     useEffect(() => {

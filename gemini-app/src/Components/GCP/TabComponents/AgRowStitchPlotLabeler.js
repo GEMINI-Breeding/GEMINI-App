@@ -20,6 +20,7 @@ import {
 } from "@mui/material";
 import { CheckCircle, ErrorOutline, Assignment } from "@mui/icons-material";
 import { useDataState } from "../../../DataContext";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../../api/config";
 
 function AgRowStitchPlotLabeler() {
     const { 
