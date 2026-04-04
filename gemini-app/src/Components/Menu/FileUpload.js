@@ -266,7 +266,7 @@ const FileUploadComponent = ({ actionType = null }) => {
         }
 
         const uploadUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}/files/upload_chunk`
+            ? `${FRAMEWORK_URL}files/upload_chunk`
             : `${flaskUrl}upload_chunk`;
 
         try {
@@ -377,7 +377,7 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
         const checkUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}/files/check_uploaded_chunks`
+            ? `${FRAMEWORK_URL}files/check_uploaded_chunks`
             : `${flaskUrl}check_uploaded_chunks`;
         const body = BACKEND_MODE === 'framework'
             ? { file_identifier: fileIdentifier, total_chunks: 0 }
@@ -412,7 +412,7 @@ const FileUploadComponent = ({ actionType = null }) => {
         }
 
         const clearUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}/files/clear_upload_cache`
+            ? `${FRAMEWORK_URL}files/clear_upload_cache`
             : `${flaskUrl}clear_upload_cache`;
         const body = BACKEND_MODE === 'framework'
             ? { file_identifier: localDirPath }

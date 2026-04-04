@@ -26,14 +26,14 @@ export const listFiles = (dirPath) =>
 
 export const getFileUrl = (filePath) => {
     if (BACKEND_MODE === 'framework') {
-        return `${FRAMEWORK_URL}/files/download/${filePath}`;
+        return `${FRAMEWORK_URL}files/download/${filePath}`;
     }
     return `${baseUrl()}files/${filePath}`;
 };
 
 export const getImageUrl = (filePath) => {
     if (BACKEND_MODE === 'framework') {
-        return `${FRAMEWORK_URL}/files/download/${filePath}`;
+        return `${FRAMEWORK_URL}files/download/${filePath}`;
     }
     return `${baseUrl()}images/${filePath}`;
 };
@@ -44,7 +44,7 @@ export const getImageUrl = (filePath) => {
  */
 export const getPresignedUrl = async (filePath) => {
     if (BACKEND_MODE === 'framework') {
-        const data = await fetchJson(`${FRAMEWORK_URL}/files/presign/${filePath}`);
+        const data = await fetchJson(`${FRAMEWORK_URL}files/presign/${filePath}`);
         return data.url;
     }
     return getFileUrl(filePath);

@@ -120,71 +120,145 @@ const GCPPickerSelectionMenu = () => {
         }
     };
 
+    const isFramework = BACKEND_MODE === 'framework';
+
+    // In framework mode: Experiment first, then Year/Location/Population populated from hierarchy
+    // In flask mode: Year first, cascading directory listing
+    const showExperiment = isFramework ? true : selectedYearGCP !== null;
+    const showYear = isFramework ? selectedExperimentGCP !== null : true;
+    const showLocation = isFramework ? selectedExperimentGCP !== null : selectedExperimentGCP !== null;
+    const showPopulation = isFramework ? selectedExperimentGCP !== null : selectedLocationGCP !== null;
+
     return (
         <>
-            <Autocomplete
-                id="year-combo-box"
-                options={yearOptionsGCP}
-                value={selectedYearGCP}
-                onChange={(event, newValue) => {
-                    setSelectedYearGCP(newValue);
-                    setSelectedExperimentGCP(null);
-                    setSelectedLocationGCP(null);
-                    setSelectedPopulationGCP(null);
-                    setSelectedDateGCP(null);
-                    setIsGCPReady(false);
-                }}
-                renderInput={(params) => <TextField {...params} label="Year" />}
-                sx={{ mb: 2 }}
-            />
+            {isFramework ? (
+                <>
+                    <Autocomplete
+                        id="experiment-combo-box"
+                        options={experimentOptionsGCP}
+                        value={selectedExperimentGCP}
+                        onChange={(event, newValue) => {
+                            setSelectedExperimentGCP(newValue);
+                            setSelectedYearGCP(null);
+                            setSelectedLocationGCP(null);
+                            setSelectedPopulationGCP(null);
+                            setSelectedDateGCP(null);
+                            setIsGCPReady(false);
+                        }}
+                        renderInput={(params) => <TextField {...params} label="Experiment" />}
+                        sx={{ mb: 2 }}
+                    />
 
-            {selectedYearGCP !== null ? (
-                <Autocomplete
-                    id="experiment-combo-box"
-                    options={experimentOptionsGCP}
-                    value={selectedExperimentGCP}
-                    onChange={(event, newValue) => {
-                        setSelectedExperimentGCP(newValue);
-                        setSelectedLocationGCP(null);
-                        setSelectedPopulationGCP(null);
-                        setSelectedDateGCP(null);
-                        setIsGCPReady(false);
-                    }}
-                    renderInput={(params) => <TextField {...params} label="Experiment" />}
-                    sx={{ mb: 2 }}
-                />
-            ) : null}
+                    {showYear ? (
+                        <Autocomplete
+                            id="year-combo-box"
+                            options={yearOptionsGCP}
+                            value={selectedYearGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedYearGCP(newValue);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Year" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
 
-            {selectedExperimentGCP !== null ? (
-                <Autocomplete
-                    id="location-combo-box"
-                    options={locationOptionsGCP}
-                    value={selectedLocationGCP}
-                    onChange={(event, newValue) => {
-                        setSelectedLocationGCP(newValue);
-                        setSelectedPopulationGCP(null);
-                        setSelectedDateGCP(null);
-                        setIsGCPReady(false);
-                    }}
-                    renderInput={(params) => <TextField {...params} label="Location" />}
-                    sx={{ mb: 2 }}
-                />
-            ) : null}
+                    {showLocation ? (
+                        <Autocomplete
+                            id="location-combo-box"
+                            options={locationOptionsGCP}
+                            value={selectedLocationGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedLocationGCP(newValue);
+                                setSelectedPopulationGCP(null);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Location" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
 
-            {selectedLocationGCP !== null ? (
-                <Autocomplete
-                    id="population-combo-box"
-                    options={populationOptionsGCP}
-                    value={selectedPopulationGCP}
-                    onChange={(event, newValue) => {
-                        setSelectedPopulationGCP(newValue);
-                        setSelectedDateGCP(null);
-                        setIsGCPReady(false);
-                    }}
-                    renderInput={(params) => <TextField {...params} label="Population" />}
-                    sx={{ mb: 2 }}
-                />
-            ) : null}
+                    {showPopulation ? (
+                        <Autocomplete
+                            id="population-combo-box"
+                            options={populationOptionsGCP}
+                            value={selectedPopulationGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedPopulationGCP(newValue);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Population" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
+                </>
+            ) : (
+                <>
+                    <Autocomplete
+                        id="year-combo-box"
+                        options={yearOptionsGCP}
+                        value={selectedYearGCP}
+                        onChange={(event, newValue) => {
+                            setSelectedYearGCP(newValue);
+                            setSelectedExperimentGCP(null);
+                            setSelectedLocationGCP(null);
+                            setSelectedPopulationGCP(null);
+                            setSelectedDateGCP(null);
+                            setIsGCPReady(false);
+                        }}
+                        renderInput={(params) => <TextField {...params} label="Year" />}
+                        sx={{ mb: 2 }}
+                    />
+
+                    {showExperiment ? (
+                        <Autocomplete
+                            id="experiment-combo-box"
+                            options={experimentOptionsGCP}
+                            value={selectedExperimentGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedExperimentGCP(newValue);
+                                setSelectedLocationGCP(null);
+                                setSelectedPopulationGCP(null);
+                                setSelectedDateGCP(null);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Experiment" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
+
+                    {selectedExperimentGCP !== null ? (
+                        <Autocomplete
+                            id="location-combo-box"
+                            options={locationOptionsGCP}
+                            value={selectedLocationGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedLocationGCP(newValue);
+                                setSelectedPopulationGCP(null);
+                                setSelectedDateGCP(null);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Location" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
+
+                    {selectedLocationGCP !== null ? (
+                        <Autocomplete
+                            id="population-combo-box"
+                            options={populationOptionsGCP}
+                            value={selectedPopulationGCP}
+                            onChange={(event, newValue) => {
+                                setSelectedPopulationGCP(newValue);
+                                setSelectedDateGCP(null);
+                                setIsGCPReady(false);
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Population" />}
+                            sx={{ mb: 2 }}
+                        />
+                    ) : null}
+                </>
+            )}
 
             <Button variant="contained" color="primary" onClick={initiatePrep}>
                 Begin Data Preparation

@@ -36,7 +36,7 @@ const config = getBackendConfig();
 
 export const BACKEND_MODE = config.backendMode;
 export const FLASK_URL = `http://${config.flaskHost}:${config.flaskPort}/flask_app/`;
-export const FRAMEWORK_URL = `http://${config.frameworkHost}:${config.frameworkPort}/api`;
+export const FRAMEWORK_URL = `http://${config.frameworkHost}:${config.frameworkPort}/api/`;
 export const TILE_SERVER_URL = `http://${config.tileServerHost}:${config.tileServerPort}`;
 
 /**

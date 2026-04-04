@@ -90,7 +90,7 @@ export const TableComponent = () => {
 
         if (BACKEND_MODE === 'framework') {
             // Framework mode: fetch experiments and build table data from entity hierarchy
-            fetch(`${FRAMEWORK_URL}/experiments/all`)
+            fetch(`${FRAMEWORK_URL}experiments/all`)
                 .then((response) => response.json())
                 .then((data) => {
                     // Transform experiment list into table-compatible format

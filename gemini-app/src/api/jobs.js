@@ -10,13 +10,13 @@ import { FRAMEWORK_URL } from './config';
  * Get job status by ID.
  */
 export const getJobStatus = (jobId) =>
-    fetchJson(`${FRAMEWORK_URL}/jobs/${jobId}`);
+    fetchJson(`${FRAMEWORK_URL}jobs/${jobId}`);
 
 /**
  * Cancel a running job.
  */
 export const cancelJob = (jobId) =>
-    postJson(`${FRAMEWORK_URL}/jobs/${jobId}/cancel`, {});
+    postJson(`${FRAMEWORK_URL}jobs/${jobId}/cancel`, {});
 
 /**
  * Connect to a WebSocket for real-time job progress.

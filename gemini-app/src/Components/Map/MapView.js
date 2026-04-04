@@ -94,7 +94,7 @@ export default function MapView() {
         if (selectedTilePath) {
             // In framework mode, tiles are served from MinIO via the same tile server
             const fileUrl = BACKEND_MODE === 'framework'
-                ? `${FRAMEWORK_URL}/files/download/${selectedTilePath}`
+                ? `${FRAMEWORK_URL}files/download/${selectedTilePath}`
                 : `${flaskUrl}${selectedTilePath}`;
             setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));
             setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));

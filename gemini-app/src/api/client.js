@@ -19,11 +19,12 @@ export const fetchJson = async (url, options = {}) => {
  * POST request with JSON body, returning parsed JSON.
  */
 export const postJson = async (url, body, options = {}) => {
+    const { headers: extraHeaders, ...restOptions } = options;
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options.headers },
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
         body: JSON.stringify(body),
-        ...options,
+        ...restOptions,
     });
     if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);

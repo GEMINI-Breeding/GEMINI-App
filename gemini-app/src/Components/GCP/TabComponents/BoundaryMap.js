@@ -196,7 +196,7 @@ function BoundaryMap({ task }) {
                 console.log("data for load json ", data);
 
                 const loadUrl = BACKEND_MODE === 'framework'
-                    ? `${FRAMEWORK_URL}/geojson/load`
+                    ? `${FRAMEWORK_URL}geojson/load`
                     : `${flaskUrl}load_geojson`;
                 const response = await fetch(loadUrl, {
                     method: "POST",

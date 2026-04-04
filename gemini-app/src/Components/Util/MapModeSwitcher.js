@@ -141,7 +141,7 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         };
 
         const saveUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}/geojson/save`
+            ? `${FRAMEWORK_URL}geojson/save`
             : `${flaskUrl}save_geojson`;
         const saveBody = BACKEND_MODE === 'framework'
             ? { file_path: `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${filename}`, geojson: fc }

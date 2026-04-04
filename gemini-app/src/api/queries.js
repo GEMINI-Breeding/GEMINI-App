@@ -16,7 +16,7 @@ export const queryImages = (params) => {
         if (params.season || params.year) queryParams.append('season_name', params.season || params.year);
         if (params.location) queryParams.append('site_name', params.location);
         if (params.date) queryParams.append('collection_date', params.date);
-        return fetchJson(`${FRAMEWORK_URL}/sensors/id/${params.sensorId}/records?${queryParams}`);
+        return fetchJson(`${FRAMEWORK_URL}sensors/id/${params.sensorId}/records?${queryParams}`);
     }
     return postJson(`${FLASK_URL}query_images`, params);
 };
@@ -30,7 +30,7 @@ export const queryTraits = (params) => {
         if (params.season || params.year) queryParams.append('season_name', params.season || params.year);
         if (params.location) queryParams.append('site_name', params.location);
         if (params.date) queryParams.append('collection_date', params.date);
-        return fetchJson(`${FRAMEWORK_URL}/traits/id/${params.traitId}/records?${queryParams}`);
+        return fetchJson(`${FRAMEWORK_URL}traits/id/${params.traitId}/records?${queryParams}`);
     }
     return postJson(`${FLASK_URL}query_traits`, params);
 };
@@ -39,7 +39,7 @@ export const queryTraits = (params) => {
 
 export const loadGeojson = (params) => {
     if (BACKEND_MODE === 'framework') {
-        return postJson(`${FRAMEWORK_URL}/geojson/load`, {
+        return postJson(`${FRAMEWORK_URL}geojson/load`, {
             file_path: params.filePath || params.path,
         });
     }
@@ -48,7 +48,7 @@ export const loadGeojson = (params) => {
 
 export const saveGeojson = (params) => {
     if (BACKEND_MODE === 'framework') {
-        return postJson(`${FRAMEWORK_URL}/geojson/save`, {
+        return postJson(`${FRAMEWORK_URL}geojson/save`, {
             file_path: params.filePath || params.path,
             geojson: params.geojson,
         });
@@ -60,7 +60,7 @@ export const saveGeojson = (params) => {
 
 export const saveCsv = (params) => {
     if (BACKEND_MODE === 'framework') {
-        return postJson(`${FRAMEWORK_URL}/csv/save`, {
+        return postJson(`${FRAMEWORK_URL}csv/save`, {
             file_path: params.filePath || params.path,
             headers: params.headers,
             rows: params.rows,
@@ -80,7 +80,7 @@ export const getOrthomosaicVersions = (params) => {
 
 export const downloadZipped = (params) => {
     if (BACKEND_MODE === 'framework') {
-        return postJson(`${FRAMEWORK_URL}/files/download_zip`, params);
+        return postJson(`${FRAMEWORK_URL}files/download_zip`, params);
     }
     return postJson(`${FLASK_URL}dload_zipped`, params);
 };
@@ -90,7 +90,7 @@ export const downloadZipped = (params) => {
 export const filterPlotBorders = (params) => {
     if (BACKEND_MODE === 'framework') {
         // Framework: query plots with geometry
-        return fetchJson(`${FRAMEWORK_URL}/plots/all`);
+        return fetchJson(`${FRAMEWORK_URL}plots/all`);
     }
     return postJson(`${FLASK_URL}filter_plot_borders`, params);
 };
