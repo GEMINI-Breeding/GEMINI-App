@@ -168,6 +168,7 @@ export const DataProvider = ({ children }) => {
     const [batchSizeExtract, setBatchSizeExtract] = useState(32);
     const [currentExtractProgress, setCurrentExtractProgress] = useState(0);
     const [isUploadingLabels, setIsUploadingLabels] = useState(false);
+    const [currentJobId, setCurrentJobId] = useState(null);
 
     // ImageViewer State
     const [imageIndex, setImageIndex] = useState(0);
@@ -324,6 +325,7 @@ export const DataProvider = ({ children }) => {
                 batchSizeExtract,
                 currentExtractProgress,
                 isUploadingLabels,
+                currentJobId,
 
                 // ImageViewer State
                 imageIndex,
@@ -476,6 +478,7 @@ export const DataProvider = ({ children }) => {
                     setBatchSizeExtract,
                     setCurrentExtractProgress,
                     setIsUploadingLabels,
+                    setCurrentJobId,
 
                     // ImageViewer State
                     setImageIndex,

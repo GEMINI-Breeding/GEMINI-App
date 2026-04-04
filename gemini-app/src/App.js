@@ -37,6 +37,8 @@ import FileUploadComponent from "./Components/Menu/FileUpload";
 import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 import DocsFrame from "./Components/DocsFrame";
+import { BACKEND_MODE } from "./api/config";
+import { connectJobProgress, cancelJob } from "./api/jobs";
 
 function App() {
     //const [helpPaneOpen, setHelpPaneOpen] = useState(false);
@@ -77,7 +79,8 @@ function App() {
         currentOrthoProgress,
         isDroneExtracting,
         currentDroneExtractProgress,
-        isGCPReady
+        isGCPReady,
+        currentJobId
     } = useDataState();
 
     const {
@@ -103,7 +106,8 @@ function App() {
         setCurrentOrthoProgress,
         setIsOrthoProcessing,
         setIsDroneExtracting,
-        setSidebarCollapsed
+        setSidebarCollapsed,
+        setCurrentJobId
     } = useDataSetters();
 
     const selectedMetricRef = useRef(selectedMetric);
@@ -284,28 +288,43 @@ function App() {
 
     // FOR ORTHO START
     useEffect(() => {
-        let interval;
-        if (isOrthoProcessing) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_ortho_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log(data)
-                        setCurrentOrthoProgress(data.ortho)
-                    } else {
-                        console.error("Failed to fetch ortho progress");
-                    }
-                } catch (error) {
-                    console.error("Error fetching ortho progress", error);
-                    setSubmitError("Error getting ortho progress.")
-                }
-            }, 5*1000); // Poll every 5 secs
+        if (!isOrthoProcessing) return;
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => setCurrentOrthoProgress(data.progress || 0),
+                onComplete: () => { setIsOrthoProcessing(false); setProcessRunning(false); setCurrentOrthoProgress(100); },
+                onError: () => { setIsOrthoProcessing(false); setProcessRunning(false); setSubmitError("Ortho processing failed."); },
+            });
+            return () => ws.close();
         }
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_ortho_progress`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setCurrentOrthoProgress(data.ortho);
+                }
+            } catch (error) {
+                console.error("Error fetching ortho progress", error);
+                setSubmitError("Error getting ortho progress.");
+            }
+        }, 5000);
         return () => clearInterval(interval);
-    }, [isOrthoProcessing, flaskUrl]);
+    }, [isOrthoProcessing, flaskUrl, currentJobId]);
 
     const handleStopOrtho = async () => {
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            try {
+                await cancelJob(currentJobId);
+                setIsOrthoProcessing(false);
+                setProcessRunning(false);
+                setCurrentOrthoProgress(0);
+                setCurrentJobId(null);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+            return;
+        }
         const data = {
             year: selectedYearGCP,
             experiment: selectedExperimentGCP,
@@ -324,16 +343,14 @@ function App() {
                 body: JSON.stringify(data)
             });
             if (response.ok) {
-                // Handle successful stop
                 console.log("ODM stopped");
                 setIsOrthoProcessing(false);
                 setProcessRunning(false);
                 setCurrentOrthoProgress(0);
             } else {
-                // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping ODM", errorData);
-                setSubmitError("Error stopping ODM.")
+                setSubmitError("Error stopping ODM.");
             }
         } catch (error) {
             console.error("Error:", error);
@@ -343,72 +360,95 @@ function App() {
 
     // FOR TRAINING START
     const handleStopTraining = async () => {
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            try {
+                await cancelJob(currentJobId);
+                setIsTraining(false);
+                setCurrentEpoch(0);
+                setTrainingData(null);
+                setChartData({ x: [], y: [] });
+                setProcessRunning(false);
+                setCurrentJobId(null);
+            } catch (error) {
+                console.error("Error:", error);
+                setSubmitError("Error stopping training.");
+            }
+            return;
+        }
         try {
             const response = await fetch(`${flaskUrl}stop_training`, { method: "POST" });
-            // Handle successful stop
             console.log("Training stopped");
-            setIsTraining(false); // Update isTraining to false
-            setCurrentEpoch(0); // Reset epochs
+            setIsTraining(false);
+            setCurrentEpoch(0);
             setTrainingData(null);
-            setChartData({ x: [], y: [] }); // Reset chart data
+            setChartData({ x: [], y: [] });
             setProcessRunning(false);
         } catch (error) {
             console.error("Error:", error);
-            setSubmitError("Error stopping training.")
+            setSubmitError("Error stopping training.");
         }
     };
-    
-    useEffect(() => {
-        console.log({
-            isTraining: isTraining,
-            currentEpoch: currentEpoch,
-            trainingData: trainingData,
-            chartData: chartData,
-            processRunning: processRunning
-        });
-    }, [isTraining, currentEpoch, trainingData, chartData, processRunning]);
-    
 
     useEffect(() => {
-        let interval;
-        if (isTraining) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
-                        setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
-                        setCurrentEpoch(data.epoch); // Update current epoch
-                        setTrainingData(data);
-                    } else {
-                        console.error("Failed to fetch training progress");
-                        setSubmitError("Error getting training progress.")
-                    }
-                } catch (error) {
-                    console.error("Error fetching training progress", error);
-                }
-            }, 5000); // Poll every 5 seconds
+        if (!isTraining) return;
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => {
+                    const detail = data.progress_detail || {};
+                    setProgress(data.progress || 0);
+                    if (detail.epoch !== undefined) setCurrentEpoch(detail.epoch);
+                    setTrainingData(detail);
+                },
+                onComplete: () => { setIsTraining(false); setProcessRunning(false); setProgress(100); },
+                onError: (data) => { setIsTraining(false); setProcessRunning(false); setSubmitError(data.error_message || "Training failed."); },
+            });
+            return () => ws.close();
         }
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_progress`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
+                    setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
+                    setCurrentEpoch(data.epoch);
+                    setTrainingData(data);
+                } else {
+                    setSubmitError("Error getting training progress.");
+                }
+            } catch (error) {
+                console.error("Error fetching training progress", error);
+            }
+        }, 5000);
         return () => clearInterval(interval);
-    }, [isTraining]);
+    }, [isTraining, currentJobId]);
     // FOR TRAINING END
 
     // FOR LOCATE START
     const handleStopLocating = async () => {
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            try {
+                await cancelJob(currentJobId);
+                setIsLocating(false);
+                setProcessRunning(false);
+                setCurrentLocateProgress(0);
+                setCurrentJobId(null);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+            return;
+        }
         try {
             const response = await fetch(`${flaskUrl}stop_locate`, { method: "POST" });
             if (response.ok) {
-                // Handle successful stop
                 console.log("Locating stopped");
                 setIsLocating(false);
                 setProcessRunning(false);
-                setCurrentLocateProgress(0)
+                setCurrentLocateProgress(0);
             } else {
-                // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping locating", errorData);
-                setSubmitError("Error stopping locating.")
+                setSubmitError("Error stopping locating.");
             }
         } catch (error) {
             console.error("Error:", error);
@@ -416,63 +456,81 @@ function App() {
     };
 
     useEffect(() => {
-        let interval;
-        if (isLocating) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_locate_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log(data)
-                        setCurrentLocateProgress(data.locate)
-                    } else {
-                        console.error("Failed to fetch locate progress");
-                        setSubmitError("Error fetching locate progress.")
-                    }
-                } catch (error) {
-                    console.error("Error fetching locate progress", error);
-                }
-            }, 60000); // Poll every min
+        if (!isLocating) return;
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => setCurrentLocateProgress(data.progress || 0),
+                onComplete: () => { setIsLocating(false); setProcessRunning(false); setCurrentLocateProgress(100); setCloseMenu(true); },
+                onError: () => { setIsLocating(false); setProcessRunning(false); setSubmitError("Locating failed."); },
+            });
+            return () => ws.close();
         }
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_locate_progress`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setCurrentLocateProgress(data.locate);
+                } else {
+                    setSubmitError("Error fetching locate progress.");
+                }
+            } catch (error) {
+                console.error("Error fetching locate progress", error);
+            }
+        }, 60000);
         return () => clearInterval(interval);
-    }, [isLocating, flaskUrl]);
+    }, [isLocating, flaskUrl, currentJobId]);
     // FOR LOCATE END
 
     // FOR EXTRACT START
     const handleStopExtracting = async () => {
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            try {
+                await cancelJob(currentJobId);
+                setIsExtracting(false);
+                setProcessRunning(false);
+                setCurrentJobId(null);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+            return;
+        }
         try {
             const response = await fetch(`${flaskUrl}stop_extract`, { method: "POST" });
             if (response.ok) {
-                // Handle successful stop
                 console.log("Extracting stopped");
                 setIsExtracting(false);
                 setProcessRunning(false);
-                // setCurrentExtractProgress(0);
             } else {
-                // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping extracting", errorData);
-                setSubmitError("Error stopping extraction.")
+                setSubmitError("Error stopping extraction.");
             }
         } catch (error) {
             console.error("Error:", error);
         }
     };
     const handleDoneExtracting = async () => {
+        if (BACKEND_MODE !== 'flask') {
+            setIsExtracting(false);
+            setProcessRunning(false);
+            setCurrentExtractProgress(0);
+            setCloseMenu(false);
+            setCurrentJobId(null);
+            return;
+        }
         try {
             const response = await fetch(`${flaskUrl}done_extract`, { method: "POST" });
             if (response.ok) {
-                // Handle successful stop
                 console.log("Extracting finished");
                 setIsExtracting(false);
                 setProcessRunning(false);
                 setCurrentExtractProgress(0);
                 setCloseMenu(false);
             } else {
-                // Handle error response
                 const errorData = await response.json();
                 console.error("Error finishing extraction", errorData);
-                setSubmitError("Error finishing extraction.")
+                setSubmitError("Error finishing extraction.");
             }
         } catch (error) {
             console.error("Error:", error);
@@ -480,30 +538,46 @@ function App() {
     };
 
     useEffect(() => {
-        let interval;
-        if (isExtracting) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_extract_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log(data)
-                        setCurrentExtractProgress(data.extract)
-                    } else {
-                        console.error("Failed to fetch locate progress");
-                        setSubmitError("Error fetching locate progress.")
-                    }
-                } catch (error) {
-                    console.error("Error fetching locate progress", error);
-                }
-            }, 60000); // Poll every min
+        if (!isExtracting) return;
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => setCurrentExtractProgress(data.progress || 0),
+                onComplete: () => { setIsExtracting(false); setProcessRunning(false); setCurrentExtractProgress(100); setCloseMenu(true); },
+                onError: () => { setIsExtracting(false); setProcessRunning(false); setSubmitError("Extraction failed."); },
+            });
+            return () => ws.close();
         }
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_extract_progress`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setCurrentExtractProgress(data.extract);
+                } else {
+                    setSubmitError("Error fetching extract progress.");
+                }
+            } catch (error) {
+                console.error("Error fetching extract progress", error);
+            }
+        }, 60000);
         return () => clearInterval(interval);
-    }, [isExtracting, flaskUrl]);
+    }, [isExtracting, flaskUrl, currentJobId]);
     // FOR EXTRACT END
 
     // FOR DRONE EXTRACT START
     const handleStopDroneExtracting = async () => {
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            try {
+                await cancelJob(currentJobId);
+                setIsDroneExtracting(false);
+                setProcessRunning(false);
+                setCurrentDroneExtractProgress(0);
+                setCurrentJobId(null);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+            return;
+        }
         const data = {
             year: selectedYearGCP,
             experiment: selectedExperimentGCP,
@@ -522,16 +596,14 @@ function App() {
                 body: JSON.stringify(data),
             });
             if (response.ok) {
-                // Handle successful stop
                 console.log("Extracting stopped");
                 setIsDroneExtracting(false);
                 setProcessRunning(false);
                 setCurrentDroneExtractProgress(0);
             } else {
-                // Handle error response
                 const errorData = await response.json();
                 console.error("Error stopping drone extracting", errorData);
-                setSubmitError("Error stopping drone extraction.")
+                setSubmitError("Error stopping drone extraction.");
             }
         } catch (error) {
             console.error("Error:", error);
@@ -539,26 +611,30 @@ function App() {
     };
 
     useEffect(() => {
-        let interval;
-        if (isDroneExtracting) {
-            interval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${flaskUrl}get_drone_extract_progress`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log(data)
-                        setCurrentDroneExtractProgress(data.drone_extract)
-                    } else {
-                        console.error("Failed to fetch drone extract progress");
-                        setSubmitError("Error fetching drone extract progress.")
-                    }
-                } catch (error) {
-                    console.error("Error fetching drone extract progress", error);
-                }
-            }, 1000); // Poll every min
+        if (!isDroneExtracting) return;
+        if (BACKEND_MODE !== 'flask' && currentJobId) {
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => setCurrentDroneExtractProgress(data.progress || 0),
+                onComplete: () => { setIsDroneExtracting(false); setProcessRunning(false); setCurrentDroneExtractProgress(100); },
+                onError: () => { setIsDroneExtracting(false); setProcessRunning(false); setSubmitError("Drone extraction failed."); },
+            });
+            return () => ws.close();
         }
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${flaskUrl}get_drone_extract_progress`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setCurrentDroneExtractProgress(data.drone_extract);
+                } else {
+                    setSubmitError("Error fetching drone extract progress.");
+                }
+            } catch (error) {
+                console.error("Error fetching drone extract progress", error);
+            }
+        }, 1000);
         return () => clearInterval(interval);
-    }, [isDroneExtracting, flaskUrl]);
+    }, [isDroneExtracting, flaskUrl, currentJobId]);
     // FOR DRONE EXTRACT DONE
 
     return (

@@ -17,6 +17,8 @@ import {
 import dedent from "dedent";
 import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { runOdm, runStitch } from "../../api/processing";
+import { BACKEND_MODE } from "../../api/config";
 
 const OrthoModal = ( {selectedOrthoMethod} ) => {
     const {
@@ -37,15 +39,16 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
         selectedSensorGCP
     } = useDataState();
 
-    const { 
-        setOrthoSetting, 
-        setOrthoCustomValue, 
-        setOrthoModalOpen, 
-        setIsOrthoProcessing, 
+    const {
+        setOrthoSetting,
+        setOrthoCustomValue,
+        setOrthoModalOpen,
+        setIsOrthoProcessing,
         setOrthoServerStatus,
         setIsImageViewerOpen,
         setProcessRunning,
-        setImageViewerLoading
+        setImageViewerLoading,
+        setCurrentJobId
     } = useDataSetters();
 
     const [submitError, setSubmitError] = useState("");
@@ -159,30 +162,21 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
         window.selectedOrthoMethod = selectedOrthoMethod;
         window.orthoData = data;
 
-        fetch(`${flaskUrl}${endpoint}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(data),
-        })
-            .then((response) => {
-                if (!response.ok) {
-                    throw new Error("Error generating ortho");
+        const apiFn = selectedOrthoMethod === "STITCH" ? runStitch : runOdm;
+        apiFn(data)
+            .then((result) => {
+                console.log("Success:", result);
+                if (BACKEND_MODE !== 'flask' && result && result.id) {
+                    setCurrentJobId(result.id);
                 }
-                return response.json();
-            })
-            .then((data) => {
-                console.log("Success:", data);
                 setOrthoServerStatus("Success!");
                 setImageViewerLoading(false);
             })
             .catch((error) => {
                 console.error("Error:", error);
                 setOrthoServerStatus("Error generating ortho");
-                setSubmitError("Error starting ortho generation.")
+                setSubmitError("Error starting ortho generation.");
                 setImageViewerLoading(false);
-
                 alert("Error starting ortho generation. Please try again.");
             });
     };

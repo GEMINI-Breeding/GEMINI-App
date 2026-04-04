@@ -21,6 +21,8 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { DataGrid } from '@mui/x-data-grid';
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
+import { trainModel } from "../../../../api/processing";
+import { BACKEND_MODE } from "../../../../api/config";
 
 function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const {
@@ -38,15 +40,16 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         selectRoverTrait
     } = useDataState();
 
-    const { 
-        setEpochs, 
-        setBatchSize, 
-        setImageSize, 
-        setIsTraining, 
-        setProcessRunning, 
-        setCurrentEpoch, 
-        setTrainingData, 
-        setChartData 
+    const {
+        setEpochs,
+        setBatchSize,
+        setImageSize,
+        setIsTraining,
+        setProcessRunning,
+        setCurrentEpoch,
+        setTrainingData,
+        setChartData,
+        setCurrentJobId
     } = useDataSetters();
 
     // for training model
@@ -83,23 +86,13 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
                 payload.sensor = selections.sensor;
             }
 
-            const response = await fetch(`${flaskUrl}train_model`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                console.log("Response from server:", data);
-            } else {
-                const errorData = await response.json();
-                console.error("Error details:", errorData);
-
-                // create dialog box containing error message
-                alert("Error: " + errorData.error);
+            const data = await trainModel(payload);
+            console.log("Response from server:", data);
+            if (BACKEND_MODE !== 'flask' && data && data.id) {
+                setCurrentJobId(data.id);
+            }
+            if (data && data.error) {
+                alert("Error: " + data.error);
             }
         } catch (error) {
             console.error("There was an error sending the request", error);

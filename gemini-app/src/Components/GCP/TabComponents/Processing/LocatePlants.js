@@ -19,6 +19,8 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
+import { locatePlants } from "../../../../api/processing";
+import { BACKEND_MODE } from "../../../../api/config";
 
 function LocateMenu({ open, onClose, item, platform, sensor }) {
 
@@ -40,6 +42,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
         setIsLocating,
         setProcessRunning,
         setCloseMenu,
+        setCurrentJobId,
     } = useDataSetters();
 
     const handleLocate = async () => {
@@ -59,24 +62,13 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 id: selectedModelId
             };
             
-            const response = await fetch(`${flaskUrl}locate_plants`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                console.log("Response from server:", data);
-            } else {
-                const errorData = await response.json();
-                console.error("Error details:", errorData);
-                
-                // Raise error dialog of error message (500 message)
-                // message from backend: return jsonify({"error": error_output}), 500
-                alert("Error: " + errorData.error);
+            const data = await locatePlants(payload);
+            console.log("Response from server:", data);
+            if (BACKEND_MODE !== 'flask' && data && data.id) {
+                setCurrentJobId(data.id);
+            }
+            if (data && data.error) {
+                alert("Error: " + data.error);
             }
         } catch (error) {
             console.error("There was an error sending the request", error)
