@@ -84,6 +84,23 @@ npm install --legacy-peer-deps  # Fixes upstream dependency conflict
 
 ---
 
+## 🚀 Running for Development
+
+After completing the native install steps above:
+
+```bash
+cd gemini-app
+npm run gemini
+```
+
+This starts both the React frontend and Flask backend concurrently. By default:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+
+Ports and the data directory are configured in `gemini-app/.env` (see `.env.example`).
+
+---
+
 ## 🔍 Pipeline Overview
 
 ![Sensing Pipeline](assets/sensing_pipeline.png)

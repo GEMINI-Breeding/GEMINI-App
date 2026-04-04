@@ -143,6 +143,7 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
             // Upload the files
             const maxRetries = 3;
+            const failedFiles = [];
             for (let i = 0; i < filesToUpload.length; i++) {
                 let retries = 0;
                 while (retries < maxRetries) {
@@ -157,16 +158,19 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
                         break;
                     } catch (error) {
                         if (retries === maxRetries - 1) {
-                            alert(`Failed to upload file: ${filesToUpload[i]}`);
-                            setProcessRunning(false)
-                            setIsUploadingLabels(false);
-                            setAcceptedAnnotations([]);
-                            setUploadProgress(0);
+                            failedFiles.push(filesToUpload[i]);
                             break;
                         }
                         retries++;
                         }
                 }
+            }
+            if (failedFiles.length > 0) {
+                alert(`Failed to upload ${failedFiles.length} file(s):\n${failedFiles.join('\n')}`);
+                setProcessRunning(false);
+                setIsUploadingLabels(false);
+                setAcceptedAnnotations([]);
+                setUploadProgress(0);
             }
 
         } catch (error) {

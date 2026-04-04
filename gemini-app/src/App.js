@@ -7,6 +7,15 @@ import IconButton from "@mui/material/IconButton";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Snackbar from "@mui/material/Snackbar";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import CircularProgress from "@mui/material/CircularProgress";
+import Tooltip from "@mui/material/Tooltip";
+import SettingsIcon from "@mui/icons-material/Settings";
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
@@ -32,10 +41,12 @@ import DocsFrame from "./Components/DocsFrame";
 function App() {
     //const [helpPaneOpen, setHelpPaneOpen] = useState(false);
     const [submitError, setSubmitError] = useState("");
-
-    /*const toggleHelpPane = () => {
-        setHelpPaneOpen(!helpPaneOpen);
-    };*/
+    const [dataDirMissing, setDataDirMissing] = useState(false);
+    const [dataDirPath, setDataDirPath] = useState("");
+    const [dataDirCreating, setDataDirCreating] = useState(false);
+    const [dataDirBrowsing, setDataDirBrowsing] = useState(false);
+    const [dataDirError, setDataDirError] = useState("");
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     // App state management; see DataContext.js
     const {
@@ -101,6 +112,103 @@ function App() {
         selectedMetricRef.current = selectedMetric;
     }, [selectedMetric]);
 
+    // Check if the data directory exists on startup, retrying until the backend is reachable
+    useEffect(() => {
+        let cancelled = false;
+        const check = () => {
+            fetch(`${flaskUrl}check_data_dir`)
+                .then(res => res.json())
+                .then(data => {
+                    if (cancelled) return;
+                    if (!data.exists) {
+                        setDataDirPath(data.path);
+                        setDataDirMissing(true);
+                    }
+                })
+                .catch(() => {
+                    if (!cancelled) setTimeout(check, 3000);
+                });
+        };
+        check();
+        return () => { cancelled = true; };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleBrowseDataDir = () => {
+        setDataDirError("");
+        setDataDirBrowsing(true);
+        fetch(`${flaskUrl}browse_data_dir`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                setDataDirBrowsing(false);
+                if (data.selected) {
+                    setDataDirPath(data.path);
+                } else if (data.error) {
+                    setDataDirError(data.error);
+                }
+            })
+            .catch(err => {
+                setDataDirBrowsing(false);
+                setDataDirError(err.message);
+            });
+    };
+
+    const handleCreateDataDir = () => {
+        setDataDirCreating(true);
+        setDataDirError("");
+        fetch(`${flaskUrl}create_data_dir`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: dataDirPath })
+        })
+            .then(res => res.json())
+            .then(data => {
+                setDataDirCreating(false);
+                if (data.success) {
+                    setDataDirMissing(false);
+                } else {
+                    setDataDirError(data.error || "Failed to create directory.");
+                }
+            })
+            .catch(err => {
+                setDataDirCreating(false);
+                setDataDirError(err.message);
+            });
+    };
+
+    const handleOpenSettings = () => {
+        setDataDirError("");
+        fetch(`${flaskUrl}check_data_dir`)
+            .then(res => res.json())
+            .then(data => {
+                setDataDirPath(data.path);
+                setSettingsOpen(true);
+            })
+            .catch(() => setSettingsOpen(true));
+    };
+
+    const handleSettingsSave = () => {
+        setDataDirCreating(true);
+        setDataDirError("");
+        fetch(`${flaskUrl}create_data_dir`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: dataDirPath })
+        })
+            .then(res => res.json())
+            .then(data => {
+                setDataDirCreating(false);
+                if (data.success) {
+                    setSettingsOpen(false);
+                } else {
+                    setDataDirError(data.error || "Failed to update directory.");
+                }
+            })
+            .catch(err => {
+                setDataDirCreating(false);
+                setDataDirError(err.message);
+            });
+    };
+
     const sidebar = (
         <CollapsibleSidebar
             onTilePathChange={setSelectedTilePath}
@@ -127,52 +235,49 @@ function App() {
         </Box>
     );
 
+    // Sync sidebar collapsed state when view changes
+    useEffect(() => {
+        switch (currentView) {
+            case 1:
+            case 5:
+            case 6:
+            case 7:
+                if (!isGCPReady) setSidebarCollapsed(false);
+                break;
+            case 8:
+                setSidebarCollapsed(true);
+                break;
+            default:
+                break;
+        }
+    }, [currentView, isGCPReady, setSidebarCollapsed]);
+
     // Choose what to render based on the `currentView` state
     const contentView = (() => {
         switch (currentView) {
             case 0:
                 return <MapView />;
             case 1:
-                if(!isGCPReady){
-                    setSidebarCollapsed(false);
-                }
                 return <TabbedPrepUI />;
             case 2:
                 return <StatsMenuMain />;
             case 3:
-                // Prepare main tab - show both tabs
                 return <FileUploadComponent />;
             case 4:
                 return <ImageQueryUI />;
             case 5:
-                // Mosaic Generation - set tab to 0 in TabbedPrepUI
-                if(!isGCPReady){
-                    setSidebarCollapsed(false);
-                }
                 return <TabbedPrepUI selectedTab={0} />;
             case 6:
-                // Plot Association - set tab to 1 in TabbedPrepUI
-                if(!isGCPReady){
-                    setSidebarCollapsed(false);
-                }
                 return <TabbedPrepUI selectedTab={1} />;
             case 7:
-                // Processing - set tab to 2 in TabbedPrepUI
-                if(!isGCPReady){
-                    setSidebarCollapsed(false);
-                }
                 return <TabbedPrepUI selectedTab={2} />;
             case 8:
-                setSidebarCollapsed(true);
                 return <DocsFrame />;
             case 9:
-                // Upload Files - show upload tab of FileUploadComponent
                 return <FileUploadComponent actionType="upload" />;
             case 10:
-                // Manage Files - show manage tab of FileUploadComponent
                 return <FileUploadComponent actionType="manage" />;
             default:
-                setSidebarCollapsed(true);
                 return <DocsFrame />;
         }
     })();
@@ -598,6 +703,112 @@ function App() {
                     message={submitError}
                 />
             </ActiveComponentsProvider>
+
+            <Dialog open={dataDirMissing} disableEscapeKeyDown maxWidth="sm" fullWidth>
+                <DialogTitle>Set Up Data Directory</DialogTitle>
+                <DialogContent>
+                    <DialogContentText sx={{ mb: 2 }}>
+                        A data directory is required to store uploaded files, processed data, and models.
+                        Choose an existing folder or create a new one.
+                    </DialogContentText>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <Box sx={{
+                            fontFamily: 'monospace',
+                            fontSize: '0.875rem',
+                            p: 1.5,
+                            bgcolor: 'grey.100',
+                            borderRadius: 1,
+                            flex: 1,
+                            wordBreak: 'break-all'
+                        }}>
+                            {dataDirPath || 'No directory selected'}
+                        </Box>
+                        <Button variant="outlined" onClick={handleBrowseDataDir} disabled={dataDirBrowsing}>
+                            {dataDirBrowsing ? "Waiting..." : "Browse"}
+                        </Button>
+                    </Box>
+                    {dataDirError && (
+                        <DialogContentText color="error" sx={{ mt: 1 }}>
+                            Error: {dataDirError}
+                        </DialogContentText>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button
+                        onClick={handleCreateDataDir}
+                        variant="contained"
+                        disabled={dataDirCreating || !dataDirPath}
+                    >
+                        {dataDirCreating ? <CircularProgress size={20} /> : "Use This Directory"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Settings dialog */}
+            <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Settings</DialogTitle>
+                <DialogContent>
+                    <DialogContentText sx={{ mb: 2 }}>
+                        Data Directory
+                    </DialogContentText>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <Box sx={{
+                            fontFamily: 'monospace',
+                            fontSize: '0.875rem',
+                            p: 1.5,
+                            bgcolor: 'grey.100',
+                            borderRadius: 1,
+                            flex: 1,
+                            wordBreak: 'break-all'
+                        }}>
+                            {dataDirPath || 'No directory selected'}
+                        </Box>
+                        <Button variant="outlined" onClick={handleBrowseDataDir} disabled={dataDirBrowsing}>
+                            {dataDirBrowsing ? "Waiting..." : "Browse"}
+                        </Button>
+                    </Box>
+                    {dataDirError && (
+                        <DialogContentText color="error" sx={{ mt: 1 }}>
+                            Error: {dataDirError}
+                        </DialogContentText>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
+                    <Button
+                        onClick={handleSettingsSave}
+                        variant="contained"
+                        disabled={dataDirCreating || !dataDirPath}
+                    >
+                        {dataDirCreating ? <CircularProgress size={20} /> : "Save"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Floating Settings icon */}
+            <Tooltip title="Settings" placement="left">
+                <IconButton
+                    aria-label="settings"
+                    onClick={handleOpenSettings}
+                    sx={{
+                        position: 'fixed',
+                        bottom: 24,
+                        left: 24,
+                        backgroundColor: 'grey.700',
+                        color: 'white',
+                        width: 40,
+                        height: 40,
+                        boxShadow: 3,
+                        zIndex: (theme) => theme.zIndex.fab,
+                        '&:hover': {
+                            backgroundColor: 'grey.600',
+                            boxShadow: 6,
+                        },
+                    }}
+                >
+                    <SettingsIcon />
+                </IconButton>
+            </Tooltip>
         </ThemeProvider>
     );
 }

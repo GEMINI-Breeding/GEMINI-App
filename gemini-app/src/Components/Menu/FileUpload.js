@@ -522,6 +522,7 @@ const FileUploadComponent = ({ actionType = null }) => {
                 setNoFilesToUpload(false);
                 const maxRetries = 3;
                 let bFT = false;
+                const failedFiles = [];
                 for (let i = 0; i < filesToUpload.length; i++) {
                     console.log(('.' + filesToUpload[i].split('.')[1]))
                     if(selectedDataType === "image" && fileTypes[filesToUpload[i]].split('/')[0] != "image")
@@ -531,7 +532,7 @@ const FileUploadComponent = ({ actionType = null }) => {
                         break;
                     }
                     else if(
-                        (selectedDataType != "image") && 
+                        (selectedDataType != "image") &&
                         selectedDataType !== "platformLogs" &&
                         selectedDataType !== "binary" &&
                         ('.' + filesToUpload[i].split('.')[1]) != dataTypes[selectedDataType].fileType)
@@ -549,26 +550,26 @@ const FileUploadComponent = ({ actionType = null }) => {
                                     break;
                                 }
                                 const file = files.find((f) => f.name === filesToUpload[i]);
-                                
+
                                 if (selectedDataType === "binary" && selectedDataType !== "platformLogs") {
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
                                     break;
                                 } else if (selectedDataType === "ortho") {
                                     // Generate renamed filename for orthomosaic files
                                     const renamedFileName = getRenamedOrthomosaicFileName(file.name, values.date);
-                                    
+
                                     // Set pyramid creation state for this file
                                     if (file.name.endsWith('.tif')) {
                                         setIsCreatingPyramids(true);
                                     }
-                                    
+
                                     await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length, renamedFileName);
-                                    
+
                                     // Pyramid creation is complete when upload finishes (it's done synchronously on backend)
                                     if (file.name.endsWith('.tif')) {
                                         setIsCreatingPyramids(false);
                                     }
-                                    
+
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                                     break;
                                 } else {
@@ -578,7 +579,7 @@ const FileUploadComponent = ({ actionType = null }) => {
                                 break;
                             } catch (error) {
                                 if (retries === maxRetries - 1) {
-                                    alert(`Failed to upload file: ${filesToUpload[i]}`);
+                                    failedFiles.push(filesToUpload[i]);
                                     console.log(`Failed to upload file: ${filesToUpload[i]}`, error);
                                     break;
                                 }
@@ -586,6 +587,9 @@ const FileUploadComponent = ({ actionType = null }) => {
                             }
                         }
                     }
+                }
+                if (failedFiles.length > 0) {
+                    alert(`Failed to upload ${failedFiles.length} file(s):\n${failedFiles.join('\n')}`);
                 }
                 if(!bFT)
                 {
@@ -761,10 +765,22 @@ const FileUploadComponent = ({ actionType = null }) => {
         );
     };
 
+    // Build the accept object for react-dropzone v14+
+    // react-dropzone expects { "mime/type": [".ext"] }, not a raw string.
+    const getAcceptConfig = (fileType) => {
+        if (fileType === "*") return undefined; // Accept all files
+        if (fileType === "image/*") return { "image/*": [] };
+        if (fileType === ".bin") return { "application/octet-stream": [".bin"] };
+        if (fileType === ".csv") return { "text/csv": [".csv"] };
+        if (fileType === ".txt") return { "text/plain": [".txt"] };
+        if (fileType === ".tif") return { "image/tiff": [".tif", ".tiff"] };
+        return undefined;
+    };
+
     // Dropzone configuration
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: handleFileChange,
-        accept: dataTypes[selectedDataType].fileType,
+        accept: getAcceptConfig(dataTypes[selectedDataType].fileType),
         maxFiles: Infinity,
         noClick: false,
         noKeyboard: false,

@@ -7,6 +7,7 @@ const DocsFrame = () => {
                 src="https://gemini-breeding.github.io/"
                 title="GEMINI Documentation"
                 style={{ width: '100%', height: '100%', border: 'none' }}
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
             />
         </div>
     );

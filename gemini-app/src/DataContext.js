@@ -43,8 +43,8 @@ const getRuntimeConfig = () => {
     return {
         flaskPort: process.env.REACT_APP_FLASK_PORT || '5000',
         tileServerPort: process.env.REACT_APP_TILE_SERVER_PORT || '8091',
-        flaskHost: '0.0.0.0',
-        tileServerHost: '0.0.0.0'
+        flaskHost: 'localhost',
+        tileServerHost: 'localhost'
     };
 };
 
