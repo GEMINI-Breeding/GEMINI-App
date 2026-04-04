@@ -1309,140 +1309,6 @@ interface InferenceResult {
   classes: Record<string, number>;
 }
 
-function GroundInferencePanel({
-  runId,
-  onDelete,
-  isDeleting,
-}: {
-  runId: string;
-  onDelete: (label: string) => void;
-  isDeleting: boolean;
-}) {
-  const [confirmLabel, setConfirmLabel] = useState<string | null>(null);
-
-  const { data: results = [], isLoading } = useQuery<InferenceResult[]>({
-    queryKey: ["inference-summary", runId],
-    queryFn: async () => {
-      const res = await fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`)
-      );
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data) ? data : (data?.results ?? []);
-    },
-    staleTime: 30_000,
-  });
-
-  if (isLoading) {
-    return (
-      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        Loading inference results…
-      </div>
-    );
-  }
-
-  if (results.length === 0) return null;
-
-  return (
-    <>
-      <div className="mt-3 overflow-hidden rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="py-2 text-xs">Label</TableHead>
-              <TableHead className="py-2 text-xs">Stitch</TableHead>
-              <TableHead className="py-2 text-xs">Assoc</TableHead>
-              <TableHead className="py-2 text-right text-xs">Plots</TableHead>
-              <TableHead className="py-2 text-right text-xs">
-                Predictions
-              </TableHead>
-              <TableHead className="py-2 text-xs">Classes</TableHead>
-              <TableHead className="py-2 text-right text-xs">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {results.map((r) => (
-              <TableRow key={r.label} className="text-xs">
-                <TableCell className="py-2 font-medium">{r.label}</TableCell>
-                <TableCell className="text-muted-foreground py-2 font-mono">
-                  {r.stitch_version != null ? `v${r.stitch_version}` : "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground py-2 font-mono">
-                  {r.association_version != null
-                    ? `v${r.association_version}`
-                    : "—"}
-                </TableCell>
-                <TableCell className="py-2 text-right">
-                  {r.plot_count}
-                </TableCell>
-                <TableCell className="py-2 text-right">
-                  {r.total_predictions}
-                </TableCell>
-                <TableCell className="py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(r.classes).map(([cls, count]) => (
-                      <Badge
-                        key={cls}
-                        variant="outline"
-                        className="px-1 py-0 text-[10px]"
-                      >
-                        {cls}: {count}
-                      </Badge>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell className="py-2 text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      title="Download CSV"
-                      onClick={() =>
-                        tauriDownload(
-                          `/api/v1/files/serve?path=${encodeURIComponent(r.csv_rel_path)}`,
-                          `${r.label}_predictions.csv`,
-                          "GET",
-                          [{ name: "CSV", extensions: ["csv"] }]
-                        )
-                      }
-                    >
-                      <Download className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:text-destructive h-6 w-6"
-                      title="Delete"
-                      disabled={isDeleting}
-                      onClick={() => setConfirmLabel(r.label)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <ConfirmDeleteDialog
-        open={!!confirmLabel}
-        title="Delete inference results"
-        description={`Delete inference results for "${confirmLabel}"? This will remove the predictions CSV.`}
-        isDeleting={isDeleting}
-        onConfirm={() => {
-          if (confirmLabel) onDelete(confirmLabel);
-          setConfirmLabel(null);
-        }}
-        onCancel={() => setConfirmLabel(null)}
-      />
-    </>
-  );
-}
-
 // ── Ground: unified inference + trait versions panel ─────────────────────────
 
 function GroundVersionsPanel({
@@ -1479,11 +1345,27 @@ function GroundVersionsPanel({
     staleTime: 30_000,
   });
 
-  // Group inference results by trait_version
+  // Group inference results by trait_version.
+  // For legacy entries where trait_version is null, fall back to matching by
+  // stitch_version against the TraitRecord list. If still no match, assign to
+  // the latest record so existing data is always visible without a re-run.
+  const latestRecordVersion = records.length > 0
+    ? Math.max(...records.map((r: TraitRecord) => r.version))
+    : -1;
+
   const inferenceByVersion = inferenceResults.reduce<Record<number, InferenceResult[]>>(
     (acc, r) => {
-      const v = r.trait_version ?? -1;
-      acc[v] = [...(acc[v] ?? []), r];
+      let v = r.trait_version;
+      if (v == null) {
+        // Try to match by stitch_version
+        const matched = records.find(
+          (rec: TraitRecord) => rec.stitch_version != null && rec.stitch_version === r.stitch_version
+        );
+        v = matched ? matched.version : latestRecordVersion;
+      }
+      if (v != null) {
+        acc[v] = [...(acc[v] ?? []), r];
+      }
       return acc;
     },
     {}
@@ -1566,17 +1448,15 @@ function GroundVersionsPanel({
                         {versionInferences.length === 0 ? (
                           <span className="text-muted-foreground text-xs">—</span>
                         ) : (
-                          versionInferences.flatMap((inf) =>
-                            Object.entries(inf.classes).map(([cls, count]) => (
-                              <Badge
-                                key={`${inf.label}/${cls}`}
-                                variant="outline"
-                                className="px-1 py-0 text-[10px]"
-                              >
-                                {cls}: {count}
-                              </Badge>
-                            ))
-                          )
+                          versionInferences.map((inf) => (
+                            <Badge
+                              key={inf.label}
+                              variant="outline"
+                              className="px-1 py-0 text-[10px]"
+                            >
+                              {inf.label}: {inf.total_predictions}
+                            </Badge>
+                          ))
                         )}
                       </div>
                     </TableCell>
