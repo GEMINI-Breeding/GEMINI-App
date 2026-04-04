@@ -11,3 +11,4 @@ export * from './entities';
 export * from './files';
 export * from './processing';
 export * from './jobs';
+export * from './queries';
