@@ -89,18 +89,77 @@ export const TableComponent = () => {
         setLoading(true);
 
         if (BACKEND_MODE === 'framework') {
-            // Framework mode: fetch experiments and build table data from entity hierarchy
+            // Framework mode: fetch experiments, then hierarchy for each, and flatten into table rows
             fetch(`${FRAMEWORK_URL}experiments/all`)
-                .then((response) => response.json())
-                .then((data) => {
-                    // Transform experiment list into table-compatible format
-                    const transformedData = Array.isArray(data) ? data.map(exp => ({
-                        id: exp.id,
-                        experiment: exp.experiment_name,
-                        info: exp.experiment_info,
-                    })) : [];
-                    setProcData(transformedData);
-                    setFilteredData(transformedData);
+                .then((response) => {
+                    if (!response.ok) return [];
+                    return response.json();
+                })
+                .then(async (experiments) => {
+                    if (!Array.isArray(experiments) || experiments.length === 0) {
+                        setProcData([]);
+                        setFilteredData([]);
+                        setLoading(false);
+                        return;
+                    }
+                    // Fetch hierarchy for each experiment
+                    const allRows = [];
+                    for (const exp of experiments) {
+                        try {
+                            const hierResp = await fetch(`${FRAMEWORK_URL}experiments/id/${exp.id}/hierarchy`);
+                            if (!hierResp.ok) continue;
+                            const hier = await hierResp.json();
+                            const seasons = hier.seasons || [];
+                            const sites = hier.sites || [];
+                            const populations = hier.populations || [];
+                            const sensorPlatforms = hier.sensor_platforms || [];
+                            const sensors = hier.sensors || [];
+                            const datasets = hier.datasets || [];
+
+                            // Build rows from datasets (each dataset = one row)
+                            for (const ds of datasets) {
+                                const dsInfo = ds.dataset_info || {};
+                                const year = seasons.length > 0 ? seasons[0].season_name : '';
+                                const location = sites.length > 0 ? sites[0].site_name : '';
+                                const population = dsInfo.population || (populations.length > 0 ? populations[0].population_name : '');
+                                const platform = dsInfo.platform || (sensorPlatforms.length > 0 ? sensorPlatforms[0].sensor_platform_name : '');
+                                const sensor = dsInfo.sensor || (sensors.length > 0 ? sensors[0].sensor_name : '');
+                                const dataType = dsInfo.data_type || '';
+
+                                allRows.push({
+                                    id: ds.id,
+                                    year,
+                                    experiment: exp.experiment_name,
+                                    location,
+                                    population,
+                                    date: ds.collection_date ? ds.collection_date.split('T')[0] : '',
+                                    platform,
+                                    sensor,
+                                    _dataType: dataType,
+                                    _datasetInfo: dsInfo,
+                                });
+                            }
+
+                            // If no datasets but experiment exists, show a row for the experiment
+                            if (datasets.length === 0) {
+                                allRows.push({
+                                    id: exp.id,
+                                    year: seasons.length > 0 ? seasons[0].season_name : '',
+                                    experiment: exp.experiment_name,
+                                    location: sites.length > 0 ? sites[0].site_name : '',
+                                    population: populations.length > 0 ? populations[0].population_name : '',
+                                    date: '',
+                                    platform: '',
+                                    sensor: '',
+                                    _dataType: 'unknown',
+                                });
+                            }
+                        } catch (e) {
+                            console.error(`Error fetching hierarchy for ${exp.experiment_name}:`, e);
+                        }
+                    }
+                    setProcData(allRows);
+                    setFilteredData(allRows);
                     setLoading(false);
                 })
                 .catch((error) => {
@@ -132,6 +191,9 @@ export const TableComponent = () => {
     }, [selectedDataType, procData]);
 
     const detectDataType = (row) => {
+        // Framework mode: use the stored data_type from dataset_info if available
+        if (row._dataType && row._dataType !== 'unknown') return row._dataType;
+        // Flask mode: infer from field presence
         if (row.sensor && (row.platform && row.platform !== "rover" && row.platform !== "Amiga" ) && row.date) return "image";
         if ((row.platform === "rover" || row.platform === "Amiga") && row.cameras && row.cameras.length > 0) return "binary";
         if ((row.date && row.date !== "[object Object]") && (!row.platform || row.platform === "[object Object]")) return "weather";
@@ -143,7 +205,22 @@ export const TableComponent = () => {
     const handleViewReport = async (id) => {
         const row = procData.find((row) => row.id === id);
         if (!row) return;
-    
+
+        if (BACKEND_MODE !== 'flask') {
+            // Framework mode: binary reports are not yet available
+            // (requires worker to extract and generate reports)
+            const dsInfo = row._datasetInfo || {};
+            const files = dsInfo.files || [];
+            setReportContent(
+                `Dataset: ${row.experiment} / ${row.location} / ${row.date}\n` +
+                `Data type: ${row._dataType || 'unknown'}\n` +
+                `Files: ${files.length > 0 ? files.join('\n  ') : 'None'}\n\n` +
+                `Binary extraction reports will be available after the FLIR worker processes the data.`
+            );
+            setReportDialogOpen(true);
+            return;
+        }
+
         try {
             const response = await fetch(`${flaskUrl}get_binary_report`, {
                 method: 'POST',
@@ -154,10 +231,10 @@ export const TableComponent = () => {
                     date: row.date,
                     year: row.year,
                     experiment: row.experiment,
-                    camera: selectedCameras[id] || row.cameras[0]
+                    camera: selectedCameras[id] || (row.cameras && row.cameras[0]) || ''
                 })
             });
-    
+
             const data = await response.text();
             setReportContent(data);
             setReportDialogOpen(true);
@@ -166,7 +243,7 @@ export const TableComponent = () => {
             setReportContent("Failed to load report.");
             setReportDialogOpen(true);
         }
-    };    
+    };
 
     const handleEdit = (id) => {
         setShowEditSuccess(false);

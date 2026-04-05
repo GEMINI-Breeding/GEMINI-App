@@ -17,6 +17,7 @@ import {
 import dedent from "dedent";
 import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { checkMask, getOdmLogs } from '../../api/processing';
 import { runOdm, runStitch } from "../../api/processing";
 import { BACKEND_MODE } from "../../api/config";
 
@@ -73,23 +74,11 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                 return;
             }
 
-            fetch(`${flaskUrl}check_mask`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP
-                })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
+            checkMask({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP
             })
             .then(data => {
                 let maskValue = [0, 0, 0, 0]; // default mask
@@ -257,7 +246,7 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
 };
 
 function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
-    const { flaskUrl } = useDataState();
+    const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
     const { setCurrentOrthoProgress, setIsOrthoProcessing, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentOrthoProgress) ? currentOrthoProgress : 0;
@@ -274,20 +263,17 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
             const fetchLogs = async () => {
                 setLoadingLogs(true);
                 try {
-                    const response = await fetch(`${flaskUrl}get_odm_logs`,{
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({method: window.selectedOrthoMethod, orthoData: window.orthoData}),
+                    const data = await getOdmLogs({
+                        method: window.selectedOrthoMethod,
+                        orthoData: window.orthoData,
+                        year: selectedYearGCP,
+                        experiment: selectedExperimentGCP,
+                        location: selectedLocationGCP,
+                        population: selectedPopulationGCP,
                     });
-                    const data = await response.json();
-                    if (response.ok) {
-                        console.log("Logs:", data);
-                        //setLogContent(prevContent => prevContent + "\n" + data.log_content); // => Why?
-                        setLogContent(data.log_content);
-                    } else {
-                        console.log("Error fetching logs:", data.error);
+                    if (data.logs || data.log_content) {
+                        setLogContent(data.log_content || data.logs);
+                    } else if (data.error) {
                         setLogContent("Error: " + data.error);
                     }
                 } catch (error) {

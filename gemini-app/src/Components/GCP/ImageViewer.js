@@ -26,6 +26,7 @@ import { useHandleGcpRefreshImages } from "../Util/ImageViewerUtil";
 import useTrackComponent from "../../useTrackComponent";
 import fetchAndSetGcpFilePath from "./TabComponents/Checklist";
 import { fetchData } from "../../DataContext";
+import { uploadFile } from '../../api/files';
 
 function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     useTrackComponent("ImageViewer");
@@ -101,20 +102,12 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         formData.append("files", file);
         formData.append("dirPath", dirPath);
         formData.append("dataType", "gcpLocations");
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), timeout);
         try {
-            const response = await fetch(`${flaskUrl}upload`, {
-                method: "POST",
-                body: formData,
-                signal: controller.signal,
-            });
-            console.log(response)
-            clearTimeout(id);
+            const response = await uploadFile(formData);
+            console.log(response);
             return response;
         } catch (error) {
             console.log("Upload error:", error);
-            clearTimeout(id);
             throw error;
         }
     };

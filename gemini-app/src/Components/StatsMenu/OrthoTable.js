@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DataGrid } from '@mui/x-data-grid';
-import { fetchData, useDataState } from "../../DataContext";
+import { useDataState } from "../../DataContext";
 import { Box, Typography, Alert, CircularProgress } from '@mui/material';
 import { IconButton } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -8,12 +8,15 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import OrthoPreview from '../Menu/OrthoPreview';
 import RoverPlotPreview from '../Menu/RoverPlotPreview';
 import Download from "@mui/icons-material/Download";
+import { listDirs, listFiles, deleteOrtho, downloadOrtho, downloadPlotOrtho, getOrthoMetadata } from '../../api/files';
+import { getPlotBordersData } from '../../api/queries';
+import { BACKEND_MODE } from '../../api/config';
 
 const OrthoTable = () => {
     const [orthoData, setOrthoData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
     const [isOrthoPreviewOpen, setIsOrthoPreviewOpen] = useState(false);
     const [viewImageUrl, setViewImageUrl] = useState(null);
     const [isRoverPreviewOpen, setIsRoverPreviewOpen] = useState(false);
@@ -24,30 +27,23 @@ const OrthoTable = () => {
         const fetchOrthoData = async () => {
             setLoading(true);
             try {
-                const dates = await fetchData(
-                    `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
-                );
+                const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+                const dates = await listDirs(basePath);
 
                 const allOrthoData = [];
 
                 for (const date of dates) {
-                    const platforms = await fetchData(
-                        `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
-                    );
+                    const platforms = await listDirs(`${basePath}/${date}`);
 
                     for (const platform of platforms) {
-                        const sensors = await fetchData(
-                            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
-                        );
+                        const sensors = await listDirs(`${basePath}/${date}/${platform}`);
 
                         for (const sensor of sensors) {
                             // First check for regular drone orthomosaics directly in sensor directory
-                            const orthoFiles = await fetchData(
-                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                            );
+                            const orthoFiles = await listFiles(`${basePath}/${date}/${platform}/${sensor}`);
 
                             // Check for drone orthomosaics
-                            const rgbFiles = orthoFiles.filter(file => 
+                            const rgbFiles = orthoFiles.filter(file =>
                                 (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) || file === `${date}-RGB.tif`
                             );
 
@@ -66,16 +62,14 @@ const OrthoTable = () => {
                                 };
 
                                 try {
-                                    const response = await fetch(
-                                        `${flaskUrl}get_ortho_metadata?date=${date}&platform=${platform}&sensor=${sensor}&year=${selectedYearGCP}&experiment=${selectedExperimentGCP}&location=${selectedLocationGCP}&population=${selectedPopulationGCP}&fileName=${rgbFile}`
-                                    );
-
-                                    if (response.ok) {
-                                        const metadata = await response.json();
-                                        if (metadata && !metadata.error) {
-                                            orthoEntry.quality = metadata.quality || 'N/A';
-                                            orthoEntry.timestamp = metadata.timestamp || 'N/A';
-                                        }
+                                    const metadata = await getOrthoMetadata({
+                                        date, platform, sensor, fileName: rgbFile,
+                                        year: selectedYearGCP, experiment: selectedExperimentGCP,
+                                        location: selectedLocationGCP, population: selectedPopulationGCP,
+                                    });
+                                    if (metadata && !metadata.error) {
+                                        orthoEntry.quality = metadata.quality || 'N/A';
+                                        orthoEntry.timestamp = metadata.timestamp || 'N/A';
                                     }
                                 } catch (error) {
                                     console.warn(`Error fetching metadata for ${date}/${platform}/${sensor}/${rgbFile}:`, error);
@@ -86,21 +80,17 @@ const OrthoTable = () => {
 
                             // Now check for AgRowStitch versioned directories
                             try {
-                                const sensorDirs = await fetchData(
-                                    `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
-                                );
+                                const sensorDirs = await listDirs(`${basePath}/${date}/${platform}/${sensor}`);
 
                                 // Look for AgRowStitch versioned directories
                                 const agrowstitchDirs = sensorDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
-                                
+
                                 // Process each version separately to show all versions
                                 for (const agrowstitchDir of agrowstitchDirs) {
-                                    const plotFiles = await fetchData(
-                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}`
-                                    );
+                                    const plotFiles = await listFiles(`${basePath}/${date}/${platform}/${sensor}/${agrowstitchDir}`);
 
                                     // Look for plot image files (prefer full_res over resized, and .png files for viewing)
-                                    const plotImages = plotFiles.filter(file => 
+                                    const plotImages = plotFiles.filter(file =>
                                         file.startsWith('full_res_mosaic_temp_plot_') && file.endsWith('.png')
                                     );
 
@@ -145,26 +135,13 @@ const OrthoTable = () => {
 
         const fetchPlotData = async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_plot_borders_data`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        year: selectedYearGCP,
-                        experiment: selectedExperimentGCP,
-                        location: selectedLocationGCP,
-                        population: selectedPopulationGCP,
-                    }),
+                const data = await getPlotBordersData({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setPlotData(data.plot_data || {});
-                } else {
-                    console.error('Error fetching plot data:', response.status);
-                    setPlotData({});
-                }
+                setPlotData(data.plot_data || {});
             } catch (error) {
                 console.error('Error fetching plot data:', error);
                 setPlotData({});
@@ -175,7 +152,7 @@ const OrthoTable = () => {
             fetchOrthoData();
             fetchPlotData();
         }
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP]);
 
     const getPlotNumber = (fileName) => {
         const match = fileName.match(/plot_(\d+)/);
@@ -186,7 +163,7 @@ const OrthoTable = () => {
         const plotNumber = getPlotNumber(fileName);
         const plotIndex = parseInt(plotNumber);
         const metadata = plotData[plotIndex] || {};
-        
+
         return {
             plotNumber,
             plotLabel: metadata.plot,
@@ -213,10 +190,10 @@ const OrthoTable = () => {
     };
 
     const handleDeleteOrtho = async (row) => {
-        const deleteMessage = row.isPlotBased 
+        const deleteMessage = row.isPlotBased
             ? `Are you sure you want to delete the ${row.type} for ${row.date}?`
             : `Are you sure you want to delete the ortho for ${row.date}?`;
-            
+
         if (window.confirm(deleteMessage)) {
             try {
                 const deletePayload = {
@@ -229,30 +206,15 @@ const OrthoTable = () => {
                     sensor: row.sensor,
                 };
 
-                // For AgRowStitch entries, include the specific version directory
                 if (row.isPlotBased) {
-                    deletePayload.agrowstitchDir = row.agrowstitchDir; // Use the correct AgRowStitch directory name
+                    deletePayload.agrowstitchDir = row.agrowstitchDir;
                     deletePayload.deleteType = 'agrowstitch';
-                    console.log(`Deleting AgRowStitch directory: ${row.agrowstitchDir}`);
                 } else {
-                    deletePayload.fileName = row.fileName; // This should be the specific file like "2023-06-15-RGB-Pyramid.tif"
+                    deletePayload.fileName = row.fileName;
                     deletePayload.deleteType = 'ortho';
-                    console.log(`Deleting orthomosaic file: ${row.fileName}`);
                 }
 
-                console.log('Delete payload:', deletePayload);
-
-                const response = await fetch(`${flaskUrl}delete_ortho`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(deletePayload),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to delete ortho');
-                }
+                await deleteOrtho(deletePayload);
 
                 // Remove the deleted ortho from the state
                 setOrthoData(orthoData.filter(ortho => ortho.id !== row.id));
@@ -266,86 +228,80 @@ const OrthoTable = () => {
     const handleDownloadOrtho = async (row) => {
         try {
             if (row.isPlotBased) {
-                // Handle plot-based download - zip the PNG files
-                const response = await fetch(`${flaskUrl}download_plot_ortho`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        year: selectedYearGCP,
-                        experiment: selectedExperimentGCP,
-                        location: selectedLocationGCP,
-                        population: selectedPopulationGCP,
-                        date: row.date,
-                        platform: row.platform,
-                        sensor: row.sensor,
-                        agrowstitchDir: row.agrowstitchDir,
-                    }),
+                const result = await downloadPlotOrtho({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: row.date,
+                    platform: row.platform,
+                    sensor: row.sensor,
+                    agrowstitchDir: row.agrowstitchDir,
                 });
 
-                if (!response.ok) {
-                    throw new Error('Failed to download plot ortho');
-                }
-
-                // Convert the response to a Blob
-                const blob = await response.blob();
-                // Create a temporary URL for the blob
-                const url = window.URL.createObjectURL(blob);
-                // Create a temporary anchor element and trigger the download
-                const a = document.createElement("a");
-                a.href = url;
-                // Set filename for the zip file with more descriptive naming
-                const fileName = `${row.date}-${row.platform}-${row.sensor}-plots.zip`;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-            } else {
-                // Handle regular orthomosaic download
-                const response = await fetch(`${flaskUrl}download_ortho`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        year: selectedYearGCP,
-                        experiment: selectedExperimentGCP,
-                        location: selectedLocationGCP,
-                        population: selectedPopulationGCP,
-                        date: row.date,
-                        platform: row.platform,
-                        sensor: row.sensor,
-                    }),
-                });
-        
-                if (!response.ok) {
-                    throw new Error('Failed to download ortho');
-                }
-        
-                // Convert the response to a Blob
-                const blob = await response.blob();
-                // Create a temporary URL for the blob
-                const url = window.URL.createObjectURL(blob);
-                // Create a temporary anchor element and trigger the download
-                const a = document.createElement("a");
-                a.href = url;
-                // Extract the filename from the response headers or set a default one
-                const disposition = response.headers.get("Content-Disposition");
-                let fileName = row.fileName.replace('.tif', '.png');
-                if (disposition && disposition.indexOf("filename=") !== -1) {
-                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                    const matches = filenameRegex.exec(disposition);
-                    if (matches != null && matches[1]) {
-                        fileName = matches[1].replace(/['"]/g, '');
+                if (BACKEND_MODE !== 'flask') {
+                    // Framework mode: result has presigned URLs for individual files
+                    for (const file of (result.files || [])) {
+                        const a = document.createElement("a");
+                        a.href = file.url;
+                        a.download = file.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
                     }
+                } else {
+                    // Flask mode: result is a blob response
+                    const blob = await result.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${row.date}-${row.platform}-${row.sensor}-plots.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
                 }
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
+            } else {
+                const result = await downloadOrtho({
+                    year: selectedYearGCP,
+                    experiment: selectedExperimentGCP,
+                    location: selectedLocationGCP,
+                    population: selectedPopulationGCP,
+                    date: row.date,
+                    platform: row.platform,
+                    sensor: row.sensor,
+                    fileName: row.fileName,
+                });
+
+                if (BACKEND_MODE !== 'flask') {
+                    // Framework mode: result has presigned URL
+                    const a = document.createElement("a");
+                    a.href = result.url;
+                    a.download = result.fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                } else {
+                    // Flask mode: result is a fetch Response
+                    const blob = await result.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    let fileName = row.fileName.replace('.tif', '.png');
+                    const disposition = result.headers.get("Content-Disposition");
+                    if (disposition && disposition.indexOf("filename=") !== -1) {
+                        const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                        const matches = filenameRegex.exec(disposition);
+                        if (matches != null && matches[1]) {
+                            fileName = matches[1].replace(/['"]/g, '');
+                        }
+                    }
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                }
             }
         } catch (error) {
             console.error('Error downloading ortho:', error);
@@ -392,10 +348,10 @@ const OrthoTable = () => {
     ];
 
     if (loading) return (
-        <Box sx={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
+        <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
             height: 400,
             flexDirection: 'column',
             gap: 2

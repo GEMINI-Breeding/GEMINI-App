@@ -16,7 +16,10 @@ import {
     Slider
 } from '@mui/material';
 import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen, Download } from '@mui/icons-material';
-import { fetchData, useDataState } from "../../DataContext";
+import { useDataState } from "../../DataContext";
+import { listFiles, getFileUrl, getTifToPng, getPngFile, downloadSinglePlot } from '../../api/files';
+import { getPlotBordersData } from '../../api/queries';
+import { BACKEND_MODE } from '../../api/config';
 
 const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
     const [plotImages, setPlotImages] = useState([]);
@@ -32,7 +35,7 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [dragDistance, setDragDistance] = useState(0);
     const [plotData, setPlotData] = useState({});
-    const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
 
     useEffect(() => {
         if (open && datePlatformSensor) {
@@ -52,18 +55,17 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
                 URL.revokeObjectURL(currentImageUrl);
             }
         };
-    }, [open, datePlatformSensor, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+    }, [open, datePlatformSensor, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     const fetchPlotImages = async () => {
         if (!datePlatformSensor) return;
-        
+
         const { date, platform, sensor, agrowstitchDir } = datePlatformSensor;
         setLoading(true);
-        
+
         try {
-            const plotFiles = await fetchData(
-                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}`
-            );
+            const dirPath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}`;
+            const plotFiles = await listFiles(dirPath);
 
             // Filter for plot image files (include both PNG and TIFF)
             const plotImages = plotFiles
@@ -92,26 +94,13 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
 
     const fetchPlotData = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_plot_borders_data`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                }),
+            const data = await getPlotBordersData({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
             });
-
-            if (response.ok) {
-                const data = await response.json();
-                setPlotData(data.plot_data || {});
-            } else {
-                console.error('Error fetching plot data:', response.status);
-                setPlotData({});
-            }
+            setPlotData(data.plot_data || {});
         } catch (error) {
             console.error('Error fetching plot data:', error);
             setPlotData({});
@@ -120,85 +109,62 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
 
     const handleImageLoad = (event) => {
         const img = event.target;
-        setImageDimensions({ 
-            width: img.naturalWidth, 
-            height: img.naturalHeight 
+        setImageDimensions({
+            width: img.naturalWidth,
+            height: img.naturalHeight
         });
         setIsImageLoaded(true);
-        console.log('Image loaded successfully:', currentImageUrl);
-    };    const loadPlotImage = async (fileName, date, platform, sensor, agrowstitchDir) => {
+    };
+
+    const loadPlotImage = async (fileName, date, platform, sensor, agrowstitchDir) => {
         try {
-            // Clean up previous blob URL if it exists
             if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(currentImageUrl);
             }
 
             const imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}/${fileName}`;
+
             // If TIFF, request server to convert it to PNG
             if (fileName.endsWith('.tif')) {
-                const response = await fetch(`${flaskUrl}get_tif_to_png`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filePath: imagePath })
-                });
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    setCurrentImageUrl(url);
-                    setZoom(1);
-                    setIsImageLoaded(false);
-                    return;
+                try {
+                    const result = await getTifToPng({ filePath: imagePath });
+                    if (result && result.url) {
+                        setCurrentImageUrl(result.url);
+                        setZoom(1);
+                        setIsImageLoaded(false);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('TIF to PNG conversion failed, trying direct serve');
                 }
             }
 
-            console.log('Loading image path:', imagePath);
-            
-            // Try the existing /files/ endpoint first
-            const directUrl = `${flaskUrl}files/${imagePath}`;
-            console.log('Trying direct URL:', directUrl);
-            
+            // Try direct file serving via API layer
+            const directUrl = getFileUrl(imagePath);
             try {
                 const directResponse = await fetch(directUrl);
                 if (directResponse.ok) {
-                    console.log('Direct file serving works, using direct URL');
                     setCurrentImageUrl(directUrl);
                     setZoom(1);
                     setIsImageLoaded(false);
                     return;
                 }
             } catch (directError) {
-                console.log('Direct file serving failed, trying blob method');
+                console.log('Direct file serving failed, trying PNG endpoint');
             }
-            
-            // Fallback to the new get_png_file endpoint
-            const response = await fetch(`${flaskUrl}get_png_file`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ filePath: imagePath }),
-            });
 
-            console.log('Blob endpoint response status:', response.status, response.statusText);
-
-            if (response.ok) {
-                const blob = await response.blob();
-                console.log('Blob size:', blob.size, 'Blob type:', blob.type);
-                
-                if (blob.size > 0) {
-                    const imageUrl = URL.createObjectURL(blob);
-                    console.log('Created blob URL:', imageUrl);
-                    setCurrentImageUrl(imageUrl);
+            // Fallback: get_png_file endpoint
+            try {
+                const pngResult = await getPngFile({ filePath: imagePath });
+                if (pngResult && pngResult.url) {
+                    setCurrentImageUrl(pngResult.url);
                     setZoom(1);
                     setIsImageLoaded(false);
                 } else {
-                    console.error('Received empty blob');
                     setCurrentImageUrl('');
                 }
-            } else {
-                console.error('Error loading plot image:', response.status, response.statusText);
-                const errorText = await response.text();
-                console.error('Error response:', errorText);
+            } catch (pngError) {
+                console.error('Error loading plot image:', pngError);
                 setCurrentImageUrl('');
             }
         } catch (error) {
@@ -286,48 +252,31 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
         });
         
         try {
-            const response = await fetch(`${flaskUrl}download_single_plot`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date,
-                    platform,
-                    sensor,
-                    agrowstitchDir,
-                    plotFilename: currentFileName,
-                }),
-            });
+            const filePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${agrowstitchDir}/${currentFileName}`;
+            const result = await downloadSinglePlot({ filePath, plotFilename: currentFileName });
 
-            console.log('Download response status:', response.status);
-            console.log('Response headers:', [...response.headers.entries()]);
+            const metadata = getCurrentPlotMetadata();
+            const fileExtension = currentFileName.endsWith('.png') ? '.png' : '.tif';
+            let customFilename;
+            if (metadata.plotLabel && metadata.accession) {
+                customFilename = `plot_${metadata.plotLabel}_accession_${metadata.accession}${fileExtension}`;
+            } else if (metadata.plotLabel) {
+                customFilename = `plot_${metadata.plotLabel}${fileExtension}`;
+            } else {
+                customFilename = `plot_${metadata.plotNumber}${fileExtension}`;
+            }
 
-            if (response.ok) {
-                // Generate custom filename using plot metadata
-                const metadata = getCurrentPlotMetadata();
-                const fileExtension = currentFileName.endsWith('.png') ? '.png' : '.tif';
-                
-                let customFilename;
-                if (metadata.plotLabel && metadata.accession) {
-                    // Use the desired format: plot_{plot}_accession_{accession}
-                    customFilename = `plot_${metadata.plotLabel}_accession_${metadata.accession}${fileExtension}`;
-                } else if (metadata.plotLabel) {
-                    // Fallback if no accession
-                    customFilename = `plot_${metadata.plotLabel}${fileExtension}`;
-                } else {
-                    // Final fallback to plot number from filename
-                    customFilename = `plot_${metadata.plotNumber}${fileExtension}`;
-                }
-
-                console.log('Custom download filename:', customFilename, 'based on metadata:', metadata);
-
-                // Create blob and download
-                const blob = await response.blob();
+            if (BACKEND_MODE !== 'flask') {
+                // Framework: presigned URL
+                const a = document.createElement('a');
+                a.href = result.url;
+                a.download = customFilename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } else {
+                // Flask: blob from response
+                const blob = result instanceof Response ? await result.blob() : new Blob([JSON.stringify(result)]);
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -336,10 +285,6 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-            } else {
-                const errorText = await response.text();
-                console.error('Error downloading plot:', response.status, errorText);
-                alert('Error downloading plot image');
             }
         } catch (error) {
             console.error('Error downloading plot:', error);

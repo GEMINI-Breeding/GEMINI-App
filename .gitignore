@@ -1,2 +1,10 @@
 GEMINI-App.code-workspace
 .vscode/
+.idea/
+.DS_Store
+
+# Planning files (Claude Code working files, not source)
+task_plan.md
+findings.md
+progress.md
+CLAUDE.md

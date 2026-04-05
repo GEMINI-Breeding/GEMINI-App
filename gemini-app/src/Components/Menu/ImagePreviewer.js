@@ -6,12 +6,12 @@ import IconButton from "@mui/material/IconButton";
 import { useDataState } from "../../DataContext";
 import Checkbox from "@mui/material/Checkbox";
 import RestoreImageSelector from './RestoreImageSelector';
+import { listFiles, getFileUrl, removeImages } from '../../api/files';
 
 export const ImagePreviewer = ({ open, obj, onClose }) => {
     const [imageIndex, setImageIndex] = useState(0);
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
-    const {flaskUrl} = useDataState();
     const [directory, setDirectory] = useState("");
     const [imageLoading, setImageLoading] = useState(false);
     const [nextImageUrl, setNextImageUrl] = useState(null);
@@ -44,13 +44,10 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
         }
     }, [directory]);
 
-    const API_ENDPOINT = `${flaskUrl}files`;
-
     const fetchImages = async () => {
         try {
             setImageViewerLoading(true);
-            const response = await fetch(`${flaskUrl}list_files/${directory}`);
-            const data = await response.json();
+            const data = await listFiles(directory);
             setImageList(data);
             setImageViewerLoading(false);
         } catch (error) {
@@ -139,50 +136,36 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
     useEffect(() => {
         if (imageList.length > 0 && open) {
             if (imageIndex < imageList.length - 1) {
-                const nextUrl = `${API_ENDPOINT}/${directory}${imageList[imageIndex + 1]}`;
+                const nextUrl = `${getFileUrl(`${directory}${imageList[imageIndex + 1]}`)}`;
                 setNextImageUrl(nextUrl);
             } else {
                 setNextImageUrl(null);
             }
             
             if (imageIndex > 0) {
-                const prevUrl = `${API_ENDPOINT}/${directory}${imageList[imageIndex - 1]}`;
+                const prevUrl = `${getFileUrl(`${directory}${imageList[imageIndex - 1]}`)}`;
                 setPrevImageUrl(prevUrl);
             } else {
                 setPrevImageUrl(null);
             }
         }
-    }, [imageIndex, imageList, API_ENDPOINT, directory, open]);
+    }, [imageIndex, imageList, directory, open]);
 
     const SLIDER_RAIL_HEIGHT = 10;
     const SLIDER_THUMB_SIZE = 20;
 
     const handleRemoveSelectedImages = async () => {
-        const payload = {
-            images: Array.from(selectedImages),
-            source_dir: directory,
-        };
-    
         try {
-            const response = await fetch(`${flaskUrl}remove_images`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
+            await removeImages({
+                files: Array.from(selectedImages),
+                directory: directory,
             });
-    
-            if (response.ok) {
-                console.log("Images removed:", payload.images);
-    
-                const updatedList = imageList.filter(name => !selectedImages.has(name));
-                setImageList(updatedList);
-    
-                // Reset state
-                setSelectedImages(new Set());
-                setSelectionMode(false);
-                setImageIndex(0);
-            } else {
-                console.error("Failed to remove selected images.");
-            }
+
+            const updatedList = imageList.filter(name => !selectedImages.has(name));
+            setImageList(updatedList);
+            setSelectedImages(new Set());
+            setSelectionMode(false);
+            setImageIndex(0);
         } catch (error) {
             console.error("Error removing selected images:", error);
         }
@@ -277,7 +260,7 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
                             >
                                 {/* Image */}
                                 <img
-                                    src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
+                                    src={getFileUrl(`${directory}${imageList[imageIndex]}`)}
                                     alt={`Image ${imageIndex + 1}`}
                                     style={{
                                         maxWidth: "100%",

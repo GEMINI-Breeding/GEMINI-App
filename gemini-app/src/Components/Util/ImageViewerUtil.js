@@ -1,13 +1,13 @@
 import { useDataState, useDataSetters } from "../../DataContext";
 import { useEffect, useMemo, useState } from "react";
 import { mergeLists } from "../../utils/imageUtils";
+import { getGcpSelectedImages, refreshGcpSelectedImages, initializeGcpFile } from '../../api/gcp';
 
 export function useHandleProcessImages() {
     const {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
-        flaskUrl,
         radiusMeters,
         isSidebarCollapsed,
         selectedYearGCP,
@@ -16,16 +16,16 @@ export function useHandleProcessImages() {
         selectedPlatformGCP,
     } = useDataState();
 
-    const { 
-        setImageList, 
-        setGcpPath, 
-        setSidebarCollapsed, 
+    const {
+        setImageList,
+        setGcpPath,
+        setSidebarCollapsed,
         setTotalImages,
         setImageViewerLoading,
         setImageViewerReady
     } = useDataSetters();
 
-    const handleProcessImages = () => {
+    const handleProcessImages = async () => {
         const data = {
             location: selectedLocationGCP,
             population: selectedPopulationGCP,
@@ -36,69 +36,38 @@ export function useHandleProcessImages() {
             sensor: selectedSensorGCP,
             platform: selectedPlatformGCP,
         };
-        
-        /*if(typeof data.selected_images === 'undefined')
-        {
-            console.log("Data selection error caught")
-            return;
-        }*/
-        // Start loading state
+
         setImageViewerLoading(true);
-        setImageList([]); // Clear existing images to show loading spinner
-        fetch(`${flaskUrl}get_gcp_selcted_images`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(data),
-        })
-            .then((response) => response.json())
-            .then((data) => {
-                if (data.num_total) {
-                    setTotalImages(data.num_total);
-                }
-                // Before setting the image list, initialize (or fetch existing) file content
-                console.log("data", data);
-                fetch(`${flaskUrl}initialize_file`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ 
-                        basePath: data.selected_images[0].image_path,
-                        platform: selectedPlatformGCP,
-                        sensor: selectedSensorGCP,
-                        }),
-                })
-                    .then((fileResponse) => fileResponse.json())
-                    .then((fileData) => {
-                        console.log("fileData", fileData);
+        setImageList([]);
 
-                        if (fileData.existing_data && fileData.existing_data.length > 0) {
-                            // Logic to merge existing data with current imageList
-                            const mergedList = mergeLists(data.selected_images, fileData.existing_data);
-                            setImageList(mergedList);
-                        } else {
-                            setImageList(data.selected_images);
-                        }
+        try {
+            const gcpData = await getGcpSelectedImages(data);
+            if (gcpData.num_total) {
+                setTotalImages(gcpData.num_total);
+            }
 
-                        if (fileData.file_path) {
-                            setGcpPath(fileData.file_path);
-                        } else {
-                            console.log("No GCP path found again");
-                        }
-                        
-                        // End loading state
-                        setImageViewerLoading(false);
-                    });
-            }).catch ((error) => {
-                console.log("Error with data selection, "+ error);
-                // End loading state on error
-                setImageViewerLoading(false);
+            const fileData = await initializeGcpFile({
+                basePath: gcpData.selected_images[0].image_path,
+                platform: selectedPlatformGCP,
+                sensor: selectedSensorGCP,
             });
-        
 
-        // If the sidebar is not collapsed, collapse it
+            if (fileData && fileData.existing_data && fileData.existing_data.length > 0) {
+                const mergedList = mergeLists(gcpData.selected_images, fileData.existing_data);
+                setImageList(mergedList);
+            } else {
+                setImageList(gcpData.selected_images);
+            }
+
+            if (fileData && fileData.file_path) {
+                setGcpPath(fileData.file_path);
+            }
+            setImageViewerLoading(false);
+        } catch (error) {
+            console.log("Error with data selection, " + error);
+            setImageViewerLoading(false);
+        }
+
         if (!isSidebarCollapsed) {
             setSidebarCollapsed(true);
         }
@@ -112,7 +81,6 @@ export function useHandleGcpRefreshImages() {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
-        flaskUrl,
         radiusMeters,
         isSidebarCollapsed,
         selectedYearGCP,
@@ -121,15 +89,15 @@ export function useHandleGcpRefreshImages() {
         selectedPlatformGCP,
     } = useDataState();
 
-    const { 
-        setImageList, 
-        setGcpPath, 
-        setSidebarCollapsed, 
+    const {
+        setImageList,
+        setGcpPath,
+        setSidebarCollapsed,
         setTotalImages,
         setImageViewerLoading,
     } = useDataSetters();
 
-    const handleGcpRefreshImages = () => {
+    const handleGcpRefreshImages = async () => {
         const data = {
             location: selectedLocationGCP,
             population: selectedPopulationGCP,
@@ -140,65 +108,38 @@ export function useHandleGcpRefreshImages() {
             sensor: selectedSensorGCP,
             platform: selectedPlatformGCP,
         };
-        
-        // Start loading state
+
         setImageViewerLoading(true);
-        setImageList([]); // Clear existing images to show loading spinner
+        setImageList([]);
 
-        fetch(`${flaskUrl}refresh_gcp_selcted_images`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(data),
-        })
-            .then((response) => response.json())
-            .then((data) => {
-                if (data.num_total) {
-                    setTotalImages(data.num_total);
-                }
-                // Before setting the image list, initialize (or fetch existing) file content
-                console.log("data", data);
-                fetch(`${flaskUrl}initialize_file`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ 
-                        basePath: data.selected_images[0].image_path,
-                        platform: selectedPlatformGCP,
-                        sensor: selectedSensorGCP,
-                        }),
-                })
-                    .then((fileResponse) => fileResponse.json())
-                    .then((fileData) => {
-                        console.log("fileData", fileData);
+        try {
+            const gcpData = await refreshGcpSelectedImages(data);
+            if (gcpData.num_total) {
+                setTotalImages(gcpData.num_total);
+            }
 
-                        if (fileData.existing_data && fileData.existing_data.length > 0) {
-                            // Logic to merge existing data with current imageList
-                            const mergedList = mergeLists(data.selected_images, fileData.existing_data);
-                            setImageList(mergedList);
-                        } else {
-                            setImageList(data.selected_images);
-                        }
-
-                        if (fileData.file_path) {
-                            setGcpPath(fileData.file_path);
-                        } else {
-                            console.log("No GCP path found again");
-                        }
-                        
-                        // End loading state
-                        setImageViewerLoading(false);
-                    });
-            }).catch ((error) => {
-                console.log("Error with data selection, "+ error);
-                // End loading state on error
-                setImageViewerLoading(false);
+            const fileData = await initializeGcpFile({
+                basePath: gcpData.selected_images[0].image_path,
+                platform: selectedPlatformGCP,
+                sensor: selectedSensorGCP,
             });
-        
 
-        // If the sidebar is not collapsed, collapse it
+            if (fileData && fileData.existing_data && fileData.existing_data.length > 0) {
+                const mergedList = mergeLists(gcpData.selected_images, fileData.existing_data);
+                setImageList(mergedList);
+            } else {
+                setImageList(gcpData.selected_images);
+            }
+
+            if (fileData && fileData.file_path) {
+                setGcpPath(fileData.file_path);
+            }
+            setImageViewerLoading(false);
+        } catch (error) {
+            console.log("Error with data selection, " + error);
+            setImageViewerLoading(false);
+        }
+
         if (!isSidebarCollapsed) {
             setSidebarCollapsed(true);
         }

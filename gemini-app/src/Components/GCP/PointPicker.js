@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
 import Snackbar from "@mui/material/Snackbar";
+import { saveGcpArray } from '../../api/gcp';
 
 const PointPicker = ({ src }) => {
-    const { 
-        imageList, 
-        imageIndex, 
-        flaskUrl, 
+    const {
+        imageList,
+        imageIndex,
         imageViewerLoading,
         selectedSensorGCP,
         selectedPlatformGCP
@@ -26,32 +26,24 @@ const PointPicker = ({ src }) => {
 
     const saveData = async (imageList) => {
         console.log("Saving GCP data with", imageList.length, "images");
-        
-        // Count points for logging
+
         const pointCount = imageList.filter(img => img.pointX !== null && img.pointY !== null).length;
         console.log(`Saving ${pointCount} GCP points out of ${imageList.length} images`);
 
         try {
-            const response = await fetch(`${flaskUrl}save_array`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    array: imageList, // Send all images, including those with null points
+            const result = await saveGcpArray({
+                content: {
+                    array: imageList,
                     platform: selectedPlatformGCP,
                     sensor: selectedSensorGCP
-                }),
+                },
+                filePath: `gcp_data/${selectedPlatformGCP}/${selectedSensorGCP}/gcp_points.json`,
+                // Flask mode params (passed through)
+                array: imageList,
+                platform: selectedPlatformGCP,
+                sensor: selectedSensorGCP,
             });
-
-            const result = await response.json();
-
-            if (response.ok) {
-                console.log("GCP data saved successfully:", result.message);
-            } else {
-                console.error("Error saving GCP data:", result.message);
-                setSubmitError("Error saving GCP data: " + result.message);
-            }
+            console.log("GCP data saved successfully:", result.message || result);
         } catch (error) {
             console.error("Network error while saving GCP data:", error);
             setSubmitError("Network error: " + error.message);

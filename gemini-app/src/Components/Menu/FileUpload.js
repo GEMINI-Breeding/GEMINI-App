@@ -16,6 +16,11 @@ import {
     LinearProgress,
     Tabs,
     Tab,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogContentText,
+    DialogActions,
 } from "@mui/material";
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import BuildIcon from '@mui/icons-material/Build';
@@ -112,8 +117,8 @@ const FileUploadComponent = ({ actionType = null }) => {
     useTrackComponent("FileUploadComponent");
 
     // State hooks for various component states
-    const { flaskUrl, extractingBinary } = useDataState();
-    const { setExtractingBinary } = useDataSetters();
+    const { flaskUrl, extractingBinary, currentJobId } = useDataState();
+    const { setExtractingBinary, setCurrentJobId } = useDataSetters();
     const [isLoading, setIsLoading] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
     const [selectedDataType, setSelectedDataType] = useState("image");
@@ -132,6 +137,9 @@ const FileUploadComponent = ({ actionType = null }) => {
     const [currentInputValues, setCurrentInputValues] = useState({});
     const [dirPath, setDirPath] = useState("");
     const [internalActionType, setInternalActionType] = useState(actionType || 'upload');
+    const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+    const [errorDialogTitle, setErrorDialogTitle] = useState("");
+    const [errorDialogMessage, setErrorDialogMessage] = useState("");
     const {
         uploadedData
     } = useDataState();
@@ -139,16 +147,54 @@ const FileUploadComponent = ({ actionType = null }) => {
     const {
         setUploadedData
     } = useDataSetters();
+    const showErrorDialog = (title, message) => {
+        setErrorDialogTitle(title);
+        setErrorDialogMessage(message);
+        setErrorDialogOpen(true);
+    };
+
     useEffect(() => {
         console.log(selectedDataType);
-    }, [selectedDataType]);
+        // Set default date to today when switching to a data type that has a date field
+        if (dataTypes[selectedDataType].fields.includes("date") && !formik.values.date) {
+            formik.setFieldValue("date", todayISO);
+        }
+    }, [selectedDataType]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (!extractingBinary) return;
 
-        // Framework mode: progress comes via WebSocket (handled in App.js)
-        if (BACKEND_MODE !== 'flask') return;
+        // Framework mode: track progress via WebSocket
+        if (BACKEND_MODE !== 'flask') {
+            if (!currentJobId) return;
+            const { connectJobProgress } = require('../../api/jobs');
+            const ws = connectJobProgress(currentJobId, {
+                onProgress: (data) => {
+                    const pct = Math.round(data.progress || 0);
+                    setProgress(pct);
+                },
+                onComplete: () => {
+                    setExtractingBinary(false);
+                    setIsFinishedUploading(true);
+                    setUploadedData(true);
+                    setIsUploading(false);
+                    setProgress(100);
+                    setCurrentJobId(null);
+                },
+                onError: (data) => {
+                    setExtractingBinary(false);
+                    setIsFinishedUploading(true);
+                    setFailedUpload(true);
+                    setIsUploading(false);
+                    setCurrentJobId(null);
+                    const errorMsg = (data && data.error_message) || 'Binary extraction failed. Check that the uploaded file is a valid Amiga .bin recording.';
+                    showErrorDialog('Binary Extraction Failed', errorMsg);
+                },
+            });
+            return () => ws.close();
+        }
 
+        // Flask mode: poll for progress
         const intervalId = setInterval(async () => {
                 const pct = await getBinaryProgress(dirPath);
                 let prog_calc = Math.round(pct);
@@ -162,12 +208,12 @@ const FileUploadComponent = ({ actionType = null }) => {
             }, 1000);
 
         return () => clearInterval(intervalId);
-    }, [extractingBinary, dirPath, files.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [extractingBinary, dirPath, files.length, currentJobId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (!extractingBinary) return;
 
-        // Framework mode: status comes via WebSocket (handled in App.js)
+        // Framework mode: status tracked via WebSocket above
         if (BACKEND_MODE !== 'flask') return;
 
         const intervalId = setInterval(async () => {
@@ -326,7 +372,9 @@ const FileUploadComponent = ({ actionType = null }) => {
                 const data = await extractBinaryFile({ files, localDirPath });
                 console.log("Binary extraction job submitted:", data);
                 if (data && data.id) {
-                    // Job submitted — progress tracked via WebSocket in App.js
+                    setCurrentJobId(data.id);
+                } else {
+                    throw new Error('Job submission returned no job ID');
                 }
                 return;
             }
@@ -341,13 +389,21 @@ const FileUploadComponent = ({ actionType = null }) => {
                 console.log("Binary file extraction started");
                 await response.json();
             } else {
-                console.error("Failed to extract binary file");
+                const errorText = await response.text().catch(() => '');
+                showErrorDialog('Extraction Failed', `Binary extraction request failed (${response.status}). ${errorText}`);
                 setIsFinishedUploading(true);
                 setFailedUpload(true);
                 clearDirPath();
             }
         } catch (error) {
             console.error("Error extracting binary file:", error);
+            const isNetworkError = error.message === 'Failed to fetch' || error.name === 'TypeError';
+            showErrorDialog(
+                'Extraction Failed',
+                isNetworkError
+                    ? 'Cannot connect to the backend server. Check that the backend is running and accessible.'
+                    : `Binary extraction failed: ${error.message}`
+            );
             setIsFinishedUploading(true);
             setFailedUpload(true);
             clearDirPath();
@@ -469,6 +525,11 @@ const FileUploadComponent = ({ actionType = null }) => {
         if (!extractingBinary) return;
         if (BACKEND_MODE !== 'flask') {
             // Framework mode: cancel via job API
+            if (currentJobId) {
+                const { cancelJob } = require('../../api/jobs');
+                await cancelJob(currentJobId);
+                setCurrentJobId(null);
+            }
             setExtractingBinary(false);
             return;
         }
@@ -480,24 +541,45 @@ const FileUploadComponent = ({ actionType = null }) => {
     }
 
     // Formik hook for form state management and validation
+    const todayISO = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     const formik = useFormik({
         initialValues: {
             year: "",
             experiment: "",
             location: "",
             population: "",
-            date: "",
+            date: todayISO,
             platform: "",
             sensor: "",
         },
         onSubmit: async (values) => {
             setIsUploading(true);
             cancelUploadRef.current = false;
-            // setProgress(0);
             setBadFileType(false);
             setBadOrthomosaicFiles(false);
             setOrthomosaicErrorMessage("");
             setIsCreatingPyramids(false);
+
+            // Check backend connectivity before starting upload
+            try {
+                const healthUrl = BACKEND_MODE !== 'flask'
+                    ? `${FRAMEWORK_URL}files/list/`
+                    : `${flaskUrl}list_dirs_nested`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                await fetch(healthUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+            } catch (error) {
+                setIsUploading(false);
+                showErrorDialog(
+                    'Backend Not Reachable',
+                    BACKEND_MODE !== 'flask'
+                        ? 'Cannot connect to the framework backend. Check that the gemini-framework Docker stack is running (docker compose up).'
+                        : 'Cannot connect to the Flask backend. Check that the server is running (npm run server).'
+                );
+                return;
+            }
+
             // Construct directory path based on data type and form values
             let localDirPath = "";
             
@@ -564,7 +646,9 @@ const FileUploadComponent = ({ actionType = null }) => {
                 }
             }
             
-            const filesToUpload = uploadNewFilesOnly ? await checkFilesOnServer(fileList, localDirPath) : fileList;
+            const filesToUpload = (uploadNewFilesOnly && BACKEND_MODE === 'flask')
+                ? await checkFilesOnServer(fileList, localDirPath)
+                : fileList;
             console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
@@ -625,6 +709,10 @@ const FileUploadComponent = ({ actionType = null }) => {
 
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                                     break;
+                                } else if (BACKEND_MODE !== 'flask') {
+                                    // Framework mode: use chunked upload for all file types
+                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
+                                    break;
                                 } else {
                                     await uploadFileWithTimeout(file, localDirPath, selectedDataType);
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
@@ -642,18 +730,36 @@ const FileUploadComponent = ({ actionType = null }) => {
                     }
                 }
                 if (failedFiles.length > 0) {
-                    alert(`Failed to upload ${failedFiles.length} file(s):\n${failedFiles.join('\n')}`);
+                    showErrorDialog(
+                        'Upload Failed',
+                        `Failed to upload ${failedFiles.length} file(s):\n${failedFiles.join('\n')}\n\nCheck your network connection and that the backend server is running.`
+                    );
                 }
                 if(!bFT)
                 {
-                    // Step 3: only extract if not cancelled
+                    // Step 3: Register entities in framework mode
+                    if (BACKEND_MODE !== 'flask' && !cancelUploadRef.current) {
+                        try {
+                            const { registerUploadEntities } = await import('../../api/entities');
+                            await registerUploadEntities(values, selectedDataType, filesToUpload);
+                            console.log("Entities registered for upload");
+                        } catch (error) {
+                            console.error("Failed to register upload entities:", error);
+                            showErrorDialog(
+                                'Entity Registration Warning',
+                                `Files were uploaded successfully, but entity registration failed: ${error.message}\n\nUploaded files are stored but may not appear in the Manage tab until entities are created.`
+                            );
+                        }
+                    }
+
+                    // Step 4: only extract if not cancelled
                     if (selectedDataType === "binary" && !cancelUploadRef.current) {
                         setProgress(0);
                         console.log("Files to extract:", filesToUpload);
                         await extractBinaryFiles(filesToUpload, localDirPath);
                     }
-                    
-                    // now handle “finished” state
+
+                    // now handle "finished" state
                     if (!cancelUploadRef.current && selectedDataType === "binary") {
                         setIsFinishedUploading(true)
                         setUploadedData(true)
@@ -927,8 +1033,25 @@ const FileUploadComponent = ({ actionType = null }) => {
                     {!isLoading && !isUploading && !isFinishedUploading && (
                         <>
                             {dataTypes[selectedDataType].fields.map((field) =>
-                                renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
-                            ) } 
+                                field === "date" ? (
+                                    <TextField
+                                        key="date"
+                                        label="Date"
+                                        type="date"
+                                        value={formik.values.date || ""}
+                                        onChange={(e) => formik.setFieldValue("date", e.target.value)}
+                                        onBlur={formik.handleBlur}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                                        error={Boolean(formik.touched.date && formik.errors.date)}
+                                        helperText={formik.touched.date && formik.errors.date}
+                                        InputLabelProps={{ shrink: true }}
+                                        fullWidth
+                                        sx={{ width: "100%", marginTop: "20px" }}
+                                    />
+                                ) : (
+                                    renderAutocomplete(field.charAt(0).toUpperCase() + field.slice(1))
+                                )
+                            ) }
                             {selectedDataType === "ortho" && (
                                 <Paper
                                     variant="outlined"
@@ -1168,6 +1291,24 @@ const FileUploadComponent = ({ actionType = null }) => {
                 </Grid>
         )}     
         </Grid>
+        <Dialog
+            open={errorDialogOpen}
+            onClose={() => setErrorDialogOpen(false)}
+            aria-labelledby="error-dialog-title"
+            aria-describedby="error-dialog-description"
+        >
+            <DialogTitle id="error-dialog-title">{errorDialogTitle}</DialogTitle>
+            <DialogContent>
+                <DialogContentText id="error-dialog-description" sx={{ whiteSpace: 'pre-wrap' }}>
+                    {errorDialogMessage}
+                </DialogContentText>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setErrorDialogOpen(false)} autoFocus>
+                    OK
+                </Button>
+            </DialogActions>
+        </Dialog>
         </>
     );
 };

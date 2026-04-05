@@ -5,6 +5,18 @@
 #
 set -e
 
+# Check if Docker is running
+if ! docker info > /dev/null 2>&1; then
+    echo "[framework] ERROR: Docker is not running."
+    if [ "$(uname)" = "Darwin" ]; then
+        echo "[framework] Please start Docker Desktop and try again."
+        echo "[framework] You can open it with: open -a Docker"
+    else
+        echo "[framework] Please start the Docker daemon and try again."
+    fi
+    exit 1
+fi
+
 COMPOSE_DIR="$(cd "$(dirname "$0")/../gemini-framework/gemini/pipeline" && pwd)"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yaml"
 ENV_FILE="$COMPOSE_DIR/.env"
@@ -21,9 +33,15 @@ if [ ! -f "$ENV_FILE" ]; then
     fi
 fi
 
-# Start containers
-echo "[framework] Starting gemini-framework Docker stack..."
-docker compose -f "$COMPOSE_FILE" up -d --build 2>&1 | sed 's/^/[framework] /'
+# Start containers (builds only if image doesn't exist or Dockerfile changed)
+# Use --build flag only when explicitly requested via BUILD=1 env var
+if [ "${BUILD:-0}" = "1" ]; then
+    echo "[framework] Building and starting gemini-framework Docker stack..."
+    docker compose -f "$COMPOSE_FILE" up -d --build 2>&1 | sed 's/^/[framework] /'
+else
+    echo "[framework] Starting gemini-framework Docker stack..."
+    docker compose -f "$COMPOSE_FILE" up -d 2>&1 | sed 's/^/[framework] /'
+fi
 
 # Wait for REST API health
 echo "[framework] Waiting for REST API to be ready..."

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Grid, Button, Autocomplete, TextField, Typography, Box, CircularProgress, Switch } from "@mui/material";
-import { fetchData, useDataSetters, useDataState } from "../../DataContext";
+import { useDataSetters, useDataState } from "../../DataContext";
 import Snackbar from "@mui/material/Snackbar";
 import SplitButton from "../Util/SplitButton";
+import { listDirs } from '../../api/files';
+import { loadGeojson, queryImages, downloadZipped } from '../../api/queries';
 
 const ImageSelection = () => {
     // Assuming these are provided by your DataContext or parent component
@@ -11,7 +13,6 @@ const ImageSelection = () => {
         selectedExperimentGCP,
         selectedLocationGCP,
         selectedPopulationGCP,
-        flaskUrl,
         imageDataQuery,
         selectedDateQuery,
         selectedPlatformQuery,
@@ -35,41 +36,20 @@ const ImageSelection = () => {
 
     const [middleImage, setMiddleImage] = useState(false);
 
-    const fetchGeoJSON = async (
-        selectedYearGCP,
-        selectedExperimentGCP,
-        selectedLocationGCP,
-        selectedPopulationGCP,
-        flaskUrl
-    ) => {
-        const data = {
-            selectedLocationGcp: selectedLocationGCP,
-            selectedPopulationGcp: selectedPopulationGCP,
-            selectedYearGcp: selectedYearGCP,
-            selectedExperimentGcp: selectedExperimentGCP,
-            filename: "Plot-Boundary-WGS84.geojson",
-        };
-
-        console.log("data for load json ", data);
-
-        const response = await fetch(`${flaskUrl}load_geojson`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(data),
-        });
-        if (response.ok) {
-            console.log("response", response);
-            const geojsonData = await response.json();
-            console.log(geojsonData);
-            geojsonData.features ? setGeoJSON(geojsonData) : setGeoJSON({ type: "FeatureCollection", features: [] });
-        } else {
-            console.error("Failed to load data");
-            setGeoJSON({
-                type: "FeatureCollection",
-                features: [],
+    const fetchGeoJSON = async (year, experiment, location, population) => {
+        try {
+            const geojsonData = await loadGeojson({
+                filePath: `Processed/${year}/${experiment}/${location}/${population}/Plot-Boundary-WGS84.geojson`,
+                selectedLocationGcp: location,
+                selectedPopulationGcp: population,
+                selectedYearGcp: year,
+                selectedExperimentGcp: experiment,
+                filename: "Plot-Boundary-WGS84.geojson",
             });
+            geojsonData.features ? setGeoJSON(geojsonData) : setGeoJSON({ type: "FeatureCollection", features: [] });
+        } catch (error) {
+            console.error("Failed to load data:", error);
+            setGeoJSON({ type: "FeatureCollection", features: [] });
         }
     };
 
@@ -175,23 +155,8 @@ const ImageSelection = () => {
         let response;
         if (mode === "view") {
             try {
-                // Call Flask endpoint with the payload
-                response = await fetch(`${flaskUrl}query_images`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(payload),
-                });
-
-                if (!response.ok) {
-                    throw new Error("Network response was not ok");
-                }
-
-                const imData = await response.json();
+                const imData = await queryImages(payload);
                 setImageDataQuery(imData);
-                console.log(imData);
-                // Use imageData (filtered image names) as needed
             } catch (error) {
                 console.error("Error retrieving image data:", error);
                 setSubmitError("Error retrieving image data. Please try again.");
@@ -199,24 +164,25 @@ const ImageSelection = () => {
             }
         } else {
             try {
-                response = await fetch(`${flaskUrl}dload_zipped`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(payload),
-                })
-                    .then((response) => response.blob())
-                    .then((blob) => {
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.style.display = "none";
-                        a.href = url;
-                        a.download = "images.zip";
-                        document.body.appendChild(a);
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                    });
+                const result = await downloadZipped(payload);
+                if (result instanceof Blob) {
+                    const url = window.URL.createObjectURL(result);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = "images.zip";
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                } else if (result && result.url) {
+                    // Framework mode: presigned URL
+                    const a = document.createElement("a");
+                    a.href = result.url;
+                    a.download = "images.zip";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
             } catch (error) {
                 console.error("Error retrieving image data:", error);
                 setSubmitError("Error retrieving image data. Please try again.");
@@ -232,7 +198,7 @@ const ImageSelection = () => {
             setIsLoading(true);
             const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
             try {
-                const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
+                const response = await listDirs(dirPath);
                 setDateOptions(response);
             } catch (error) {
                 console.error("Error fetching dates:", error);
@@ -242,7 +208,7 @@ const ImageSelection = () => {
 
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
             fetchDates();
-            fetchGeoJSON(selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl);
+            fetchGeoJSON(selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP);
         }
     }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
@@ -256,7 +222,7 @@ const ImageSelection = () => {
             setIsLoading(true);
             const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}`;
             try {
-                const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
+                const response = await listDirs(dirPath);
                 setPlatformOptions(response);
             } catch (error) {
                 console.error("Error fetching platforms:", error);
@@ -277,7 +243,7 @@ const ImageSelection = () => {
             setIsLoading(true);
             const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}`;
             try {
-                const response = await fetchData(`${flaskUrl}list_dirs/${dirPath}`);
+                const response = await listDirs(dirPath);
                 setSensorOptions(response);
             } catch (error) {
                 console.error("Error fetching sensors:", error);

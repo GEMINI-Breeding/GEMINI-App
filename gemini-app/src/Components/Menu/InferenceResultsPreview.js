@@ -21,7 +21,9 @@ import {
     Grid
 } from '@mui/material';
 import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen} from '@mui/icons-material';
-import { fetchData, useDataState } from "../../DataContext";
+import { useDataState } from "../../DataContext";
+import { listFiles, getFileUrl, getPngFile } from '../../api/files';
+import { getPlotBordersData, getPlotPredictions } from '../../api/queries';
 
 const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     const [plotImages, setPlotImages] = useState([]);
@@ -48,7 +50,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
     const imageContainerRef = useRef(null);
     const canvasRef = useRef(null);
     
-    const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
 
     const generateClassColors = (classes) => {
         const colors = [
@@ -87,7 +89,7 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                 URL.revokeObjectURL(currentImageUrl);
             }
         };
-    }, [open, inferenceData, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+    }, [open, inferenceData, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     useEffect(() => {
         // Fetch predictions when plot changes
@@ -233,8 +235,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
             if (versionDir === 'Plot_Images') {
                 isPlotImages = true;
                 // Look in Intermediate directory for Plot_Images
-                plotFiles = await fetchData(
-                    `${flaskUrl}list_files/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/plot_images/${date}`
+                plotFiles = await listFiles(
+                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/plot_images/${date}`
                 );
                 
                 // Filter for plot images from split_orthomosaics
@@ -247,8 +249,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     });
             } else {
                 // Traditional AgRowStitch format
-                plotFiles = await fetchData(
-                    `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
+                plotFiles = await listFiles(
+                    `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}`
                 );
 
                 // Filter for AgRowStitch plot images
@@ -277,21 +279,13 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
 
     const fetchPlotData = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_plot_borders_data`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                }),
+            const data = await getPlotBordersData({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
             });
-
-            if (response.ok) {
-                const data = await response.json();
-                setPlotData(data.plot_data || {});
-            }
+            setPlotData(data.plot_data || {});
         } catch (error) {
             console.error('Error fetching plot data:', error);
             setPlotData({});
@@ -306,33 +300,21 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
         const versionDir = orthomosaic || agrowstitch_version;
         
         try {
-            const response = await fetch(`${flaskUrl}get_plot_predictions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date,
-                    platform,
-                    sensor,
-                    agrowstitch_version: versionDir, // Keep for backend compatibility
-                    orthomosaic: versionDir, // New parameter name
-                    plot_filename: currentFileName,
-                    model_task: model_task || 'detection' // Pass model task to get correct predictions
-                })
+            const data = await getPlotPredictions({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date,
+                platform,
+                sensor,
+                agrowstitch_version: versionDir,
+                orthomosaic: versionDir,
+                plot_filename: currentFileName,
+                model_task: model_task || 'detection'
             });
-
-            if (response.ok) {
-                const data = await response.json();
-                setPredictions(data.predictions || []);
-                setClassCounts(data.class_counts || {});
-            } else {
-                console.error('Error fetching predictions:', response.status);
-                setPredictions([]);
-                setClassCounts({});
-            }
+            setPredictions(data.predictions || []);
+            setClassCounts(data.class_counts || {});
         } catch (error) {
             console.error('Error fetching predictions:', error);
             setPredictions([]);
@@ -356,8 +338,8 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                 imagePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/${versionDir}/${fileName}`;
             }
             
-            const directUrl = `${flaskUrl}files/${imagePath}`;
-            
+            const directUrl = getFileUrl(imagePath);
+
             try {
                 const directResponse = await fetch(directUrl);
                 if (directResponse.ok) {
@@ -367,23 +349,18 @@ const InferenceResultsPreview = ({ open, onClose, inferenceData }) => {
                     return;
                 }
             } catch (directError) {
-                console.log('Direct file serving failed, trying blob method');
+                console.log('Direct file serving failed, trying PNG endpoint');
             }
-            
-            const response = await fetch(`${flaskUrl}get_png_file`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filePath: imagePath }),
-            });
 
-            if (response.ok) {
-                const blob = await response.blob();
-                if (blob.size > 0) {
-                    const imageUrl = URL.createObjectURL(blob);
-                    setCurrentImageUrl(imageUrl);
+            try {
+                const pngResult = await getPngFile({ filePath: imagePath });
+                if (pngResult && pngResult.url) {
+                    setCurrentImageUrl(pngResult.url);
                     setZoom(1);
                     setIsImageLoaded(false);
                 }
+            } catch (_) {
+                // Fall through
             }
         } catch (error) {
             console.error('Error loading plot image:', error);

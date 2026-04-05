@@ -54,6 +54,15 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { useDataState } from "../../DataContext";
 import ReactMapGL, { Source, Layer } from 'react-map-gl';
+import { BACKEND_MODE } from '../../api/config';
+import { listFiles } from '../../api/files';
+import { filterPlotBorders } from '../../api/queries';
+import {
+    getPlotData, getImagePlotIndex, getGpsData, getStitchDirection,
+    getGpsReference, setGpsReference, shiftGps, undoGpsShift,
+    checkGpsShiftStatus, markPlot, deletePlot, saveStitchMask,
+    getMaxPlotIndex
+} from '../../api/plots';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const reactMapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
@@ -1375,6 +1384,23 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [open, visualIndex, imageList.length, plotSelectionState, cropMode, plotMode]);
+
+    if (BACKEND_MODE === 'framework') {
+        return (
+            <Dialog open={open} onClose={handleBackButton} maxWidth="sm" fullWidth>
+                <DialogTitle>Plot Marking</DialogTitle>
+                <DialogContent>
+                    <Typography>
+                        Plot marking operations are not yet available in framework mode.
+                        Please use Flask mode for plot marking functionality.
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleBackButton}>Close</Button>
+                </DialogActions>
+            </Dialog>
+        );
+    }
 
     return (
         <Dialog

@@ -16,6 +16,7 @@ import {
 import DashboardCustomizeIcon from "@mui/icons-material/DashboardCustomize";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { listDirs } from '../../api/files';
 import { centerOfMass, booleanContains, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
 
 export function parseCsv(csvText) {
@@ -252,27 +253,22 @@ function PlotProposalSwitcher() {
     const checkAgrowstitchAvailability = async () => {
         try {
             const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
-            const response = await fetch(`${flaskUrl}list_dirs/${basePath}`);
-            const dates = await response.json();
-            
+            const dates = await listDirs(basePath);
+
             let hasAgrowstitch = false;
             for (const date of dates) {
                 if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    // Check if this date has AgRowStitch data
                     try {
-                        const platformResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}`);
-                        const platforms = await platformResponse.json();
-                        
+                        const platforms = await listDirs(`${basePath}/${date}`);
+
                         for (const platform of platforms) {
                             try {
-                                const sensorResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}`);
-                                const sensors = await sensorResponse.json();
-                                
+                                const sensors = await listDirs(`${basePath}/${date}/${platform}`);
+
                                 for (const sensor of sensors) {
                                     try {
-                                        const dirResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
-                                        const dirs = await dirResponse.json();
-                                        
+                                        const dirs = await listDirs(`${basePath}/${date}/${platform}/${sensor}`);
+
                                         if (dirs.some(dir => dir.startsWith('AgRowStitch_v'))) {
                                             hasAgrowstitch = true;
                                             break;

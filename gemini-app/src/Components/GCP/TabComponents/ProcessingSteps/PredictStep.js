@@ -19,6 +19,8 @@ import IconButton from "@mui/material/IconButton";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useDataState, fetchData } from "../../../../DataContext";
+import { listDirs } from '../../../../api/files';
+import { getOrthomosaicVersions, getInferenceProgress } from '../../../../api/queries';
 import InferenceTable from "../../../StatsMenu/InferenceTable";
 import AerialPrepTabs from "../Processing/AerialPrepTabs";
 
@@ -182,21 +184,9 @@ function PredictStep() {
 
     const loadPlatforms = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_platforms`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate
-                })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                setPlatformOptions(data.platforms || []);
-            }
+            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
+            const platforms = await listDirs(dirPath);
+            setPlatformOptions(platforms || []);
         } catch (error) {
             console.error("Error loading platforms:", error);
         }
@@ -204,22 +194,9 @@ function PredictStep() {
 
     const loadSensors = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_sensors`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    platform: selectedPlatform
-                })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                setSensorOptions(data.sensors || []);
-            }
+            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${selectedPlatform}`;
+            const sensors = await listDirs(dirPath);
+            setSensorOptions(sensors || []);
         } catch (error) {
             console.error("Error loading sensors:", error);
         }
@@ -227,34 +204,26 @@ function PredictStep() {
 
     const loadAgrowstitchVersions = async () => {
         try {
-            const response = await fetch(`${flaskUrl}get_orthomosaic_versions`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    year: selectedYearGCP, 
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    platform: selectedPlatform,
-                    sensor: selectedSensor
-                })
+            const data = await getOrthomosaicVersions({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: selectedDate,
+                platform: selectedPlatform,
+                sensor: selectedSensor
             });
-            if (response.ok) {
-                const data = await response.json();
-                const versions = []
-                console.log("AgRowStitch versions data:", data);
-                for (let i = 0; i < data.length; i++) {
-                    if (data[i].AGR_version !== undefined  && data[i].AGR_version.startsWith('AgRowStitch_v')) {
-                        versions.push(data[i].AGR_version);
-                    }
+            const versions = [];
+            console.log("AgRowStitch versions data:", data);
+            for (let i = 0; i < data.length; i++) {
+                if (data[i].AGR_version !== undefined && data[i].AGR_version.startsWith('AgRowStitch_v')) {
+                    versions.push(data[i].AGR_version);
                 }
-                setAgrowstitchOptions(versions || []);
-                console.log("AgRowStitch versions:", versions);
-                // Auto-select Plot_Images if available
-                if (versions && versions.includes('Plot_Images')) {
-                    setSelectedAgrowstitch('Plot_Images');
-                }
+            }
+            setAgrowstitchOptions(versions || []);
+            console.log("AgRowStitch versions:", versions);
+            if (versions && versions.includes('Plot_Images')) {
+                setSelectedAgrowstitch('Plot_Images');
             }
         } catch (error) {
             console.error("Error loading orthomosaic versions:", error);
@@ -323,23 +292,20 @@ function PredictStep() {
     const pollProgress = () => {
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_inference_progress`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setProgress(data.progress || 0);
-                    setMessage(data.message || "Processing...");
-                    
-                    if (data.completed) {
-                        setIsProcessing(false);
-                        setResults(data.results);
-                        setMessage("Inference completed successfully!");
-                        setInferenceRefreshTrigger(prev => prev + 1); // Trigger refresh of inference table
-                        clearInterval(interval);
-                    } else if (data.error) {
-                        setError(data.error);
-                        setIsProcessing(false);
-                        clearInterval(interval);
-                    }
+                const data = await getInferenceProgress();
+                setProgress(data.progress || 0);
+                setMessage(data.message || "Processing...");
+
+                if (data.completed) {
+                    setIsProcessing(false);
+                    setResults(data.results);
+                    setMessage("Inference completed successfully!");
+                    setInferenceRefreshTrigger(prev => prev + 1);
+                    clearInterval(interval);
+                } else if (data.error) {
+                    setError(data.error);
+                    setIsProcessing(false);
+                    clearInterval(interval);
                 }
             } catch (error) {
                 console.error("Error polling progress:", error);

@@ -130,13 +130,30 @@ export const stopDroneExtract = (body) => {
     return Promise.resolve(null);
 };
 
+// -- COG Creation --
+
+export const createCog = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        // Flask creates COGs inline during orthomosaic generation — no separate endpoint
+        return Promise.resolve(null);
+    }
+    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'CREATE_COG', parameters: body });
+};
+
 // -- Binary Extraction (FLIR) --
 
-export const extractBinaryFile = (formData) => {
+export const extractBinaryFile = (data) => {
     if (BACKEND_MODE === 'flask') {
-        return fetch(`${FLASK_URL}extract_binary_file`, { method: 'POST', body: formData }).then(r => r.json());
+        return fetch(`${FLASK_URL}extract_binary_file`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }).then(r => r.json());
     }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'EXTRACT_BINARY', parameters: {} });
+    return postJson(`${FRAMEWORK_URL}jobs/submit`, {
+        job_type: 'EXTRACT_BINARY',
+        parameters: { files: data.files, localDirPath: data.localDirPath },
+    });
 };
 
 export const getBinaryProgress = (body) => {
@@ -151,4 +168,48 @@ export const getBinaryStatus = () => {
         return fetchJson(`${FLASK_URL}get_binary_status`);
     }
     return Promise.resolve(null);
+};
+
+// -- Stitch Mask --
+
+/**
+ * Check if a stitch mask exists for a dataset.
+ * Framework mode: try to read stitch_mask.json from MinIO.
+ */
+export const checkMask = async (params) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}check_mask`, params);
+    }
+    const { year, experiment, location, population, date, platform, sensor } = params;
+    const maskPath = `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/stitch_mask.json`;
+    try {
+        const data = await fetchJson(`${FRAMEWORK_URL}files/download/gemini/${maskPath}`);
+        return { exists: true, mask: data };
+    } catch (_) {
+        return { exists: false };
+    }
+};
+
+// -- ODM Logs --
+
+/**
+ * Get ODM processing logs.
+ * Framework mode: read log from job artifacts in MinIO.
+ */
+export const getOdmLogs = async (params) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}get_odm_logs`, params);
+    }
+    const { year, experiment, location, population, date, platform, sensor } = params;
+    const logPath = `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/odm_log.txt`;
+    try {
+        const response = await fetch(`${FRAMEWORK_URL}files/download/gemini/${logPath}`);
+        if (response.ok) {
+            const text = await response.text();
+            return { logs: text };
+        }
+        return { logs: '' };
+    } catch (_) {
+        return { logs: '' };
+    }
 };

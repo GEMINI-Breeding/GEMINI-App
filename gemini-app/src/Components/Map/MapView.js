@@ -7,7 +7,7 @@ import { FlyToInterpolator } from "@deck.gl/core";
 import SplitButton from "../Util/SplitButton";
 
 import { useDataSetters, useDataState, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../DataContext";
-import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
+import { getTileFileUrl } from "../../api/files";
 import useTraitsColorMap from "./ColorMap";
 import GeoJsonTooltip from "./ToolTip";
 import useExtentFromBounds from "./MapHooks";
@@ -92,10 +92,7 @@ export default function MapView() {
 
     useEffect(() => {
         if (selectedTilePath) {
-            // In framework mode, tiles are served from MinIO via the same tile server
-            const fileUrl = BACKEND_MODE === 'framework'
-                ? `${FRAMEWORK_URL}files/download/${selectedTilePath}`
-                : `${flaskUrl}${selectedTilePath}`;
+            const fileUrl = getTileFileUrl(selectedTilePath, flaskUrl);
             setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));
             setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));
         } else {

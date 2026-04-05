@@ -4,14 +4,13 @@ import Slider from "@mui/material/Slider";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
 import Checkbox from "@mui/material/Checkbox";
-import { useDataState } from "../../DataContext";
 import { Typography } from "@mui/material";
+import { listFiles, getFileUrl, restoreImages } from '../../api/files';
 
 const SLIDER_RAIL_HEIGHT = 10;
 const SLIDER_THUMB_SIZE = 20;
 
 export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
-    const { flaskUrl } = useDataState();
     const [imageIndex, setImageIndex] = useState(0);
     const [imageList, setImageList] = useState([]);
     const [imageViewerLoading, setImageViewerLoading] = useState(false);
@@ -21,7 +20,6 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
 
-    const API_ENDPOINT = `${flaskUrl}files`;
     const removedDirectory = sourceDirectory.replace("/Images/", "/Removed/");
 
     useEffect(() => {
@@ -31,14 +29,13 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
     const fetchImages = async () => {
         try {
             setImageViewerLoading(true);
-            const response = await fetch(`${flaskUrl}list_files/${removedDirectory}`);
-            const data = await response.json();
+            const data = await listFiles(removedDirectory);
 
             if (Array.isArray(data)) {
                 setImageList(data);
             } else {
                 console.warn("Unexpected response format:", data);
-                setImageList([]);  // Prevent map errors
+                setImageList([]);
             }
             setImageViewerLoading(false);
         } catch (error) {
@@ -58,21 +55,16 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
         };
 
         try {
-            const response = await fetch(`${flaskUrl}restore_images`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+            await restoreImages({
+                files: payload.images,
+                directory: removedDirectory,
             });
 
-            if (response.ok) {
-                const updatedList = imageList.filter(name => !selectedImages.has(name));
-                setImageList(updatedList);
-                setSelectedImages(new Set());
-                setImageIndex(0);
-                onClose();
-            } else {
-                console.error("Failed to restore selected images.");
-            }
+            const updatedList = imageList.filter(name => !selectedImages.has(name));
+            setImageList(updatedList);
+            setSelectedImages(new Set());
+            setImageIndex(0);
+            onClose();
         } catch (error) {
             console.error("Error restoring selected images:", error);
         }
@@ -91,20 +83,20 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
     useEffect(() => {
         if (imageList.length > 0 && open) {
             if (imageIndex < imageList.length - 1) {
-                const nextUrl = `${API_ENDPOINT}/${removedDirectory}${imageList[imageIndex + 1]}`;
+                const nextUrl = `${getFileUrl(`${removedDirectory}${imageList[imageIndex + 1]}`)}`;
                 setNextImageUrl(nextUrl);
             } else {
                 setNextImageUrl(null);
             }
 
             if (imageIndex > 0) {
-                const prevUrl = `${API_ENDPOINT}/${removedDirectory}${imageList[imageIndex - 1]}`;
+                const prevUrl = `${getFileUrl(`${removedDirectory}${imageList[imageIndex - 1]}`)}`;
                 setPrevImageUrl(prevUrl);
             } else {
                 setPrevImageUrl(null);
             }
         }
-    }, [imageIndex, imageList, API_ENDPOINT, removedDirectory, open]);
+    }, [imageIndex, imageList, removedDirectory, open]);
 
     useEffect(() => {
         if (!open) return;
@@ -187,7 +179,7 @@ export const RestoreImageSelector = ({ open, onClose, sourceDirectory }) => {
                                         }}
                                     >
                                         <img
-                                            src={`${API_ENDPOINT}/${removedDirectory}${imageList[imageIndex]}`}
+                                            src={getFileUrl(`${removedDirectory}${imageList[imageIndex]}`)}
                                             alt={`Image ${imageIndex + 1}`}
                                             style={{
                                                 maxWidth: "100%",

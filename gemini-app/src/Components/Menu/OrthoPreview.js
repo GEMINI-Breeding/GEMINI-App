@@ -1,42 +1,55 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog, CircularProgress, Typography } from '@mui/material';
-import { useDataState } from '../../DataContext';
+import { getTifToPng } from '../../api/files';
+import { BACKEND_MODE, FRAMEWORK_URL } from '../../api/config';
 
 const OrthoPreview = ({ open, onClose, imageUrl }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [imageSrc, setImageSrc] = useState(null);
-    const { flaskUrl } = useDataState();
 
     useEffect(() => {
         if (open && imageUrl) {
             setLoading(true);
             setError(null);
-            fetch(`${flaskUrl}get_tif_to_png`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ filePath: imageUrl }),
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.blob();
-                })
-                .then(blob => {
-                    const objectUrl = URL.createObjectURL(blob);
-                    setImageSrc(objectUrl);
-                    setLoading(false);
-                })
-                .catch(error => {
-                    console.error('Error fetching image:', error);
-                    setError(`Failed to fetch image. Error: ${error.message}`);
-                    setLoading(false);
-                });
+
+            if (BACKEND_MODE !== 'flask') {
+                // Framework mode: use API abstraction
+                getTifToPng({ filePath: imageUrl })
+                    .then(result => {
+                        if (result.url) {
+                            setImageSrc(result.url);
+                            setLoading(false);
+                        } else if (result.id) {
+                            // Job submitted — use the download URL for the converted PNG
+                            const pngPath = imageUrl.replace(/\.tif$/i, '.png');
+                            setImageSrc(`${FRAMEWORK_URL}files/download/gemini/${pngPath}`);
+                            setLoading(false);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching image:', error);
+                        setError(`Failed to fetch image. Error: ${error.message}`);
+                        setLoading(false);
+                    });
+            } else {
+                // Flask mode: POST to get_tif_to_png returns blob
+                getTifToPng({ filePath: imageUrl })
+                    .then(blob => {
+                        // Flask getTifToPng returns via postJson, but old code used raw fetch for blob
+                        // Use getFileUrl for the PNG version
+                        const pngPath = imageUrl.replace(/\.tif$/i, '.png');
+                        setImageSrc(`${FRAMEWORK_URL}files/download/gemini/${pngPath}`);
+                        setLoading(false);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching image:', error);
+                        setError(`Failed to fetch image. Error: ${error.message}`);
+                        setLoading(false);
+                    });
+            }
         }
-    }, [open, imageUrl, flaskUrl]);
+    }, [open, imageUrl]);
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -44,10 +57,10 @@ const OrthoPreview = ({ open, onClose, imageUrl }) => {
                 {loading && <CircularProgress />}
                 {error && <Typography color="error">{error}</Typography>}
                 {!loading && !error && imageSrc && (
-                    <img 
+                    <img
                         src={imageSrc}
-                        alt="Orthomosaic" 
-                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
+                        alt="Orthomosaic"
+                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                     />
                 )}
             </div>

@@ -6,6 +6,7 @@ import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../../DataContext";
 import { BACKEND_MODE, FRAMEWORK_URL } from "../../../api/config";
+import { getTileFileUrl } from "../../../api/files";
 import GeoJsonTooltip from "../../Map/ToolTip";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
 import { MapOrthoSwitcher } from "../../Util/MapOrthoSwitcher";
@@ -64,14 +65,16 @@ function BoundaryMap({ task }) {
         if (prepOrthoImagePath) {
             const newPath = "files/" + prepOrthoImagePath;
             setSelectedTilePath(newPath);
-            
-            const encodedPath = encodeURIComponent(`${flaskUrl}${newPath}`);
+
+            const fileUrl = getTileFileUrl(newPath, flaskUrl);
+            const encodedPath = encodeURIComponent(fileUrl);
             setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
             setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
         } else {
             setTileUrl(TILE_URL_TEMPLATE);
             setBoundsUrl(BOUNDS_URL_TEMPLATE);
         }
+        const orthoPath = "files/" + prepOrthoImagePath;
         const newPrepOrthoTileLayer = new TileLayer({
             id: "geotiff-tile-layer",
             minZoom: 10,
@@ -79,7 +82,7 @@ function BoundaryMap({ task }) {
             tileSize: 256,
             data: TILE_URL_TEMPLATE.replace(
                 "${FILE_PATH}",
-                encodeURIComponent(`${flaskUrl}files/${prepOrthoImagePath}`)
+                encodeURIComponent(getTileFileUrl(orthoPath, flaskUrl))
             ),
             renderSubLayers: (props) => {
                 const {
@@ -101,6 +104,7 @@ function BoundaryMap({ task }) {
     useEffect(() => {
         if (prepAgRowStitchPlotPaths && prepAgRowStitchPlotPaths.length > 0) {
             const newTileLayers = prepAgRowStitchPlotPaths.map((plot, index) => {
+                const plotPath = "files/" + plot.fullPath;
                 return new TileLayer({
                     id: `agrowstitch-plot-${index}`,
                     minZoom: 10,
@@ -108,7 +112,7 @@ function BoundaryMap({ task }) {
                     tileSize: 256,
                     data: TILE_URL_TEMPLATE.replace(
                         "${FILE_PATH}",
-                        encodeURIComponent(`${flaskUrl}files/${plot.fullPath}`)
+                        encodeURIComponent(getTileFileUrl(plotPath, flaskUrl))
                     ),
                     renderSubLayers: (props) => {
                         const {
@@ -129,7 +133,7 @@ function BoundaryMap({ task }) {
             // Set bounds URL for the first plot to get initial extent
             if (prepAgRowStitchPlotPaths[0]) {
                 const firstPlotPath = "files/" + prepAgRowStitchPlotPaths[0].fullPath;
-                const encodedPath = encodeURIComponent(`${flaskUrl}${firstPlotPath}`);
+                const encodedPath = encodeURIComponent(getTileFileUrl(firstPlotPath, flaskUrl));
                 setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
                 setSelectedTilePath(firstPlotPath);
             }

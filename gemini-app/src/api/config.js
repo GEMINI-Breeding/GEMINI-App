@@ -17,6 +17,7 @@ const getBackendConfig = () => {
             frameworkHost: window.RUNTIME_CONFIG.FRAMEWORK_HOST || window.RUNTIME_CONFIG.FLASK_HOST,
             tileServerPort: window.RUNTIME_CONFIG.TILE_SERVER_PORT,
             tileServerHost: window.RUNTIME_CONFIG.TILE_SERVER_HOST,
+            storageBucket: window.RUNTIME_CONFIG.STORAGE_BUCKET || 'gemini',
             backendMode: window.RUNTIME_CONFIG.BACKEND_MODE || 'flask',
         };
     }
@@ -28,6 +29,7 @@ const getBackendConfig = () => {
         frameworkHost: process.env.REACT_APP_FRAMEWORK_HOST || 'localhost',
         tileServerPort: process.env.REACT_APP_TILE_SERVER_PORT || '8091',
         tileServerHost: process.env.REACT_APP_TILE_SERVER_HOST || 'localhost',
+        storageBucket: process.env.REACT_APP_STORAGE_BUCKET || 'gemini',
         backendMode: process.env.REACT_APP_BACKEND_MODE || 'flask',
     };
 };
@@ -38,6 +40,7 @@ export const BACKEND_MODE = config.backendMode;
 export const FLASK_URL = `http://${config.flaskHost}:${config.flaskPort}/flask_app/`;
 export const FRAMEWORK_URL = `http://${config.frameworkHost}:${config.frameworkPort}/api/`;
 export const TILE_SERVER_URL = `http://${config.tileServerHost}:${config.tileServerPort}`;
+export const STORAGE_BUCKET = config.storageBucket;
 
 /**
  * Returns the appropriate base URL for a given API domain.

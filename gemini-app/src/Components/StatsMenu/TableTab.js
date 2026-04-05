@@ -4,7 +4,9 @@ import Snackbar from "@mui/material/Snackbar";
 
 import { NestedSection, FolderTab, FolderTabs } from "./StatsAccordion.js";
 import useTrackComponent from "../../useTrackComponent.js";
-import { fetchData, useDataSetters, useDataState } from "../../DataContext.js";
+import { useDataSetters, useDataState } from "../../DataContext.js";
+import { listDirs, listFiles, getFileUrl } from '../../api/files';
+import { getOrthomosaicVersions } from '../../api/queries';
 
 import LoadTableModal from "./LoadTableModal.js";
 import LoadGraphModal from "./LoadGraphModal.js";
@@ -13,8 +15,7 @@ import LoadGraphModal from "./LoadGraphModal.js";
 const TableViewTab = () => {
     useTrackComponent("TableViewTab");
 
-    const { 
-        flaskUrl,
+    const {
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,
@@ -69,8 +70,6 @@ const TableViewTab = () => {
     
     // const includedPlatforms = ["Drone", "Rover","Amiga-Onboard", "T4"];
     
-    const constructUrl = (path, ...args) => `${flaskUrl}${path}/${args.join('/')}`;
-
     const fetchDataAndUpdate = async (date, platform, sensor, updatedData) => {
         let isGeojsonExist = 2; // Default to not completed
         let enableDownload = 2;
@@ -82,67 +81,55 @@ const TableViewTab = () => {
             updatedData[platform][sensor] = [];
         }
         let geoJsonFile = "";
-        
-        // Check for orthomosaic versions using the new endpoint
+
+        // Check for orthomosaic versions using the API abstraction
         try {
-            const response = await fetch(`${flaskUrl}/get_orthomosaic_versions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date,
-                    platform,
-                    sensor
-                })
+            const versionsResponse = await getOrthomosaicVersions({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date,
+                platform,
+                sensor
             });
-            
-            if (response.ok) {
-                const versionsResponse = await response.json();
-                
-                if (versionsResponse && versionsResponse.length > 0) {
-                    // Add each version as a separate entry
-                    for (const version of versionsResponse) {
-                        isGeojsonExist = true;
-                        enableDownload = true;
-                        geoJsonFile = `${flaskUrl}${version.path}`;
-                        if (version.versionName === undefined){
-                            continue;
-                        }
-                        updatedData[platform][sensor].push({
-                            date, 
-                            isGeojsonExist, 
-                            enableDownload, 
-                            geoJsonFile: geoJsonFile,
-                            versionName: version.versionName,
-                            versionType: version.versionType,
-                            version: version.version
-                        });
+
+            if (versionsResponse && versionsResponse.length > 0) {
+                for (const version of versionsResponse) {
+                    isGeojsonExist = true;
+                    enableDownload = true;
+                    geoJsonFile = version.path ? getFileUrl(version.path) : '';
+                    if (version.versionName === undefined) {
+                        continue;
                     }
+                    updatedData[platform][sensor].push({
+                        date,
+                        isGeojsonExist,
+                        enableDownload,
+                        geoJsonFile: geoJsonFile,
+                        versionName: version.versionName,
+                        versionType: version.versionType,
+                        version: version.version
+                    });
                 }
             }
         } catch (error) {
             console.warn(`No orthomosaic versions found for ${date} ${platform} ${sensor}:`, error);
-            
+
             // Fallback: check for traditional geojson files in sensor directory
             try {
-                const processedFiles = await fetchData(
-                    constructUrl('list_files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor)
-                );
+                const sensorPath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`;
+                const processedFiles = await listFiles(sensorPath);
                 for (const file of processedFiles) {
                     if (file.endsWith(".geojson")) {
                         isGeojsonExist = true;
                         enableDownload = true;
-                        geoJsonFile = constructUrl('files/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform, sensor, file);
-                        
+                        geoJsonFile = getFileUrl(`${sensorPath}/${file}`);
+
                         updatedData[platform][sensor].push({
-                            date, 
-                            isGeojsonExist, 
-                            enableDownload, 
+                            date,
+                            isGeojsonExist,
+                            enableDownload,
                             geoJsonFile: geoJsonFile,
                             versionName: 'Main',
                             versionType: 'legacy',
@@ -162,33 +149,21 @@ const TableViewTab = () => {
         const fetchTableDataAndUpdate = async () => {
             if (selectedPopulationGCP) {
                 try {
-                    // Check for existing processed drone data
-                    const dates = await fetchData(
-                        constructUrl('list_dirs/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP)
-                    );
-                    // reset sensor data
+                    const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+                    const dates = await listDirs(basePath);
                     let updatedData = {};
 
-                    // iterate through each data and check if images exists
                     for (const date of dates) {
-                        //console.log("date:", date);
-                        const platforms = await fetchData(
-                            constructUrl('list_dirs/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date)
-                        );
+                        const platforms = await listDirs(`${basePath}/${date}`);
 
                         for (const platform of platforms) {
-                            // if (includedPlatforms.includes(platform)) {
-                            const sensors = await fetchData(
-                                constructUrl('list_dirs/Processed', selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, date, platform)
-                            );
+                            const sensors = await listDirs(`${basePath}/${date}/${platform}`);
 
                             for (const sensor of sensors) {
                                 await fetchDataAndUpdate(date, platform, sensor, updatedData);
                             }
-                            // }
                         }
                     }
-                    //@TODO: Restructure the hierarchy to Dates -> Platforms -> Sensors -> Data
                     const processedData = Object.keys(updatedData).map((platform) => ({
                         title: platform,
                         nestedData: Object.keys(updatedData[platform]).map((sensor) => ({

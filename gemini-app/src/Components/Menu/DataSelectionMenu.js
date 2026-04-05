@@ -3,6 +3,8 @@ import { Autocomplete, TextField, Snackbar } from "@mui/material";
 import { useDataState, useDataSetters, fetchData } from "../../DataContext";
 import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
+import { getOrthomosaicVersions } from "../../api/queries";
+import { getFileUrl } from "../../api/files";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
@@ -123,27 +125,16 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     const fetchOrthomosaicVersions = async () => {
         if (selectedValues["sensor"]) {
             try {
-                const response = await fetch(`${flaskUrl}get_orthomosaic_versions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        year: selectedValues["year"],
-                        experiment: selectedValues["experiment"],
-                        location: selectedValues["location"],
-                        population: selectedValues["population"],
-                        date: selectedValues["date"],
-                        platform: selectedValues["platform"],
-                        sensor: selectedValues["sensor"],
-                    }),
+                const data = await getOrthomosaicVersions({
+                    year: selectedValues["year"],
+                    experiment: selectedValues["experiment"],
+                    location: selectedValues["location"],
+                    population: selectedValues["population"],
+                    date: selectedValues["date"],
+                    platform: selectedValues["platform"],
+                    sensor: selectedValues["sensor"],
                 });
 
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-
-                const data = await response.json();
                 setAvailableVersions(data);
 
                 // Auto-select first version if only one available
@@ -202,7 +193,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
 
             if (selectedVersionData) {
                 // GeoJSON path is the same for both versions
-                newGeoJsonPath = `${flaskUrl}${selectedVersionData.path}`;
+                newGeoJsonPath = getFileUrl(selectedVersionData.path);
 
                 // Check if the Orthomosaic Version contains "AgRowStitch"
                 if (selectedValues["version"].includes("AgRowStitch")) {
