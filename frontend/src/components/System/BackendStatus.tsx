@@ -55,7 +55,7 @@ export function BackendStatus({ onReady }: BackendStatusProps) {
         <h1>Starting GEMI...</h1>
         <p>Initializing backend services...</p>
         <p style={{ fontSize: "12px", color: "#666", marginTop: "20px" }}>
-          This may take a few seconds on first launch
+          This may take a few minutes on first launch
         </p>
         <div style={{ marginTop: "20px", fontSize: "32px" }}>...</div>
       </div>

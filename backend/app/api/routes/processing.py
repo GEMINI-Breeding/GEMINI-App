@@ -3029,6 +3029,8 @@ def inference_results(
         return {"available": False, "models": available_models, "active_model": active_model, "predictions": [], "images": []}
 
     rows: list[dict] = []
+    # Per-image metadata captured from CSV (ground pipelines store row/col/accession per prediction)
+    img_meta_from_csv: dict[str, dict] = {}
     with open(csv_path, newline="") as f:
         for row in _csv.DictReader(f):
             try:
@@ -3046,6 +3048,14 @@ def inference_results(
                 if points:
                     entry["points"] = points
                 rows.append(entry)
+                img_name = row.get("image", "")
+                if img_name and img_name not in img_meta_from_csv:
+                    img_meta_from_csv[img_name] = {
+                        "plot": str(row.get("plot_label", "") or ""),
+                        "row": str(row.get("row", "") or ""),
+                        "col": str(row.get("col", "") or ""),
+                        "accession": str(row.get("accession", "") or ""),
+                    }
             except (ValueError, TypeError):
                 continue
 
@@ -3092,6 +3102,38 @@ def inference_results(
         except Exception:
             pass
 
+    # For ground pipelines: also load the association CSV as a fallback for plot metadata.
+    # Images without predictions won't appear in img_meta_from_csv, but the association CSV
+    # has row/col/accession for every plot.
+    assoc_meta: dict[str, dict] = {}
+    if pipeline and pipeline.type != "aerial":
+        try:
+            active_entry_for_assoc = next((e for e in model_entries if e.get("label") == active_model), None)
+            assoc_version = (active_entry_for_assoc or {}).get("association_version") if isinstance(inference_out, list) else None
+            assoc_entries = outputs.get("associations", [])
+            assoc_entry = next((a for a in assoc_entries if a.get("version") == assoc_version), None) if assoc_version else None
+            assoc_csv_path = paths.abs(assoc_entry["association_path"]) if assoc_entry and assoc_entry.get("association_path") else paths.intermediate_run / "association.csv"
+            if assoc_csv_path.exists():
+                with open(assoc_csv_path, newline="") as _af:
+                    for _row in _csv.DictReader(_af):
+                        tif_name = _row.get("plot_tif", "")
+                        stem = Path(tif_name).stem
+                        parts = stem.split("_")
+                        plot_idx = None
+                        for _i, _p in enumerate(parts):
+                            if _p == "plot" and _i + 1 < len(parts) and parts[_i + 1].isdigit():
+                                plot_idx = parts[_i + 1]
+                                break
+                        if plot_idx is not None:
+                            assoc_meta[plot_idx] = {
+                                "plot": str(_row.get("plot") or _row.get("Plot") or plot_idx),
+                                "row": str(_row.get("row") or _row.get("Row") or ""),
+                                "col": str(_row.get("column") or _row.get("col") or _row.get("Col") or ""),
+                                "accession": str(_row.get("accession") or _row.get("Accession") or ""),
+                            }
+        except Exception:
+            pass
+
     import re as _re
     for img in images:  # always set plot_id; enrich with metadata when available
         stem = img["name"]
@@ -3101,11 +3143,25 @@ def inference_results(
         # Also handles simple "plot_1" prefix style.
         _m = _re.search(r"_(\d+)$", stem)
         plot_id = _m.group(1) if _m else (stem[len("plot_"):] if stem.startswith("plot_") else stem)
-        meta = plot_meta.get(plot_id) or plot_meta.get(stem) or {}
-        img["plot"] = plot_id
-        img["row"] = meta.get("row", "")
-        img["col"] = meta.get("col", "")
-        img["accession"] = meta.get("accession", "")
+        # Priority: CSV predictions metadata > association CSV > traits GeoJSON
+        csv_meta = img_meta_from_csv.get(img["name"])
+        if csv_meta and (csv_meta.get("row") or csv_meta.get("col") or csv_meta.get("accession")):
+            img["plot"] = csv_meta.get("plot") or plot_id
+            img["row"] = csv_meta.get("row", "")
+            img["col"] = csv_meta.get("col", "")
+            img["accession"] = csv_meta.get("accession", "")
+        elif assoc_meta.get(plot_id):
+            am = assoc_meta[plot_id]
+            img["plot"] = am.get("plot") or plot_id
+            img["row"] = am.get("row", "")
+            img["col"] = am.get("col", "")
+            img["accession"] = am.get("accession", "")
+        else:
+            meta = plot_meta.get(plot_id) or plot_meta.get(stem) or {}
+            img["plot"] = plot_id
+            img["row"] = meta.get("row", "")
+            img["col"] = meta.get("col", "")
+            img["accession"] = meta.get("accession", "")
 
     # Lazily sync detection counts to PlotRecord rows so the Analyze tab can
     # quickly show which plots have detections without reading inference CSVs.
@@ -3134,6 +3190,36 @@ def inference_results(
 class ApplyThresholdRequest(BaseModel):
     confidence_threshold: float  # 0.0 – 1.0
     label: str | None = None     # which model label; None → apply all models
+
+
+class MarkStepCompleteBody(BaseModel):
+    step: str
+
+
+@router.post("/pipeline-runs/{id}/mark-step-complete")
+def mark_step_complete(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: MarkStepCompleteBody,
+) -> dict[str, Any]:
+    """Mark a pipeline step as complete without running it (e.g. skip inference)."""
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps[body.step] = True
+    if pipeline and pipeline.type == "aerial":
+        all_step_keys = ["gcp_selection", "orthomosaic", "plot_boundaries", "trait_extraction", "inference"]
+    else:
+        all_step_keys = ["plot_marking", "stitching", "inference"]
+    all_done = all(existing_steps.get(s, False) for s in all_step_keys)
+    new_status = "completed" if all_done else (run.status or "idle")
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(steps_completed=existing_steps, status=new_status),
+    )
+    return {"ok": True, "step": body.step, "status": new_status}
 
 
 @router.post("/pipeline-runs/{id}/apply-inference-threshold")

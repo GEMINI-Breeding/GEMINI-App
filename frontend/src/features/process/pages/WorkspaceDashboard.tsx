@@ -1,7 +1,7 @@
 import { Plus, FolderOpen, MoreVertical, Trash2, RefreshCw, Layers, Pencil } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -201,6 +201,19 @@ export function WorkspaceDashboard() {
 
   const workspaces = data?.data ?? []
 
+  // Pre-fetch card images for all workspaces so we can show them all at once
+  const imageQueries = useQueries({
+    queries: workspaces.map((ws) => ({
+      queryKey: ["workspace-card-images", ws.id],
+      queryFn: () =>
+        fetch(apiUrl(`/api/v1/workspaces/${ws.id}/card-images`), {
+          headers: authHeaders(),
+        }).then((r) => r.json()),
+      staleTime: 0,
+    })),
+  })
+  const allImagesLoaded = workspaces.length === 0 || imageQueries.every((q) => !q.isLoading)
+
   const createMutation = useMutation({
     mutationFn: (body: { name: string; description: string }) =>
       WorkspacesService.create({ requestBody: body }),
@@ -303,8 +316,22 @@ export function WorkspaceDashboard() {
         </div>
       </div>
       <div className="flex-1 overflow-auto px-6 pb-6">
-        {isLoading ? (
-          <div className="text-muted-foreground text-sm">Loading workspaces…</div>
+        {isLoading || (workspaces.length > 0 && !allImagesLoaded) ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {(isLoading ? Array(3).fill(null) : workspaces).map((_, i) => (
+              <div key={i} className="rounded-lg border bg-card overflow-hidden flex flex-col animate-pulse">
+                <div className="h-28 w-full bg-muted" />
+                <div className="p-4 flex flex-col gap-2">
+                  <div className="h-3.5 w-2/3 rounded bg-muted" />
+                  <div className="h-3 w-1/2 rounded bg-muted" />
+                  <div className="mt-1 space-y-1.5">
+                    <div className="h-3 w-3/4 rounded bg-muted" />
+                    <div className="h-3 w-3/4 rounded bg-muted" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : workspaces.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
             <FolderOpen className="h-10 w-10 text-muted-foreground" />

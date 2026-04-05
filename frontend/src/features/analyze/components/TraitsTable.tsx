@@ -254,9 +254,9 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
         </span>
       </div>
 
-      <div className="rounded-md border overflow-auto max-h-[480px]">
+      <div className="rounded-md border overflow-auto max-h-[calc(100vh-340px)]">
         <Table>
-          <TableHeader className="sticky top-0 bg-background z-10">
+          <TableHeader className="sticky top-0 bg-background z-10 shadow-[0_1px_0_0_hsl(var(--border))]">
             <TableRow>
               {showActions && <TableHead className="w-16 text-xs">View</TableHead>}
               {columns.map((col) => (

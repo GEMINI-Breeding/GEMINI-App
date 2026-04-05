@@ -1068,7 +1068,27 @@ export function InferenceTool({
               {inferenceComplete ? "Re-run Inference" : "Run Inference"}
             </Button>
           )}
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Close</Button>
+          <div className="flex items-center gap-2">
+            {!inferenceComplete && !isRunning && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/mark-step-complete`), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ step: "inference" }),
+                  })
+                  queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+                  onCancel()
+                }}
+              >
+                Skip
+              </Button>
+            )}
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Close</Button>
+          </div>
         </div>
       </div>
 

@@ -351,13 +351,18 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
   const addPlot = useCallback(() => {
     setPlots((prev) => {
-      const newId = prev.length + 1
-      const prevDirection = prev[prev.length - 1]?.direction ?? "down"
-      const updated = [...prev, { plot_id: newId, start_image: null, end_image: null, direction: prevDirection }]
-      setPlotPage(updated.length - 1)
+      const insertIdx = plotPage + 1
+      const prevDirection = prev[plotPage]?.direction ?? "down"
+      const newPlot = { plot_id: 0, start_image: null, end_image: null, direction: prevDirection }
+      const updated = [
+        ...prev.slice(0, insertIdx),
+        newPlot,
+        ...prev.slice(insertIdx),
+      ].map((p, i) => ({ ...p, plot_id: i + 1 }))
+      setPlotPage(insertIdx)
       return updated
     })
-  }, [])
+  }, [plotPage])
 
   const deletePlot = useCallback(() => {
     setPlots((prev) => {
