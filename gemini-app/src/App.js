@@ -117,7 +117,9 @@ function App() {
     }, [selectedMetric]);
 
     // Check if the data directory exists on startup, retrying until the backend is reachable
+    // (Flask mode only — framework mode uses MinIO, not a local data directory)
     useEffect(() => {
+        if (BACKEND_MODE !== 'flask') return;
         let cancelled = false;
         const check = () => {
             fetch(`${flaskUrl}check_data_dir`)
@@ -376,7 +378,7 @@ function App() {
             return;
         }
         try {
-            const response = await fetch(`${flaskUrl}stop_training`, { method: "POST" });
+            await fetch(`${flaskUrl}stop_training`, { method: "POST" });
             console.log("Training stopped");
             setIsTraining(false);
             setCurrentEpoch(0);

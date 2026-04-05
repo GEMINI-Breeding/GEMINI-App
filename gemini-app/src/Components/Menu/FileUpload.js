@@ -24,7 +24,7 @@ import { useFormik } from "formik";
 import { useDataState, useDataSetters } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
-import { BACKEND_MODE, FLASK_URL, FRAMEWORK_URL } from "../../api/config";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
 import Box from "@mui/material/Box";
 import { TableComponent } from "./TableComponent";
 
@@ -144,33 +144,37 @@ const FileUploadComponent = ({ actionType = null }) => {
     }, [selectedDataType]);
 
     useEffect(() => {
+        if (!extractingBinary) return;
 
-        if (extractingBinary) {
-        
-            const intervalId = setInterval(async () => {
-                    const pct = await getBinaryProgress(dirPath);
-                    let prog_calc = Math.round(pct);
-                    setProgress(prog_calc);
+        // Framework mode: progress comes via WebSocket (handled in App.js)
+        if (BACKEND_MODE !== 'flask') return;
 
-                    if (prog_calc >= 100) {
-                        setIsFinishedUploading(true);
-                        setUploadedData(true);
-                        setIsUploading(false);
-                    }
-                }, 1000);
-            
-            return () => clearInterval(intervalId);
-        }
-    }, [extractingBinary, dirPath, files.length]);
+        const intervalId = setInterval(async () => {
+                const pct = await getBinaryProgress(dirPath);
+                let prog_calc = Math.round(pct);
+                setProgress(prog_calc);
+
+                if (prog_calc >= 100) {
+                    setIsFinishedUploading(true);
+                    setUploadedData(true);
+                    setIsUploading(false);
+                }
+            }, 1000);
+
+        return () => clearInterval(intervalId);
+    }, [extractingBinary, dirPath, files.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (!extractingBinary) return;
-    
+
+        // Framework mode: status comes via WebSocket (handled in App.js)
+        if (BACKEND_MODE !== 'flask') return;
+
         const intervalId = setInterval(async () => {
             try {
                 const response = await fetch(`${flaskUrl}get_binary_status`);
                 const { status } = await response.json();
-    
+
                 if (status === "failed") {
                     setIsFinishedUploading(true);
                     setFailedUpload(true);
@@ -181,9 +185,9 @@ const FileUploadComponent = ({ actionType = null }) => {
                 console.error("Error fetching binary status:", error);
             }
         }, 1000);
-    
+
         return () => clearInterval(intervalId);
-    }, [extractingBinary]);
+    }, [extractingBinary]); // eslint-disable-line react-hooks/exhaustive-deps
     
     // Effect to fetch nested directories on component mount
     useEffect(() => {
@@ -316,6 +320,17 @@ const FileUploadComponent = ({ actionType = null }) => {
         setExtractingBinary(true);
 
         try {
+            if (BACKEND_MODE !== 'flask') {
+                // Framework mode: submit as a job
+                const { extractBinaryFile } = await import('../../api/processing');
+                const data = await extractBinaryFile({ files, localDirPath });
+                console.log("Binary extraction job submitted:", data);
+                if (data && data.id) {
+                    // Job submitted — progress tracked via WebSocket in App.js
+                }
+                return;
+            }
+
             const response = await fetch(`${flaskUrl}extract_binary_file`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -324,22 +339,17 @@ const FileUploadComponent = ({ actionType = null }) => {
 
             if (response.ok) {
                 console.log("Binary file extraction started");
-                const result = await response.json();
-                console.log("Extraction started");
+                await response.json();
             } else {
                 console.error("Failed to extract binary file");
                 setIsFinishedUploading(true);
                 setFailedUpload(true);
-
-                // If extraction fails, clear the directory
                 clearDirPath();
             }
         } catch (error) {
             console.error("Error extracting binary file:", error);
             setIsFinishedUploading(true);
             setFailedUpload(true);
-
-            // If extraction fails, clear the directory
             clearDirPath();
         }
     };
@@ -435,6 +445,10 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     const clearDirPath = () => {
         setProgress(0);
+        if (BACKEND_MODE !== 'flask') {
+            // Framework mode: files are in MinIO, no local dir to clear
+            return;
+        }
         console.log("Clearing dir of uploaded files in: ", dirPath);
         fetch(`${flaskUrl}clear_upload_dir`, {
             method: "POST",
@@ -452,14 +466,17 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     const handleCancelExtraction = async () => {
         console.log("Cancelling extraction of files in: ", dirPath);
-        if (extractingBinary) {
-            // ask the server to kill the extraction process
-            await fetch(`${flaskUrl}cancel_extraction`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ dirPath }),
-            });
-        };
+        if (!extractingBinary) return;
+        if (BACKEND_MODE !== 'flask') {
+            // Framework mode: cancel via job API
+            setExtractingBinary(false);
+            return;
+        }
+        await fetch(`${flaskUrl}cancel_extraction`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dirPath }),
+        });
     }
 
     // Formik hook for form state management and validation
@@ -761,13 +778,14 @@ const FileUploadComponent = ({ actionType = null }) => {
     };
 
     // Render function for Autocomplete components
-    const renderAutocomplete = (label) => {
+    const renderAutocomplete = (label, key) => {
         const fieldName = label.toLowerCase();
         const options = getOptionsForField(fieldName);
         const error = formik.touched[fieldName] && formik.errors[fieldName];
 
         return (
             <Autocomplete
+                key={key || fieldName}
                 freeSolo
                 id={`autocomplete-${fieldName}`}
                 options={options}

@@ -7,7 +7,7 @@ import { FlyToInterpolator } from "@deck.gl/core";
 import SplitButton from "../Util/SplitButton";
 
 import { useDataSetters, useDataState, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../DataContext";
-import { BACKEND_MODE, FLASK_URL, FRAMEWORK_URL } from "../../api/config";
+import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
 import useTraitsColorMap from "./ColorMap";
 import GeoJsonTooltip from "./ToolTip";
 import useExtentFromBounds from "./MapHooks";

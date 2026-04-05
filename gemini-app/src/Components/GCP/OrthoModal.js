@@ -156,8 +156,6 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
             reconstruction_quality: orthoSetting,
             custom_options: orthoCustomValue ? orthoCustomValue : [],
         };
-        const endpoint = selectedOrthoMethod === "STITCH" ? "run_stitch" : "run_odm";
-
         // global variable to find ortho method and data
         window.selectedOrthoMethod = selectedOrthoMethod;
         window.orthoData = data;

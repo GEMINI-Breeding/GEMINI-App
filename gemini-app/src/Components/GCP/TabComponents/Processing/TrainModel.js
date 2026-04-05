@@ -15,7 +15,6 @@ import {
     LinearProgress,
     Box,
     IconButton,
-    Menu,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { DataGrid } from '@mui/x-data-grid';
@@ -464,7 +463,7 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
 
     const handleDone = async () => {
         try{
-            const response = await fetch(`${flaskUrl}done_training`, { method: "POST" });
+            await fetch(`${flaskUrl}done_training`, { method: "POST" });
             console.log("Training is done.");
             setIsTraining(false);
             setCurrentEpoch(0); // Reset epochs
