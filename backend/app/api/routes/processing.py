@@ -1059,17 +1059,17 @@ def save_plot_grid(
     versions = [dict(v) for v in existing_outputs.get("plot_boundaries", [])]
     now = _dt.utcnow().isoformat()
 
-    if body.save_as or not versions:
+    # Discover ALL versions on disk (shared across runs for this population).
+    # This is used to decide whether to overwrite vs. create new — a run that
+    # loaded a boundary from a different run will have an empty local `versions`
+    # list even though a versioned file exists on disk.
+    all_disk_versions, active_disk_v = _discover_pb_versions(paths, existing_outputs)
+
+    if body.save_as or not all_disk_versions:
         # Determine next version number from ALL existing versioned files in the
         # shared population directory — prevents overwriting versions created by
         # a different pipeline type (e.g. ground Save As clobbering aerial v1).
-        shared_dir = paths.intermediate_shared_pop
-        existing_file_versions = [
-            int(m.group(1))
-            for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson")
-            if (m := _re.match(r"Plot-Boundary-WGS84_v(\d+)\.geojson", f.name))
-        ]
-        all_known_versions = existing_file_versions + [v["version"] for v in versions]
+        all_known_versions = [v["version"] for v in all_disk_versions]
         new_version = max(all_known_versions, default=0) + 1
 
         versioned_path = paths.plot_boundary_geojson_versioned(new_version)
@@ -1099,14 +1099,30 @@ def save_plot_grid(
         if canonical_owned:
             paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
     else:
-        # Overwrite the current active version
-        active_v = existing_outputs.get("active_plot_boundary_version")
-        target = next((v for v in versions if v["version"] == active_v), versions[-1] if versions else None)
-        if target:
-            versioned_path = paths.abs(target["geojson_path"])
-            versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
-            target["ortho_version"] = body.ortho_version
-            target["stitch_version"] = body.stitch_version
+        # Overwrite the currently active version (resolved from disk, not just this run's
+        # outputs, so runs that inherited a boundary from another run overwrite correctly).
+        target_disk = next(
+            (v for v in all_disk_versions if v["version"] == active_disk_v),
+            all_disk_versions[-1],
+        )
+        versioned_path = paths.abs(target_disk["geojson_path"])
+        versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
+
+        # Keep the run's local versions list in sync: update if already present, add if not.
+        local_entry = next((v for v in versions if v["version"] == target_disk["version"]), None)
+        if local_entry:
+            local_entry["ortho_version"] = body.ortho_version
+            local_entry["stitch_version"] = body.stitch_version
+        else:
+            versions.append({
+                "version": target_disk["version"],
+                "name": target_disk.get("name"),
+                "geojson_path": target_disk["geojson_path"],
+                "ortho_version": body.ortho_version,
+                "stitch_version": body.stitch_version,
+                "created_at": now,
+            })
+        existing_outputs["active_plot_boundary_version"] = target_disk["version"]
 
         # Overwrite always updates the canonical (this run explicitly chose to save here)
         paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
