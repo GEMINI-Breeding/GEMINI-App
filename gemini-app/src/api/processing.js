@@ -197,28 +197,28 @@ export const getModelInfo = (body) => {
         return postJson(`${FLASK_URL}get_model_info`, body);
     }
     // Framework: scan MinIO for model metadata
-    return postJson(`${FRAMEWORK_URL}models/info`, body);
+    return postJson(`${FRAMEWORK_URL}model_management/info`, body);
 };
 
 export const getLocateInfo = (body) => {
     if (BACKEND_MODE === 'flask') {
         return postJson(`${FLASK_URL}get_locate_info`, body);
     }
-    return postJson(`${FRAMEWORK_URL}models/locate_info`, body);
+    return postJson(`${FRAMEWORK_URL}model_management/locate_info`, body);
 };
 
 export const bestLocateFile = (body) => {
     if (BACKEND_MODE === 'flask') {
         return postJson(`${FLASK_URL}best_locate_file`, body);
     }
-    return postJson(`${FRAMEWORK_URL}models/best_locate`, body);
+    return postJson(`${FRAMEWORK_URL}model_management/best_locate`, body);
 };
 
 export const bestModelFile = (body) => {
     if (BACKEND_MODE === 'flask') {
         return postJson(`${FLASK_URL}best_model_file`, body);
     }
-    return postJson(`${FRAMEWORK_URL}models/best_model`, body);
+    return postJson(`${FRAMEWORK_URL}model_management/best_model`, body);
 };
 
 export const doneTraining = () => {

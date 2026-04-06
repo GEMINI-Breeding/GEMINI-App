@@ -61,11 +61,19 @@ export const listFiles = async (dirPath) => {
     return fetchJson(`${baseUrl()}list_files/${dirPath}`);
 };
 
-export const listDirsNested = () =>
-    fetchJson(`${baseUrl()}list_dirs_nested`);
+export const listDirsNested = () => {
+    if (BACKEND_MODE !== 'flask') {
+        return fetchJson(`${FRAMEWORK_URL}files/list_nested`);
+    }
+    return fetchJson(`${FLASK_URL}list_dirs_nested`);
+};
 
-export const listDirsNestedProcessed = () =>
-    fetchJson(`${baseUrl()}list_dirs_nested_processed`);
+export const listDirsNestedProcessed = () => {
+    if (BACKEND_MODE !== 'flask') {
+        return fetchJson(`${FRAMEWORK_URL}files/list_nested_processed`);
+    }
+    return fetchJson(`${FLASK_URL}list_dirs_nested_processed`);
+};
 
 // -- File serving --
 

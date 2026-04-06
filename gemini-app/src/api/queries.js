@@ -277,9 +277,8 @@ export const downloadZipped = (params) => {
 // -- Plot Borders --
 
 export const filterPlotBorders = (params) => {
-    if (BACKEND_MODE === 'framework') {
-        // Framework: query plots with geometry
-        return fetchJson(`${FRAMEWORK_URL}plots/all`);
+    if (BACKEND_MODE !== 'flask') {
+        return postJson(`${FRAMEWORK_URL}plot_geometry/borders`, params);
     }
     return postJson(`${FLASK_URL}filter_plot_borders`, params);
 };
