@@ -1822,49 +1822,30 @@ def orthomosaic_info(
         existing_geojson = None
         existing_grid_settings = None
 
-        # First choice (ground): load the run-specific boundary saved by PlotBoundaryPrep.
-        _ground_boundary_rel = _outputs.get("plot_boundaries_geojson")
-        if _ground_boundary_rel:
-            _ground_boundary_path = paths.abs(_ground_boundary_rel)
-            if _ground_boundary_path.exists():
+        # Priority 1: latest versioned boundary (manually created via PlotBoundaryPrep).
+        # _active_pbv is this run's own saved version, or the most recent on disk — ensures
+        # manually drawn boundaries always take precedence over auto-generated ones.
+        if _active_pbv is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
+            if _vf.exists():
                 try:
-                    existing_geojson = json.loads(_ground_boundary_path.read_text())
-                except Exception:
-                    pass
-
-        # Second choice: load the boundary this run explicitly saved via the versioned system.
-        if existing_geojson is None:
-            _active_pbv_own = _outputs.get("active_plot_boundary_version")
-            if _active_pbv_own is not None:
-                _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
-                if _vf.exists():
-                    try:
-                        raw = json.loads(_vf.read_text())
-                        existing_grid_settings = raw.pop("grid_settings", None)
-                        raw.pop("_run_meta", None)
-                        existing_geojson = raw
-                    except Exception:
-                        pass
-
-        # Fallback: if this run has no own boundary yet, load the most recent
-        # boundary from the shared population directory (e.g. one saved by the
-        # aerial pipeline) so the user has a starting point to edit and Save As.
-        if existing_geojson is None and _pb_versions:
-            _aerial_versions = [
-                v for v in _pb_versions
-                if (v.get("run_meta") or {}).get("pipeline_type") == "aerial"
-            ]
-            # Prefer aerial; fall back to any version (older files may lack pipeline_type)
-            _fallback_v = _aerial_versions[-1] if _aerial_versions else _pb_versions[-1]
-            _vf2 = paths.abs(_fallback_v["geojson_path"])
-            if _vf2.exists():
-                try:
-                    raw = json.loads(_vf2.read_text())
+                    raw = json.loads(_vf.read_text())
                     existing_grid_settings = raw.pop("grid_settings", None)
                     raw.pop("_run_meta", None)
                     existing_geojson = raw
                 except Exception:
                     pass
+
+        # Priority 2: auto-generated boundary written by the georeferencing step.
+        if existing_geojson is None:
+            _ground_boundary_rel = _outputs.get("plot_boundaries_geojson")
+            if _ground_boundary_rel:
+                _ground_boundary_path = paths.abs(_ground_boundary_rel)
+                if _ground_boundary_path.exists():
+                    try:
+                        existing_geojson = json.loads(_ground_boundary_path.read_text())
+                    except Exception:
+                        pass
 
         # Load existing pop boundary if present
         existing_pop = None
@@ -1912,15 +1893,13 @@ def orthomosaic_info(
         _active_v = _outputs.get("active_ortho_version")
         _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
 
-        # Only pre-load boundaries that THIS aerial run explicitly saved.  Do
-        # not fall back to the canonical shared file — it may have been written
-        # by a ground pipeline run on the same population, and showing those
-        # ground polygons in the aerial boundary drawer would be confusing.
+        # Load the active/latest versioned boundary. _active_pbv defaults to the most
+        # recent file on disk, so runs that haven't saved their own boundary yet will
+        # inherit the latest one as a starting point.
         existing_geojson = None
         existing_grid_settings = None
-        _active_pbv_own = _outputs.get("active_plot_boundary_version")
-        if _active_pbv_own is not None:
-            _vf = paths.plot_boundary_geojson_versioned(_active_pbv_own)
+        if _active_pbv is not None:
+            _vf = paths.plot_boundary_geojson_versioned(_active_pbv)
             if _vf.exists():
                 try:
                     raw = json.loads(_vf.read_text())
@@ -2914,6 +2893,7 @@ def use_uploaded_ortho(
 
     existing_steps = dict(run.steps_completed or {})
     existing_steps["data_sync"] = True
+    existing_steps["gcp_selection"] = True
     existing_steps["orthomosaic"] = True
 
     update_pipeline_run(

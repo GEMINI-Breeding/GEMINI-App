@@ -23,6 +23,7 @@ import {
   RotateCcw,
   RefreshCw,
   FolderOpen,
+  Minus,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -458,6 +459,7 @@ interface StepRowProps {
   extraContent?: React.ReactNode;
   extraButtons?: React.ReactNode;
   hideDefaultButton?: boolean;
+  skipped?: boolean;
 }
 
 // ── Shared confirm-delete dialog ──────────────────────────────────────────────
@@ -1869,6 +1871,7 @@ function StepRow({
   extraContent,
   extraButtons,
   hideDefaultButton,
+  skipped = false,
 }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1878,6 +1881,7 @@ function StepRow({
   );
 
   const iconEl = (() => {
+    if (skipped) return <Minus className="text-muted-foreground h-5 w-5" />;
     switch (status) {
       case "completed":
         return <Check className="h-5 w-5 text-green-600" />;
@@ -1892,13 +1896,15 @@ function StepRow({
     }
   })();
 
-  const circleCls = {
-    completed: "border-green-500 bg-green-500/10",
-    running: "border-blue-500 bg-blue-500/10",
-    failed: "border-red-500 bg-red-500/10",
-    ready: "border-primary bg-primary/10",
-    locked: "border-border bg-muted/30",
-  }[status];
+  const circleCls = skipped
+    ? "border-border bg-muted/30"
+    : {
+        completed: "border-green-500 bg-green-500/10",
+        running: "border-blue-500 bg-blue-500/10",
+        failed: "border-red-500 bg-red-500/10",
+        ready: "border-primary bg-primary/10",
+        locked: "border-border bg-muted/30",
+      }[status];
 
   const isActive = status === "running";
   const canRun =
@@ -1930,11 +1936,16 @@ function StepRow({
           <div className="flex items-start justify-between gap-2 pt-2">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`font-medium ${status === "locked" ? "text-muted-foreground" : ""}`}
+                className={`font-medium ${status === "locked" || skipped ? "text-muted-foreground" : ""}`}
               >
                 {step.label}
               </span>
-              {step.kind === "optional" && (
+              {skipped && (
+                <Badge variant="outline" className="text-muted-foreground text-xs">
+                  skipped
+                </Badge>
+              )}
+              {!skipped && step.kind === "optional" && (
                 <Badge
                   variant="outline"
                   className="text-muted-foreground text-xs"
@@ -1942,15 +1953,15 @@ function StepRow({
                   optional
                 </Badge>
               )}
-              {step.kind === "interactive" && (
+              {!skipped && step.kind === "interactive" && (
                 <Badge variant="outline" className="text-xs">
                   interactive
                 </Badge>
               )}
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">
-              {extraButtons}
-              {isActive && (
+              {!skipped && extraButtons}
+              {!skipped && isActive && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1961,7 +1972,7 @@ function StepRow({
                   Stop
                 </Button>
               )}
-              {!hideDefaultButton && (
+              {!skipped && !hideDefaultButton && (
                 <Button
                   variant={status === "completed" ? "outline" : "default"}
                   size="sm"
@@ -4179,6 +4190,10 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
           <CardContent>
             {(() => {
               const isExecuting = executeMutation.isPending || isRunning;
+              // Steps auto-skipped because an orthomosaic was imported directly
+              const importedOrtho = pipelineType === "aerial" &&
+                (run.outputs as any)?.orthomosaics?.[0]?.imported === true;
+              const IMPORTED_SKIP_STEPS = new Set(["data_sync", "gcp_selection"]);
               return steps.map((step, idx) => {
               const status = getStepStatus(
                 step.key,
@@ -4196,10 +4211,13 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                     ? "ready"
                     : status;
 
+              const isSkipped = importedOrtho && IMPORTED_SKIP_STEPS.has(step.key);
+
               // Step-specific warnings
               const warning =
                 step.key === "orthomosaic" &&
-                !run.steps_completed?.gcp_selection
+                !run.steps_completed?.gcp_selection &&
+                !importedOrtho
                   ? "GCP selection was skipped — orthomosaic accuracy may be reduced"
                   : step.key === "stitching" &&
                       capabilities &&
@@ -4226,12 +4244,13 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                   }
                   onRunStep={handleRunStep}
                   onOpenTool={handleOpenTool}
+                  skipped={isSkipped}
                   onStopStep={() => stopMutation.mutate()}
                   isExecuting={executeMutation.isPending || isRunning}
                   isStopping={stopMutation.isPending}
                   isStarting={executingStep === step.key}
                   warning={warning}
-                  hideDefaultButton={step.key === "data_sync"}
+                  hideDefaultButton={step.key === "data_sync" || isSkipped}
                   extraButtons={
                     step.key === "data_sync" ? (
                       <Button

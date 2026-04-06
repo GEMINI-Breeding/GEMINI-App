@@ -144,14 +144,15 @@ def sync_file_uploads(
     synced = 0
     removed = 0
 
-    # Deduplicate: if multiple records share the same storage_path (and owner),
-    # keep the one with the highest file_count and delete the rest.  This cleans
-    # up rows created by repeated upload attempts before the fix.
+    # Deduplicate: if multiple records share the same storage_path, owner, AND
+    # data_type, keep the one with the highest file_count and delete the rest.
+    # data_type is included so Orthomosaic (RGB) and Orthomosaic DEM records that
+    # share the same directory are NOT merged — they are distinct entries.
     from collections import defaultdict as _dd
     path_groups: dict[tuple, list] = _dd(list)
     for record in records:
         norm = record.storage_path.replace("\\", "/")
-        key = (str(record.owner_id) if record.owner_id else "", norm)
+        key = (str(record.owner_id) if record.owner_id else "", norm, record.data_type or "")
         path_groups[key].append(record)
     deleted_ids: set = set()
     for key, group in path_groups.items():
@@ -268,6 +269,60 @@ def sync_file_uploads(
                                     discovered += 1
             if discovered:
                 session.commit()
+
+    # Orthomosaic discovery: scan for {sensor}/Orthomosaic/ directories containing
+    # *-RGB.tif and/or *-DEM.tif.  Creates separate "Orthomosaic" and
+    # "Orthomosaic DEM" records so both appear in the Manage tab after a Refresh.
+    if owner_id is not None:
+        raw_root = root / "Raw"
+        if raw_root.is_dir():
+            # Build lookup keyed on (norm_path, data_type) for fast existence checks
+            existing_key_set = {
+                (record.storage_path.replace("\\", "/"), record.data_type or "")
+                for record in records
+            }
+            for ortho_dir in raw_root.rglob("Orthomosaic"):
+                if not ortho_dir.is_dir():
+                    continue
+                # Expected layout: Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/Orthomosaic
+                parts = ortho_dir.relative_to(raw_root).parts
+                if len(parts) != 8 or parts[7] != "Orthomosaic":
+                    continue
+                _, exp, loc, pop, date, platform, sensor, _ = parts
+                rel_ortho = ortho_dir.relative_to(root).as_posix()
+
+                type_map = {
+                    "Orthomosaic": f"{date}-RGB.tif",
+                    "Orthomosaic DEM": f"{date}-DEM.tif",
+                }
+                for dtype, filename in type_map.items():
+                    tif_path = ortho_dir / filename
+                    if not tif_path.exists():
+                        continue
+                    key = (rel_ortho, dtype)
+                    if key in existing_key_set:
+                        continue
+                    new_record = FileUploadCreate(
+                        data_type=dtype,
+                        experiment=exp,
+                        location=loc,
+                        population=pop,
+                        date=date,
+                        platform=platform,
+                        sensor=sensor,
+                        storage_path=rel_ortho,
+                    )
+                    db_item = FileUpload.model_validate(
+                        new_record, update={"owner_id": owner_id}
+                    )
+                    db_item.file_count = sum(1 for f in ortho_dir.rglob("*") if f.is_file())
+                    db_item.status = "completed"
+                    session.add(db_item)
+                    existing_key_set.add(key)
+                    logger.info(f"sync: discovered orthomosaic record – {rel_ortho} ({dtype})")
+                    discovered += 1
+        if discovered:
+            session.commit()
 
     logger.info(f"sync complete: synced={synced}, removed={removed}, discovered={discovered}")
     return {"synced": synced, "removed": removed, "discovered": discovered}

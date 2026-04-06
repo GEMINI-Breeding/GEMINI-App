@@ -142,14 +142,30 @@ function NewRunDialog({
           file_upload_id: upload.id,
         },
       });
-      // Silently try to reuse existing boundaries from a previous run of this pipeline.
-      // Ground: reuses plot_borders.csv (plot_marking step)
-      // Aerial: reuses Plot-Boundary-WGS84.geojson (plot_boundaries step)
-      // If no previous boundaries exist the backend returns 404 — we ignore it.
-      try {
-        await ProcessingService.applyBoundaries({ id: run.id });
-      } catch {
-        // no boundaries yet — that's fine
+      if (upload.data_type === "Orthomosaic") {
+        // Orthomosaic upload: register it directly, marking data_sync / gcp_selection /
+        // orthomosaic as complete so only plot_boundary_prep onward is needed.
+        try {
+          const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
+          await fetch(`${base}/api/v1/pipeline-runs/${run.id}/use-uploaded-ortho`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+            },
+            body: JSON.stringify({ save_mode: "new_version" }),
+          });
+        } catch {
+          // TIF may not yet be on disk — user can register later from the run page
+        }
+      } else {
+        // Silently try to reuse existing boundaries from a previous run.
+        // Ground: reuses plot_borders.csv  Aerial: reuses Plot-Boundary-WGS84.geojson
+        try {
+          await ProcessingService.applyBoundaries({ id: run.id });
+        } catch {
+          // no boundaries yet — that's fine
+        }
       }
       return run;
     },
@@ -228,7 +244,7 @@ function NewRunDialog({
                     <thead className="bg-muted/60 sticky top-0 z-10">
                       <tr>
                         <th className="px-2 py-1.5 w-5" />
-                        {["Experiment", "Location", "Population", "Date", "Platform", "Sensor", "Files"].map((h) => (
+                          {["Type", "Experiment", "Location", "Population", "Date", "Platform", "Sensor", "Files"].map((h) => (
                           <th key={h} className="px-2 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                             {h}
                           </th>
@@ -238,7 +254,7 @@ function NewRunDialog({
                     <tbody>
                       {displayUploads.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
+                          <td colSpan={9} className="px-3 py-6 text-center text-muted-foreground">
                             No datasets match the filters.
                           </td>
                         </tr>
@@ -270,6 +286,13 @@ function NewRunDialog({
                                     {included ? "Already included — delete the run to re-add" : "Not Included"}
                                   </TooltipContent>
                                 </Tooltip>
+                              </td>
+                              <td className="px-2 py-1.5 whitespace-nowrap">
+                                {u.data_type === "Orthomosaic" ? (
+                                  <span className="inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-inset ring-violet-500/20">Ortho</span>
+                                ) : (
+                                  <span className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-inset ring-sky-500/20">Images</span>
+                                )}
                               </td>
                               <td className="px-2 py-1.5 font-medium max-w-[120px] truncate">{u.experiment}</td>
                               <td className="px-2 py-1.5 text-muted-foreground max-w-[100px] truncate">{u.location}</td>
