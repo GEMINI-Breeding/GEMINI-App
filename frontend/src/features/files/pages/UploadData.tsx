@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { FilesService, OpenAPI } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
-import { GeoTiffValidationDialog } from "../components/GeoTiffValidationDialog";
+import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard";
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog";
 import {
   Dialog,
@@ -22,7 +22,8 @@ function apiUrl(path: string): string {
 export function UploadData() {
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [pendingValidation, setPendingValidation] = useState<string[]>([]);
+  const [rgbTifPath, setRgbTifPath] = useState<string | null>(null);
+  const [demTifPath, setDemTifPath] = useState<string | null>(null);
   const [syncedCsvText, setSyncedCsvText] = useState<string | null>(null);
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null);
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null);
@@ -57,13 +58,24 @@ export function UploadData() {
     [],
   );
 
+  const handleRgbUploadComplete = useCallback(
+    async (destPaths: string[]) => {
+      const tif = destPaths.find((p) => /\.(tif|tiff)$/i.test(p));
+      if (tif) setRgbTifPath(tif);
+    },
+    [],
+  );
+
+  const handleDemUploadComplete = useCallback(
+    async (destPaths: string[]) => {
+      const tif = destPaths.find((p) => /\.(tif|tiff)$/i.test(p));
+      if (tif) setDemTifPath(tif);
+    },
+    [],
+  );
+
   const handleUploadComplete = useCallback(
     async (destPaths: string[]) => {
-      if (selectedFileType === "Orthomosaic") {
-        const tifs = destPaths.filter((p) => /\.(tif|tiff)$/i.test(p));
-        if (tifs.length > 0) setPendingValidation(tifs);
-      }
-
       if (selectedFileType === "Synced Metadata") {
         const csvPath = destPaths.find((p) => /\.csv$/i.test(p));
         if (!csvPath) return;
@@ -89,7 +101,7 @@ export function UploadData() {
       <div className="pt-6">
         <div className="grid grid-cols-2 gap-8 items-start">
           <div className="space-y-6">
-            <DataTypes onChange={setSelectedFileType} />
+            <DataTypes onChange={(t) => { setSelectedFileType(t); setRgbTifPath(null); setDemTifPath(null); }} />
             <DataStructureForm
               fileType={selectedFileType}
               values={formValues}
@@ -99,20 +111,24 @@ export function UploadData() {
 
           {selectedFileType === "Orthomosaic" ? (
             <div className="space-y-6">
-              <UploadList
-                dataType={selectedFileType}
-                formValues={formValues}
-                onFilesSelected={handleFilesSelected}
-                onUploadComplete={handleUploadComplete}
-                label="RGB Orthomosaic (.tif) — required"
-              />
+              <div>
+                <UploadList
+                  dataType={selectedFileType}
+                  formValues={formValues}
+                  onFilesSelected={handleFilesSelected}
+                  onUploadComplete={handleRgbUploadComplete}
+                  label="RGB Orthomosaic (.tif) — required"
+                />
+                {rgbTifPath && <GeoTiffValidationCard key={rgbTifPath} destPath={rgbTifPath} />}
+              </div>
               <div className="border-t pt-6">
                 <UploadList
                   dataType="Orthomosaic DEM"
                   formValues={formValues}
-                  onUploadComplete={handleUploadComplete}
+                  onUploadComplete={handleDemUploadComplete}
                   label="DEM (.tif) — optional (required for plant height)"
                 />
+                {demTifPath && <GeoTiffValidationCard key={demTifPath} destPath={demTifPath} />}
               </div>
             </div>
           ) : (
@@ -126,13 +142,6 @@ export function UploadData() {
           )}
         </div>
       </div>
-
-      {pendingValidation.length > 0 && (
-        <GeoTiffValidationDialog
-          destPaths={pendingValidation}
-          onClose={() => setPendingValidation([])}
-        />
-      )}
 
       {syncedCsvText !== null && (
         <MsgsSyncedUploadDialog
