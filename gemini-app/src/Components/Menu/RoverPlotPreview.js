@@ -19,7 +19,6 @@ import { ArrowBack, ArrowForward, Close, ZoomIn, ZoomOut, FitScreen, Download } 
 import { useDataState } from "../../DataContext";
 import { listFiles, getFileUrl, getTifToPng, getPngFile, downloadSinglePlot } from '../../api/files';
 import { getPlotBordersData } from '../../api/queries';
-import { BACKEND_MODE } from '../../api/config';
 
 const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
     const [plotImages, setPlotImages] = useState([]);
@@ -266,26 +265,12 @@ const RoverPlotPreview = ({ open, onClose, datePlatformSensor }) => {
                 customFilename = `plot_${metadata.plotNumber}${fileExtension}`;
             }
 
-            if (BACKEND_MODE !== 'flask') {
-                // Framework: presigned URL
-                const a = document.createElement('a');
-                a.href = result.url;
-                a.download = customFilename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            } else {
-                // Flask: blob from response
-                const blob = result instanceof Response ? await result.blob() : new Blob([JSON.stringify(result)]);
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = customFilename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }
+            const a = document.createElement('a');
+            a.href = result.url;
+            a.download = customFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         } catch (error) {
             console.error('Error downloading plot:', error);
             alert('Error downloading plot image');

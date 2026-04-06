@@ -19,7 +19,6 @@ import Snackbar from "@mui/material/Snackbar";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { checkMask, getOdmLogs } from '../../api/processing';
 import { runOdm, runStitch } from "../../api/processing";
-import { BACKEND_MODE } from "../../api/config";
 
 const OrthoModal = ( {selectedOrthoMethod} ) => {
     const {
@@ -152,7 +151,7 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
         apiFn(data)
             .then((result) => {
                 console.log("Success:", result);
-                if (BACKEND_MODE !== 'flask' && result && result.id) {
+                if (result && result.id) {
                     setCurrentJobId(result.id);
                 }
                 setOrthoServerStatus("Success!");

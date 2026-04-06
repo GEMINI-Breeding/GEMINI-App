@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Autocomplete, TextField, Button } from "@mui/material";
 
 import { useDataSetters, useDataState } from "../../DataContext";
-import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
-import { listDirs } from "../../api/files";
 
 const TableSelectionMenu = () => {
     const {
@@ -47,66 +45,29 @@ const TableSelectionMenu = () => {
     const [experiments, setExperiments] = useState([]);
 
     useEffect(() => {
-        if (BACKEND_MODE === 'framework') {
-            getExperiments()
-                .then((data) => {
-                    setExperiments(data);
-                    setExperimentOptionsGCP(data.map(e => e.experiment_name));
-                })
-                .catch((error) => console.error("Error:", error));
-        } else {
-            listDirs('Raw/')
-                .then(setYearOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        }
+        getExperiments()
+            .then((data) => {
+                setExperiments(data);
+                setExperimentOptionsGCP(data.map(e => e.experiment_name));
+            })
+            .catch((error) => console.error("Error:", error));
     }, []);
 
     useEffect(() => {
-        if (BACKEND_MODE === 'framework') {
-            if (selectedExperimentGCP) {
-                const exp = experiments.find(e => e.experiment_name === selectedExperimentGCP);
-                if (exp) {
-                    getExperimentHierarchy(exp.id)
-                        .then((data) => {
-                            setYearOptionsGCP(data.seasons.map(s => s.season_name));
-                            setLocationOptionsGCP(data.sites.map(s => s.site_name));
-                            setPopulationOptionsGCP(data.populations.map(p => p.population_name));
-                        })
-                        .catch((error) => console.error("Error:", error));
-                }
+        if (selectedExperimentGCP) {
+            const exp = experiments.find(e => e.experiment_name === selectedExperimentGCP);
+            if (exp) {
+                getExperimentHierarchy(exp.id)
+                    .then((data) => {
+                        setYearOptionsGCP(data.seasons.map(s => s.season_name));
+                        setLocationOptionsGCP(data.sites.map(s => s.site_name));
+                        setPopulationOptionsGCP(data.populations.map(p => p.population_name));
+                    })
+                    .catch((error) => console.error("Error:", error));
             }
-            return;
-        }
-        if (selectedYearGCP) {
-            listDirs(`Raw/${selectedYearGCP}/`)
-                .then(setExperimentOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setExperimentOptionsGCP([]);
         }
     }, [selectedYearGCP, selectedExperimentGCP]);
 
-    useEffect(() => {
-        if (BACKEND_MODE === 'framework') return;
-        if (selectedYearGCP && selectedExperimentGCP) {
-            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/`)
-                .then(setLocationOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setLocationOptionsGCP([]);
-        }
-    }, [selectedYearGCP, selectedExperimentGCP]);
-
-    useEffect(() => {
-        if (BACKEND_MODE === 'framework') return;
-        if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP) {
-            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/`)
-                .then(setPopulationOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setPopulationOptionsGCP([]);
-        }
-    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP]);
 
     const initiateTableMenu = () => {
         console.log("selectedPopulationGCP: ",selectedPopulationGCP);

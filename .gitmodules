@@ -1,7 +1,3 @@
-[submodule "GEMINI-Flask-Server"]
-	path = GEMINI-Flask-Server
-	url = https://github.com/GEMINI-Breeding/GEMINI-Flask-Server.git
-    branch = main
 [submodule "gemini-framework"]
 	path = gemini-framework
 	url = https://github.com/GEMINI-Breeding/gemini-framework.git

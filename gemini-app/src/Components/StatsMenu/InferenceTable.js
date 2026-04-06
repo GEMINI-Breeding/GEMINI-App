@@ -8,7 +8,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import InferenceResultsPreview from '../Menu/InferenceResultsPreview';
 import Download from "@mui/icons-material/Download";
 import { getInferenceProgress, getInferenceResults, downloadInferenceCsv, deleteInferenceResults } from '../../api/queries';
-import { BACKEND_MODE } from '../../api/config';
 
 const InferenceTable = ({ refreshTrigger }) => {
     const [inferenceData, setInferenceData] = useState([]);
@@ -100,27 +99,12 @@ const InferenceTable = ({ refreshTrigger }) => {
         try {
             const result = await downloadInferenceCsv({ path: row.csv_path });
 
-            if (BACKEND_MODE !== 'flask') {
-                // Framework mode: result has presigned URL
-                const a = document.createElement('a');
-                a.href = result.url;
-                a.download = result.fileName || `${row.date}_${row.platform}_${row.sensor}_${row.model_task || 'detection'}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            } else {
-                // Flask mode: result is parsed JSON with blob URL or similar
-                const response = await fetch(result.url || result);
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${row.date}_${row.platform}_${row.sensor}_${row.orthomosaic || 'predictions'}_${row.model_task || 'detection'}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-            }
+            const a = document.createElement('a');
+            a.href = result.url;
+            a.download = result.fileName || `${row.date}_${row.platform}_${row.sensor}_${row.model_task || 'detection'}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         } catch (error) {
             console.error('Error downloading CSV:', error);
             alert('Failed to download CSV file');

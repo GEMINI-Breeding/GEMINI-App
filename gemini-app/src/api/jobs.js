@@ -1,6 +1,6 @@
 /**
  * Job queue API and WebSocket progress for gemini-framework.
- * Used when BACKEND_MODE is "framework".
+ * Provides job queue and WebSocket progress for gemini-framework.
  */
 
 import { fetchJson, postJson } from './client';

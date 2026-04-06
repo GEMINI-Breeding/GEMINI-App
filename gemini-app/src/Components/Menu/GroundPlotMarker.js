@@ -53,7 +53,6 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ReactMapGL, { Source, Layer } from 'react-map-gl';
-import { BACKEND_MODE } from '../../api/config';
 import { listFiles, getFileUrl } from '../../api/files';
 import { filterPlotBorders } from '../../api/queries';
 import {
@@ -1231,23 +1230,22 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         };
     }, [open, visualIndex, imageList.length, plotSelectionState, cropMode, plotMode]);
 
-    if (BACKEND_MODE === 'framework') {
-        return (
-            <Dialog open={open} onClose={handleBackButton} maxWidth="sm" fullWidth>
-                <DialogTitle>Plot Marking</DialogTitle>
-                <DialogContent>
-                    <Typography>
-                        Plot marking operations are not yet available in framework mode.
-                        Please use Flask mode for plot marking functionality.
-                    </Typography>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={handleBackButton}>Close</Button>
-                </DialogActions>
-            </Dialog>
-        );
-    }
+    // Plot marking operations are not yet available in framework mode
+    return (
+        <Dialog open={open} onClose={handleBackButton} maxWidth="sm" fullWidth>
+            <DialogTitle>Plot Marking</DialogTitle>
+            <DialogContent>
+                <Typography>
+                    Plot marking operations are not yet available.
+                </Typography>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={handleBackButton}>Close</Button>
+            </DialogActions>
+        </Dialog>
+    );
 
+    // eslint-disable-next-line no-unreachable
     return (
         <Dialog
             open={open}

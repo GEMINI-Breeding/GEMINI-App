@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Autocomplete, TextField, Snackbar } from "@mui/material";
 import { useDataState, useDataSetters, fetchData } from "../../DataContext";
-import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
 import { getOrthomosaicVersions } from "../../api/queries";
-import { getFileUrl, listDirsNestedProcessed } from "../../api/files";
+import { getFileUrl } from "../../api/files";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
     const { genotypeOptions, selectedGenotypes, metricOptions } = useDataState();
@@ -35,22 +34,14 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     // Fetch data based on backend mode
     //////////////////////////////////////////
     useEffect(() => {
-        if (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') {
-            // Framework mode: fetch experiment list
-            getExperiments()
-                .then((data) => setExperiments(data))
-                .catch((error) => console.error("Error fetching experiments:", error));
-        } else {
-            // Flask mode: fetch nested directory structure
-            listDirsNestedProcessed()
-                .then((data) => setNestedStructure(data))
-                .catch((error) => console.error("Error fetching nested structure:", error));
-        }
+        getExperiments()
+            .then((data) => setExperiments(data))
+            .catch((error) => console.error("Error fetching experiments:", error));
     }, []);
 
     // Framework mode: fetch hierarchy when experiment is selected
     useEffect(() => {
-        if ((BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') && selectedValues.experiment) {
+        if (selectedValues.experiment) {
             const exp = experiments.find(e => e.experiment_name === selectedValues.experiment);
             if (exp) {
                 getExperimentHierarchy(exp.id)
@@ -64,10 +55,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     // Function to get options based on the current path
     //////////////////////////////////////////
     const getOptionsForField = (field) => {
-        if (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') {
-            return getFrameworkOptionsForField(field);
-        }
-        return getFlaskOptionsForField(field);
+        return getFrameworkOptionsForField(field);
     };
 
     const getFlaskOptionsForField = (field) => {
@@ -161,9 +149,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
         const newSelectedValues = { ...selectedValues, [field]: value };
 
         // Reset subsequent selections
-        const fieldsOrder = (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid')
-            ? ["experiment", "year", "location", "population", "date", "platform", "sensor", "version"]
-            : ["year", "experiment", "location", "population", "date", "platform", "sensor", "version"];
+        const fieldsOrder = ["experiment", "year", "location", "population", "date", "platform", "sensor", "version"];
         const currentIndex = fieldsOrder.indexOf(field);
         fieldsOrder.slice(currentIndex + 1).forEach((key) => {
             newSelectedValues[key] = "";
@@ -269,9 +255,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     //////////////////////////////////////////
     // Dynamically render Autocomplete components
     //////////////////////////////////////////
-    const fieldsOrder = (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid')
-        ? ["experiment", "year", "location", "population", "date", "platform", "sensor"]
-        : ["year", "experiment", "location", "population", "date", "platform", "sensor"];
+    const fieldsOrder = ["experiment", "year", "location", "population", "date", "platform", "sensor"];
 
     const fieldLabels = {
         year: "Year",

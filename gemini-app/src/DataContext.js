@@ -1,6 +1,6 @@
 // DataContext.js
 import React, { createContext, useContext, useState } from "react";
-import { FLASK_URL, FRAMEWORK_URL, TILE_SERVER_URL, BACKEND_MODE } from "./api/config";
+import { FRAMEWORK_URL, TILE_SERVER_URL } from "./api/config";
 
 const DataStateContext = createContext();
 const DataSettersContext = createContext();
@@ -203,10 +203,7 @@ export const DataProvider = ({ children }) => {
     const [selectedSensorQuery, setSelectedSensorQuery] = useState(null);
 
     // Backend URLs - centralized in api/config.js
-    // Backend URLs — flaskUrl kept for backward compatibility with existing components
-    const [flaskUrl] = useState(FLASK_URL);
     const [frameworkUrl] = useState(FRAMEWORK_URL);
-    const [backendMode] = useState(BACKEND_MODE);
 
     return (
         <DataStateContext.Provider
@@ -358,9 +355,7 @@ export const DataProvider = ({ children }) => {
                 selectedSensorQuery,
 
                 // Backend
-                flaskUrl,
                 frameworkUrl,
-                backendMode,
             }}
         >
             <DataSettersContext.Provider

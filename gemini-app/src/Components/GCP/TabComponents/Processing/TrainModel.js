@@ -21,7 +21,6 @@ import { DataGrid } from '@mui/x-data-grid';
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
 import { trainModel, getModelInfo, doneTraining } from "../../../../api/processing";
-import { BACKEND_MODE } from "../../../../api/config";
 import { checkRuns, listDirs } from "../../../../api/files";
 
 function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
@@ -87,7 +86,7 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
             const data = await trainModel(payload);
             console.log("Response from server:", data);
-            if (BACKEND_MODE !== 'flask' && data && data.id) {
+            if (data && data.id) {
                 setCurrentJobId(data.id);
             }
             if (data && data.error) {

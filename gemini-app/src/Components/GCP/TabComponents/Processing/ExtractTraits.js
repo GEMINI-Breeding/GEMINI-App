@@ -22,7 +22,6 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { extractTraits, bestLocateFile, bestModelFile } from "../../../../api/processing";
-import { BACKEND_MODE } from "../../../../api/config";
 import { listDirs, checkRuns } from "../../../../api/files";
 
 function ExtractMenu({ open, onClose, item, platform, sensor }) {
@@ -74,7 +73,7 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
             
             const data = await extractTraits(payload);
             console.log("Response from server:", data);
-            if (BACKEND_MODE !== 'flask' && data && data.id) {
+            if (data && data.id) {
                 setCurrentJobId(data.id);
             }
             if (data && data.error) {

@@ -18,7 +18,7 @@ module.exports = defineConfig({
         },
     ],
     webServer: {
-        command: "REACT_APP_BACKEND_MODE=framework REACT_APP_FRAMEWORK_PORT=7777 npm start",
+        command: "REACT_APP_FRAMEWORK_PORT=7777 npm start",
         url: "http://localhost:3000",
         timeout: 120_000,
         reuseExistingServer: !process.env.CI,

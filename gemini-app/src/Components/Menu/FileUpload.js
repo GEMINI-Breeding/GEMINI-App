@@ -29,7 +29,7 @@ import { useFormik } from "formik";
 import { useDataState, useDataSetters } from "../../DataContext";
 import useTrackComponent from "../../useTrackComponent";
 import dataTypes from "../../uploadDataTypes.json";
-import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
+import { FRAMEWORK_URL } from "../../api/config";
 import Box from "@mui/material/Box";
 import { TableComponent } from "./TableComponent";
 
@@ -117,7 +117,7 @@ const FileUploadComponent = ({ actionType = null }) => {
     useTrackComponent("FileUploadComponent");
 
     // State hooks for various component states
-    const { flaskUrl, extractingBinary, currentJobId } = useDataState();
+    const { extractingBinary, currentJobId } = useDataState();
     const { setExtractingBinary, setCurrentJobId } = useDataSetters();
     const [isLoading, setIsLoading] = useState(false);
     const [nestedDirectories, setNestedDirectories] = useState({});
@@ -164,163 +164,51 @@ const FileUploadComponent = ({ actionType = null }) => {
     useEffect(() => {
         if (!extractingBinary) return;
 
-        // Framework mode: track progress via WebSocket
-        if (BACKEND_MODE !== 'flask') {
-            if (!currentJobId) return;
-            const { connectJobProgress } = require('../../api/jobs');
-            const ws = connectJobProgress(currentJobId, {
-                onProgress: (data) => {
-                    const pct = Math.round(data.progress || 0);
-                    setProgress(pct);
-                },
-                onComplete: () => {
-                    setExtractingBinary(false);
-                    setIsFinishedUploading(true);
-                    setUploadedData(true);
-                    setIsUploading(false);
-                    setProgress(100);
-                    setCurrentJobId(null);
-                },
-                onError: (data) => {
-                    setExtractingBinary(false);
-                    setIsFinishedUploading(true);
-                    setFailedUpload(true);
-                    setIsUploading(false);
-                    setCurrentJobId(null);
-                    const errorMsg = (data && data.error_message) || 'Binary extraction failed. Check that the uploaded file is a valid Amiga .bin recording.';
-                    showErrorDialog('Binary Extraction Failed', errorMsg);
-                },
-            });
-            return () => ws.close();
-        }
-
-        // Flask mode: poll for progress
-        const intervalId = setInterval(async () => {
-                const pct = await getBinaryProgress(dirPath);
-                let prog_calc = Math.round(pct);
-                setProgress(prog_calc);
-
-                if (prog_calc >= 100) {
-                    setIsFinishedUploading(true);
-                    setUploadedData(true);
-                    setIsUploading(false);
-                }
-            }, 1000);
-
-        return () => clearInterval(intervalId);
+        // Track progress via WebSocket
+        if (!currentJobId) return;
+        const { connectJobProgress } = require('../../api/jobs');
+        const ws = connectJobProgress(currentJobId, {
+            onProgress: (data) => {
+                const pct = Math.round(data.progress || 0);
+                setProgress(pct);
+            },
+            onComplete: () => {
+                setExtractingBinary(false);
+                setIsFinishedUploading(true);
+                setUploadedData(true);
+                setIsUploading(false);
+                setProgress(100);
+                setCurrentJobId(null);
+            },
+            onError: (data) => {
+                setExtractingBinary(false);
+                setIsFinishedUploading(true);
+                setFailedUpload(true);
+                setIsUploading(false);
+                setCurrentJobId(null);
+                const errorMsg = (data && data.error_message) || 'Binary extraction failed. Check that the uploaded file is a valid Amiga .bin recording.';
+                showErrorDialog('Binary Extraction Failed', errorMsg);
+            },
+        });
+        return () => ws.close();
     }, [extractingBinary, dirPath, files.length, currentJobId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Effect: directory structure comes from entity queries, not filesystem
     useEffect(() => {
-        if (!extractingBinary) return;
-
-        // Framework mode: status tracked via WebSocket above
-        if (BACKEND_MODE !== 'flask') return;
-
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch(`${flaskUrl}get_binary_status`);
-                const { status } = await response.json();
-
-                if (status === "failed") {
-                    setIsFinishedUploading(true);
-                    setFailedUpload(true);
-                    setIsUploading(false);
-                    clearInterval(intervalId);
-                }
-            } catch (error) {
-                console.error("Error fetching binary status:", error);
-            }
-        }, 1000);
-
-        return () => clearInterval(intervalId);
-    }, [extractingBinary]); // eslint-disable-line react-hooks/exhaustive-deps
-    
-    // Effect to fetch nested directories on component mount
-    useEffect(() => {
-        if (BACKEND_MODE === 'framework') {
-            // Framework mode: directory structure comes from entity queries, not filesystem
-            setIsLoading(false);
-            setUploadedData(true);
-            return;
-        }
-        setIsLoading(true);
+        setIsLoading(false);
         setUploadedData(true);
-        fetch(`${flaskUrl}list_dirs_nested`)
-            .then((response) => response.json())
-            .then((data) => {
-                setNestedDirectories(data);
-                setIsLoading(false);
-            })
-            .catch((error) => {
-                console.error("Error fetching nested directories:", error);
-                setIsLoading(false);
-                setUploadedData(false);
-            });
-    }, [flaskUrl]);
-
-    // Function to check for existing files on the server
-    const checkFilesOnServer = async (fileList, localDirPath) => {
-        const response = await fetch(`${flaskUrl}check_files`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileList, localDirPath }),
-        });
-        return response.json();
-    };
-
-    // Function to upload a file with a timeout
-    const uploadFileWithTimeout = async (file, localDirPath, dataType, timeout = 30000, renamedFileName = null) => {
-        const formData = new FormData();
-        formData.append("files", file);
-        formData.append("dirPath", localDirPath);
-        formData.append("dataType", dataType);
-        if (renamedFileName) {
-            formData.append("renamedFileName", renamedFileName);
-        }
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), timeout);
-
-        try {
-            const response = await fetch(`${flaskUrl}upload`, {
-                method: "POST",
-                body: formData,
-                signal: controller.signal,
-            });
-            console.log(response)
-            clearTimeout(id);
-            return response;
-        } catch (error) {
-            console.log("Upload error:", error);
-            clearTimeout(id);
-            throw error;
-        }
-    };
+    }, []);
 
     const uploadChunkWithoutTimeout = async (chunk, index, totalChunks, fileIdentifier, localDirPath, renamedFileName = null) => {
         const formData = new FormData();
-
-        if (BACKEND_MODE === 'framework') {
-            // Framework mode: upload chunks to MinIO via framework API
-            formData.append("file_chunk", chunk);
-            formData.append("chunk_index", index);
-            formData.append("total_chunks", totalChunks);
-            formData.append("file_identifier", renamedFileName || fileIdentifier);
-            formData.append("object_name", `${localDirPath}/${renamedFileName || fileIdentifier}`);
-        } else {
-            // Flask mode: original field names
-            formData.append("fileChunk", chunk);
-            formData.append("chunkIndex", index);
-            formData.append("totalChunks", totalChunks);
-            formData.append("fileIdentifier", renamedFileName || fileIdentifier);
-            formData.append("dirPath", localDirPath);
-        }
-
-        const uploadUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}files/upload_chunk`
-            : `${flaskUrl}upload_chunk`;
+        formData.append("file_chunk", chunk);
+        formData.append("chunk_index", index);
+        formData.append("total_chunks", totalChunks);
+        formData.append("file_identifier", renamedFileName || fileIdentifier);
+        formData.append("object_name", `${localDirPath}/${renamedFileName || fileIdentifier}`);
 
         try {
-            const response = await fetch(uploadUrl, {
+            const response = await fetch(`${FRAMEWORK_URL}files/upload_chunk`, {
                 method: "POST",
                 body: formData
             });
@@ -331,69 +219,17 @@ const FileUploadComponent = ({ actionType = null }) => {
         }
     };
 
-    const getBinaryProgress = async (localDirPath) => {
-        try {
-            const response = await fetch(`${flaskUrl}get_binary_progress`,
-                {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ localDirPath }),
-          }
-            );
-          if (response.ok) {
-            const data = await response.json();
-            // backend may now return fractional progress (files completed + fraction within current file)
-            const raw = data.progress; // could be float or int
-            const totalFiles = files.length || 1;
-            let pct = 0;
-            if (typeof raw === 'number') {
-                // If raw >= totalFiles treat as all done
-                const capped = Math.min(raw, totalFiles);
-                pct = (capped / totalFiles) * 100;
-            }
-            return pct;
-          } else {
-            console.error("Failed to fetch progress");
-            return 0;
-          }
-        } catch (error) {
-            console.error("Error reading text file:", error);
-            return 0; // Return 0 if there's an error
-        }
-    };
-
     const extractBinaryFiles = async (files, localDirPath) => {
         setExtractingBinary(true);
 
         try {
-            if (BACKEND_MODE !== 'flask') {
-                // Framework mode: submit as a job
-                const { extractBinaryFile } = await import('../../api/processing');
-                const data = await extractBinaryFile({ files, localDirPath });
-                console.log("Binary extraction job submitted:", data);
-                if (data && data.id) {
-                    setCurrentJobId(data.id);
-                } else {
-                    throw new Error('Job submission returned no job ID');
-                }
-                return;
-            }
-
-            const response = await fetch(`${flaskUrl}extract_binary_file`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ files, localDirPath }),
-            });
-
-            if (response.ok) {
-                console.log("Binary file extraction started");
-                await response.json();
+            const { extractBinaryFile } = await import('../../api/processing');
+            const data = await extractBinaryFile({ files, localDirPath });
+            console.log("Binary extraction job submitted:", data);
+            if (data && data.id) {
+                setCurrentJobId(data.id);
             } else {
-                const errorText = await response.text().catch(() => '');
-                showErrorDialog('Extraction Failed', `Binary extraction request failed (${response.status}). ${errorText}`);
-                setIsFinishedUploading(true);
-                setFailedUpload(true);
-                clearDirPath();
+                throw new Error('Job submission returned no job ID');
             }
         } catch (error) {
             console.error("Error extracting binary file:", error);
@@ -442,24 +278,15 @@ const FileUploadComponent = ({ actionType = null }) => {
     };
 
     const checkUploadedChunks = async (fileIdentifier, localDirPath) => {
-        const checkUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}files/check_uploaded_chunks`
-            : `${flaskUrl}check_uploaded_chunks`;
-        const body = BACKEND_MODE === 'framework'
-            ? { file_identifier: fileIdentifier, total_chunks: 0 }
-            : { fileIdentifier, localDirPath };
-
         try {
-          const response = await fetch(checkUrl, {
+          const response = await fetch(`${FRAMEWORK_URL}files/check_uploaded_chunks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify({ file_identifier: fileIdentifier, total_chunks: 0 }),
           });
           if (response.ok) {
             const data = await response.json();
-            return BACKEND_MODE === 'framework'
-                ? data.uploaded_chunks
-                : data.uploadedChunksCount;
+            return data.uploaded_chunks;
           } else {
             console.error("Failed to retrieve uploaded chunks count");
             return 0;
@@ -477,18 +304,11 @@ const FileUploadComponent = ({ actionType = null }) => {
             localDirPath = dirPath;
         }
 
-        const clearUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}files/clear_upload_cache`
-            : `${flaskUrl}clear_upload_cache`;
-        const body = BACKEND_MODE === 'framework'
-            ? { file_identifier: localDirPath }
-            : { localDirPath };
-
         console.log("Clearing cache of uploaded files in: ", localDirPath);
-        fetch(clearUrl, {
+        fetch(`${FRAMEWORK_URL}files/clear_upload_cache`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify({ file_identifier: localDirPath }),
         })
         .then((response) => response.json())
         .then((data) => {
@@ -501,43 +321,18 @@ const FileUploadComponent = ({ actionType = null }) => {
 
     const clearDirPath = () => {
         setProgress(0);
-        if (BACKEND_MODE !== 'flask') {
-            // Framework mode: files are in MinIO, no local dir to clear
-            return;
-        }
-        console.log("Clearing dir of uploaded files in: ", dirPath);
-        fetch(`${flaskUrl}clear_upload_dir`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dirPath }),
-        })
-        .then((response) => response.json())
-        .then((data) => {
-            console.log(data);
-        })
-        .catch((error) => {
-            console.error('Error clearing directory:', error);
-        });
+        // Files are in MinIO, no local dir to clear
     }
 
     const handleCancelExtraction = async () => {
         console.log("Cancelling extraction of files in: ", dirPath);
         if (!extractingBinary) return;
-        if (BACKEND_MODE !== 'flask') {
-            // Framework mode: cancel via job API
-            if (currentJobId) {
-                const { cancelJob } = require('../../api/jobs');
-                await cancelJob(currentJobId);
-                setCurrentJobId(null);
-            }
-            setExtractingBinary(false);
-            return;
+        if (currentJobId) {
+            const { cancelJob } = require('../../api/jobs');
+            await cancelJob(currentJobId);
+            setCurrentJobId(null);
         }
-        await fetch(`${flaskUrl}cancel_extraction`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dirPath }),
-        });
+        setExtractingBinary(false);
     }
 
     // Formik hook for form state management and validation
@@ -562,20 +357,15 @@ const FileUploadComponent = ({ actionType = null }) => {
 
             // Check backend connectivity before starting upload
             try {
-                const healthUrl = BACKEND_MODE !== 'flask'
-                    ? `${FRAMEWORK_URL}files/list/`
-                    : `${flaskUrl}list_dirs_nested`;
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5000);
-                await fetch(healthUrl, { signal: controller.signal });
+                await fetch(`${FRAMEWORK_URL}files/list/`, { signal: controller.signal });
                 clearTimeout(timeoutId);
             } catch (error) {
                 setIsUploading(false);
                 showErrorDialog(
                     'Backend Not Reachable',
-                    BACKEND_MODE !== 'flask'
-                        ? 'Cannot connect to the framework backend. Check that the gemini-framework Docker stack is running (docker compose up).'
-                        : 'Cannot connect to the Flask backend. Check that the server is running (npm run server).'
+                    'Cannot connect to the framework backend. Check that the gemini-framework Docker stack is running (docker compose up).'
                 );
                 return;
             }
@@ -646,9 +436,7 @@ const FileUploadComponent = ({ actionType = null }) => {
                 }
             }
             
-            const filesToUpload = (uploadNewFilesOnly && BACKEND_MODE === 'flask')
-                ? await checkFilesOnServer(fileList, localDirPath)
-                : fileList;
+            const filesToUpload = fileList;
             console.log("Number of files to upload: ", filesToUpload.length)
 
             // Step 2: Upload the files
@@ -688,10 +476,7 @@ const FileUploadComponent = ({ actionType = null }) => {
                                 }
                                 const file = files.find((f) => f.name === filesToUpload[i]);
 
-                                if (selectedDataType === "binary" && selectedDataType !== "platformLogs") {
-                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
-                                    break;
-                                } else if (selectedDataType === "ortho") {
+                                if (selectedDataType === "ortho") {
                                     // Generate renamed filename for orthomosaic files
                                     const renamedFileName = getRenamedOrthomosaicFileName(file.name, values.date);
 
@@ -709,13 +494,9 @@ const FileUploadComponent = ({ actionType = null }) => {
 
                                     setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
                                     break;
-                                } else if (BACKEND_MODE !== 'flask') {
-                                    // Framework mode: use chunked upload for all file types
-                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
-                                    break;
                                 } else {
-                                    await uploadFileWithTimeout(file, localDirPath, selectedDataType);
-                                    setProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+                                    // Use chunked upload for all file types
+                                    await uploadFileChunks(file, localDirPath, filesToUpload.length, i, filesToUpload.length);
                                 }
                                 break;
                             } catch (error) {
@@ -737,8 +518,8 @@ const FileUploadComponent = ({ actionType = null }) => {
                 }
                 if(!bFT)
                 {
-                    // Step 3: Register entities in framework mode
-                    if (BACKEND_MODE !== 'flask' && !cancelUploadRef.current) {
+                    // Step 3: Register entities
+                    if (!cancelUploadRef.current) {
                         try {
                             const { registerUploadEntities } = await import('../../api/entities');
                             await registerUploadEntities(values, selectedDataType, filesToUpload);

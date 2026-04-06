@@ -1,185 +1,96 @@
 /**
  * Processing API calls for long-running operations.
  *
- * In Flask mode: calls Flask endpoints directly.
- * In framework mode: submits jobs via the job queue and returns job IDs.
+ * Submits jobs via the job queue and returns job IDs.
  */
 
 import { fetchJson, postJson } from './client';
-import { BACKEND_MODE, FLASK_URL, FRAMEWORK_URL } from './config';
+import { FRAMEWORK_URL } from './config';
 
 // -- Training --
 
-export const trainModel = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}train_model`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'TRAIN_MODEL', parameters: body });
-};
+export const trainModel = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'TRAIN_MODEL', parameters: body });
 
-export const getTrainingProgress = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_progress`);
-    }
-    return Promise.resolve(null); // Framework uses WebSocket — see jobs.js
-};
+export const getTrainingProgress = () =>
+    Promise.resolve(null); // Framework uses WebSocket — see jobs.js
 
-export const stopTraining = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}stop_training`, {});
-    }
-    return Promise.resolve(null); // Framework uses job cancellation
-};
+export const stopTraining = () =>
+    Promise.resolve(null); // Framework uses job cancellation
 
 // -- Plant Location --
 
-export const locatePlants = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}locate_plants`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'LOCATE_PLANTS', parameters: body });
-};
+export const locatePlants = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'LOCATE_PLANTS', parameters: body });
 
-export const getLocateProgress = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_locate_progress`);
-    }
-    return Promise.resolve(null);
-};
+export const getLocateProgress = () =>
+    Promise.resolve(null);
 
-export const stopLocate = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}stop_locate`, {});
-    }
-    return Promise.resolve(null);
-};
+export const stopLocate = () =>
+    Promise.resolve(null);
 
 // -- Trait Extraction --
 
-export const extractTraits = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}extract_traits`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'EXTRACT_TRAITS', parameters: body });
-};
+export const extractTraits = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'EXTRACT_TRAITS', parameters: body });
 
-export const getExtractProgress = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_extract_progress`);
-    }
-    return Promise.resolve(null);
-};
+export const getExtractProgress = () =>
+    Promise.resolve(null);
 
-export const stopExtract = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}stop_extract`, {});
-    }
-    return Promise.resolve(null);
-};
+export const stopExtract = () =>
+    Promise.resolve(null);
 
 // -- Orthomosaic (ODM / AgRowStitch) --
 
-export const runOdm = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}run_odm`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_ODM', parameters: body });
-};
+export const runOdm = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_ODM', parameters: body });
 
-export const runStitch = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}run_stitch`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_STITCH', parameters: body });
-};
+export const runStitch = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_STITCH', parameters: body });
 
-export const getOrthoProgress = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_ortho_progress`);
-    }
-    return Promise.resolve(null);
-};
+export const getOrthoProgress = () =>
+    Promise.resolve(null);
 
-export const stopOdm = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}stop_odm`, body);
-    }
-    return Promise.resolve(null);
-};
+export const stopOdm = () =>
+    Promise.resolve(null);
 
 // -- Drone Processing --
 
-export const processDroneTiff = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}process_drone_tiff`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'PROCESS_DRONE_TIFF', parameters: body });
-};
+export const processDroneTiff = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'PROCESS_DRONE_TIFF', parameters: body });
 
-export const getDroneExtractProgress = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_drone_extract_progress`);
-    }
-    return Promise.resolve(null);
-};
+export const getDroneExtractProgress = () =>
+    Promise.resolve(null);
 
-export const stopDroneExtract = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}stop_drone_extract`, body);
-    }
-    return Promise.resolve(null);
-};
+export const stopDroneExtract = () =>
+    Promise.resolve(null);
 
 // -- COG Creation --
 
-export const createCog = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        // Flask creates COGs inline during orthomosaic generation — no separate endpoint
-        return Promise.resolve(null);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'CREATE_COG', parameters: body });
-};
+export const createCog = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'CREATE_COG', parameters: body });
 
 // -- Binary Extraction (FLIR) --
 
-export const extractBinaryFile = (data) => {
-    if (BACKEND_MODE === 'flask') {
-        return fetch(`${FLASK_URL}extract_binary_file`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        }).then(r => r.json());
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, {
+export const extractBinaryFile = (data) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, {
         job_type: 'EXTRACT_BINARY',
         parameters: { files: data.files, localDirPath: data.localDirPath },
     });
-};
 
-export const getBinaryProgress = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}get_binary_progress`, body);
-    }
-    return Promise.resolve(null);
-};
+export const getBinaryProgress = () =>
+    Promise.resolve(null);
 
-export const getBinaryStatus = () => {
-    if (BACKEND_MODE === 'flask') {
-        return fetchJson(`${FLASK_URL}get_binary_status`);
-    }
-    return Promise.resolve(null);
-};
+export const getBinaryStatus = () =>
+    Promise.resolve(null);
 
 // -- Stitch Mask --
 
 /**
  * Check if a stitch mask exists for a dataset.
- * Framework mode: try to read stitch_mask.json from MinIO.
+ * Try to read stitch_mask.json from MinIO.
  */
 export const checkMask = async (params) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}check_mask`, params);
-    }
     const { year, experiment, location, population, date, platform, sensor } = params;
     const maskPath = `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/stitch_mask.json`;
     try {
@@ -192,106 +103,55 @@ export const checkMask = async (params) => {
 
 // -- Model Management --
 
-export const getModelInfo = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}get_model_info`, body);
-    }
-    // Framework: scan MinIO for model metadata
-    return postJson(`${FRAMEWORK_URL}model_management/info`, body);
-};
+export const getModelInfo = (body) =>
+    postJson(`${FRAMEWORK_URL}model_management/info`, body);
 
-export const getLocateInfo = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}get_locate_info`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}model_management/locate_info`, body);
-};
+export const getLocateInfo = (body) =>
+    postJson(`${FRAMEWORK_URL}model_management/locate_info`, body);
 
-export const bestLocateFile = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}best_locate_file`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}model_management/best_locate`, body);
-};
+export const bestLocateFile = (body) =>
+    postJson(`${FRAMEWORK_URL}model_management/best_locate`, body);
 
-export const bestModelFile = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}best_model_file`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}model_management/best_model`, body);
-};
+export const bestModelFile = (body) =>
+    postJson(`${FRAMEWORK_URL}model_management/best_model`, body);
 
-export const doneTraining = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}done_training`, {});
-    }
-    return Promise.resolve({ status: 'ok' });
-};
+export const doneTraining = () =>
+    Promise.resolve({ status: 'ok' });
 
-export const doneExtracting = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}done_extract`, {});
-    }
-    return Promise.resolve({ status: 'ok' });
-};
+export const doneExtracting = () =>
+    Promise.resolve({ status: 'ok' });
 
 // -- Labels & Annotations --
 
-export const checkExistingLabels = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}check_existing_labels`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}annotations/check_labels`, body);
-};
+export const checkExistingLabels = (body) =>
+    postJson(`${FRAMEWORK_URL}annotations/check_labels`, body);
 
-export const uploadTraitLabels = (formData) => {
-    if (BACKEND_MODE === 'flask') {
-        return fetch(`${FLASK_URL}upload_trait_labels`, {
-            method: 'POST',
-            body: formData,
-        }).then(r => r.json());
-    }
-    return fetch(`${FRAMEWORK_URL}annotations/upload_labels`, {
+export const uploadTraitLabels = (formData) =>
+    fetch(`${FRAMEWORK_URL}annotations/upload_labels`, {
         method: 'POST',
         body: formData,
     }).then(r => r.json());
-};
 
-export const startCvat = () => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}start_cvat`, {});
-    }
-    return postJson(`${FRAMEWORK_URL}annotations/start_cvat`, {});
-};
+export const startCvat = () =>
+    postJson(`${FRAMEWORK_URL}annotations/start_cvat`, {});
 
 // -- Orthomosaic Split --
 
-export const splitOrthomosaics = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}split_orthomosaics`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'SPLIT_ORTHOMOSAIC', parameters: body });
-};
+export const splitOrthomosaics = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'SPLIT_ORTHOMOSAIC', parameters: body });
 
 // -- Roboflow Inference --
 
-export const runRoboflowInference = (body) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}run_roboflow_inference`, body);
-    }
-    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_ROBOFLOW_INFERENCE', parameters: body });
-};
+export const runRoboflowInference = (body) =>
+    postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_ROBOFLOW_INFERENCE', parameters: body });
 
 // -- ODM Logs --
 
 /**
  * Get ODM processing logs.
- * Framework mode: read log from job artifacts in MinIO.
+ * Read log from job artifacts in MinIO.
  */
 export const getOdmLogs = async (params) => {
-    if (BACKEND_MODE === 'flask') {
-        return postJson(`${FLASK_URL}get_odm_logs`, params);
-    }
     const { year, experiment, location, population, date, platform, sensor } = params;
     const logPath = `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/odm_log.txt`;
     try {

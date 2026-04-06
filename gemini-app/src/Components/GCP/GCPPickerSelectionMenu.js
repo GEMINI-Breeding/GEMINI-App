@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Autocomplete, TextField, Button } from "@mui/material";
 
 import { useDataSetters, useDataState } from "../../DataContext";
-import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
-import { listDirs } from "../../api/files";
 
 const GCPPickerSelectionMenu = () => {
     const {
@@ -48,67 +46,30 @@ const GCPPickerSelectionMenu = () => {
     const [hierarchy, setHierarchy] = useState(null);
 
     useEffect(() => {
-        if (BACKEND_MODE === 'framework') {
-            getExperiments()
-                .then((data) => {
-                    setExperiments(data);
-                    setExperimentOptionsGCP(data.map(e => e.experiment_name));
-                })
-                .catch((error) => console.error("Error:", error));
-        } else {
-            listDirs('Raw/')
-                .then(setYearOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        }
+        getExperiments()
+            .then((data) => {
+                setExperiments(data);
+                setExperimentOptionsGCP(data.map(e => e.experiment_name));
+            })
+            .catch((error) => console.error("Error:", error));
     }, []);
 
     useEffect(() => {
-        if (BACKEND_MODE === 'framework') {
-            if (selectedExperimentGCP) {
-                const exp = experiments.find(e => e.experiment_name === selectedExperimentGCP);
-                if (exp) {
-                    getExperimentHierarchy(exp.id)
-                        .then((data) => {
-                            setHierarchy(data);
-                            setYearOptionsGCP(data.seasons.map(s => s.season_name));
-                            setLocationOptionsGCP(data.sites.map(s => s.site_name));
-                            setPopulationOptionsGCP(data.populations.map(p => p.population_name));
-                        })
-                        .catch((error) => console.error("Error:", error));
-                }
+        if (selectedExperimentGCP) {
+            const exp = experiments.find(e => e.experiment_name === selectedExperimentGCP);
+            if (exp) {
+                getExperimentHierarchy(exp.id)
+                    .then((data) => {
+                        setHierarchy(data);
+                        setYearOptionsGCP(data.seasons.map(s => s.season_name));
+                        setLocationOptionsGCP(data.sites.map(s => s.site_name));
+                        setPopulationOptionsGCP(data.populations.map(p => p.population_name));
+                    })
+                    .catch((error) => console.error("Error:", error));
             }
-            return;
-        }
-        if (selectedYearGCP) {
-            listDirs(`Raw/${selectedYearGCP}/`)
-                .then(setExperimentOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setExperimentOptionsGCP([]);
         }
     }, [selectedYearGCP, selectedExperimentGCP]);
 
-    useEffect(() => {
-        if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
-        if (selectedYearGCP && selectedExperimentGCP) {
-            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/`)
-                .then(setLocationOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setLocationOptionsGCP([]);
-        }
-    }, [selectedYearGCP, selectedExperimentGCP]);
-
-    useEffect(() => {
-        if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
-        if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP) {
-            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/`)
-                .then(setPopulationOptionsGCP)
-                .catch((error) => console.error("Error:", error));
-        } else {
-            setPopulationOptionsGCP([]);
-        }
-    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP]);
 
     const initiatePrep = () => {
         if(selectedPopulationGCP !== null){
@@ -120,145 +81,71 @@ const GCPPickerSelectionMenu = () => {
         }
     };
 
-    const isFramework = BACKEND_MODE === 'framework';
-
-    // In framework mode: Experiment first, then Year/Location/Population populated from hierarchy
-    // In flask mode: Year first, cascading directory listing
-    const showExperiment = isFramework ? true : selectedYearGCP !== null;
-    const showYear = isFramework ? selectedExperimentGCP !== null : true;
-    const showLocation = isFramework ? selectedExperimentGCP !== null : selectedExperimentGCP !== null;
-    const showPopulation = isFramework ? selectedExperimentGCP !== null : selectedLocationGCP !== null;
+    // Experiment first, then Year/Location/Population populated from hierarchy
+    const showYear = selectedExperimentGCP !== null;
+    const showLocation = selectedExperimentGCP !== null;
+    const showPopulation = selectedExperimentGCP !== null;
 
     return (
         <>
-            {isFramework ? (
-                <>
-                    <Autocomplete
-                        id="experiment-combo-box"
-                        options={experimentOptionsGCP}
-                        value={selectedExperimentGCP}
-                        onChange={(event, newValue) => {
-                            setSelectedExperimentGCP(newValue);
-                            setSelectedYearGCP(null);
-                            setSelectedLocationGCP(null);
-                            setSelectedPopulationGCP(null);
-                            setSelectedDateGCP(null);
-                            setIsGCPReady(false);
-                        }}
-                        renderInput={(params) => <TextField {...params} label="Experiment" />}
-                        sx={{ mb: 2 }}
-                    />
+            <Autocomplete
+                id="experiment-combo-box"
+                options={experimentOptionsGCP}
+                value={selectedExperimentGCP}
+                onChange={(event, newValue) => {
+                    setSelectedExperimentGCP(newValue);
+                    setSelectedYearGCP(null);
+                    setSelectedLocationGCP(null);
+                    setSelectedPopulationGCP(null);
+                    setSelectedDateGCP(null);
+                    setIsGCPReady(false);
+                }}
+                renderInput={(params) => <TextField {...params} label="Experiment" />}
+                sx={{ mb: 2 }}
+            />
 
-                    {showYear ? (
-                        <Autocomplete
-                            id="year-combo-box"
-                            options={yearOptionsGCP}
-                            value={selectedYearGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedYearGCP(newValue);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Year" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
+            {showYear ? (
+                <Autocomplete
+                    id="year-combo-box"
+                    options={yearOptionsGCP}
+                    value={selectedYearGCP}
+                    onChange={(event, newValue) => {
+                        setSelectedYearGCP(newValue);
+                        setIsGCPReady(false);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Year" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
 
-                    {showLocation ? (
-                        <Autocomplete
-                            id="location-combo-box"
-                            options={locationOptionsGCP}
-                            value={selectedLocationGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedLocationGCP(newValue);
-                                setSelectedPopulationGCP(null);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Location" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
+            {showLocation ? (
+                <Autocomplete
+                    id="location-combo-box"
+                    options={locationOptionsGCP}
+                    value={selectedLocationGCP}
+                    onChange={(event, newValue) => {
+                        setSelectedLocationGCP(newValue);
+                        setSelectedPopulationGCP(null);
+                        setIsGCPReady(false);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Location" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
 
-                    {showPopulation ? (
-                        <Autocomplete
-                            id="population-combo-box"
-                            options={populationOptionsGCP}
-                            value={selectedPopulationGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedPopulationGCP(newValue);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Population" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
-                </>
-            ) : (
-                <>
-                    <Autocomplete
-                        id="year-combo-box"
-                        options={yearOptionsGCP}
-                        value={selectedYearGCP}
-                        onChange={(event, newValue) => {
-                            setSelectedYearGCP(newValue);
-                            setSelectedExperimentGCP(null);
-                            setSelectedLocationGCP(null);
-                            setSelectedPopulationGCP(null);
-                            setSelectedDateGCP(null);
-                            setIsGCPReady(false);
-                        }}
-                        renderInput={(params) => <TextField {...params} label="Year" />}
-                        sx={{ mb: 2 }}
-                    />
-
-                    {showExperiment ? (
-                        <Autocomplete
-                            id="experiment-combo-box"
-                            options={experimentOptionsGCP}
-                            value={selectedExperimentGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedExperimentGCP(newValue);
-                                setSelectedLocationGCP(null);
-                                setSelectedPopulationGCP(null);
-                                setSelectedDateGCP(null);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Experiment" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
-
-                    {selectedExperimentGCP !== null ? (
-                        <Autocomplete
-                            id="location-combo-box"
-                            options={locationOptionsGCP}
-                            value={selectedLocationGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedLocationGCP(newValue);
-                                setSelectedPopulationGCP(null);
-                                setSelectedDateGCP(null);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Location" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
-
-                    {selectedLocationGCP !== null ? (
-                        <Autocomplete
-                            id="population-combo-box"
-                            options={populationOptionsGCP}
-                            value={selectedPopulationGCP}
-                            onChange={(event, newValue) => {
-                                setSelectedPopulationGCP(newValue);
-                                setSelectedDateGCP(null);
-                                setIsGCPReady(false);
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Population" />}
-                            sx={{ mb: 2 }}
-                        />
-                    ) : null}
-                </>
-            )}
+            {showPopulation ? (
+                <Autocomplete
+                    id="population-combo-box"
+                    options={populationOptionsGCP}
+                    value={selectedPopulationGCP}
+                    onChange={(event, newValue) => {
+                        setSelectedPopulationGCP(newValue);
+                        setIsGCPReady(false);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Population" />}
+                    sx={{ mb: 2 }}
+                />
+            ) : null}
 
             <Button variant="contained" color="primary" onClick={initiatePrep}>
                 Begin Data Preparation

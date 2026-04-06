@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useDataState, useDataSetters } from "../../DataContext";
-import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
+import { FRAMEWORK_URL } from "../../api/config";
 import { DataGrid } from '@mui/x-data-grid';
 import { Edit, Delete, Visibility, ConstructionOutlined, SnowshoeingOutlined, RemoveFromQueue } from '@mui/icons-material';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, Select, MenuItem, TextField, Button, LinearProgress, Box, Typography, CircularProgress } from '@mui/material';
@@ -14,7 +14,7 @@ import CSVDataTable from "../StatsMenu/CSVDataTable";
 import ActivityZoneIcon from '@mui/icons-material/Map';
 import AddLocationAltIcon from '@mui/icons-material/AddLocationAlt';
 import DownloadIcon from '@mui/icons-material/Download';
-import { listDirsNested, deleteFiles, getBinaryReport, downloadAmigaImages, updateData, viewSyncedData } from '../../api/files';
+import { listDirsNested, deleteFiles, downloadAmigaImages, updateData, viewSyncedData } from '../../api/files';
 import { filterPlotBorders } from '../../api/queries';
 import { getMaxPlotIndex } from '../../api/plots';
 
@@ -90,100 +90,84 @@ export const TableComponent = () => {
         setShowDeleteSuccess(false);
         setLoading(true);
 
-        if (BACKEND_MODE === 'framework') {
-            // Framework mode: fetch experiments, then hierarchy for each, and flatten into table rows
-            fetch(`${FRAMEWORK_URL}experiments/all`)
-                .then((response) => {
-                    if (!response.ok) return [];
-                    return response.json();
-                })
-                .then(async (experiments) => {
-                    if (!Array.isArray(experiments) || experiments.length === 0) {
-                        setProcData([]);
-                        setFilteredData([]);
-                        setLoading(false);
-                        return;
-                    }
-                    // Fetch hierarchy for each experiment
-                    const allRows = [];
-                    for (const exp of experiments) {
-                        try {
-                            const hierResp = await fetch(`${FRAMEWORK_URL}experiments/id/${exp.id}/hierarchy`);
-                            if (!hierResp.ok) continue;
-                            const hier = await hierResp.json();
-                            const seasons = hier.seasons || [];
-                            const sites = hier.sites || [];
-                            const populations = hier.populations || [];
-                            const sensorPlatforms = hier.sensor_platforms || [];
-                            const sensors = hier.sensors || [];
-                            const datasets = hier.datasets || [];
+        // Fetch experiments, then hierarchy for each, and flatten into table rows
+        fetch(`${FRAMEWORK_URL}experiments/all`)
+            .then((response) => {
+                if (!response.ok) return [];
+                return response.json();
+            })
+            .then(async (experiments) => {
+                if (!Array.isArray(experiments) || experiments.length === 0) {
+                    setProcData([]);
+                    setFilteredData([]);
+                    setLoading(false);
+                    return;
+                }
+                // Fetch hierarchy for each experiment
+                const allRows = [];
+                for (const exp of experiments) {
+                    try {
+                        const hierResp = await fetch(`${FRAMEWORK_URL}experiments/id/${exp.id}/hierarchy`);
+                        if (!hierResp.ok) continue;
+                        const hier = await hierResp.json();
+                        const seasons = hier.seasons || [];
+                        const sites = hier.sites || [];
+                        const populations = hier.populations || [];
+                        const sensorPlatforms = hier.sensor_platforms || [];
+                        const sensors = hier.sensors || [];
+                        const datasets = hier.datasets || [];
 
-                            // Build rows from datasets (each dataset = one row)
-                            for (const ds of datasets) {
-                                const dsInfo = ds.dataset_info || {};
-                                const year = seasons.length > 0 ? seasons[0].season_name : '';
-                                const location = sites.length > 0 ? sites[0].site_name : '';
-                                const population = dsInfo.population || (populations.length > 0 ? populations[0].population_name : '');
-                                const platform = dsInfo.platform || (sensorPlatforms.length > 0 ? sensorPlatforms[0].sensor_platform_name : '');
-                                const sensor = dsInfo.sensor || (sensors.length > 0 ? sensors[0].sensor_name : '');
-                                const dataType = dsInfo.data_type || '';
+                        // Build rows from datasets (each dataset = one row)
+                        for (const ds of datasets) {
+                            const dsInfo = ds.dataset_info || {};
+                            const year = seasons.length > 0 ? seasons[0].season_name : '';
+                            const location = sites.length > 0 ? sites[0].site_name : '';
+                            const population = dsInfo.population || (populations.length > 0 ? populations[0].population_name : '');
+                            const platform = dsInfo.platform || (sensorPlatforms.length > 0 ? sensorPlatforms[0].sensor_platform_name : '');
+                            const sensor = dsInfo.sensor || (sensors.length > 0 ? sensors[0].sensor_name : '');
+                            const dataType = dsInfo.data_type || '';
 
-                                allRows.push({
-                                    id: ds.id,
-                                    year,
-                                    experiment: exp.experiment_name,
-                                    location,
-                                    population,
-                                    date: ds.collection_date ? ds.collection_date.split('T')[0] : '',
-                                    platform,
-                                    sensor,
-                                    _dataType: dataType,
-                                    _datasetInfo: dsInfo,
-                                });
-                            }
-
-                            // If no datasets but experiment exists, show a row for the experiment
-                            if (datasets.length === 0) {
-                                allRows.push({
-                                    id: exp.id,
-                                    year: seasons.length > 0 ? seasons[0].season_name : '',
-                                    experiment: exp.experiment_name,
-                                    location: sites.length > 0 ? sites[0].site_name : '',
-                                    population: populations.length > 0 ? populations[0].population_name : '',
-                                    date: '',
-                                    platform: '',
-                                    sensor: '',
-                                    _dataType: 'unknown',
-                                });
-                            }
-                        } catch (e) {
-                            console.error(`Error fetching hierarchy for ${exp.experiment_name}:`, e);
+                            allRows.push({
+                                id: ds.id,
+                                year,
+                                experiment: exp.experiment_name,
+                                location,
+                                population,
+                                date: ds.collection_date ? ds.collection_date.split('T')[0] : '',
+                                platform,
+                                sensor,
+                                _dataType: dataType,
+                                _datasetInfo: dsInfo,
+                            });
                         }
+
+                        // If no datasets but experiment exists, show a row for the experiment
+                        if (datasets.length === 0) {
+                            allRows.push({
+                                id: exp.id,
+                                year: seasons.length > 0 ? seasons[0].season_name : '',
+                                experiment: exp.experiment_name,
+                                location: sites.length > 0 ? sites[0].site_name : '',
+                                population: populations.length > 0 ? populations[0].population_name : '',
+                                date: '',
+                                platform: '',
+                                sensor: '',
+                                _dataType: 'unknown',
+                            });
+                        }
+                    } catch (e) {
+                        console.error(`Error fetching hierarchy for ${exp.experiment_name}:`, e);
                     }
-                    setProcData(allRows);
-                    setFilteredData(allRows);
-                    setLoading(false);
-                })
-                .catch((error) => {
-                    console.error("Error fetching experiments:", error);
-                    setError(error);
-                    setLoading(false);
-                });
-        } else {
-            listDirsNested()
-                .then((data) => {
-                    setData(data);
-                    const transformedData = transformNestedData(data);
-                    setProcData(transformedData);
-                    setFilteredData(transformedData);
-                    setLoading(false);
-                })
-                .catch((error) => {
-                    console.error("Error fetching nested directories:", error);
-                    setError(error);
-                    setLoading(false);
-                });
-        }
+                }
+                setProcData(allRows);
+                setFilteredData(allRows);
+                setLoading(false);
+            })
+            .catch((error) => {
+                console.error("Error fetching experiments:", error);
+                setError(error);
+                setLoading(false);
+            });
     }, []);
     
     useEffect(() => {
@@ -207,37 +191,15 @@ export const TableComponent = () => {
         const row = procData.find((row) => row.id === id);
         if (!row) return;
 
-        if (BACKEND_MODE !== 'flask') {
-            // Framework mode: binary reports are not yet available
-            // (requires worker to extract and generate reports)
-            const dsInfo = row._datasetInfo || {};
-            const files = dsInfo.files || [];
-            setReportContent(
-                `Dataset: ${row.experiment} / ${row.location} / ${row.date}\n` +
-                `Data type: ${row._dataType || 'unknown'}\n` +
-                `Files: ${files.length > 0 ? files.join('\n  ') : 'None'}\n\n` +
-                `Binary extraction reports will be available after the FLIR worker processes the data.`
-            );
-            setReportDialogOpen(true);
-            return;
-        }
-
-        try {
-            const data = await getBinaryReport({
-                location: row.location,
-                population: row.population,
-                date: row.date,
-                year: row.year,
-                experiment: row.experiment,
-                camera: selectedCameras[id] || (row.cameras && row.cameras[0]) || ''
-            });
-            setReportContent(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
-            setReportDialogOpen(true);
-        } catch (error) {
-            console.error("Error fetching report:", error);
-            setReportContent("Failed to load report.");
-            setReportDialogOpen(true);
-        }
+        const dsInfo = row._datasetInfo || {};
+        const files = dsInfo.files || [];
+        setReportContent(
+            `Dataset: ${row.experiment} / ${row.location} / ${row.date}\n` +
+            `Data type: ${row._dataType || 'unknown'}\n` +
+            `Files: ${files.length > 0 ? files.join('\n  ') : 'None'}\n\n` +
+            `Binary extraction reports will be available after the FLIR worker processes the data.`
+        );
+        setReportDialogOpen(true);
     };
 
     const handleEdit = (id) => {

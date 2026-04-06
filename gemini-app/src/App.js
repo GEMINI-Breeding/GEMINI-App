@@ -37,10 +37,8 @@ import FileUploadComponent from "./Components/Menu/FileUpload";
 import StatsMenuMain from "./Components/StatsMenu/StatsMenuMain";
 import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 import DocsFrame from "./Components/DocsFrame";
-import { BACKEND_MODE } from "./api/config";
 import { connectJobProgress, cancelJob } from "./api/jobs";
 import { checkDataDir, browseDataDir, createDataDir } from "./api/files";
-import { stopTraining, getTrainingProgress, stopLocate, getLocateProgress, stopExtract, getExtractProgress, stopOdm, getOrthoProgress, stopDroneExtract, getDroneExtractProgress, doneExtracting } from "./api/processing";
 
 function App() {
     //const [helpPaneOpen, setHelpPaneOpen] = useState(false);
@@ -56,15 +54,6 @@ function App() {
     const {
         selectedMetric,
         currentView,
-        selectedYearGCP,
-        selectedExperimentGCP,
-        selectedLocationGCP,
-        selectedPopulationGCP,
-        selectedDateGCP,
-        selectedPlatformGCP,
-        selectedSensorGCP,
-        orthoSetting,
-        orthoCustomValue,
         isTraining,
         progress,
         epochs,
@@ -117,27 +106,7 @@ function App() {
         selectedMetricRef.current = selectedMetric;
     }, [selectedMetric]);
 
-    // Check if the data directory exists on startup, retrying until the backend is reachable
-    // (Flask mode only — framework mode uses MinIO, not a local data directory)
-    useEffect(() => {
-        if (BACKEND_MODE !== 'flask') return;
-        let cancelled = false;
-        const check = () => {
-            checkDataDir()
-                .then(data => {
-                    if (cancelled) return;
-                    if (!data.exists) {
-                        setDataDirPath(data.path || '');
-                        setDataDirMissing(true);
-                    }
-                })
-                .catch(() => {
-                    if (!cancelled) setTimeout(check, 3000);
-                });
-        };
-        check();
-        return () => { cancelled = true; };
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Data directory check not needed — framework mode uses MinIO, not a local data directory
 
     const handleBrowseDataDir = () => {
         setDataDirError("");
@@ -279,7 +248,7 @@ function App() {
     // FOR ORTHO START
     useEffect(() => {
         if (!isOrthoProcessing) return;
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentOrthoProgress(data.progress || 0),
                 onComplete: () => { setIsOrthoProcessing(false); setProcessRunning(false); setCurrentOrthoProgress(100); },
@@ -287,20 +256,10 @@ function App() {
             });
             return () => ws.close();
         }
-        const interval = setInterval(async () => {
-            try {
-                const data = await getOrthoProgress();
-                if (data) setCurrentOrthoProgress(data.ortho);
-            } catch (error) {
-                console.error("Error fetching ortho progress", error);
-                setSubmitError("Error getting ortho progress.");
-            }
-        }, 5000);
-        return () => clearInterval(interval);
     }, [isOrthoProcessing, currentJobId]);
 
     const handleStopOrtho = async () => {
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             try {
                 await cancelJob(currentJobId);
                 setIsOrthoProcessing(false);
@@ -310,34 +269,13 @@ function App() {
             } catch (error) {
                 console.error("Error:", error);
             }
-            return;
-        }
-        const data = {
-            year: selectedYearGCP,
-            experiment: selectedExperimentGCP,
-            location: selectedLocationGCP,
-            population: selectedPopulationGCP,
-            date: selectedDateGCP,
-            platform: selectedPlatformGCP,
-            sensor: selectedSensorGCP,
-            reconstruction_quality: orthoSetting,
-            custom_options: orthoCustomValue ? orthoCustomValue : [],
-        };
-        try {
-            await stopOdm(data);
-            console.log("ODM stopped");
-            setIsOrthoProcessing(false);
-            setProcessRunning(false);
-            setCurrentOrthoProgress(0);
-        } catch (error) {
-            console.error("Error:", error);
         }
     };
     // FOR ORTHO END
 
     // FOR TRAINING START
     const handleStopTraining = async () => {
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             try {
                 await cancelJob(currentJobId);
                 setIsTraining(false);
@@ -350,25 +288,12 @@ function App() {
                 console.error("Error:", error);
                 setSubmitError("Error stopping training.");
             }
-            return;
-        }
-        try {
-            await stopTraining();
-            console.log("Training stopped");
-            setIsTraining(false);
-            setCurrentEpoch(0);
-            setTrainingData(null);
-            setChartData({ x: [], y: [] });
-            setProcessRunning(false);
-        } catch (error) {
-            console.error("Error:", error);
-            setSubmitError("Error stopping training.");
         }
     };
 
     useEffect(() => {
         if (!isTraining) return;
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => {
                     const detail = data.progress_detail || {};
@@ -381,28 +306,12 @@ function App() {
             });
             return () => ws.close();
         }
-        const interval = setInterval(async () => {
-            try {
-                const data = await getTrainingProgress();
-                if (data) {
-                    const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
-                    setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
-                    setCurrentEpoch(data.epoch);
-                    setTrainingData(data);
-                } else {
-                    setSubmitError("Error getting training progress.");
-                }
-            } catch (error) {
-                console.error("Error fetching training progress", error);
-            }
-        }, 5000);
-        return () => clearInterval(interval);
     }, [isTraining, currentJobId]);
     // FOR TRAINING END
 
     // FOR LOCATE START
     const handleStopLocating = async () => {
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             try {
                 await cancelJob(currentJobId);
                 setIsLocating(false);
@@ -412,22 +321,12 @@ function App() {
             } catch (error) {
                 console.error("Error:", error);
             }
-            return;
-        }
-        try {
-            await stopLocate();
-            console.log("Locating stopped");
-            setIsLocating(false);
-            setProcessRunning(false);
-            setCurrentLocateProgress(0);
-        } catch (error) {
-            console.error("Error:", error);
         }
     };
 
     useEffect(() => {
         if (!isLocating) return;
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentLocateProgress(data.progress || 0),
                 onComplete: () => { setIsLocating(false); setProcessRunning(false); setCurrentLocateProgress(100); setCloseMenu(true); },
@@ -435,23 +334,12 @@ function App() {
             });
             return () => ws.close();
         }
-        const interval = setInterval(async () => {
-            try {
-                const data = await getLocateProgress();
-                if (data) {
-                    setCurrentLocateProgress(data.locate);
-                }
-            } catch (error) {
-                console.error("Error fetching locate progress", error);
-            }
-        }, 60000);
-        return () => clearInterval(interval);
     }, [isLocating, currentJobId]);
     // FOR LOCATE END
 
     // FOR EXTRACT START
     const handleStopExtracting = async () => {
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             try {
                 await cancelJob(currentJobId);
                 setIsExtracting(false);
@@ -460,41 +348,19 @@ function App() {
             } catch (error) {
                 console.error("Error:", error);
             }
-            return;
-        }
-        try {
-            await stopExtract();
-            console.log("Extracting stopped");
-            setIsExtracting(false);
-            setProcessRunning(false);
-        } catch (error) {
-            console.error("Error:", error);
         }
     };
     const handleDoneExtracting = async () => {
-        if (BACKEND_MODE !== 'flask') {
-            setIsExtracting(false);
-            setProcessRunning(false);
-            setCurrentExtractProgress(0);
-            setCloseMenu(false);
-            setCurrentJobId(null);
-            return;
-        }
-        try {
-            await doneExtracting();
-            console.log("Extracting finished");
-            setIsExtracting(false);
-            setProcessRunning(false);
-            setCurrentExtractProgress(0);
-            setCloseMenu(false);
-        } catch (error) {
-            console.error("Error:", error);
-        }
+        setIsExtracting(false);
+        setProcessRunning(false);
+        setCurrentExtractProgress(0);
+        setCloseMenu(false);
+        setCurrentJobId(null);
     };
 
     useEffect(() => {
         if (!isExtracting) return;
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentExtractProgress(data.progress || 0),
                 onComplete: () => { setIsExtracting(false); setProcessRunning(false); setCurrentExtractProgress(100); setCloseMenu(true); },
@@ -502,23 +368,12 @@ function App() {
             });
             return () => ws.close();
         }
-        const interval = setInterval(async () => {
-            try {
-                const data = await getExtractProgress();
-                if (data) {
-                    setCurrentExtractProgress(data.extract);
-                }
-            } catch (error) {
-                console.error("Error fetching extract progress", error);
-            }
-        }, 60000);
-        return () => clearInterval(interval);
     }, [isExtracting, currentJobId]);
     // FOR EXTRACT END
 
     // FOR DRONE EXTRACT START
     const handleStopDroneExtracting = async () => {
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             try {
                 await cancelJob(currentJobId);
                 setIsDroneExtracting(false);
@@ -528,33 +383,12 @@ function App() {
             } catch (error) {
                 console.error("Error:", error);
             }
-            return;
-        }
-        const data = {
-            year: selectedYearGCP,
-            experiment: selectedExperimentGCP,
-            location: selectedLocationGCP,
-            population: selectedPopulationGCP,
-            date: selectedDateGCP,
-            platform: selectedPlatformGCP,
-            sensor: selectedSensorGCP,
-            reconstruction_quality: orthoSetting,
-            custom_options: orthoCustomValue ? orthoCustomValue : [],
-        };
-        try {
-            await stopDroneExtract(data);
-            console.log("Extracting stopped");
-            setIsDroneExtracting(false);
-            setProcessRunning(false);
-            setCurrentDroneExtractProgress(0);
-        } catch (error) {
-            console.error("Error:", error);
         }
     };
 
     useEffect(() => {
         if (!isDroneExtracting) return;
-        if (BACKEND_MODE !== 'flask' && currentJobId) {
+        if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentDroneExtractProgress(data.progress || 0),
                 onComplete: () => { setIsDroneExtracting(false); setProcessRunning(false); setCurrentDroneExtractProgress(100); },
@@ -562,17 +396,6 @@ function App() {
             });
             return () => ws.close();
         }
-        const interval = setInterval(async () => {
-            try {
-                const data = await getDroneExtractProgress();
-                if (data) {
-                    setCurrentDroneExtractProgress(data.drone_extract);
-                }
-            } catch (error) {
-                console.error("Error fetching drone extract progress", error);
-            }
-        }, 1000);
-        return () => clearInterval(interval);
     }, [isDroneExtracting, currentJobId]);
     // FOR DRONE EXTRACT DONE
 

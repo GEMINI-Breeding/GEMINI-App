@@ -15,20 +15,7 @@ afterAll(() => {
 });
 
 describe("getTileFileUrl", () => {
-    test("flask mode returns flask URL with file path", () => {
-        process.env.REACT_APP_BACKEND_MODE = "flask";
-        process.env.REACT_APP_FLASK_PORT = "5000";
-        const { getTileFileUrl } = require("../files");
-        const result = getTileFileUrl(
-            "files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
-        );
-        expect(result).toBe(
-            "http://localhost:5000/flask_app/files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
-        );
-    });
-
-    test("framework mode returns S3 URL with bucket and object path", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("returns S3 URL with bucket and object path", () => {
         process.env.REACT_APP_STORAGE_BUCKET = "gemini";
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl(
@@ -39,22 +26,19 @@ describe("getTileFileUrl", () => {
         );
     });
 
-    test("framework mode strips files/ prefix from path", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("strips files/ prefix from path", () => {
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl("files/some/path.tif");
         expect(result).toMatch(/^s3:\/\/gemini\/some\/path\.tif$/);
     });
 
-    test("framework mode handles path without files/ prefix", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("handles path without files/ prefix", () => {
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl("Processed/path.tif");
         expect(result).toBe("s3://gemini/Processed/path.tif");
     });
 
-    test("framework mode uses custom bucket from env", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("uses custom bucket from env", () => {
         process.env.REACT_APP_STORAGE_BUCKET = "my-bucket";
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl("files/test.tif");
@@ -68,8 +52,6 @@ describe("getTileFileUrl", () => {
 
     test("STORAGE_BUCKET from RUNTIME_CONFIG", () => {
         window.RUNTIME_CONFIG = {
-            FLASK_PORT: "5000",
-            FLASK_HOST: "localhost",
             TILE_SERVER_PORT: "8091",
             TILE_SERVER_HOST: "localhost",
             STORAGE_BUCKET: "custom-bucket",
@@ -80,15 +62,7 @@ describe("getTileFileUrl", () => {
 });
 
 describe("getFileUrl", () => {
-    test("flask mode returns flask file URL", () => {
-        process.env.REACT_APP_BACKEND_MODE = "flask";
-        const { getFileUrl } = require("../files");
-        const result = getFileUrl("Processed/2024/test.tif");
-        expect(result).toContain("flask_app/files/Processed/2024/test.tif");
-    });
-
-    test("framework mode returns framework download URL", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("returns framework download URL", () => {
         const { getFileUrl } = require("../files");
         const result = getFileUrl("Processed/2024/test.tif");
         expect(result).toContain("/api/files/download/Processed/2024/test.tif");
@@ -96,15 +70,7 @@ describe("getFileUrl", () => {
 });
 
 describe("getImageUrl", () => {
-    test("flask mode returns flask images URL", () => {
-        process.env.REACT_APP_BACKEND_MODE = "flask";
-        const { getImageUrl } = require("../files");
-        const result = getImageUrl("some/image.jpg");
-        expect(result).toContain("flask_app/images/some/image.jpg");
-    });
-
-    test("framework mode returns framework download URL", () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("returns framework download URL", () => {
         const { getImageUrl } = require("../files");
         const result = getImageUrl("some/image.jpg");
         expect(result).toContain("/api/files/download/some/image.jpg");
@@ -112,8 +78,7 @@ describe("getImageUrl", () => {
 });
 
 describe("getPngFile", () => {
-    test("framework mode returns download URL object", async () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("returns download URL object", async () => {
         const { getPngFile } = require("../files");
         const result = await getPngFile({ filePath: "Processed/2024/test.png" });
         expect(result).toHaveProperty("url");
@@ -122,8 +87,7 @@ describe("getPngFile", () => {
 });
 
 describe("deleteOrtho", () => {
-    test("framework mode builds correct delete path for ortho file", async () => {
-        process.env.REACT_APP_BACKEND_MODE = "framework";
+    test("builds correct delete path for ortho file", async () => {
         // Mock fetch globally
         const mockFetch = jest.fn()
             .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) }) // list

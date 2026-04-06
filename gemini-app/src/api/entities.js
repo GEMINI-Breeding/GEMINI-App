@@ -1,6 +1,6 @@
 /**
  * API calls for gemini-framework entities.
- * Used when BACKEND_MODE is "framework" or "hybrid" with entity domain migrated.
+ * Provides CRUD operations for gemini-framework entities.
  */
 
 import { fetchJson, postJson } from './client';

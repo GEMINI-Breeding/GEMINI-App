@@ -10,7 +10,6 @@ import RoverPlotPreview from '../Menu/RoverPlotPreview';
 import Download from "@mui/icons-material/Download";
 import { listDirs, listFiles, deleteOrtho, downloadOrtho, downloadPlotOrtho, getOrthoMetadata } from '../../api/files';
 import { getPlotBordersData } from '../../api/queries';
-import { BACKEND_MODE } from '../../api/config';
 
 const OrthoTable = () => {
     const [orthoData, setOrthoData] = useState([]);
@@ -239,27 +238,13 @@ const OrthoTable = () => {
                     agrowstitchDir: row.agrowstitchDir,
                 });
 
-                if (BACKEND_MODE !== 'flask') {
-                    // Framework mode: result has presigned URLs for individual files
-                    for (const file of (result.files || [])) {
-                        const a = document.createElement("a");
-                        a.href = file.url;
-                        a.download = file.name;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                    }
-                } else {
-                    // Flask mode: result is a blob response
-                    const blob = await result.blob();
-                    const url = window.URL.createObjectURL(blob);
+                for (const file of (result.files || [])) {
                     const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `${row.date}-${row.platform}-${row.sensor}-plots.zip`;
+                    a.href = file.url;
+                    a.download = file.name;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    window.URL.revokeObjectURL(url);
                 }
             } else {
                 const result = await downloadOrtho({
@@ -273,35 +258,12 @@ const OrthoTable = () => {
                     fileName: row.fileName,
                 });
 
-                if (BACKEND_MODE !== 'flask') {
-                    // Framework mode: result has presigned URL
-                    const a = document.createElement("a");
-                    a.href = result.url;
-                    a.download = result.fileName;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                } else {
-                    // Flask mode: result is a fetch Response
-                    const blob = await result.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    let fileName = row.fileName.replace('.tif', '.png');
-                    const disposition = result.headers.get("Content-Disposition");
-                    if (disposition && disposition.indexOf("filename=") !== -1) {
-                        const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                        const matches = filenameRegex.exec(disposition);
-                        if (matches != null && matches[1]) {
-                            fileName = matches[1].replace(/['"]/g, '');
-                        }
-                    }
-                    a.download = fileName;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(url);
-                }
+                const a = document.createElement("a");
+                a.href = result.url;
+                a.download = result.fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
             }
         } catch (error) {
             console.error('Error downloading ortho:', error);

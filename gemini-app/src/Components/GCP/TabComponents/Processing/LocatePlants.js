@@ -20,7 +20,6 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useDataSetters, useDataState } from "../../../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
 import { locatePlants, getLocateInfo } from "../../../../api/processing";
-import { BACKEND_MODE } from "../../../../api/config";
 import { checkRuns } from "../../../../api/files";
 
 function LocateMenu({ open, onClose, item, platform, sensor }) {
@@ -64,7 +63,7 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
             
             const data = await locatePlants(payload);
             console.log("Response from server:", data);
-            if (BACKEND_MODE !== 'flask' && data && data.id) {
+            if (data && data.id) {
                 setCurrentJobId(data.id);
             }
             if (data && data.error) {
