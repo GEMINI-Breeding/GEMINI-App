@@ -31,10 +31,20 @@ if _agrowstitch_config:
 
     from AgRowStitch import run  # type: ignore
 
-    r = run(_agrowstitch_config, _cpu_count)
-    if hasattr(r, "__iter__") and not isinstance(r, (str, bytes)):
-        for _ in r:
-            pass
+    try:
+        r = run(_agrowstitch_config, _cpu_count)
+        if hasattr(r, "__iter__") and not isinstance(r, (str, bytes)):
+            for _ in r:
+                pass
+    except Exception as _exc:
+        # Print to stderr so the parent process captures it via the PIPE,
+        # then exit with a non-zero code so ground.py knows it failed.
+        # Do NOT re-raise — a bare raise causes PyInstaller's windowed-mode
+        # "Unhandled exception in script" popup on Windows.
+        import traceback as _tb
+        print("AgRowStitch error:", _exc, file=sys.stderr)
+        _tb.print_exc(file=sys.stderr)
+        sys.exit(1)
     sys.exit(0)
 # ─────────────────────────────────────────────────────────────────────────────
 
