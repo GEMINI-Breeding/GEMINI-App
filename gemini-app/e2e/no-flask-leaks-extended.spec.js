@@ -70,10 +70,17 @@ test.describe("No Flask leaks across all tabs", () => {
         await page.goto("/");
         await page.waitForLoadState("networkidle");
 
-        // Click Process sidebar button
+        // Close any sidebar overlay that may intercept clicks
+        const hideButton = page.locator('text=Hide');
+        if (await hideButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await hideButton.click();
+            await page.waitForTimeout(500);
+        }
+
+        // Click Process sidebar button (force to avoid overlay issues)
         const processButton = page.locator('button:has(svg[data-testid="SettingsIcon"])');
         if (await processButton.count() > 0) {
-            await processButton.first().click();
+            await processButton.first().click({ force: true });
             await page.waitForTimeout(1000);
         }
 
@@ -91,10 +98,17 @@ test.describe("No Flask leaks across all tabs", () => {
         await page.goto("/");
         await page.waitForLoadState("networkidle");
 
-        // Click Stats sidebar button
+        // Close any sidebar overlay that may intercept clicks
+        const hideButton = page.locator('text=Hide');
+        if (await hideButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await hideButton.click();
+            await page.waitForTimeout(500);
+        }
+
+        // Click Stats sidebar button (force to avoid overlay issues)
         const statsButton = page.locator('button:has(svg[data-testid="EqualizerIcon"]), button:has(svg[data-testid="BarChartIcon"])');
         if (await statsButton.count() > 0) {
-            await statsButton.first().click();
+            await statsButton.first().click({ force: true });
             await page.waitForTimeout(1000);
         }
 

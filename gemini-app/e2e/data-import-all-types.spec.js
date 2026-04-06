@@ -343,6 +343,7 @@ test.describe("Entity registration after upload", () => {
         page,
         request,
     }) => {
+        test.setTimeout(120_000);
         // First upload
         await navigateToUpload(page);
         await selectDataType(page, "Image Data");

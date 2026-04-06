@@ -62,14 +62,16 @@ test.describe("File operations (framework API)", () => {
         const objectPath = `${BASE_PATH}/presign-test.txt`;
         await seedFileToMinIO(request, objectPath, testContent, "text/plain");
 
-        // Get presigned URL
+        // Get presigned URL — verify the endpoint returns a valid URL
         const presignResp = await request.get(`${API_BASE}/files/presign/gemini/${objectPath}`);
         expect(presignResp.ok()).toBeTruthy();
         const presignData = await presignResp.json();
         expect(presignData.url).toBeTruthy();
+        expect(presignData.url).toContain("X-Amz-Signature");
 
-        // Download via presigned URL
-        const downloadResp = await request.get(presignData.url);
+        // Download via the framework download endpoint (presigned URLs use internal
+        // Docker hostnames that aren't reachable from the test runner)
+        const downloadResp = await request.get(`${API_BASE}/files/download/gemini/${objectPath}`);
         expect(downloadResp.ok()).toBeTruthy();
         const body = await downloadResp.text();
         expect(body).toBe(testContent);
