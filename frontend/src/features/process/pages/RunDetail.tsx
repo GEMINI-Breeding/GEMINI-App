@@ -336,6 +336,8 @@ function getStepStatus(
   stepsCompleted: Record<string, boolean> | null | undefined,
   runStatus: string
 ): StepStatus {
+  // If the run is fully completed, all steps show as completed
+  if (runStatus === "completed") return "completed";
   // current_step takes priority — a re-run sets it even when steps_completed still shows true
   if (currentStep === stepKey) {
     return runStatus === "failed" ? "failed" : "running";

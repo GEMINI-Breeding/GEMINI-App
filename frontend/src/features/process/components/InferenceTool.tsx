@@ -208,11 +208,12 @@ interface ImageViewerProps {
   predictions: Prediction[]
   hiddenClasses: Set<string>
   showMasks: boolean
+  showLabels: boolean
   /** When true, uses a taller image area (fullscreen mode) */
   fullscreen?: boolean
 }
 
-function ImageViewer({ image, predictions, hiddenClasses, showMasks, fullscreen }: ImageViewerProps) {
+function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels, fullscreen }: ImageViewerProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -234,7 +235,7 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, fullscreen 
   // Redraw canvas whenever anything relevant changes
   useEffect(() => {
     drawDetections()
-  }, [dims, predictions, hiddenClasses, showMasks, zoom, panX, panY])
+  }, [dims, predictions, hiddenClasses, showMasks, showLabels, zoom, panX, panY])
 
   function drawDetections() {
     const canvas = canvasRef.current
@@ -310,13 +311,15 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, fullscreen 
         ctx.strokeRect(x, y, w, h)
 
         // Label
-        const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`
-        ctx.font = "11px monospace"
-        const tw = ctx.measureText(label).width
-        ctx.fillStyle = color
-        ctx.fillRect(x, y - 16, tw + 6, 16)
-        ctx.fillStyle = "#fff"
-        ctx.fillText(label, x + 3, y - 3)
+        if (showLabels) {
+          const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`
+          ctx.font = "11px monospace"
+          const tw = ctx.measureText(label).width
+          ctx.fillStyle = color
+          ctx.fillRect(x, y - 16, tw + 6, 16)
+          ctx.fillStyle = "#fff"
+          ctx.fillText(label, x + 3, y - 3)
+        }
       }
     }
   }
@@ -482,6 +485,7 @@ export function InferenceTool({
   const [selectedTraitsModel, setSelectedTraitsModel] = useState<string>("")
   const [traitsThreshold, setTraitsThreshold] = useState(50)
   const [iouThreshold, setIouThreshold] = useState(50)
+  const [showLabels, setShowLabels] = useState(true)
   const [traitsStatus, setTraitsStatus] = useState<{ loading: boolean; message: string | null }>({ loading: false, message: null })
   const [logLines, setLogLines] = useState<string[]>([])
   const [logTotal, setLogTotal] = useState<number | null>(null)
@@ -814,6 +818,31 @@ export function InferenceTool({
                 className="w-full h-1.5 accent-primary"
               />
             </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Overlap Threshold</Label>
+                <span className="text-xs font-mono font-medium">{iouThreshold}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={iouThreshold}
+                onChange={(e) => setIouThreshold(Number(e.target.value))}
+                className="w-full h-1.5 accent-primary"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Show labels</Label>
+              <button
+                type="button"
+                onClick={() => setShowLabels((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${showLabels ? "bg-primary" : "bg-muted"}`}
+              >
+                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showLabels ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+            </div>
             {hasSegmentation && (
               <div className="flex items-center justify-between">
                 <Label className="text-xs">Show masks</Label>
@@ -933,7 +962,7 @@ export function InferenceTool({
                   max={100}
                   step={5}
                   value={traitsThreshold}
-                  onChange={(e) => { setTraitsThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
+                  onChange={(e) => { const v = Number(e.target.value); setTraitsThreshold(v); setConfThreshold(v); setTraitsStatus({ loading: false, message: null }) }}
                   className="flex-1 h-1.5 accent-primary"
                 />
                 <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
@@ -1001,6 +1030,7 @@ export function InferenceTool({
               predictions={currentPreds}
               hiddenClasses={hiddenClasses}
               showMasks={showMasks}
+              showLabels={showLabels}
               fullscreen={fullscreen}
             />
           )}

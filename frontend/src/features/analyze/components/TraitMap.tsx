@@ -15,7 +15,7 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
-import { X, Download, Loader2, ZoomIn } from "lucide-react"
+import { X, Download, Loader2, ZoomIn, Tag } from "lucide-react"
 import { useExpandable, ExpandButton, FullscreenModal } from "@/components/Common/ExpandableSection"
 import { useQuery } from "@tanstack/react-query"
 import { buildColorScale } from "../utils/colorScale"
@@ -319,6 +319,7 @@ function PlotImagePanel({
   const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const hasDetections = predictions.length > 0
   const exp = useExpandable()
@@ -352,18 +353,20 @@ function PlotImagePanel({
       const y = (p.y - p.height / 2) * scale + offsetY
       const w = p.width * scale, h = p.height * scale
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h)
-      const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
-      ctx.font = "11px monospace"
-      const tw = ctx.measureText(label).width
-      ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
-      ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
+      if (showLabels) {
+        const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
+        ctx.font = "11px monospace"
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
+        ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
+      }
     }
   }
 
   useEffect(() => {
     const id = requestAnimationFrame(() => drawCanvas())
     return () => cancelAnimationFrame(id)
-  }, [dims, predictions, showDetections, exp.isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dims, predictions, showDetections, showLabels, exp.isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setBlobUrl(null)
@@ -489,14 +492,26 @@ function PlotImagePanel({
             </select>
           )}
           {hasDetections && (
-            <button
-              type="button"
-              onClick={() => setShowDetections((v) => !v)}
-              title={showDetections ? "Hide detections" : "Show detections"}
-              className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowDetections((v) => !v)}
+                title={showDetections ? "Hide detections" : "Show detections"}
+                className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+              {showDetections && (
+                <button
+                  type="button"
+                  onClick={() => setShowLabels((v) => !v)}
+                  title={showLabels ? "Hide labels" : "Show labels"}
+                  className={`transition-colors ${showLabels ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Tag className={`w-4 h-4 ${showLabels ? "" : "opacity-40"}`} />
+                </button>
+              )}
+            </>
           )}
           <ExpandButton onClick={exp.open} title="Expand plot" className="h-7 w-7" />
           <button

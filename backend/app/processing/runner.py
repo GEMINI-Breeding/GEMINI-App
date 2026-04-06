@@ -323,7 +323,7 @@ def _all_steps_for_run(run: Any) -> list[str]:
     try:
         pipeline = session.get(Pipeline, run.pipeline_id)
         if pipeline and pipeline.type == "aerial":
-            return ["gcp_selection", "orthomosaic", "plot_boundaries", "trait_extraction", "inference"]
+            return ["orthomosaic", "plot_boundary_prep", "trait_extraction", "inference"]
         return ["plot_marking", "stitching", "inference"]
     finally:
         session.close()

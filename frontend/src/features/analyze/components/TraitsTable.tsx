@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react"
-import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Loader2 } from "lucide-react"
+import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Loader2, Tag } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -87,9 +87,10 @@ interface PlotViewerProps {
   plotId: string
   predictions: Prediction[]
   showDetections: boolean
+  showLabels: boolean
 }
 
-function PlotViewer({ recordId, plotId, predictions, showDetections }: PlotViewerProps) {
+function PlotViewer({ recordId, plotId, predictions, showDetections, showLabels }: PlotViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
@@ -124,13 +125,15 @@ function PlotViewer({ recordId, plotId, predictions, showDetections }: PlotViewe
       const x = (p.x - p.width / 2) * sx, y = (p.y - p.height / 2) * sy
       const w = p.width * sx, h = p.height * sy
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h)
-      const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
-      ctx.font = "11px monospace"
-      const tw = ctx.measureText(label).width
-      ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
-      ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
+      if (showLabels) {
+        const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
+        ctx.font = "11px monospace"
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
+        ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
+      }
     }
-  }, [dims, predictions, showDetections])
+  }, [dims, predictions, showDetections, showLabels])
 
   if (error) return <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Image not available</div>
   if (!blobUrl) return <div className="flex items-center justify-center h-full"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
@@ -157,6 +160,7 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
   const [sortAsc, setSortAsc] = useState(true)
   const [viewPlotId, setViewPlotId] = useState<string | null>(null)
   const [showDetections, setShowDetections] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
 
   // Fetch inference results (only if runId provided)
   const { data: inferenceData } = useQuery({
@@ -331,15 +335,28 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
             <span className="text-xs font-semibold">Plot {viewPlotId}</span>
             <div className="flex items-center gap-2">
               {viewHasDetections && (
-                <button
-                  type="button"
-                  title={showDetections ? "Hide detections" : "Show detections"}
-                  className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
-                  onClick={() => setShowDetections((v) => !v)}
-                >
-                  <Scan className="w-3 h-3" />
-                  {showDetections ? "Hide detections" : "Show detections"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    title={showDetections ? "Hide detections" : "Show detections"}
+                    className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                    onClick={() => setShowDetections((v) => !v)}
+                  >
+                    <Scan className="w-3 h-3" />
+                    {showDetections ? "Hide detections" : "Show detections"}
+                  </button>
+                  {showDetections && (
+                    <button
+                      type="button"
+                      title={showLabels ? "Hide labels" : "Show labels"}
+                      className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                      onClick={() => setShowLabels((v) => !v)}
+                    >
+                      <Tag className={`w-3 h-3 ${showLabels ? "" : "opacity-40"}`} />
+                      {showLabels ? "Hide labels" : "Show labels"}
+                    </button>
+                  )}
+                </>
               )}
               <button
                 type="button"
@@ -358,6 +375,7 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
               plotId={viewPlotId}
               predictions={viewPredictions}
               showDetections={showDetections}
+              showLabels={showLabels}
             />
           </div>
         </div>

@@ -242,6 +242,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const [activeVersion, setActiveVersion] = useState<number | null>(null)
   // Track whether we've done the initial load so saves don't reset the viewer position
   const hasLoadedRef = useRef(false)
+  const isDirtyRef = useRef(false)
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
 
   const { data: versionList = [], refetch: refetchVersions } = useQuery<{ version: number; name: string; created_at: string; run_label: string; is_active: boolean }[]>({
     queryKey: ["plot-markings", runId],
@@ -267,6 +269,10 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
   // plots state: array of PlotSelection
   const [plots, setPlots] = useState<PlotSelection[]>(makePlots(1))
+  const setPlotsDirty = useCallback((arg: PlotSelection[] | ((prev: PlotSelection[]) => PlotSelection[])) => {
+    if (hasLoadedRef.current) isDirtyRef.current = true
+    setPlots(arg as any)
+  }, [])
   // which plot page we're viewing (0-indexed into plots array)
   const [plotPage, setPlotPage] = useState(0)
   // editable nav input (shows current plot number, used to jump)
@@ -283,6 +289,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         end_image: s.end_image ?? null,
         direction: s.direction ?? "",
       }))
+      isDirtyRef.current = false
       setPlots(loaded)
       if (!hasLoadedRef.current) {
         hasLoadedRef.current = true
@@ -325,20 +332,20 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
   const markStart = useCallback(() => {
     if (!currentImage) return
-    setPlots((prev) =>
+    setPlotsDirty((prev) =>
       prev.map((p, i) => i === plotPage ? { ...p, start_image: currentImage } : p)
     )
-  }, [currentImage, plotPage])
+  }, [currentImage, plotPage, setPlotsDirty])
 
   const markEnd = useCallback(() => {
     if (!currentImage) return
-    setPlots((prev) =>
+    setPlotsDirty((prev) =>
       prev.map((p, i) => i === plotPage ? { ...p, end_image: currentImage } : p)
     )
-  }, [currentImage, plotPage])
+  }, [currentImage, plotPage, setPlotsDirty])
 
   const setDirection = (direction: string) => {
-    setPlots((prev) =>
+    setPlotsDirty((prev) =>
       prev.map((p, i) => i === plotPage ? { ...p, direction } : p)
     )
   }
@@ -350,7 +357,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   }
 
   const addPlot = useCallback(() => {
-    setPlots((prev) => {
+    setPlotsDirty((prev) => {
       const insertIdx = plotPage + 1
       const prevDirection = prev[plotPage]?.direction ?? "down"
       const newPlot = { plot_id: 0, start_image: null, end_image: null, direction: prevDirection }
@@ -365,7 +372,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   }, [plotPage])
 
   const deletePlot = useCallback(() => {
-    setPlots((prev) => {
+    setPlotsDirty((prev) => {
       if (prev.length <= 1) return prev
       const updated = prev
         .filter((_, i) => i !== plotPage)
@@ -413,6 +420,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         requestBody: { selections: plots as unknown as { [key: string]: unknown }[], save_as: false } as any,
       }),
     onSuccess: (data: any) => {
+      isDirtyRef.current = false
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
       queryClient.invalidateQueries({ queryKey: ["plot-marking", runId] })
       refetchVersions()
@@ -431,6 +439,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         requestBody: { selections: plots as unknown as { [key: string]: unknown }[], save_as: true, name: name || undefined } as any,
       }),
     onSuccess: (data: any) => {
+      isDirtyRef.current = false
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
       queryClient.invalidateQueries({ queryKey: ["plot-marking", runId] })
       refetchVersions()
@@ -768,7 +777,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                           <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.start_image)} onClick={() => jumpTo(activePlot.start_image)}>
                             <ChevronRight className="w-3 h-3" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
                             <X className="w-3 h-3" />
                           </Button>
                         </>
@@ -791,7 +800,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                           <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.end_image)} onClick={() => jumpTo(activePlot.end_image)}>
                             <ChevronRight className="w-3 h-3" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
                             <X className="w-3 h-3" />
                           </Button>
                         </>
@@ -881,7 +890,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           )}
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={onCancel}>
+            <Button variant="outline" className="flex-1" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
               Back
             </Button>
             <Button
@@ -947,6 +956,20 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         </div>
       </div>
     </div>
+
+    {/* Unsaved changes dialog */}
+    <Dialog open={showUnsavedDialog} onOpenChange={(o) => !o && setShowUnsavedDialog(false)}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Unsaved Changes</DialogTitle>
+          <DialogDescription>You have unsaved plot markings. Leave without saving?</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowUnsavedDialog(false)}>Stay</Button>
+          <Button variant="destructive" onClick={() => { setShowUnsavedDialog(false); onCancel() }}>Leave</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     {/* Save As dialog */}
     <Dialog open={showSaveAsDialog} onOpenChange={(o) => !o && setShowSaveAsDialog(false)}>

@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Loader2 } from "lucide-react"
+import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Loader2, Tag } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -91,9 +91,10 @@ interface PlotImageViewerProps {
   plotId: string
   predictions: Prediction[]
   showDetections: boolean
+  showLabels: boolean
 }
 
-function PlotImageViewer({ recordId, plotId, predictions, showDetections }: PlotImageViewerProps) {
+function PlotImageViewer({ recordId, plotId, predictions, showDetections, showLabels }: PlotImageViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
@@ -161,6 +162,7 @@ function PlotImageViewer({ recordId, plotId, predictions, showDetections }: Plot
       ctx.lineWidth = 2
       ctx.strokeRect(x, y, w, h)
 
+      if (!showLabels) continue
       const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`
       ctx.font = "11px monospace"
       const tw = ctx.measureText(label).width
@@ -169,7 +171,7 @@ function PlotImageViewer({ recordId, plotId, predictions, showDetections }: Plot
       ctx.fillStyle = "#fff"
       ctx.fillText(label, x + 3, y - 3)
     }
-  }, [dims, predictions, showDetections])
+  }, [dims, predictions, showDetections, showLabels])
 
   if (error) {
     return (
@@ -221,6 +223,7 @@ interface PinnedCardProps {
 
 function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDownload }: PinnedCardProps) {
   const [showDetections, setShowDetections] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
 
   return (
     <div className="rounded-lg border overflow-hidden flex flex-col">
@@ -234,14 +237,26 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
         </div>
         <div className="flex items-center gap-1 shrink-0 ml-2">
           {hasDetections && (
-            <button
-              type="button"
-              title={showDetections ? "Hide detections" : "Show detections"}
-              className={`text-muted-foreground hover:text-foreground transition-colors ${showDetections ? "text-primary" : ""}`}
-              onClick={() => setShowDetections((v) => !v)}
-            >
-              <Scan className="w-3.5 h-3.5" />
-            </button>
+            <>
+              <button
+                type="button"
+                title={showDetections ? "Hide detections" : "Show detections"}
+                className={`text-muted-foreground hover:text-foreground transition-colors ${showDetections ? "text-primary" : ""}`}
+                onClick={() => setShowDetections((v) => !v)}
+              >
+                <Scan className="w-3.5 h-3.5" />
+              </button>
+              {showDetections && (
+                <button
+                  type="button"
+                  title={showLabels ? "Hide labels" : "Show labels"}
+                  className={`transition-colors ${showLabels ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setShowLabels((v) => !v)}
+                >
+                  <Tag className={`w-3.5 h-3.5 ${showLabels ? "" : "opacity-40"}`} />
+                </button>
+              )}
+            </>
           )}
           <button
             type="button"
@@ -268,6 +283,7 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
           plotId={row.plotId}
           predictions={showDetections ? predictions : []}
           showDetections={showDetections}
+          showLabels={showLabels}
         />
       </div>
     </div>
@@ -282,6 +298,7 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
   const [search, setSearch] = useState("")
   const comparisonExp = useExpandable()
   const [viewShowDetections, setViewShowDetections] = useState(false)
+  const [viewShowLabels, setViewShowLabels] = useState(true)
 
   // Fetch trait records for this run → get recordId for plot image API
   const { data: traitRecords } = useQuery({
@@ -513,15 +530,28 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
               <span className="text-xs text-muted-foreground">{viewRow.accession}</span>
             )}
             {viewHasDetections && (
-              <button
-                type="button"
-                title={viewShowDetections ? "Hide detections" : "Show detections"}
-                className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${viewShowDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
-                onClick={() => setViewShowDetections((v) => !v)}
-              >
-                <Scan className="w-3 h-3" />
-                {viewShowDetections ? "Hide detections" : "Show detections"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  title={viewShowDetections ? "Hide detections" : "Show detections"}
+                  className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${viewShowDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                  onClick={() => setViewShowDetections((v) => !v)}
+                >
+                  <Scan className="w-3 h-3" />
+                  {viewShowDetections ? "Hide detections" : "Show detections"}
+                </button>
+                {viewShowDetections && (
+                  <button
+                    type="button"
+                    title={viewShowLabels ? "Hide labels" : "Show labels"}
+                    className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${viewShowLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                    onClick={() => setViewShowLabels((v) => !v)}
+                  >
+                    <Tag className={`w-3 h-3 ${viewShowLabels ? "" : "opacity-40"}`} />
+                    {viewShowLabels ? "Hide labels" : "Show labels"}
+                  </button>
+                )}
+              </>
             )}
             <button
               type="button"
@@ -547,6 +577,7 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
               plotId={viewPlotId}
               predictions={viewShowDetections ? viewPredictions : []}
               showDetections={viewShowDetections}
+              showLabels={viewShowLabels}
             />
           </div>
         </section>

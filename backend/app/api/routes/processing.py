@@ -3209,7 +3209,7 @@ def mark_step_complete(
     existing_steps = dict(run.steps_completed or {})
     existing_steps[body.step] = True
     if pipeline and pipeline.type == "aerial":
-        all_step_keys = ["gcp_selection", "orthomosaic", "plot_boundaries", "trait_extraction", "inference"]
+        all_step_keys = ["orthomosaic", "plot_boundary_prep", "trait_extraction", "inference"]
     else:
         all_step_keys = ["plot_marking", "stitching", "inference"]
     all_done = all(existing_steps.get(s, False) for s in all_step_keys)

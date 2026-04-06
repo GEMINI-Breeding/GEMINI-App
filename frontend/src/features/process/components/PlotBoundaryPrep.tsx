@@ -985,6 +985,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [pendingSaveAs, setPendingSaveAs] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
+  const isDirtyRef = useRef(false);
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [hasBoundary, setHasBoundary] = useState(false);
   const [selectedOrthoVersion, setSelectedOrthoVersion] = useState<
     number | null
@@ -1004,6 +1006,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   const [canRedo, setCanRedo] = useState(false);
 
   function pushHistory(fc: GeoJSON.FeatureCollection) {
+    isDirtyRef.current = true;
     // Discard any redo states beyond current position
     historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
     historyRef.current.push(fc);
@@ -1014,6 +1017,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
   function undo() {
     if (historyIndexRef.current <= 0) return;
+    isDirtyRef.current = true;
     historyIndexRef.current -= 1;
     const fc = historyRef.current[historyIndexRef.current];
     setPreviewGeoJson(fc);
@@ -1024,6 +1028,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
   function redo() {
     if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    isDirtyRef.current = true;
     historyIndexRef.current += 1;
     const fc = historyRef.current[historyIndexRef.current];
     setPreviewGeoJson(fc);
@@ -1842,6 +1847,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       await queryClient.invalidateQueries({ queryKey: ["orthomosaic-info", runId] });
       await queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
       await queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] });
+      isDirtyRef.current = false;
       showSuccessToast(
         saveAs ? "Saved as new version" : "Plot boundaries saved"
       );
@@ -2057,7 +2063,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
       {/* Footer */}
       <div className="flex gap-2">
-        <Button variant="outline" onClick={onCancel}>
+        <Button variant="outline" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
           Cancel
         </Button>
         {previewGeoJson && (
@@ -2119,6 +2125,20 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           }
         }}
       />
+
+      {/* Unsaved changes dialog */}
+      <Dialog open={showUnsavedDialog} onOpenChange={(o) => !o && setShowUnsavedDialog(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Unsaved Changes</DialogTitle>
+            <DialogDescription>You have unsaved boundary changes. Leave without saving?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowUnsavedDialog(false)}>Stay</Button>
+            <Button variant="destructive" onClick={() => { setShowUnsavedDialog(false); onCancel(); }}>Leave</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation dialog */}
       <Dialog open={showDeleteConfirm} onOpenChange={(o) => !o && setShowDeleteConfirm(false)}>
