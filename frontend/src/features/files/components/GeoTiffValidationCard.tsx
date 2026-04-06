@@ -8,7 +8,6 @@
 
 import { useEffect, useState } from "react"
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import useCustomToast from "@/hooks/useCustomToast"
 
 function apiUrl(path: string): string {
