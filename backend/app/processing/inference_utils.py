@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess as _subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+# Suppress console windows on Windows for every subprocess call in this module.
+_WINFLAGS: dict = (
+    {"creationflags": _subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+)
 
 from PIL import Image
 
@@ -226,6 +233,7 @@ def _start_local_server(host_port: int = 9002) -> None:
     ping = subprocess.run(
         [docker, "info"],
         capture_output=True, text=True,
+        **_WINFLAGS,
     )
     if ping.returncode != 0:
         raise RuntimeError(
@@ -237,12 +245,14 @@ def _start_local_server(host_port: int = 9002) -> None:
     subprocess.run(
         [docker, "rm", "-f", "gemi-inference"],
         capture_output=True,
+        **_WINFLAGS,
     )
 
     # Only pull if the image isn't already cached locally
     inspect = subprocess.run(
         [docker, "image", "inspect", ROBOFLOW_DOCKER_IMAGE_CPU],
         capture_output=True,
+        **_WINFLAGS,
     )
     if inspect.returncode != 0:
         logger.info(
@@ -252,6 +262,7 @@ def _start_local_server(host_port: int = 9002) -> None:
         pull = subprocess.run(
             [docker, "pull", ROBOFLOW_DOCKER_IMAGE_CPU],
             capture_output=True, text=True, timeout=1800,  # 30 min for large image
+            **_WINFLAGS,
         )
         if pull.returncode != 0:
             raise RuntimeError(
@@ -268,6 +279,7 @@ def _start_local_server(host_port: int = 9002) -> None:
             ROBOFLOW_DOCKER_IMAGE_CPU,
         ],
         capture_output=True, text=True,
+        **_WINFLAGS,
     )
     if run_result.returncode != 0:
         raise RuntimeError(
@@ -292,6 +304,7 @@ def _start_local_server(host_port: int = 9002) -> None:
     logs = subprocess.run(
         [docker, "logs", "gemi-inference"],
         capture_output=True, text=True,
+        **_WINFLAGS,
     )
     raise RuntimeError(
         f"Roboflow inference server did not become available within {max_wait} seconds.\n"

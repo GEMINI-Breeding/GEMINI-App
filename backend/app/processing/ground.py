@@ -27,6 +27,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+
+# Suppress console windows on Windows for every subprocess call in this module.
+_WINFLAGS: dict = (
+    {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+)
 import time
 import uuid
 from pathlib import Path
@@ -893,6 +898,7 @@ def run_stitching(
                     text=True,
                     timeout=60,
                     env=_preflight_env,
+                    **_WINFLAGS,
                 )
                 _pf_out = (_pf.stdout or "").strip()
                 _pf_err = (_pf.stderr or "").strip()
@@ -917,6 +923,7 @@ def run_stitching(
                 stderr=subprocess.PIPE,
                 text=True,
                 env=_subprocess_env,
+                **_WINFLAGS,
             )
 
             # Resource snapshot helper — emits RAM + VRAM in one line
@@ -959,6 +966,7 @@ def run_stitching(
                             ],
                             stderr=subprocess.DEVNULL,
                             text=True,
+                            **_WINFLAGS,
                         ).strip()
                         for gpu_idx, line in enumerate(out.splitlines()):
                             p = [x.strip() for x in line.split(",")]
@@ -1807,6 +1815,7 @@ def _image_needs_rebuild() -> bool:
         ],
         capture_output=True,
         text=True,
+        **_WINFLAGS,
     )
     if result.returncode != 0:
         return True  # image doesn't exist
@@ -1861,6 +1870,7 @@ def _build_bin_extractor_image(emit: Callable[[dict], None]) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            **_WINFLAGS,
         )
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -1897,6 +1907,7 @@ def _ensure_docker_ready(emit: Callable[[dict], None]) -> None:
             capture_output=True,
             check=True,
             timeout=15,
+            **_WINFLAGS,
         )
     except FileNotFoundError:
         raise RuntimeError(
@@ -1985,7 +1996,7 @@ def _run_docker_container(
 
     # Start the container.  This returns as soon as Docker confirms the
     # container is running — no blocking on stdout/stderr pipes.
-    start = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    start = subprocess.run(cmd, capture_output=True, text=True, timeout=60, **_WINFLAGS)
     if start.returncode != 0:
         raise RuntimeError(
             f"docker run -d failed to start container:\n"
@@ -2002,6 +2013,7 @@ def _run_docker_container(
             r = subprocess.run(
                 ["docker", "wait", container_name],
                 capture_output=True, text=True,
+                **_WINFLAGS,
             )
             _result_q.put(("done", r))
         except Exception as exc:
@@ -2023,6 +2035,7 @@ def _run_docker_container(
                     subprocess.run(
                         ["docker", "stop", container_name],
                         timeout=30, capture_output=True,
+                        **_WINFLAGS,
                     )
                 except Exception as e:
                     logger.warning("docker stop %s failed: %s", container_name, e)
@@ -2042,6 +2055,7 @@ def _run_docker_container(
         logs = subprocess.run(
             ["docker", "logs", container_name],
             capture_output=True, text=True, timeout=30,
+            **_WINFLAGS,
         )
         stdout = logs.stdout or ""
         stderr = logs.stderr or ""
@@ -2057,6 +2071,7 @@ def _run_docker_container(
         subprocess.run(
             ["docker", "rm", "-f", container_name],
             capture_output=True, timeout=30,
+            **_WINFLAGS,
         )
     except Exception as e:
         logger.warning("docker rm %s failed: %s", container_name, e)
