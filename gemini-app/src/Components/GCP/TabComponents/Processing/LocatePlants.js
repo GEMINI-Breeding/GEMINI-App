@@ -17,19 +17,19 @@ import {
     IconButton
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
+import { useDataSetters, useDataState } from "../../../../DataContext";
 import { DataGrid } from '@mui/x-data-grid';
-import { locatePlants } from "../../../../api/processing";
+import { locatePlants, getLocateInfo } from "../../../../api/processing";
 import { BACKEND_MODE } from "../../../../api/config";
+import { checkRuns } from "../../../../api/files";
 
 function LocateMenu({ open, onClose, item, platform, sensor }) {
 
-    const { 
+    const {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         batchSizeLocate,
         isLocating,
         closeMenu,
@@ -144,8 +144,8 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
         const fetchDataAndUpdate = async () => {
             try {
                 // obtain model train files
-                const train_files = await fetchData(
-                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                const train_files = await checkRuns(
+                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
                 );
                 const filteredEntries = Object.entries(train_files).filter(([path, dates]) => {
                     return dates.includes(item?.date);
@@ -163,25 +163,13 @@ function LocateMenu({ open, onClose, item, platform, sensor }) {
                 setModelOptions([...options, { id: 'Best', path: '', performance: -1 }]);
 
                 // obtain locate run files
-                const locate_files = await fetchData(
-                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
+                const locate_files = await checkRuns(
+                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${item?.date}/${platform}/${sensor}/Locate`
                 );
 
-                const response = await fetch(`${flaskUrl}get_locate_info`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(locate_files),
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    setRowsData(data);
-                    console.log("Response from server:", data);
-                } else {
-                    const errorData = await response.json();
-                    console.error("Error details:", errorData);
-                }
+                const data = await getLocateInfo(locate_files);
+                setRowsData(data);
+                console.log("Response from server:", data);
             } catch (error) {
                 console.error("Error fetching model information: ", error);
             }

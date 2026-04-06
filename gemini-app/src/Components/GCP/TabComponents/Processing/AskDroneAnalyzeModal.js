@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import CircularProgress from "@mui/material/CircularProgress";
-import { useDataState, useDataSetters, fetchData } from "../../../../DataContext";
+import { useDataState, useDataSetters } from "../../../../DataContext";
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
     Grid,
@@ -13,11 +13,11 @@ import {
     IconButton,
     DialogContent
 } from "@mui/material";
+import { processDroneTiff } from "../../../../api";
 
 const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
     // Global state
     const {
-        flaskUrl,
         nowDroneProcessing,
         selectedLocationGCP,
         selectedPopulationGCP,
@@ -29,7 +29,7 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
     } = useDataState();
 
     // Global setters
-    const { 
+    const {
         // setNowDroneProcessing,
         setIsDroneExtracting,
     } = useDataSetters();
@@ -46,21 +46,7 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
                 sensor: item.sensor,
             };
 
-            fetch(`${flaskUrl}process_drone_tiff`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(data),
-            })
-            .then((response) => {
-                if (!response.ok) {
-                    return response.json().then((error) => {
-                        throw new Error(error.message);
-                    });
-                }
-                return response.json();
-            })
+            processDroneTiff(data)
             .then((data) => {
                 console.log("Drone tiff file processed!");
                 // setNowDroneProcessing(false);
@@ -72,7 +58,6 @@ const AskDroneAnalyzeModal = ({ open, onClose, item }) => {
         nowDroneProcessing,
         item,
         onClose,
-        flaskUrl,
         selectedLocationGCP,
         selectedPopulationGCP,
         // setNowDroneProcessing,

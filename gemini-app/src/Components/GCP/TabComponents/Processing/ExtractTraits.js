@@ -20,18 +20,18 @@ import {
     DialogActions
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
-import { extractTraits } from "../../../../api/processing";
+import { useDataSetters, useDataState } from "../../../../DataContext";
+import { extractTraits, bestLocateFile, bestModelFile } from "../../../../api/processing";
 import { BACKEND_MODE } from "../../../../api/config";
+import { listDirs, checkRuns } from "../../../../api/files";
 
 function ExtractMenu({ open, onClose, item, platform, sensor }) {
 
-    const { 
+    const {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         closeMenu,
         isExtracting,
         batchSizeExtract,
@@ -132,33 +132,33 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                 let updatedData = {};
                 let locate_files = {};
                 let train_files = {};
-                const dates = await fetchData(
-                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                const dates = await listDirs(
+                    `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                 );
 
                 for (const date of dates) {
-                    const platforms = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                    const platforms = await listDirs(
+                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                     );
 
                     for (const platform of platforms) {
-                        const sensors = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                        const sensors = await listDirs(
+                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                         );
 
                         for (const sensor of sensors) {
-                            
+
                             // get locate files
-                            locate_files = await fetchData(
-                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
+                            locate_files = await checkRuns(
+                                `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
                             )
                             if (Object.keys(locate_files).length === 0) {
                                 locate_files = false;
                             }
-                            
+
                             // get model files
-                            train_files = await fetchData(
-                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
+                            train_files = await checkRuns(
+                                `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
                             );
                             if (Object.keys(train_files).length === 0) {
                                 train_files = false;
@@ -206,36 +206,18 @@ function ExtractMenu({ open, onClose, item, platform, sensor }) {
                 console.log("All locates: ", locates)
                 console.log("All models: ", models)
 
-                const locateResponse = await fetch(`${flaskUrl}best_locate_file`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(locates),
-                });
-                if (locateResponse.ok) {
-                    const bestLocateData = await locateResponse.json();
-                    setBestLocate(bestLocateData)
-                } else {
-                    const errorData = await locateResponse.json();
-                    console.error("Error details: ", errorData)
-                    alert("Error fetching best locate file: " + errorData.error);
+                try {
+                    const bestLocateData = await bestLocateFile(locates);
+                    setBestLocate(bestLocateData);
+                } catch (err) {
+                    console.error("Error fetching best locate file:", err);
                 }
-                
-                const modelResponse = await fetch(`${flaskUrl}best_model_file`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(models),
-                });
-                if (modelResponse.ok) {
-                    const bestModelData = await modelResponse.json();
-                    setBestModel(bestModelData)
-                } else {
-                    const errorData = await modelResponse.json();
-                    console.error("Error details: ", errorData)
-                    alert("Error fetching best model file: " + errorData.error);
+
+                try {
+                    const bestModelData = await bestModelFile(models);
+                    setBestModel(bestModelData);
+                } catch (err) {
+                    console.error("Error fetching best model file:", err);
                 }
         
                 setSelections({

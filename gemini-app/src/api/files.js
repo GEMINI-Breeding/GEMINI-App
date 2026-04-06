@@ -100,12 +100,12 @@ export const getPresignedUrl = async (filePath) => {
  * In framework mode: returns an S3 path (s3://bucket/object) for direct MinIO access.
  * In flask mode: returns an HTTP URL to the Flask file endpoint.
  */
-export const getTileFileUrl = (filePath, flaskUrl) => {
+export const getTileFileUrl = (filePath) => {
     if (BACKEND_MODE === 'framework') {
         const objectPath = filePath.replace(/^files\//, '');
         return `s3://${STORAGE_BUCKET}/${objectPath}`;
     }
-    return `${flaskUrl}${filePath}`;
+    return `${FLASK_URL}${filePath}`;
 };
 
 export const fetchDataRootDir = () =>
@@ -329,6 +329,188 @@ export const restoreImages = async (payload) => {
 /**
  * Get orthomosaic metadata. Framework mode: try to read metadata JSON from MinIO.
  */
+// -- Check labels (annotation file listing) --
+
+/**
+ * Check if label/annotation files exist at a path. Returns array of filenames.
+ * Flask `check_labels` endpoint returns a list of files in the given annotations directory.
+ */
+export const checkLabels = async (dirPath) => {
+    if (BACKEND_MODE !== 'flask') {
+        try {
+            const items = await fetchJson(`${FRAMEWORK_URL}files/list/gemini/${dirPath}`);
+            const prefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+            const fileNames = [];
+            for (const item of items) {
+                const objectName = item.object_name || '';
+                const relative = objectName.startsWith(prefix)
+                    ? objectName.slice(prefix.length)
+                    : objectName.split('/').pop();
+                if (relative && !relative.includes('/')) {
+                    fileNames.push(relative);
+                }
+            }
+            return fileNames;
+        } catch (_) {
+            return [];
+        }
+    }
+    return fetchJson(`${FLASK_URL}check_labels/${dirPath}`);
+};
+
+// -- Check runs (training/locate run directories) --
+
+/**
+ * Check runs/files at a given path. Flask `check_runs` returns a dict of subdirectories
+ * with their contents. Framework mode: list MinIO objects and reconstruct.
+ */
+export const checkRuns = async (dirPath) => {
+    if (BACKEND_MODE !== 'flask') {
+        try {
+            const items = await fetchJson(`${FRAMEWORK_URL}files/list/gemini/${dirPath}`);
+            const prefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+            const result = {};
+            for (const item of items) {
+                const objectName = item.object_name || '';
+                const relative = objectName.startsWith(prefix)
+                    ? objectName.slice(prefix.length)
+                    : objectName.split('/').pop();
+                const parts = relative.split('/');
+                if (parts.length >= 1 && parts[0]) {
+                    const dirName = parts[0];
+                    if (!result[dirName]) {
+                        result[dirName] = [];
+                    }
+                    if (parts.length > 1) {
+                        result[dirName].push(parts.slice(1).join('/'));
+                    }
+                }
+            }
+            return result;
+        } catch (_) {
+            return {};
+        }
+    }
+    return fetchJson(`${FLASK_URL}check_runs/${dirPath}`);
+};
+
+// -- Directory management --
+
+/**
+ * Check if the data directory is accessible.
+ * Framework mode: check if the MinIO bucket exists.
+ */
+export const checkDataDir = async (dirPath) => {
+    if (BACKEND_MODE !== 'flask') {
+        try {
+            await fetchJson(`${FRAMEWORK_URL}files/list/gemini/`);
+            return { exists: true };
+        } catch (_) {
+            return { exists: false };
+        }
+    }
+    return fetchJson(`${FLASK_URL}check_data_dir?path=${encodeURIComponent(dirPath || '')}`);
+};
+
+/**
+ * Browse for a data directory.
+ * Framework mode: not applicable (MinIO has no directory picker).
+ */
+export const browseDataDir = () => {
+    if (BACKEND_MODE !== 'flask') {
+        return Promise.resolve({ path: '' });
+    }
+    return fetchJson(`${FLASK_URL}browse_data_dir`);
+};
+
+/**
+ * Create a data directory.
+ * Framework mode: MinIO bucket is created at deployment; no-op.
+ */
+export const createDataDir = async (dirPath) => {
+    if (BACKEND_MODE !== 'flask') {
+        return { status: 'ok' };
+    }
+    return postJson(`${FLASK_URL}create_data_dir`, { path: dirPath });
+};
+
+// -- Data management --
+
+/**
+ * Get binary report for an extracted dataset.
+ * Returns the report as a text string.
+ */
+export const getBinaryReport = async (params) => {
+    if (BACKEND_MODE !== 'flask') {
+        // Framework: read report JSON from MinIO
+        const { year, experiment, location, population, date, platform, sensor } = params;
+        const reportPath = `Intermediate/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/binary_report.json`;
+        return fetchJson(`${FRAMEWORK_URL}files/download/gemini/${reportPath}`).catch(() => null);
+    }
+    const response = await fetch(`${FLASK_URL}get_binary_report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+    });
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`API error ${response.status}: ${errorText}`);
+    }
+    return response.text();
+};
+
+/**
+ * Download Amiga-format images as a zip.
+ * Returns the raw Response object for streaming/progress support.
+ */
+export const downloadAmigaImages = async (params, options = {}) => {
+    if (BACKEND_MODE !== 'flask') {
+        return postJson(`${FRAMEWORK_URL}files/download_amiga`, params);
+    }
+    const response = await fetch(`${FLASK_URL}download_amiga_images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        ...options,
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+    return response;
+};
+
+/**
+ * Update dataset metadata (rename, edit).
+ */
+export const updateData = (params) => {
+    if (BACKEND_MODE !== 'flask') {
+        return postJson(`${FRAMEWORK_URL}datasets/update_metadata`, params);
+    }
+    return postJson(`${FLASK_URL}update_data`, params);
+};
+
+/**
+ * View synced data (msgs_synced.csv contents).
+ */
+export const viewSyncedData = async (params) => {
+    if (BACKEND_MODE !== 'flask') {
+        const { year, experiment, location, population, date, platform, sensor } = params;
+        const csvPath = `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/msgs_synced.csv`;
+        try {
+            const response = await fetch(`${FRAMEWORK_URL}files/download/gemini/${csvPath}`);
+            if (response.ok) {
+                const text = await response.text();
+                return { csv: text };
+            }
+            return { csv: '' };
+        } catch (_) {
+            return { csv: '' };
+        }
+    }
+    return postJson(`${FLASK_URL}view_synced_data`, params);
+};
+
 export const getOrthoMetadata = async (params) => {
     if (BACKEND_MODE !== 'flask') {
         const { year, experiment, location, population, date, platform, sensor, fileName } = params;

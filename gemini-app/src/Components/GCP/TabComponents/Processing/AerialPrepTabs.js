@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography } from "@mui/material";
-import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
+import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { AskDroneAnalyzeModal } from "./AskDroneAnalyzeModal";
 import Snackbar from "@mui/material/Snackbar";
+import { listDirs, listFiles } from "../../../../api/files";
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -15,7 +16,6 @@ export default function AerialPrepTabs() {
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         aerialPrepTab,
         isGCPReady
     } = useDataState();
@@ -36,20 +36,20 @@ export default function AerialPrepTabs() {
         const fetchDataAndUpdate = async () => {
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
-                    const dates = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                    const dates = await listDirs(
+                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
 
                     let updatedData = {};
 
                     for (const date of dates) {
-                        const platforms = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                        const platforms = await listDirs(
+                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
-                            const sensors = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                            const sensors = await listDirs(
+                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {
@@ -67,8 +67,8 @@ export default function AerialPrepTabs() {
                                 // Try to fetch processed files to check if completed
                                 try {
                                     // Check for ortho photo
-                                    const ortho_files = await fetchData(
-                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    const ortho_files = await listFiles(
+                                        `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
                                     // if (platform === "Drone" || platform === "Phone") {
                                         // check if files ending with .tif exist
@@ -78,8 +78,8 @@ export default function AerialPrepTabs() {
                                     // }
 
                                     // check for traits file
-                                    const trait_files = await fetchData(
-                                        `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    const trait_files = await listFiles(
+                                        `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                     );
                                     // if (platform === "Drone" || platform === "Phone") {
                                     // check if number of files ending with .geojson is greater than 0
@@ -137,8 +137,6 @@ export default function AerialPrepTabs() {
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
-        fetchData,
         aerialPrepTab,
     ]);
 

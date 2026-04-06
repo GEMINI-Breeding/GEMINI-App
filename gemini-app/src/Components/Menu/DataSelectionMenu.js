@@ -4,10 +4,10 @@ import { useDataState, useDataSetters, fetchData } from "../../DataContext";
 import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
 import { getOrthomosaicVersions } from "../../api/queries";
-import { getFileUrl } from "../../api/files";
+import { getFileUrl, listDirsNestedProcessed } from "../../api/files";
 
 const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetric, setSelectedMetric }) => {
-    const { genotypeOptions, selectedGenotypes, metricOptions, flaskUrl } = useDataState();
+    const { genotypeOptions, selectedGenotypes, metricOptions } = useDataState();
     const { setGenotypeOptions, setSelectedGenotypes, setMetricOptions } = useDataSetters();
 
     //////////////////////////////////////////
@@ -34,14 +34,6 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
     //////////////////////////////////////////
     // Fetch data based on backend mode
     //////////////////////////////////////////
-    const getData = async (url) => {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error("Network response was not ok");
-        }
-        return await response.json();
-    };
-
     useEffect(() => {
         if (BACKEND_MODE === 'framework' || BACKEND_MODE === 'hybrid') {
             // Framework mode: fetch experiment list
@@ -50,7 +42,7 @@ const DataSelectionMenu = ({ onTilePathChange, onGeoJsonPathChange, selectedMetr
                 .catch((error) => console.error("Error fetching experiments:", error));
         } else {
             // Flask mode: fetch nested directory structure
-            getData(`${flaskUrl}list_dirs_nested_processed`)
+            listDirsNestedProcessed()
                 .then((data) => setNestedStructure(data))
                 .catch((error) => console.error("Error fetching nested structure:", error));
         }

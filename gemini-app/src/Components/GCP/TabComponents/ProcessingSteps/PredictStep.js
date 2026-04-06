@@ -18,9 +18,10 @@ import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import { useDataState, fetchData } from "../../../../DataContext";
-import { listDirs } from '../../../../api/files';
+import { useDataState } from "../../../../DataContext";
+import { listDirs, listFiles } from '../../../../api/files';
 import { getOrthomosaicVersions, getInferenceProgress } from '../../../../api/queries';
+import { runRoboflowInference } from '../../../../api/processing';
 import InferenceTable from "../../../StatsMenu/InferenceTable";
 import AerialPrepTabs from "../Processing/AerialPrepTabs";
 
@@ -29,8 +30,7 @@ import useTrackComponent from "../../../../useTrackComponent";
 function PredictStep() {
     useTrackComponent("PredictStep");
 
-    const { 
-        flaskUrl,
+    const {
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,
@@ -74,11 +74,11 @@ function PredictStep() {
     const checkDroneFolder = async (date) => {
         const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
         try {
-            const platforms = await fetchData(`${flaskUrl}list_dirs/${basePath}`);
+            const platforms = await listDirs(basePath);
             for (const platform of platforms) {
-                const sensors = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                const sensors = await listDirs(`${basePath}/${platform}`);
                 for (const sensor of sensors) {
-                    const files = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}`);
+                    const files = await listFiles(`${basePath}/${platform}/${sensor}`);
                     // if (files.some((file) => file.includes("-RGB.tif"))) {
                     if (files.some((file) => file.includes("Pyramid.tif"))) {
                         return true;
@@ -92,14 +92,14 @@ function PredictStep() {
     const checkAgRowStitchFolder = async (date) => {
         const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
         try {
-            const platforms = await fetchData(`${flaskUrl}list_dirs/${basePath}`);
+            const platforms = await listDirs(basePath);
             for (const platform of platforms) {
-                const sensors = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                const sensors = await listDirs(`${basePath}/${platform}`);
                 for (const sensor of sensors) {
-                    const subDirs = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}/${sensor}`);
+                    const subDirs = await listDirs(`${basePath}/${platform}/${sensor}`);
                     const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
                     for (const agrowstitchDir of agrowstitchDirs) {
-                        const agrowstitchFiles = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
+                        const agrowstitchFiles = await listFiles(`${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
                         if (agrowstitchFiles.some((file) => file === "combined_mosaic_utm.tif") || agrowstitchFiles.some((file) => file.includes("_utm.tif"))) {
                             return true;
                         }
@@ -114,7 +114,7 @@ function PredictStep() {
     const checkForDroneOrthomosaics = async () => {
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
             try {
-                const dates = await fetchData(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+                const dates = await listDirs(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
                 let hasDroneData = false;
                 
                 for (const date of dates) {
@@ -137,14 +137,14 @@ function PredictStep() {
     // Check for drone orthomosaics when GCP selections change
     useEffect(() => {
         checkForDroneOrthomosaics();
-    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     // Only use filtered dates (with stitch)
     useEffect(() => {
         const fetchDatesWithStitch = async () => {
             if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
                 try {
-                    const dates = await fetchData(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+                    const dates = await listDirs(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
                     const filteredDates = [];
                     for (const date of dates) {
                         const hasDronePyramid = await checkDroneFolder(date);
@@ -162,7 +162,7 @@ function PredictStep() {
             }
         };
         fetchDatesWithStitch();
-    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP, flaskUrl]);
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     useEffect(() => {
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP && selectedDate) {
@@ -250,38 +250,27 @@ function PredictStep() {
         const finalIncludeMasks = modelTask === 'segmentation' ? true : includeMasks;
 
         try {
-            const response = await fetch(`${flaskUrl}run_roboflow_inference`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    apiUrl: selectedApiUrl,
-                    inferenceMode,
-                    apiKey,
-                    modelId,
-                    modelTask,
-                    includeMasks: finalIncludeMasks,
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    platform: selectedPlatform,
-                    sensor: selectedSensor,
-                    agrowstitchDir: selectedAgrowstitch
-                })
+            const data = await runRoboflowInference({
+                apiUrl: selectedApiUrl,
+                inferenceMode,
+                apiKey,
+                modelId,
+                modelTask,
+                includeMasks: finalIncludeMasks,
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: selectedDate,
+                platform: selectedPlatform,
+                sensor: selectedSensor,
+                agrowstitchDir: selectedAgrowstitch
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                setMessage(data.message || "Inference started successfully");
-                
-                // Poll for progress
-                pollProgress();
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || "Failed to start inference");
-                setIsProcessing(false);
-            }
+            setMessage(data.message || "Inference started successfully");
+
+            // Poll for progress
+            pollProgress();
         } catch (error) {
             console.error("Error starting inference:", error);
             setError("Network error occurred");

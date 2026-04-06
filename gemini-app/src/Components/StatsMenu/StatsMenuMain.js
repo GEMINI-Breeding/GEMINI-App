@@ -8,7 +8,7 @@ import { NestedSection, FolderTab, FolderTabs } from "../GCP/TabComponents/Proce
 
 // gemini-app components
 import useTrackComponent from "../../useTrackComponent";
-import { fetchData, useDataSetters, useDataState } from "../../DataContext";
+import { useDataSetters, useDataState } from "../../DataContext";
 import TableViewTab from "./TableTab";
 import GraphTab from "./GraphTab";
 import DownloadsTab from "./DownloadsTab";
@@ -26,8 +26,7 @@ const StatsMenuMain = () => {
     useTrackComponent("StatsMenuMain");
 
     // Shared Global States
-    const { 
-        flaskUrl,
+    const {
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,

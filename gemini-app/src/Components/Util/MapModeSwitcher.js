@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { drawPolygonMode, modifyMode, translateMode, viewMode, selectionMode } from "../GCP/TabComponents/BoundaryMap";
 import { useDataState, useDataSetters } from "../../DataContext";
-import { BACKEND_MODE, FRAMEWORK_URL } from "../../api/config";
+import { saveGeojson } from "../../api/queries";
 import { Button } from "@mui/material";
 import { save } from "@loaders.gl/core";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -15,7 +15,6 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         activeStepBoundaryPrep,
         featureCollectionPop,
         featureCollectionPlot,
@@ -140,27 +139,15 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
             filename: filename,
         };
 
-        const saveUrl = BACKEND_MODE === 'framework'
-            ? `${FRAMEWORK_URL}geojson/save`
-            : `${flaskUrl}save_geojson`;
-        const saveBody = BACKEND_MODE === 'framework'
-            ? { file_path: `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${filename}`, geojson: fc }
-            : payload;
-        const response = await fetch(saveUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(saveBody),
-        });
-        const data = await response.json();
-        console.log(data);
-
-        if (response.ok) {
+        try {
+            const filePath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${filename}`;
+            const data = await saveGeojson({ filePath, path: filePath, geojson: fc, ...payload });
+            console.log(data);
             setButtonText("Saved!");
             setTimeout(() => setButtonText("Save"), 1500);
             return 0;
-        } else {
+        } catch (err) {
+            console.error("Error saving geojson:", err);
             setButtonText("Save Failed");
             setTimeout(() => setButtonText("Save"), 1500);
             return 1;

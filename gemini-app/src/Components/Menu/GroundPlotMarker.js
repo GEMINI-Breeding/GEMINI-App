@@ -52,15 +52,14 @@ import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import { useDataState } from "../../DataContext";
 import ReactMapGL, { Source, Layer } from 'react-map-gl';
 import { BACKEND_MODE } from '../../api/config';
-import { listFiles } from '../../api/files';
+import { listFiles, getFileUrl } from '../../api/files';
 import { filterPlotBorders } from '../../api/queries';
 import {
     getPlotData, getImagePlotIndex, getGpsData, getStitchDirection,
-    getGpsReference, setGpsReference, shiftGps, undoGpsShift,
-    checkGpsShiftStatus, markPlot, deletePlot, saveStitchMask,
+    getGpsReference, setGpsReference as setGpsReferenceApi, shiftGps, undoGpsShift,
+    checkGpsShiftStatus as checkGpsShiftStatusApi, markPlot, deletePlot, saveStitchMask,
     getMaxPlotIndex
 } from '../../api/plots';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -191,7 +190,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const [initialLoading, setInitialLoading] = useState(false);
     const [gpsDataLoading, setGpsDataLoading] = useState(false);
     const [markedPlotsLoading, setMarkedPlotsLoading] = useState(false);
-    const {flaskUrl} = useDataState();
     const [directory, setDirectory] = useState("");
     const [plotSelectionState, setPlotSelectionState] = useState('start');
     const imageRef = React.useRef(null);
@@ -310,53 +308,34 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchMarkedPlots = async () => {
         if (!directory) return;
         try {
-            const response = await fetch(`${flaskUrl}get_plot_data`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
+            const data = await getPlotData({ directory });
             console.log("DEBUG: get_plot_data response:", data);
-            
-            if (response.ok) {
-                const sortedPlots = data.sort((a, b) => a.plot_index - b.plot_index);
-                
-                const enhancedPlots = await Promise.all(sortedPlots.map(async (plot) => {
-                    try {
-                        const imageName = plot.image_name ? plot.image_name.split('/').pop() : null;
-                        if (!imageName) {
-                            return plot;
-                        }
-                        
-                        const plotResponse = await fetch(`${flaskUrl}get_image_plot_index`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                directory: directory,
-                                image_name: imageName,
-                            }),
-                        });
-                        const plotData = await plotResponse.json();
-                        if (plotResponse.ok) {
-                            return {
-                                ...plot,
-                                plot_name: plotData.plot_name,
-                                accession: plotData.accession
-                            };
-                        } else {
-                            return plot;
-                        }
-                    } catch (error) {
-                        console.error("Error fetching plot metadata for plot", plot.plot_index, ":", error);
+
+            const sortedPlots = data.sort((a, b) => a.plot_index - b.plot_index);
+
+            const enhancedPlots = await Promise.all(sortedPlots.map(async (plot) => {
+                try {
+                    const imageName = plot.image_name ? plot.image_name.split('/').pop() : null;
+                    if (!imageName) {
+                        return plot;
                     }
-                    return plot;
-                }));
-                
-                setMarkedPlots(enhancedPlots);
-            } else {
-                console.error("Failed to fetch marked plots:", data.error || data);
-                setMarkedPlots([]);
-            }
+
+                    const plotData = await getImagePlotIndex({
+                        directory: directory,
+                        image_name: imageName,
+                    });
+                    return {
+                        ...plot,
+                        plot_name: plotData.plot_name,
+                        accession: plotData.accession
+                    };
+                } catch (error) {
+                    console.error("Error fetching plot metadata for plot", plot.plot_index, ":", error);
+                }
+                return plot;
+            }));
+
+            setMarkedPlots(enhancedPlots);
         } catch (error) {
             console.error("Error fetching marked plots:", error);
             setMarkedPlots([]);
@@ -468,27 +447,18 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchGpsData = async () => {
         if (!directory) return;
         try {
-            const response = await fetch(`${flaskUrl}get_gps_data`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                setGpsData(data);
-                 if (data.length > 0) {
-                    const lons = data.map(p => p.lon).filter(l => typeof l === 'number' && !isNaN(l));
-                    const lats = data.map(p => p.lat).filter(l => typeof l === 'number' && !isNaN(l));
-                    if (lons.length > 0 && lats.length > 0) {
-                        setViewState({
-                            longitude: lons.reduce((a, b) => a + b, 0) / lons.length,
-                            latitude: lats.reduce((a, b) => a + b, 0) / lats.length,
-                            zoom: 20
-                        });
-                    }
+            const data = await getGpsData({ directory });
+            setGpsData(data);
+            if (data.length > 0) {
+                const lons = data.map(p => p.lon).filter(l => typeof l === 'number' && !isNaN(l));
+                const lats = data.map(p => p.lat).filter(l => typeof l === 'number' && !isNaN(l));
+                if (lons.length > 0 && lats.length > 0) {
+                    setViewState({
+                        longitude: lons.reduce((a, b) => a + b, 0) / lons.length,
+                        latitude: lats.reduce((a, b) => a + b, 0) / lats.length,
+                        zoom: 20
+                    });
                 }
-            } else {
-                console.error("Failed to fetch GPS data:", data.error);
             }
         } catch (error) {
             console.error("Error fetching GPS data:", error);
@@ -509,13 +479,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchStitchDirection = async () => {
         if (!directory) return;
         try {
-            const response = await fetch(`${flaskUrl}get_stitch_direction`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
-            if (response.ok && data.stitch_direction) {
+            const data = await getStitchDirection({ directory });
+            if (data.stitch_direction) {
                 setCurrentStitchDirection(data.stitch_direction);
                 setStitchDirection(data.stitch_direction);
             }
@@ -527,18 +492,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchGpsReference = async () => {
         if (!directory) return;
         try {
-            const response = await fetch(`${flaskUrl}get_gps_reference`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                if (data.reference_lat !== null && data.reference_lon !== null) {
-                    setGpsReference({ lat: data.reference_lat, lon: data.reference_lon });
-                } else {
-                    setGpsReference(null);
-                }
+            const data = await getGpsReference({ directory });
+            if (data.reference_lat !== null && data.reference_lon !== null) {
+                setGpsReference({ lat: data.reference_lat, lon: data.reference_lon });
+            } else {
+                setGpsReference(null);
             }
         } catch (error) {
             console.error("Error fetching GPS reference:", error);
@@ -548,18 +506,10 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const checkGpsShiftStatus = async () => {
         if (!directory) return;
         try {
-            const response = await fetch(`${flaskUrl}check_gps_shift_status`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            
-            const data = await response.json();
-            if (response.ok) {
-                setHasGpsShift(data.has_shift);
-                setGpsShiftOperation(data.shift_applied);
-                console.log(`GPS shift status: ${data.has_shift ? 'Applied' : 'None'}`);
-            }
+            const data = await checkGpsShiftStatusApi({ directory });
+            setHasGpsShift(data.has_shift);
+            setGpsShiftOperation(data.shift_applied);
+            console.log(`GPS shift status: ${data.has_shift ? 'Applied' : 'None'}`);
         } catch (error) {
             console.error("Error checking GPS shift status:", error);
             setHasGpsShift(false);
@@ -574,22 +524,13 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
 
         try {
-            const response = await fetch(`${flaskUrl}set_gps_reference`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    directory: directory,
-                    lat: currentLatLon.lat,
-                    lon: currentLatLon.lon
-                }),
+            await setGpsReferenceApi({
+                directory: directory,
+                lat: currentLatLon.lat,
+                lon: currentLatLon.lon
             });
-
-            if (response.ok) {
-                setGpsReference({ lat: currentLatLon.lat, lon: currentLatLon.lon });
-                console.log(`GPS reference set to: ${currentLatLon.lat}, ${currentLatLon.lon}`);
-            } else {
-                console.error("Failed to set GPS reference");
-            }
+            setGpsReference({ lat: currentLatLon.lat, lon: currentLatLon.lon });
+            console.log(`GPS reference set to: ${currentLatLon.lat}, ${currentLatLon.lon}`);
         } catch (error) {
             console.error("Error setting GPS reference:", error);
         }
@@ -603,26 +544,15 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
         setGpsOperationLoading(true);
         try {
-            const response = await fetch(`${flaskUrl}shift_gps`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    directory: directory,
-                    current_lat: currentLatLon.lat,
-                    current_lon: currentLatLon.lon
-                }),
+            const data = await shiftGps({
+                directory: directory,
+                current_lat: currentLatLon.lat,
+                current_lon: currentLatLon.lon
             });
-
-            const data = await response.json();
-            if (response.ok) {
-                setHasGpsShift(true);
-                setGpsShiftOperation(data.shift_applied);
-                setGpsCache(new Map());
-                await handleRefilterPlots();
-                
-            } else {
-                console.error("Failed to shift GPS:", data.error);
-            }
+            setHasGpsShift(true);
+            setGpsShiftOperation(data.shift_applied);
+            setGpsCache(new Map());
+            await handleRefilterPlots();
         } catch (error) {
             console.error("Error shifting GPS:", error);
         } finally {
@@ -633,22 +563,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const handleUndoGpsShift = async () => {
         setGpsOperationLoading(true);
         try {
-            const response = await fetch(`${flaskUrl}undo_gps_shift`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory: directory }),
-            });
-
-            const data = await response.json();
-            if (response.ok) {
-                setHasGpsShift(false);
-                setGpsShiftOperation(null);
-                setGpsCache(new Map());
-                await handleRefilterPlots();
-                
-            } else {
-                console.error("Failed to undo GPS shift:", data.error);
-            }
+            await undoGpsShift({ directory: directory });
+            setHasGpsShift(false);
+            setGpsShiftOperation(null);
+            setGpsCache(new Map());
+            await handleRefilterPlots();
         } catch (error) {
             console.error("Error undoing GPS shift:", error);
         } finally {
@@ -662,23 +581,15 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
             // Call filter_plot_borders endpoint first, similar to TableComponent
             if (obj) {
                 try {
-                    const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            year: obj.year,
-                            experiment: obj.experiment,
-                            location: obj.location,
-                            population: obj.population,
-                            date: obj.date,
-                        }),
+                    await filterPlotBorders({
+                        year: obj.year,
+                        experiment: obj.experiment,
+                        location: obj.location,
+                        population: obj.population,
+                        date: obj.date,
                     });
-                    if (!filterResponse.ok) {
-                        const errorData = await filterResponse.json().catch(() => null);
-                        console.warn('Could not filter plot borders during refilter.', errorData?.error);
-                    }
                 } catch (error) {
-                    console.error("Error filtering plot borders during refilter:", error);
+                    console.warn("Could not filter plot borders during refilter.", error.message);
                 }
             }
 
@@ -715,8 +626,6 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
     }, [imageIndex, imageList, directory]);
 
-    const API_ENDPOINT = `${flaskUrl}files`;
-
     const fetchImagePlotIndex = async () => {
         const imageName = imageList[imageIndex];
         if (!imageName) return;
@@ -732,48 +641,33 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         }
 
         try {
-            const response = await fetch(`${flaskUrl}get_image_plot_index`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    directory: directory,
-                    image_name: imageName,
-                }),
+            const data = await getImagePlotIndex({
+                directory: directory,
+                image_name: imageName,
             });
-            const data = await response.json();
-            if (response.ok) {
-                const result = {
-                    plot_index: data.plot_index,
-                    latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
-                    plot_name: data.plot_name,
-                    accession: data.accession
-                };
+            const result = {
+                plot_index: data.plot_index,
+                latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
+                plot_name: data.plot_name,
+                accession: data.accession
+            };
 
-                setGpsCache(prev => {
-                    const newCache = new Map(prev);
-                    newCache.set(cacheKey, result);
-                    if (newCache.size > 50) {
-                        const entries = Array.from(newCache.entries());
-                        const limitedEntries = entries.slice(-50);
-                        return new Map(limitedEntries);
-                    }
-                    
-                    return newCache;
-                });
+            setGpsCache(prev => {
+                const newCache = new Map(prev);
+                newCache.set(cacheKey, result);
+                if (newCache.size > 50) {
+                    const entries = Array.from(newCache.entries());
+                    const limitedEntries = entries.slice(-50);
+                    return new Map(limitedEntries);
+                }
 
-                setCurrentImagePlotIndex(result.plot_index);
-                setCurrentLatLon(result.latLon);
-                setCurrentPlotName(result.plot_name);
-                setCurrentAccession(result.accession);
-            } else {
-                console.error("Failed to fetch plot index:", response.status, data);
-                setCurrentImagePlotIndex(null);
-                setCurrentLatLon(null);
-                setCurrentPlotName(null);
-                setCurrentAccession(null);
-            }
+                return newCache;
+            });
+
+            setCurrentImagePlotIndex(result.plot_index);
+            setCurrentLatLon(result.latLon);
+            setCurrentPlotName(result.plot_name);
+            setCurrentAccession(result.accession);
         } catch (error) {
             console.error("Error fetching plot index for image", imageName, ":", error);
             setCurrentImagePlotIndex(null);
@@ -807,37 +701,28 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 if (gpsCache.has(cacheKey)) return; // Already cached
 
                 try {
-                    const response = await fetch(`${flaskUrl}get_image_plot_index`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            directory: directory,
-                            image_name: imageName,
-                        }),
+                    const data = await getImagePlotIndex({
+                        directory: directory,
+                        image_name: imageName,
                     });
-                    const data = await response.json();
-                    if (response.ok) {
-                        const result = {
-                            plot_index: data.plot_index,
-                            latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
-                            plot_name: data.plot_name,
-                            accession: data.accession
-                        };
+                    const result = {
+                        plot_index: data.plot_index,
+                        latLon: (data.lat !== null && data.lon !== null) ? { lat: data.lat, lon: data.lon } : null,
+                        plot_name: data.plot_name,
+                        accession: data.accession
+                    };
 
-                        setGpsCache(prev => {
-                            const newCache = new Map(prev);
-                            newCache.set(cacheKey, result);
-                            if (newCache.size > 50) {
-                                const entries = Array.from(newCache.entries());
-                                const limitedEntries = entries.slice(-50);
-                                return new Map(limitedEntries);
-                            }
-                            
-                            return newCache;
-                        });
-                    }
+                    setGpsCache(prev => {
+                        const newCache = new Map(prev);
+                        newCache.set(cacheKey, result);
+                        if (newCache.size > 50) {
+                            const entries = Array.from(newCache.entries());
+                            const limitedEntries = entries.slice(-50);
+                            return new Map(limitedEntries);
+                        }
+
+                        return newCache;
+                    });
                 } catch (error) {
                     // Silently fail for prefetch to avoid console spam
                 }
@@ -848,8 +733,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchImages = async () => {
         try {
             setImageViewerLoading(true);
-            const response = await fetch(`${flaskUrl}list_files/${directory}`);
-            const data = await response.json();
+            const data = await listFiles(directory);
             setImageList(data);
             setImageViewerLoading(false);
         } catch (error) {
@@ -861,18 +745,8 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     const fetchMaxPlotIndex = async () => {
         if (!directory) return -1;
         try {
-            const response = await fetch(`${flaskUrl}get_max_plot_index`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                return data.max_plot_index;
-            } else {
-                console.error("Failed to fetch max plot index:", data.error);
-                return -1;
-            }
+            const data = await getMaxPlotIndex({ directory });
+            return data.max_plot_index;
         } catch (error) {
             console.error("Error fetching max plot index:", error);
             return -1;
@@ -965,7 +839,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                 if (index === imageIndex) continue; 
     
                 const imageName = imageList[index];
-                const imageUrl = `${API_ENDPOINT}/${directory}${imageName}`;
+                const imageUrl = getFileUrl(`${directory}${imageName}`);
                 
                 if (!preloadedImagesRef.current.has(imageUrl)) {
                     preloadedImagesRef.current.set(imageUrl, true);
@@ -977,7 +851,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
     
         return () => window.cancelIdleCallback(handle);
     
-    }, [imageIndex, imageList, directory, API_ENDPOINT]);
+    }, [imageIndex, imageList, directory]);
 
 
     const handlePrevious = () => {
@@ -1041,38 +915,27 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         let originalStartImageIndex = null;
 
         try {
-            const response = await fetch(`${flaskUrl}mark_plot`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    directory: directory,
-                    start_image_name: startImageName,
-                    end_image_name: endImageName,
-                    plot_index: plotIndex,
-                    camera: obj.camera,
-                    stitch_direction: direction,
-                    shift_all: shiftAll,
-                    shift_amount: shiftAmount,
-                    original_start_image_index: originalStartImageIndex
-                }),
+            await markPlot({
+                directory: directory,
+                start_image_name: startImageName,
+                end_image_name: endImageName,
+                plot_index: plotIndex,
+                camera: obj.camera,
+                stitch_direction: direction,
+                shift_all: shiftAll,
+                shift_amount: shiftAmount,
+                original_start_image_index: originalStartImageIndex
             });
+            fetchMarkedPlots();
+            setCurrentStitchDirection(direction);
+            setGpsCache(new Map());
+            const nextPlotIndex = plotIndex + 1;
+            setPlotIndex(nextPlotIndex);
+            onPlotIndexChange(nextPlotIndex);
 
-            if (response.ok) {
-                fetchMarkedPlots();
-                setCurrentStitchDirection(direction);
-                setGpsCache(new Map());
-                const nextPlotIndex = plotIndex + 1;
-                setPlotIndex(nextPlotIndex);
-                onPlotIndexChange(nextPlotIndex);
-                
-                setPlotSelectionState('start');
-                setStartImageName(null);
-                setShiftAll(false);
-            } else {
-                console.error("Failed to mark plot end with stitch direction");
-            }
+            setPlotSelectionState('start');
+            setStartImageName(null);
+            setShiftAll(false);
         } catch (error) {
             console.error("Error marking plot end:", error);
         }
@@ -1094,17 +957,9 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
 
     const handleDeletePlot = async (plotIndexToDelete) => {
         try {
-            const response = await fetch(`${flaskUrl}delete_plot`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory, plot_index: plotIndexToDelete }),
-            });
-            if (response.ok) {
-                fetchMarkedPlots();
-                setGpsCache(new Map());
-            } else {
-                console.error("Failed to delete plot");
-            }
+            await deletePlot({ directory, plot_index: plotIndexToDelete });
+            fetchMarkedPlots();
+            setGpsCache(new Map());
         } catch (error) {
             console.error("Error deleting plot:", error);
         }
@@ -1322,20 +1177,11 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         if (!pendingCropMask || !directory) return;
 
         try {
-            const response = await fetch(`${flaskUrl}save_stitch_mask`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    directory: directory,
-                    mask: pendingCropMask
-                }),
+            await saveStitchMask({
+                directory: directory,
+                mask: pendingCropMask
             });
-
-            if (response.ok) {
-                console.log("Stitch boundary saved successfully:", pendingCropMask);
-            } else {
-                console.error("Failed to save stitch boundary");
-            }
+            console.log("Stitch boundary saved successfully:", pendingCropMask);
         } catch (error) {
             console.error("Error saving stitch boundary:", error);
         }
@@ -1744,7 +1590,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                     <>
                                         <img
                                             ref={imageRef}
-                                            src={`${API_ENDPOINT}/${directory}${imageList[displayedIndex]}`}
+                                            src={getFileUrl(`${directory}${imageList[displayedIndex]}`)}
                                             alt={`Image ${displayedIndex + 1}`}
                                             onLoad={handleVisibleImageLoad}
                                             style={{
@@ -1757,7 +1603,7 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
                                         />
                                         {isTransitioning && (
                                             <img
-                                                src={`${API_ENDPOINT}/${directory}${imageList[imageIndex]}`}
+                                                src={getFileUrl(`${directory}${imageList[imageIndex]}`)}
                                                 onLoad={handleNewImageLoad}
                                                 style={{ display: 'none' }}
                                                 alt="Preloading"

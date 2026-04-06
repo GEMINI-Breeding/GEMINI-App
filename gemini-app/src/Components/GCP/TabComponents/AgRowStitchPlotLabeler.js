@@ -20,15 +20,16 @@ import {
 } from "@mui/material";
 import { CheckCircle, ErrorOutline, Assignment } from "@mui/icons-material";
 import { useDataState } from "../../../DataContext";
+import { listDirs } from "../../../api/files";
+import { getAgrowstitchPlotAssociations, associatePlotsWithBoundaries } from "../../../api/plots";
 
 function AgRowStitchPlotLabeler() {
-    const { 
-        selectedLocationGCP, 
-        selectedPopulationGCP, 
-        selectedYearGCP, 
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedYearGCP,
         selectedExperimentGCP,
-        featureCollectionPlot,
-        flaskUrl
+        featureCollectionPlot
     } = useDataState();
 
     const [loading, setLoading] = useState(false);
@@ -52,8 +53,7 @@ function AgRowStitchPlotLabeler() {
     const fetchAvailableDates = async () => {
         try {
             const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
-            const response = await fetch(`${flaskUrl}list_dirs/${basePath}`);
-            const dates = await response.json();
+            const dates = await listDirs(basePath);
             setAvailableDates(dates.filter(date => date.match(/^\d{4}-\d{2}-\d{2}$/)));
         } catch (error) {
             console.error('Error fetching dates:', error);
@@ -62,20 +62,17 @@ function AgRowStitchPlotLabeler() {
 
     const fetchAgrowstitchDirs = async (date) => {
         try {
-            const platformResponse = await fetch(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`);
-            const platforms = await platformResponse.json();
-            
+            const platforms = await listDirs(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`);
+
             const agrowstitchDirs = [];
-            
+
             for (const platform of platforms) {
                 try {
-                    const sensorResponse = await fetch(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`);
-                    const sensors = await sensorResponse.json();
-                    
+                    const sensors = await listDirs(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`);
+
                     for (const sensor of sensors) {
                         try {
-                            const dirResponse = await fetch(`${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`);
-                            const dirs = await dirResponse.json();
+                            const dirs = await listDirs(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`);
                             
                             const agrowstitchVersions = dirs.filter(dir => dir.startsWith('AgRowStitch_v'));
                             for (const version of agrowstitchVersions) {
@@ -121,28 +118,17 @@ function AgRowStitchPlotLabeler() {
         
         try {
             setLoading(true);
-            const response = await fetch(`${flaskUrl}get_agrowstitch_plot_associations`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: date,
-                    platform: agrowstitchInfo.platform,
-                    sensor: agrowstitchInfo.sensor
-                })
+            const data = await getAgrowstitchPlotAssociations({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: date,
+                platform: agrowstitchInfo.platform,
+                sensor: agrowstitchInfo.sensor
             });
-            
-            if (response.ok) {
-                const data = await response.json();
-                setAssociations(data.associations);
-                setTotalPlots(data.total_plots);
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to fetch associations');
-            }
+            setAssociations(data.associations);
+            setTotalPlots(data.total_plots);
         } catch (error) {
             setError('Error fetching associations: ' + error.message);
         } finally {
@@ -175,31 +161,21 @@ function AgRowStitchPlotLabeler() {
             setError('');
             setMessage('');
 
-            const response = await fetch(`${flaskUrl}associate_plots_with_boundaries`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    platform: agrowstitchInfo.platform,
-                    sensor: agrowstitchInfo.sensor,
-                    agrowstitchDir: selectedAgrowstitchDir,
-                    boundaries: featureCollectionPlot
-                })
+            const data = await associatePlotsWithBoundaries({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: selectedDate,
+                platform: agrowstitchInfo.platform,
+                sensor: agrowstitchInfo.sensor,
+                agrowstitchDir: selectedAgrowstitchDir,
+                boundaries: featureCollectionPlot
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                setMessage(`Successfully associated ${data.associations} plots with boundaries`);
-                // Refresh associations
-                fetchCurrentAssociations(selectedDate, agrowstitchInfo);
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to associate plots');
-            }
+            setMessage(`Successfully associated ${data.associations} plots with boundaries`);
+            // Refresh associations
+            fetchCurrentAssociations(selectedDate, agrowstitchInfo);
         } catch (error) {
             setError('Error associating plots: ' + error.message);
         } finally {

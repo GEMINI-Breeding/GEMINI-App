@@ -16,15 +16,16 @@ import {
 } from "@mui/material";
 import { ImageOutlined, CropFree } from "@mui/icons-material";
 import { useDataState } from "../../../DataContext";
+import { listDirs } from "../../../api/files";
+import { splitOrthomosaics } from "../../../api/processing";
 
 function PlotImageExtractor() {
-    const { 
-        selectedLocationGCP, 
-        selectedPopulationGCP, 
-        selectedYearGCP, 
+    const {
+        selectedLocationGCP,
+        selectedPopulationGCP,
+        selectedYearGCP,
         selectedExperimentGCP,
-        featureCollectionPlot,
-        flaskUrl
+        featureCollectionPlot
     } = useDataState();
 
     const [loading, setLoading] = useState(false);
@@ -49,9 +50,8 @@ function PlotImageExtractor() {
     const fetchAvailableDates = async () => {
         try {
             const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
-            const response = await fetch(`${flaskUrl}list_dirs/${basePath}`);
-            const dates = await response.json();
-            
+            const dates = await listDirs(basePath);
+
             // Filter for valid date formats and check if they have ODM orthomosaics
             const validDates = [];
             for (const date of dates) {
@@ -63,7 +63,7 @@ function PlotImageExtractor() {
                     }
                 }
             }
-            
+
             setAvailableDates(validDates);
             if (validDates.length > 0) {
                 setSelectedDate(validDates[0]);
@@ -77,18 +77,15 @@ function PlotImageExtractor() {
     const checkForOdmOrthomosaic = async (basePath, date) => {
         try {
             // Check for ODM orthomosaics in the date directory
-            const platformResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}`);
-            const platforms = await platformResponse.json();
-            
+            const platforms = await listDirs(`${basePath}/${date}`);
+
             for (const platform of platforms) {
                 try {
-                    const sensorResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}`);
-                    const sensors = await sensorResponse.json();
-                    
+                    const sensors = await listDirs(`${basePath}/${date}/${platform}`);
+
                     for (const sensor of sensors) {
                         try {
-                            const processingResponse = await fetch(`${flaskUrl}list_dirs/${basePath}/${date}/${platform}/${sensor}`);
-                            const processingDirs = await processingResponse.json();
+                            const processingDirs = await listDirs(`${basePath}/${date}/${platform}/${sensor}`);
                             
                             // Look for ODM or OpenDroneMap directories
                             const hasOdm = processingDirs.some(dir => 
@@ -125,26 +122,15 @@ function PlotImageExtractor() {
             setError('');
             setMessage('');
 
-            const response = await fetch(`${flaskUrl}split_orthomosaics`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    year: selectedYearGCP,
-                    experiment: selectedExperimentGCP,
-                    location: selectedLocationGCP,
-                    population: selectedPopulationGCP,
-                    date: selectedDate,
-                    boundaries: featureCollectionPlot
-                })
+            const data = await splitOrthomosaics({
+                year: selectedYearGCP,
+                experiment: selectedExperimentGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+                date: selectedDate,
+                boundaries: featureCollectionPlot
             });
-
-            if (response.ok) {
-                const data = await response.json();
-                setMessage(`Successfully extracted ${data.plots_processed} plot images from orthomosaics`);
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to split orthomosaics');
-            }
+            setMessage(`Successfully extracted ${data.plots_processed || 0} plot images from orthomosaics`);
         } catch (error) {
             setError('Error splitting orthomosaics: ' + error.message);
         } finally {

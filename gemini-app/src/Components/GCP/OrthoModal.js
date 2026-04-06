@@ -30,7 +30,6 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
         sliderMarks,
         isOrthoProcessing,
         orthoServerStatus,
-        flaskUrl,
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
@@ -113,7 +112,7 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                 );
             });
         }
-    }, [orthoSetting, selectedOrthoMethod, flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+    }, [orthoSetting, selectedOrthoMethod, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     /*
     Python args for ODM:
@@ -246,7 +245,7 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
 };
 
 function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
-    const { flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const { selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
     const { setCurrentOrthoProgress, setIsOrthoProcessing, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentOrthoProgress) ? currentOrthoProgress : 0;

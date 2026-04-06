@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Box, Grid, Typography, FormControl, InputLabel, Select, MenuItem, Button } from "@mui/material";
-import { useDataSetters, useDataState, fetchData } from "../../../../DataContext";
+import { useDataSetters, useDataState } from "../../../../DataContext";
 import { NestedSection, FolderTab, FolderTabs } from "./CamerasAccordion";
 import { LabelsMenu } from "./DropLabels"; // Import LabelDropzones
 import { TrainMenu } from "./TrainModel"; // Import TrainMenu
 import { LocateMenu } from "./LocatePlants"; // Import LocateMenu
 import { ExtractMenu } from "./ExtractTraits"; // Import ExtractMenu
+import { listDirs, checkRuns, checkLabels } from "../../../../api/files";
 
 import useTrackComponent from "../../../../useTrackComponent";
 
@@ -17,7 +18,6 @@ export default function RoverPrepTabs() {
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         roverPrepTab,
         processRunning,
         selectRoverTrait
@@ -124,20 +124,20 @@ export default function RoverPrepTabs() {
         const fetchDataAndUpdate = async () => {
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
-                    const dates = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                    const dates = await listDirs(
+                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
 
                     let updatedData = {};
 
                     for (const date of dates) {
-                        const platforms = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                        const platforms = await listDirs(
+                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
-                            const sensors = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                            const sensors = await listDirs(
+                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {
@@ -158,15 +158,15 @@ export default function RoverPrepTabs() {
                                         case 0: // For "Locate Plants"
                                             // labels = false; // Assume no folder for the sensor initially
 
-                                            files = await fetchData(
-                                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            files = await listDirs(
+                                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             if (Object.keys(files).length) {
                                                 // retrieve labels data
                                                 try {
-                                                    const labels_files = await fetchData(
-                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/Plant Detection/annotations`
+                                                    const labels_files = await checkLabels(
+                                                        `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/Plant Detection/annotations`
                                                     );
                                                     labels = labels_files.length >= 1;
                                                 } catch(error) {
@@ -174,11 +174,11 @@ export default function RoverPrepTabs() {
                                                 }
 
                                                 // retrieve file data
-                                                train_files = await fetchData(
-                                                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                                                train_files = await checkRuns(
+                                                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
                                                 );
-                                                const locate_files = await fetchData(
-                                                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
+                                                const locate_files = await checkRuns(
+                                                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Locate`
                                                 )
                                                 
                                                 // check model status
@@ -208,15 +208,15 @@ export default function RoverPrepTabs() {
 
                                             break;
                                         case 1: // For "Label Traits"
-                                            files = await fetchData(
-                                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            files = await listDirs(
+                                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             if (Object.keys(files).length) {
                                                 // retrieve labels data
                                                 try {
-                                                    const labels_files = await fetchData(
-                                                        `${flaskUrl}check_labels/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection/annotations`
+                                                    const labels_files = await checkLabels(
+                                                        `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels/${selectRoverTrait} Detection/annotations`
                                                     );
                                                     labels = labels_files.length >= 1;
                                                 } catch(error) {
@@ -226,8 +226,8 @@ export default function RoverPrepTabs() {
                                             }
                                             break;
                                         case 2: // For "Teach Traits"
-                                            train_files = await fetchData(
-                                                `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
+                                            train_files = await checkRuns(
+                                                `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} ${selectRoverTrait} Detection`
                                             );
                                             
                                             // check model and label sets status
@@ -277,8 +277,8 @@ export default function RoverPrepTabs() {
                                             // const filteredFiles = geojsons.filter(file => file.includes(selectRoverTrait));
                                             
                                             // if (filteredFiles.length >= 1) {
-                                            const extract_files = await fetchData(
-                                                `${flaskUrl}check_runs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            const extract_files = await checkRuns(
+                                                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
                                             console.log(extract_files)
                                             locate = extract_files[selectRoverTrait].locate;
@@ -316,7 +316,7 @@ export default function RoverPrepTabs() {
         };
 
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, roverPrepTab, processRunning, columns, selectRoverTrait]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, roverPrepTab, processRunning, columns, selectRoverTrait]);
 
     return (
         <Grid container direction="column" alignItems="center" style={{ width: "80%", margin: "0 auto" }}>

@@ -18,10 +18,11 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { DataGrid } from '@mui/x-data-grid';
-import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
+import { useDataSetters, useDataState } from "../../../../DataContext";
 import { LineChart } from "@mui/x-charts/LineChart";
-import { trainModel } from "../../../../api/processing";
+import { trainModel, getModelInfo, doneTraining } from "../../../../api/processing";
 import { BACKEND_MODE } from "../../../../api/config";
+import { checkRuns, listDirs } from "../../../../api/files";
 
 function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const {
@@ -29,7 +30,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         epochs,
         batchSize,
         imageSize,
@@ -165,69 +165,57 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
         const fetchDataAndUpdate = async () => {
             try {
                 // obtain train files
-                const train_files = await fetchData(
-                    `${flaskUrl}check_runs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
+                const train_files = await checkRuns(
+                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/Training/${platform}/${sensor} Plant Detection`
                 );
                 
                 const filteredEntries = Object.entries(train_files)
                 const filteredTrainFiles = Object.fromEntries(filteredEntries);
 
                 // retrieve information of models
-                const response = await fetch(`${flaskUrl}get_model_info`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(filteredTrainFiles),
+                const data = await getModelInfo(filteredTrainFiles);
+                // if batch is -1, replace with Auto
+                data.forEach((item) => {
+                    if (item.batch == -1) {
+                        item.batch = "Auto";
+                    }
                 });
-                if (response.ok) {
-                    const data = await response.json();
-                    // if batch is -1, replace with Auto
-                    data.forEach((item) => {
-                        if (item.batch == -1) {
-                            item.batch = "Auto";
-                        }
-                    });
-                    setRowsData(data)
-                    console.log("Response from server:", data);
-                } else {
-                    const errorData = await response.json();
-                    console.error("Error details:", errorData);
-                }
+                setRowsData(data)
+                console.log("Response from server:", data);
             } catch(error) {
                 console.error("Error fetching model information: ", error)
             }
         };
         fetchDataAndUpdate();
-    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item, processRunning]);
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, platform, sensor, item, processRunning]);
 
     // For model training in Teach Traits
     useEffect(() => {
         const fetchParamsAndUpdate = async () => {
             try {
                 let updatedData = {};
-                const dates = await fetchData(
-                    `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                const dates = await listDirs(
+                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                 );
                 for (const date of dates) {
                     try {
-                        const platforms = await fetchData(
-                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                        const platforms = await listDirs(
+                            `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
                         if (date.includes("Training")) {
                             continue;
                         }
-            
+
                         for (const platform of platforms) {
                             try {
-                                const sensors = await fetchData(
-                                    `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                                const sensors = await listDirs(
+                                    `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                                 );
-            
+
                                 for (const sensor of sensors) {
                                     try {
-                                        const traits = await fetchData(
-                                            `${flaskUrl}list_dirs/Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels`
+                                        const traits = await listDirs(
+                                            `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}/Labels`
                                         );
                                         for (const trait of traits) {
                                             if (!updatedData[trait]) {
@@ -452,7 +440,6 @@ function TrainMenu({ open, onClose, item, activeTab, platform, sensor }) {
 }
 
 function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, chartData, currentEpoch }) {
-    const  { flaskUrl } = useDataState();
     const { setChartData, setIsTraining, setTrainingData, setCurrentEpoch, setProcessRunning } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(progress) ? progress : 0;
@@ -463,7 +450,7 @@ function TrainingProgressBar({ progress, onStopTraining, trainingData, epochs, c
 
     const handleDone = async () => {
         try{
-            await fetch(`${flaskUrl}done_training`, { method: "POST" });
+            await doneTraining();
             console.log("Training is done.");
             setIsTraining(false);
             setCurrentEpoch(0); // Reset epochs

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Autocomplete, TextField, Button } from "@mui/material";
 
-import { fetchData, useDataSetters, useDataState } from "../../DataContext";
+import { useDataSetters, useDataState } from "../../DataContext";
 import { BACKEND_MODE } from "../../api/config";
 import { getExperiments, getExperimentHierarchy } from "../../api/entities";
+import { listDirs } from "../../api/files";
 
 const GCPPickerSelectionMenu = () => {
     const {
@@ -18,7 +19,6 @@ const GCPPickerSelectionMenu = () => {
         dateOptionsGCP,
         selectedDateGCP,
         radiusMeters,
-        flaskUrl,
         gcpPath,
         isSidebarCollapsed,
         isGCPReady
@@ -56,7 +56,7 @@ const GCPPickerSelectionMenu = () => {
                 })
                 .catch((error) => console.error("Error:", error));
         } else {
-            fetchData(`${flaskUrl}list_dirs/Raw/`)
+            listDirs('Raw/')
                 .then(setYearOptionsGCP)
                 .catch((error) => console.error("Error:", error));
         }
@@ -80,7 +80,7 @@ const GCPPickerSelectionMenu = () => {
             return;
         }
         if (selectedYearGCP) {
-            fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/`)
+            listDirs(`Raw/${selectedYearGCP}/`)
                 .then(setExperimentOptionsGCP)
                 .catch((error) => console.error("Error:", error));
         } else {
@@ -91,7 +91,7 @@ const GCPPickerSelectionMenu = () => {
     useEffect(() => {
         if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
         if (selectedYearGCP && selectedExperimentGCP) {
-            fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/`)
+            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/`)
                 .then(setLocationOptionsGCP)
                 .catch((error) => console.error("Error:", error));
         } else {
@@ -102,7 +102,7 @@ const GCPPickerSelectionMenu = () => {
     useEffect(() => {
         if (BACKEND_MODE === 'framework') return; // Handled above via hierarchy
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP) {
-            fetchData(`${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/`)
+            listDirs(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/`)
                 .then(setPopulationOptionsGCP)
                 .catch((error) => console.error("Error:", error));
         } else {

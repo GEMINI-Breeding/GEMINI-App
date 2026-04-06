@@ -26,7 +26,6 @@ function TabbedPrepUI({ selectedTab = null }) {
         dateOptionsGCP,
         selectedDateGCP,
         radiusMeters,
-        flaskUrl,
         gcpPath,
         isSidebarCollapsed,
         isPrepInitiated,

@@ -17,10 +17,10 @@ afterAll(() => {
 describe("getTileFileUrl", () => {
     test("flask mode returns flask URL with file path", () => {
         process.env.REACT_APP_BACKEND_MODE = "flask";
+        process.env.REACT_APP_FLASK_PORT = "5000";
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl(
-            "files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif",
-            "http://localhost:5000/flask_app/"
+            "files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
         );
         expect(result).toBe(
             "http://localhost:5000/flask_app/files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
@@ -32,8 +32,7 @@ describe("getTileFileUrl", () => {
         process.env.REACT_APP_STORAGE_BUCKET = "gemini";
         const { getTileFileUrl } = require("../files");
         const result = getTileFileUrl(
-            "files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif",
-            "http://localhost:5000/flask_app/"
+            "files/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
         );
         expect(result).toBe(
             "s3://gemini/Processed/2024/exp1/loc1/pop1/2024-06-01/Drone/RGB/2024-06-01-RGB-Pyramid.tif"
@@ -43,14 +42,14 @@ describe("getTileFileUrl", () => {
     test("framework mode strips files/ prefix from path", () => {
         process.env.REACT_APP_BACKEND_MODE = "framework";
         const { getTileFileUrl } = require("../files");
-        const result = getTileFileUrl("files/some/path.tif", "");
+        const result = getTileFileUrl("files/some/path.tif");
         expect(result).toMatch(/^s3:\/\/gemini\/some\/path\.tif$/);
     });
 
     test("framework mode handles path without files/ prefix", () => {
         process.env.REACT_APP_BACKEND_MODE = "framework";
         const { getTileFileUrl } = require("../files");
-        const result = getTileFileUrl("Processed/path.tif", "");
+        const result = getTileFileUrl("Processed/path.tif");
         expect(result).toBe("s3://gemini/Processed/path.tif");
     });
 
@@ -58,7 +57,7 @@ describe("getTileFileUrl", () => {
         process.env.REACT_APP_BACKEND_MODE = "framework";
         process.env.REACT_APP_STORAGE_BUCKET = "my-bucket";
         const { getTileFileUrl } = require("../files");
-        const result = getTileFileUrl("files/test.tif", "");
+        const result = getTileFileUrl("files/test.tif");
         expect(result).toBe("s3://my-bucket/test.tif");
     });
 

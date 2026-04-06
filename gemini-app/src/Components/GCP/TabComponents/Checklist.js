@@ -5,7 +5,8 @@ import Button from "@mui/material/Button";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import TextField from "@mui/material/TextField";
-import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
+import { useDataState, useDataSetters } from "../../../DataContext";
+import { listDirs, listFiles } from "../../../api/files";
 
 function ChecklistItem({ label, path, isChecked, onCheckboxChange, onPathChange }) {
     return (
@@ -36,7 +37,6 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
         prepOrthoImagePath,
         selectedLocationGCP,
         selectedPopulationGCP,
-        flaskUrl,
         selectedDateGCP,
         selectedTilePath,
         selectedYearGCP,
@@ -58,16 +58,16 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
     useEffect(() => {
         // Function to fetch and set the ortho image path
         const fetchAndSetOrthoImagePath = async () => {
-            const dirs = await fetchData(
-                `${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}`
+            const dirs = await listDirs(
+                `Processed/${selectedLocationGCP}/${selectedPopulationGCP}`
             );
             for (const dir of dirs) {
-                const subDirs = await fetchData(
-                    `${flaskUrl}list_dirs/Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
+                const subDirs = await listDirs(
+                    `Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
                 );
                 if (subDirs.includes("Drone")) {
                     const newPath = `Processed/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}/Drone/`;
-                    const files = await fetchData(`${flaskUrl}list_files/${newPath}`);
+                    const files = await listFiles(newPath);
                     const orthoImageFile = files.find((file) => file.includes("-Pyramid.tif"));
                     if (orthoImageFile) {
                         setPrepOrthoImagePath(newPath + orthoImageFile);
@@ -82,7 +82,7 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
 
         // Function to fetch and set the GCP file path
         const fetchAndSetGcpFilePath = async () => {
-            const files = await fetchData(`${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+            const files = await listFiles(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
             const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
             if (gcpLocationsFile) {
                 const newPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
@@ -96,10 +96,10 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
 
         // Function to fetch and set the drone image path
         const fetchAndSetDroneImagePath = async () => {
-            const dirs = await fetchData(`${flaskUrl}list_dirs/Raw/${selectedLocationGCP}/${selectedPopulationGCP}`);
+            const dirs = await listDirs(`Raw/${selectedLocationGCP}/${selectedPopulationGCP}`);
             for (const dir of dirs) {
-                const subDirs = await fetchData(
-                    `${flaskUrl}list_dirs/Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
+                const subDirs = await listDirs(
+                    `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
                 );
                 if (subDirs.includes("Drone")) {
                     const newPath = `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`;

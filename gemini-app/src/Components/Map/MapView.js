@@ -65,7 +65,6 @@ export default function MapView() {
         isLoadingColorScale,
         geojsonData,
         selectedGenotypes,
-        flaskUrl,
         tileUrl,
         boundsUrl,
         isSidebarCollapsed
@@ -92,7 +91,7 @@ export default function MapView() {
 
     useEffect(() => {
         if (selectedTilePath) {
-            const fileUrl = getTileFileUrl(selectedTilePath, flaskUrl);
+            const fileUrl = getTileFileUrl(selectedTilePath);
             setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));
             setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodeURIComponent(fileUrl)));
         } else {

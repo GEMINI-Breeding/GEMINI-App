@@ -25,8 +25,7 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { useHandleGcpRefreshImages } from "../Util/ImageViewerUtil";
 import useTrackComponent from "../../useTrackComponent";
 import fetchAndSetGcpFilePath from "./TabComponents/Checklist";
-import { fetchData } from "../../DataContext";
-import { uploadFile } from '../../api/files';
+import { uploadFile, listFiles, getFileUrl } from '../../api/files';
 
 function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     useTrackComponent("ImageViewer");
@@ -34,9 +33,8 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     const { 
         imageIndex, 
         imageList, 
-        imageViewerLoading, 
-        imageViewerError, 
-        flaskUrl, 
+        imageViewerLoading,
+        imageViewerError,
         sliderMarks,
         isImageViewerOpen,
         isOrthoProcessing,
@@ -113,8 +111,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     const fetchAndSetGcpFilePath = async () => {
-        console.log('${flaskUrl', flaskUrl);
-        const files = await fetchData(`${flaskUrl}list_files/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+        const files = await listFiles(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
         const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
         
         if (gcpLocationsFile) {
@@ -167,8 +164,9 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
         };
     }, [open, item, sensor, setIsImageViewerOpen, prepGcpFilePath]);
 
-    // file serving endpoint
-    const API_ENDPOINT = `${flaskUrl}files`;
+    // file serving endpoint — getFileUrl('') gives base + trailing slash; strip it so
+    // concatenation with image_path (which starts with /) works correctly.
+    const API_ENDPOINT = getFileUrl('').replace(/\/+$/, '');
 
     // change index of image being viewed
     const handlePrevious = () => {

@@ -5,7 +5,7 @@ import { TileLayer } from "@deck.gl/geo-layers";
 import { Map } from "react-map-gl";
 import { EditableGeoJsonLayer, TranslateMode, DrawPolygonMode, ModifyMode, ViewMode, SelectionLayer } from "nebula.gl";
 import { useDataState, useDataSetters, TILE_URL_TEMPLATE, BOUNDS_URL_TEMPLATE } from "../../../DataContext";
-import { BACKEND_MODE, FRAMEWORK_URL } from "../../../api/config";
+import { BACKEND_MODE, FRAMEWORK_URL, FLASK_URL } from "../../../api/config";
 import { getTileFileUrl } from "../../../api/files";
 import GeoJsonTooltip from "../../Map/ToolTip";
 import { ModeSwitcher } from "../../Util/MapModeSwitcher";
@@ -36,7 +36,6 @@ function BoundaryMap({ task }) {
     const {
         viewState,
         selectedTilePath,
-        flaskUrl,
         tileUrl,
         boundsUrl,
         selectedLocationGCP,
@@ -66,7 +65,7 @@ function BoundaryMap({ task }) {
             const newPath = "files/" + prepOrthoImagePath;
             setSelectedTilePath(newPath);
 
-            const fileUrl = getTileFileUrl(newPath, flaskUrl);
+            const fileUrl = getTileFileUrl(newPath);
             const encodedPath = encodeURIComponent(fileUrl);
             setTileUrl(TILE_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
             setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
@@ -82,7 +81,7 @@ function BoundaryMap({ task }) {
             tileSize: 256,
             data: TILE_URL_TEMPLATE.replace(
                 "${FILE_PATH}",
-                encodeURIComponent(getTileFileUrl(orthoPath, flaskUrl))
+                encodeURIComponent(getTileFileUrl(orthoPath))
             ),
             renderSubLayers: (props) => {
                 const {
@@ -112,7 +111,7 @@ function BoundaryMap({ task }) {
                     tileSize: 256,
                     data: TILE_URL_TEMPLATE.replace(
                         "${FILE_PATH}",
-                        encodeURIComponent(getTileFileUrl(plotPath, flaskUrl))
+                        encodeURIComponent(getTileFileUrl(plotPath))
                     ),
                     renderSubLayers: (props) => {
                         const {
@@ -133,7 +132,7 @@ function BoundaryMap({ task }) {
             // Set bounds URL for the first plot to get initial extent
             if (prepAgRowStitchPlotPaths[0]) {
                 const firstPlotPath = "files/" + prepAgRowStitchPlotPaths[0].fullPath;
-                const encodedPath = encodeURIComponent(getTileFileUrl(firstPlotPath, flaskUrl));
+                const encodedPath = encodeURIComponent(getTileFileUrl(firstPlotPath));
                 setBoundsUrl(BOUNDS_URL_TEMPLATE.replace("${FILE_PATH}", encodedPath));
                 setSelectedTilePath(firstPlotPath);
             }
@@ -201,7 +200,7 @@ function BoundaryMap({ task }) {
 
                 const loadUrl = BACKEND_MODE === 'framework'
                     ? `${FRAMEWORK_URL}geojson/load`
-                    : `${flaskUrl}load_geojson`;
+                    : `${FLASK_URL}load_geojson`;
                 const response = await fetch(loadUrl, {
                     method: "POST",
                     headers: {

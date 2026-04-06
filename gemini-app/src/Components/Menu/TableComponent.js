@@ -14,12 +14,14 @@ import CSVDataTable from "../StatsMenu/CSVDataTable";
 import ActivityZoneIcon from '@mui/icons-material/Map';
 import AddLocationAltIcon from '@mui/icons-material/AddLocationAlt';
 import DownloadIcon from '@mui/icons-material/Download';
+import { listDirsNested, deleteFiles, getBinaryReport, downloadAmigaImages, updateData, viewSyncedData } from '../../api/files';
+import { filterPlotBorders } from '../../api/queries';
+import { getMaxPlotIndex } from '../../api/plots';
 
 export const TableComponent = () => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const { flaskUrl } = useDataState();
     const [procData, setProcData] = useState([]);
     const [filteredData, setFilteredData] = useState([]);
     const [selectedDataType, setSelectedDataType] = useState("image");
@@ -168,8 +170,7 @@ export const TableComponent = () => {
                     setLoading(false);
                 });
         } else {
-            fetch(`${flaskUrl}list_dirs_nested`)
-                .then((response) => response.json())
+            listDirsNested()
                 .then((data) => {
                     setData(data);
                     const transformedData = transformNestedData(data);
@@ -183,7 +184,7 @@ export const TableComponent = () => {
                     setLoading(false);
                 });
         }
-    }, [flaskUrl]);
+    }, []);
     
     useEffect(() => {
         const filtered = procData.filter(row => detectDataType(row) === selectedDataType);
@@ -222,21 +223,15 @@ export const TableComponent = () => {
         }
 
         try {
-            const response = await fetch(`${flaskUrl}get_binary_report`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    location: row.location,
-                    population: row.population,
-                    date: row.date,
-                    year: row.year,
-                    experiment: row.experiment,
-                    camera: selectedCameras[id] || (row.cameras && row.cameras[0]) || ''
-                })
+            const data = await getBinaryReport({
+                location: row.location,
+                population: row.population,
+                date: row.date,
+                year: row.year,
+                experiment: row.experiment,
+                camera: selectedCameras[id] || (row.cameras && row.cameras[0]) || ''
             });
-
-            const data = await response.text();
-            setReportContent(data);
+            setReportContent(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
             setReportDialogOpen(true);
         } catch (error) {
             console.error("Error fetching report:", error);
@@ -279,19 +274,13 @@ export const TableComponent = () => {
             platform: row.platform
         };
     
-        fetch(`${flaskUrl}delete_files`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data_to_del }),
-        })
-            .then(response => response.json())
+        deleteFiles({ data_to_del })
             .then(() => {
                 setProcData((prevData) =>
                     prevData.filter((row) => row.id !== id)
                 );
                 setShowDeleteSuccess(true);
-                fetch(`${flaskUrl}list_dirs_nested`)
-                    .then((response) => response.json())
+                listDirsNested()
                     .then((data) => {
                         setNestedDirectories(data);
                     })
@@ -320,21 +309,11 @@ export const TableComponent = () => {
         setAbortController(controller);
     
         try {
-            const response = await fetch(`${flaskUrl}download_amiga_images`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...row,
-                    camera: camera
-                }),
-                signal: controller.signal
-            });
-    
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-            }
-    
+            const response = await downloadAmigaImages(
+                { ...row, camera: camera },
+                { signal: controller.signal }
+            );
+
             const contentLength = response.headers.get('Content-Length');
             if (!contentLength) {
                 console.warn("Content-Length header not found. Cannot track progress.");
@@ -472,23 +451,15 @@ export const TableComponent = () => {
             setPlotMarkerLoading(true);
             
             try {
-                const filterResponse = await fetch(`${flaskUrl}filter_plot_borders`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        year: row.year,
-                        experiment: row.experiment,
-                        location: row.location,
-                        population: row.population,
-                        date: row.date,
-                    }),
+                await filterPlotBorders({
+                    year: row.year,
+                    experiment: row.experiment,
+                    location: row.location,
+                    population: row.population,
+                    date: row.date,
                 });
-                if (!filterResponse.ok) {
-                    const errorData = await filterResponse.json().catch(() => null);
-                    console.warn('Could not pre-populate plot markings.', errorData?.error);
-                }
             } catch (error) {
-                console.error("Error pre-populating plot markings:", error);
+                console.warn('Could not pre-populate plot markings.', error.message);
             }
 
             const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
@@ -500,19 +471,9 @@ export const TableComponent = () => {
             }
 
             try {
-                const response = await fetch(`${flaskUrl}get_max_plot_index`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ directory }),
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    const nextIndex = data.max_plot_index > -1 ? data.max_plot_index + 1 : 0;
-                    setPlotIndices(prev => ({ ...prev, [row.id]: nextIndex }));
-                } else {
-                    console.error("Failed to fetch max plot index:", data.error);
-                    setPlotIndices(prev => ({ ...prev, [row.id]: 0 }));
-                }
+                const data = await getMaxPlotIndex({ directory });
+                const nextIndex = data.max_plot_index > -1 ? data.max_plot_index + 1 : 0;
+                setPlotIndices(prev => ({ ...prev, [row.id]: nextIndex }));
             } catch (error) {
                 console.error("Error fetching max plot index:", error);
                 setPlotIndices(prev => ({ ...prev, [row.id]: 0 }));
@@ -563,12 +524,7 @@ export const TableComponent = () => {
             platform: editFields.platform || ''
         };
     
-        fetch(`${flaskUrl}update_data`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ oldData, updatedData }),
-        })
-            .then(response => response.json())
+        updateData({ oldData, updatedData })
             .then(() => {
                 setProcData((prevData) =>
                     prevData.map((row) =>
@@ -653,19 +609,13 @@ export const TableComponent = () => {
         const baseDir = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}`;
     
         try {
-            const response = await fetch(`${flaskUrl}view_synced_data`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ base_dir: baseDir }),
-            });
-    
-            const data = await response.json();
-    
-            if (response.ok && data.data) {
-                setCsvData(data.data);  // ✅ Directly set parsed JSON
+            const data = await viewSyncedData({ base_dir: baseDir });
+
+            if (data && data.data) {
+                setCsvData(data.data);
                 setCsvDialogOpen(true);
             } else {
-                console.error("Error fetching CSV:", data.error || "Unknown error");
+                console.error("Error fetching CSV:", data?.error || "Unknown error");
             }
         } catch (err) {
             console.error("Fetch error:", err);

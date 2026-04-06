@@ -4,12 +4,12 @@ import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
 import { Button } from "@mui/material";
 import { useDataState, useDataSetters } from "../../DataContext";
+import { getFileUrl } from "../../api/files";
 import { SelectedImage } from "../Util/ImageViewerUtil";
 
 const ImageQueryViewer = () => {
     const {
         imageDataQuery,
-        flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,
@@ -24,7 +24,7 @@ const ImageQueryViewer = () => {
     const { setCurrentImageIndex, setIsLightboxOpen } = useDataSetters();
     console.log("imageQueryData", imageDataQuery);
 
-    const API_ENDPOINT = `${flaskUrl}files`;
+    const API_ENDPOINT = getFileUrl('').replace(/\/+$/, '');
 
     // Memoize the slides and photos preparation to avoid recalculating on every render
     const slides = useMemo(

@@ -9,19 +9,19 @@ import {
     CircularProgress
 } from "@mui/material";
 import { useDropzone } from 'react-dropzone';
-import { fetchData, useDataSetters, useDataState } from "../../../../DataContext";
+import { useDataSetters, useDataState } from "../../../../DataContext";
+import { checkExistingLabels, uploadTraitLabels, startCvat } from "../../../../api";
 
 function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
 
     // data states
-    const { 
+    const {
         isUploadingLabels,
         selectRoverTrait,
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedYearGCP,
         selectedExperimentGCP,
-        flaskUrl,
         processRunning,
         roverPrepTab
     } = useDataState();
@@ -89,12 +89,7 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
     // Function to check for existing files on the server
     const checkFilesOnServer = async (fileList, dirPath) => {
         console.log("Checking files on server.")
-        const response = await fetch(`${flaskUrl}check_existing_labels`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dirPath, fileList }),
-        });
-        return response.json();
+        return checkExistingLabels({ dirPath, fileList });
     };
 
     // Function to upload a file with a timeout
@@ -106,13 +101,9 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
         const id = setTimeout(() => controller.abort(), timeout);
 
         try {
-            const response = await fetch(`${flaskUrl}upload_trait_labels`, {
-                method: "POST",
-                body: formData,
-                signal: controller.signal,
-            });
+            const result = await uploadTraitLabels(formData);
             clearTimeout(id);
-            return response;
+            return result;
         } catch (error) {
             clearTimeout(id);
             throw error;
@@ -187,24 +178,12 @@ function LabelsMenu({ open, onClose, item, activeTab, platform, sensor }) {
     const handleOpenAnnotateTab = async () => {
         setIsSettingUpServer(true); // Start loading
 
-        // call flask endpoint
         try {
-            const response = await fetch(`${flaskUrl}start_cvat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-            });
+            const data = await startCvat();
+            console.log(data.status);
 
-            if (response.ok) {
-                const data = await response.json();
-                console.log(data.status);
-
-                // Open CVAT instance
-                window.open("http://localhost:8080/", "_blank");
-            } else {
-                const errorData = await response.json();
-                console.error("Error starting CVAT:", errorData.error);
-                alert(`Error starting CVAT: ${errorData.error}`);
-            }
+            // Open CVAT instance
+            window.open("http://localhost:8080/", "_blank");
         } catch (error) {
             console.error("Error:", error);
             alert("An error occurred while starting CVAT.");

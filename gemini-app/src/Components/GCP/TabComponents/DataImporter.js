@@ -3,13 +3,14 @@ import { Importer, ImporterField } from "react-csv-importer";
 import "react-csv-importer/dist/index.css";
 import { useDataState, useDataSetters } from "../../../DataContext";
 import ImportSettingsModal from "../../Util/ImportSettingsModal";
+import { saveCsv } from "../../../api";
 
 import useTrackComponent from "../../../useTrackComponent";
 
 const DataImporter = () => {
     useTrackComponent("DataImporter");
 
-    const { selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl } =
+    const { selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP } =
         useDataState();
     const { setActiveStepBoundaryPrep } = useDataSetters();
 
@@ -22,26 +23,12 @@ const DataImporter = () => {
     };
 
     const sendDataToServer = async (data) => {
-        // Prepare the data object to match the Flask endpoint's expectations
-        const payload = {
-            selectedLocationGcp: selectedLocationGCP,
-            selectedPopulationGcp: selectedPopulationGCP,
-            selectedYearGcp: selectedYearGCP,
-            selectedExperimentGcp: selectedExperimentGCP,
-            filename: "FieldDesign.csv",
-            csvData: data,
-        };
+        const filePath = `Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`;
+        const headers = data.length > 0 ? Object.keys(data[0]) : [];
+        const rows = data.map(row => Object.values(row));
 
         try {
-            const response = await fetch(`${flaskUrl}save_csv`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
-            });
-            // Handle the response from the server
-            const responseData = await response.json();
+            const responseData = await saveCsv({ filePath, headers, rows });
             console.log("Server response:", responseData);
         } catch (error) {
             console.error("Error sending data to server:", error);

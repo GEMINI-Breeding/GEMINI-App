@@ -16,7 +16,7 @@ import {
 import DashboardCustomizeIcon from "@mui/icons-material/DashboardCustomize";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
-import { listDirs } from '../../api/files';
+import { listDirs, getFileUrl } from '../../api/files';
 import { centerOfMass, booleanContains, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
 
 export function parseCsv(csvText) {
@@ -32,13 +32,12 @@ export function parseCsv(csvText) {
 }
 
 function getAndParseFieldDesign(
-    flaskUrl,
     selectedYearGCP,
     selectedExperimentGCP,
     selectedLocationGCP,
     selectedPopulationGCP
 ) {
-    const filePath = `${flaskUrl}files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`;
+    const filePath = getFileUrl(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`);
     return fetch(filePath)
         .then((response) => response.text())
         .then((text) => parseCsv(text))
@@ -144,7 +143,6 @@ function PlotProposalSwitcher() {
         featureCollectionPop,
         featureCollectionPlot,
         polygonProposalOptions,
-        flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
         selectedLocationGCP,
@@ -233,7 +231,6 @@ function PlotProposalSwitcher() {
     useEffect(() => {
         if (selectedYearGCP && selectedExperimentGCP && selectedLocationGCP && selectedPopulationGCP) {
             getAndParseFieldDesign(
-                flaskUrl,
                 selectedYearGCP,
                 selectedExperimentGCP,
                 selectedLocationGCP,
@@ -248,7 +245,7 @@ function PlotProposalSwitcher() {
             // Check for AgRowStitch availability
             checkAgrowstitchAvailability();
         }
-    }, [flaskUrl, selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
+    }, [selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP]);
 
     const checkAgrowstitchAvailability = async () => {
         try {

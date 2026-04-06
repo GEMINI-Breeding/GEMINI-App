@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { Box, Grid, Typography, Tabs, Tab, CircularProgress } from "@mui/material";
 import { NestedSection } from "./Processing/CamerasAccordion";
 import OrthoTable from '../../StatsMenu/OrthoTable';
-import { useDataState, useDataSetters, fetchData } from "../../../DataContext";
+import { useDataState, useDataSetters } from "../../../DataContext";
+import { listDirs, listFiles } from "../../../api/files";
 import ImageViewer from "../ImageViewer";
 import { useHandleProcessImages } from "../../Util/ImageViewerUtil";
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
@@ -18,7 +19,6 @@ function AerialDataPrep() {
         selectedLocationGCP,
         selectedPopulationGCP,
         selectedDateGCP,
-        flaskUrl,
         selectedYearGCP,
         selectedExperimentGCP,
         selectedSensorGCP,
@@ -117,20 +117,20 @@ function AerialDataPrep() {
             setLoading(true); // Start loading
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
-                    const dates = await fetchData(
-                        `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                    const dates = await listDirs(
+                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
                     let updatedData = {};
 
                     for (const date of dates) {
-                        const platforms = await fetchData(
-                            `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                        const platforms = await listDirs(
+                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
 
-                            const sensors = await fetchData(
-                                `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                            const sensors = await listDirs(
+                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {
@@ -143,8 +143,8 @@ function AerialDataPrep() {
                                     updatedData[platform][sensor] = [];
                                 }
 
-                                const imageFolders = await fetchData(
-                                    `${flaskUrl}list_dirs/Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                const imageFolders = await listDirs(
+                                    `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                 );
 
                                 if (imageFolders.includes("Images")) {
@@ -172,8 +172,8 @@ function AerialDataPrep() {
                                         ortho = 2;
                                     } else {
                                         try {
-                                            const processedFiles = await fetchData(
-                                                `${flaskUrl}list_files/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                            const processedFiles = await listFiles(
+                                                `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             ortho = processedFiles.some((file) => file.endsWith(".tif")) ? true : false;
@@ -212,7 +212,7 @@ function AerialDataPrep() {
             }
         };
         fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, flaskUrl, fetchData]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP]);
 
     const titleStyle = {
         fontSize: "1.25rem", // Adjust for desired size

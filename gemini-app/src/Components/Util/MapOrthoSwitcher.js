@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from "react";
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
-import { useDataState, useDataSetters, fetchData } from "../../DataContext";
+import { useDataState, useDataSetters } from "../../DataContext";
+import { listDirs, listFiles } from "../../api/files";
 import ImageIcon from "@mui/icons-material/Image";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import Button from "@mui/material/Button";
 import { Select, MenuItem, FormControl, InputLabel, Typography } from "@mui/material";
 
 export const MapOrthoSwitcher = () => {
-    const { flaskUrl, selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP } =
+    const { selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP } =
         useDataState();
     const { setPrepOrthoImagePath, setPrepAgRowStitchPlotPaths } = useDataSetters();
 
@@ -29,8 +30,8 @@ export const MapOrthoSwitcher = () => {
         console.log("selectedLocation", selectedLocationGCP);
         console.log("selectedPopulation", selectedPopulationGCP);
 
-        fetchData(
-            `${flaskUrl}list_dirs/Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+        listDirs(
+            `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
         )
             .then((dates) => {
                 console.log("fetched dates", dates);
@@ -73,15 +74,15 @@ export const MapOrthoSwitcher = () => {
     const checkDroneFolder = (date) => {
         const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
 
-        return fetchData(`${flaskUrl}list_dirs/${basePath}`)
+        return listDirs(basePath)
             .then((platforms) => {
                 // Check if platforms exist
                 const platformChecks = platforms.map((platform) =>
-                    fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`)
+                    listDirs(`${basePath}/${platform}`)
                         .then((sensors) => {
                             // Check each sensor for a "Pyramid.tif" file
                             const sensorChecks = sensors.map((sensor) =>
-                                fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}`)
+                                listFiles(`${basePath}/${platform}/${sensor}`)
                                     .then((files) => files.some((file) => file.includes("Pyramid.tif")))
                                     .catch(() => false)
                             );
@@ -101,15 +102,15 @@ export const MapOrthoSwitcher = () => {
     const checkAgRowStitchFolder = (date) => {
         const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`;
 
-        return fetchData(`${flaskUrl}list_dirs/${basePath}`)
+        return listDirs(basePath)
             .then((platforms) => {
                 // Check if platforms exist
                 const platformChecks = platforms.map((platform) =>
-                    fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`)
+                    listDirs(`${basePath}/${platform}`)
                         .then((sensors) => {
                             // Check each sensor for AgRowStitch directories
                             const sensorChecks = sensors.map((sensor) =>
-                                fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}/${sensor}`)
+                                listDirs(`${basePath}/${platform}/${sensor}`)
                                     .then((subDirs) => {
                                         // Look for AgRowStitch_vX directories
                                         const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
@@ -117,7 +118,7 @@ export const MapOrthoSwitcher = () => {
 
                                         // Check if any AgRowStitch version has combined mosaic OR UTM TIF files
                                         const versionChecks = agrowstitchDirs.map((agrowstitchDir) =>
-                                            fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`)
+                                            listFiles(`${basePath}/${platform}/${sensor}/${agrowstitchDir}`)
                                                 .then((files) => 
                                                     files.some((file) => file === "combined_mosaic_utm.tif") ||
                                                     files.some((file) => file.includes("_utm.tif"))
@@ -165,19 +166,19 @@ export const MapOrthoSwitcher = () => {
         const basePath = `Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
         
         try {
-            const platforms = await fetchData(`${flaskUrl}list_dirs/${basePath}`);
+            const platforms = await listDirs(basePath);
             if (platforms.length === 0) return;
 
             const orthoTypes = [];
             
             // Check for drone orthomosaics and AgRowStitch plots
             for (const platform of platforms) {
-                const sensors = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}`);
+                const sensors = await listDirs(`${basePath}/${platform}`);
                 
                 for (const sensor of sensors) {
                     // Check for drone Pyramid.tif
                     try {
-                        const files = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}`);
+                        const files = await listFiles(`${basePath}/${platform}/${sensor}`);
                         if (files.some(file => file.includes("Pyramid.tif"))) {
                             orthoTypes.push({
                                 type: 'drone',
@@ -193,11 +194,11 @@ export const MapOrthoSwitcher = () => {
 
                     // Check for AgRowStitch directories
                     try {
-                        const subDirs = await fetchData(`${flaskUrl}list_dirs/${basePath}/${platform}/${sensor}`);
+                        const subDirs = await listDirs(`${basePath}/${platform}/${sensor}`);
                         const agrowstitchDirs = subDirs.filter(dir => dir.startsWith('AgRowStitch_v'));
                         
                         for (const agrowstitchDir of agrowstitchDirs) {
-                            const agrowstitchFiles = await fetchData(`${flaskUrl}list_files/${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
+                            const agrowstitchFiles = await listFiles(`${basePath}/${platform}/${sensor}/${agrowstitchDir}`);
                             
                             // First, check for combined mosaic
                             const hasCombinedMosaic = agrowstitchFiles.some(file => file === "combined_mosaic_utm.tif");

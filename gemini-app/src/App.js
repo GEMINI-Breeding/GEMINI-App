@@ -39,6 +39,8 @@ import ImageQueryUI from "./Components/ImageQuery/ImageQueryUI";
 import DocsFrame from "./Components/DocsFrame";
 import { BACKEND_MODE } from "./api/config";
 import { connectJobProgress, cancelJob } from "./api/jobs";
+import { checkDataDir, browseDataDir, createDataDir } from "./api/files";
+import { stopTraining, getTrainingProgress, stopLocate, getLocateProgress, stopExtract, getExtractProgress, stopOdm, getOrthoProgress, stopDroneExtract, getDroneExtractProgress, doneExtracting } from "./api/processing";
 
 function App() {
     //const [helpPaneOpen, setHelpPaneOpen] = useState(false);
@@ -63,7 +65,6 @@ function App() {
         selectedSensorGCP,
         orthoSetting,
         orthoCustomValue,
-        flaskUrl,
         isTraining,
         progress,
         epochs,
@@ -122,12 +123,11 @@ function App() {
         if (BACKEND_MODE !== 'flask') return;
         let cancelled = false;
         const check = () => {
-            fetch(`${flaskUrl}check_data_dir`)
-                .then(res => res.json())
+            checkDataDir()
                 .then(data => {
                     if (cancelled) return;
                     if (!data.exists) {
-                        setDataDirPath(data.path);
+                        setDataDirPath(data.path || '');
                         setDataDirMissing(true);
                     }
                 })
@@ -142,8 +142,7 @@ function App() {
     const handleBrowseDataDir = () => {
         setDataDirError("");
         setDataDirBrowsing(true);
-        fetch(`${flaskUrl}browse_data_dir`, { method: 'POST' })
-            .then(res => res.json())
+        browseDataDir()
             .then(data => {
                 setDataDirBrowsing(false);
                 if (data.selected) {
@@ -161,15 +160,10 @@ function App() {
     const handleCreateDataDir = () => {
         setDataDirCreating(true);
         setDataDirError("");
-        fetch(`${flaskUrl}create_data_dir`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: dataDirPath })
-        })
-            .then(res => res.json())
+        createDataDir(dataDirPath)
             .then(data => {
                 setDataDirCreating(false);
-                if (data.success) {
+                if (data.success || data.status === 'ok') {
                     setDataDirMissing(false);
                 } else {
                     setDataDirError(data.error || "Failed to create directory.");
@@ -183,10 +177,9 @@ function App() {
 
     const handleOpenSettings = () => {
         setDataDirError("");
-        fetch(`${flaskUrl}check_data_dir`)
-            .then(res => res.json())
+        checkDataDir()
             .then(data => {
-                setDataDirPath(data.path);
+                setDataDirPath(data.path || '');
                 setSettingsOpen(true);
             })
             .catch(() => setSettingsOpen(true));
@@ -195,15 +188,10 @@ function App() {
     const handleSettingsSave = () => {
         setDataDirCreating(true);
         setDataDirError("");
-        fetch(`${flaskUrl}create_data_dir`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: dataDirPath })
-        })
-            .then(res => res.json())
+        createDataDir(dataDirPath)
             .then(data => {
                 setDataDirCreating(false);
-                if (data.success) {
+                if (data.success || data.status === 'ok') {
                     setSettingsOpen(false);
                 } else {
                     setDataDirError(data.error || "Failed to update directory.");
@@ -301,18 +289,15 @@ function App() {
         }
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_ortho_progress`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setCurrentOrthoProgress(data.ortho);
-                }
+                const data = await getOrthoProgress();
+                if (data) setCurrentOrthoProgress(data.ortho);
             } catch (error) {
                 console.error("Error fetching ortho progress", error);
                 setSubmitError("Error getting ortho progress.");
             }
         }, 5000);
         return () => clearInterval(interval);
-    }, [isOrthoProcessing, flaskUrl, currentJobId]);
+    }, [isOrthoProcessing, currentJobId]);
 
     const handleStopOrtho = async () => {
         if (BACKEND_MODE !== 'flask' && currentJobId) {
@@ -339,21 +324,11 @@ function App() {
             custom_options: orthoCustomValue ? orthoCustomValue : [],
         };
         try {
-            const response = await fetch(`${flaskUrl}stop_odm`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-            });
-            if (response.ok) {
-                console.log("ODM stopped");
-                setIsOrthoProcessing(false);
-                setProcessRunning(false);
-                setCurrentOrthoProgress(0);
-            } else {
-                const errorData = await response.json();
-                console.error("Error stopping ODM", errorData);
-                setSubmitError("Error stopping ODM.");
-            }
+            await stopOdm(data);
+            console.log("ODM stopped");
+            setIsOrthoProcessing(false);
+            setProcessRunning(false);
+            setCurrentOrthoProgress(0);
         } catch (error) {
             console.error("Error:", error);
         }
@@ -378,7 +353,7 @@ function App() {
             return;
         }
         try {
-            await fetch(`${flaskUrl}stop_training`, { method: "POST" });
+            await stopTraining();
             console.log("Training stopped");
             setIsTraining(false);
             setCurrentEpoch(0);
@@ -408,9 +383,8 @@ function App() {
         }
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_progress`);
-                if (response.ok) {
-                    const data = await response.json();
+                const data = await getTrainingProgress();
+                if (data) {
                     const progressPercentage = epochs > 0 ? (data.epoch / epochs) * 100 : 0;
                     setProgress(isNaN(progressPercentage) ? 0 : progressPercentage);
                     setCurrentEpoch(data.epoch);
@@ -441,17 +415,11 @@ function App() {
             return;
         }
         try {
-            const response = await fetch(`${flaskUrl}stop_locate`, { method: "POST" });
-            if (response.ok) {
-                console.log("Locating stopped");
-                setIsLocating(false);
-                setProcessRunning(false);
-                setCurrentLocateProgress(0);
-            } else {
-                const errorData = await response.json();
-                console.error("Error stopping locating", errorData);
-                setSubmitError("Error stopping locating.");
-            }
+            await stopLocate();
+            console.log("Locating stopped");
+            setIsLocating(false);
+            setProcessRunning(false);
+            setCurrentLocateProgress(0);
         } catch (error) {
             console.error("Error:", error);
         }
@@ -469,19 +437,16 @@ function App() {
         }
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_locate_progress`);
-                if (response.ok) {
-                    const data = await response.json();
+                const data = await getLocateProgress();
+                if (data) {
                     setCurrentLocateProgress(data.locate);
-                } else {
-                    setSubmitError("Error fetching locate progress.");
                 }
             } catch (error) {
                 console.error("Error fetching locate progress", error);
             }
         }, 60000);
         return () => clearInterval(interval);
-    }, [isLocating, flaskUrl, currentJobId]);
+    }, [isLocating, currentJobId]);
     // FOR LOCATE END
 
     // FOR EXTRACT START
@@ -498,16 +463,10 @@ function App() {
             return;
         }
         try {
-            const response = await fetch(`${flaskUrl}stop_extract`, { method: "POST" });
-            if (response.ok) {
-                console.log("Extracting stopped");
-                setIsExtracting(false);
-                setProcessRunning(false);
-            } else {
-                const errorData = await response.json();
-                console.error("Error stopping extracting", errorData);
-                setSubmitError("Error stopping extraction.");
-            }
+            await stopExtract();
+            console.log("Extracting stopped");
+            setIsExtracting(false);
+            setProcessRunning(false);
         } catch (error) {
             console.error("Error:", error);
         }
@@ -522,18 +481,12 @@ function App() {
             return;
         }
         try {
-            const response = await fetch(`${flaskUrl}done_extract`, { method: "POST" });
-            if (response.ok) {
-                console.log("Extracting finished");
-                setIsExtracting(false);
-                setProcessRunning(false);
-                setCurrentExtractProgress(0);
-                setCloseMenu(false);
-            } else {
-                const errorData = await response.json();
-                console.error("Error finishing extraction", errorData);
-                setSubmitError("Error finishing extraction.");
-            }
+            await doneExtracting();
+            console.log("Extracting finished");
+            setIsExtracting(false);
+            setProcessRunning(false);
+            setCurrentExtractProgress(0);
+            setCloseMenu(false);
         } catch (error) {
             console.error("Error:", error);
         }
@@ -551,19 +504,16 @@ function App() {
         }
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_extract_progress`);
-                if (response.ok) {
-                    const data = await response.json();
+                const data = await getExtractProgress();
+                if (data) {
                     setCurrentExtractProgress(data.extract);
-                } else {
-                    setSubmitError("Error fetching extract progress.");
                 }
             } catch (error) {
                 console.error("Error fetching extract progress", error);
             }
         }, 60000);
         return () => clearInterval(interval);
-    }, [isExtracting, flaskUrl, currentJobId]);
+    }, [isExtracting, currentJobId]);
     // FOR EXTRACT END
 
     // FOR DRONE EXTRACT START
@@ -592,21 +542,11 @@ function App() {
             custom_options: orthoCustomValue ? orthoCustomValue : [],
         };
         try {
-            const response = await fetch(`${flaskUrl}stop_drone_extract`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data),
-            });
-            if (response.ok) {
-                console.log("Extracting stopped");
-                setIsDroneExtracting(false);
-                setProcessRunning(false);
-                setCurrentDroneExtractProgress(0);
-            } else {
-                const errorData = await response.json();
-                console.error("Error stopping drone extracting", errorData);
-                setSubmitError("Error stopping drone extraction.");
-            }
+            await stopDroneExtract(data);
+            console.log("Extracting stopped");
+            setIsDroneExtracting(false);
+            setProcessRunning(false);
+            setCurrentDroneExtractProgress(0);
         } catch (error) {
             console.error("Error:", error);
         }
@@ -624,19 +564,16 @@ function App() {
         }
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${flaskUrl}get_drone_extract_progress`);
-                if (response.ok) {
-                    const data = await response.json();
+                const data = await getDroneExtractProgress();
+                if (data) {
                     setCurrentDroneExtractProgress(data.drone_extract);
-                } else {
-                    setSubmitError("Error fetching drone extract progress.");
                 }
             } catch (error) {
                 console.error("Error fetching drone extract progress", error);
             }
         }, 1000);
         return () => clearInterval(interval);
-    }, [isDroneExtracting, flaskUrl, currentJobId]);
+    }, [isDroneExtracting, currentJobId]);
     // FOR DRONE EXTRACT DONE
 
     return (

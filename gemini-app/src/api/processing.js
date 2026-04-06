@@ -190,6 +190,98 @@ export const checkMask = async (params) => {
     }
 };
 
+// -- Model Management --
+
+export const getModelInfo = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}get_model_info`, body);
+    }
+    // Framework: scan MinIO for model metadata
+    return postJson(`${FRAMEWORK_URL}models/info`, body);
+};
+
+export const getLocateInfo = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}get_locate_info`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}models/locate_info`, body);
+};
+
+export const bestLocateFile = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}best_locate_file`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}models/best_locate`, body);
+};
+
+export const bestModelFile = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}best_model_file`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}models/best_model`, body);
+};
+
+export const doneTraining = () => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}done_training`, {});
+    }
+    return Promise.resolve({ status: 'ok' });
+};
+
+export const doneExtracting = () => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}done_extract`, {});
+    }
+    return Promise.resolve({ status: 'ok' });
+};
+
+// -- Labels & Annotations --
+
+export const checkExistingLabels = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}check_existing_labels`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}annotations/check_labels`, body);
+};
+
+export const uploadTraitLabels = (formData) => {
+    if (BACKEND_MODE === 'flask') {
+        return fetch(`${FLASK_URL}upload_trait_labels`, {
+            method: 'POST',
+            body: formData,
+        }).then(r => r.json());
+    }
+    return fetch(`${FRAMEWORK_URL}annotations/upload_labels`, {
+        method: 'POST',
+        body: formData,
+    }).then(r => r.json());
+};
+
+export const startCvat = () => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}start_cvat`, {});
+    }
+    return postJson(`${FRAMEWORK_URL}annotations/start_cvat`, {});
+};
+
+// -- Orthomosaic Split --
+
+export const splitOrthomosaics = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}split_orthomosaics`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'SPLIT_ORTHOMOSAIC', parameters: body });
+};
+
+// -- Roboflow Inference --
+
+export const runRoboflowInference = (body) => {
+    if (BACKEND_MODE === 'flask') {
+        return postJson(`${FLASK_URL}run_roboflow_inference`, body);
+    }
+    return postJson(`${FRAMEWORK_URL}jobs/submit`, { job_type: 'RUN_ROBOFLOW_INFERENCE', parameters: body });
+};
+
 // -- ODM Logs --
 
 /**
