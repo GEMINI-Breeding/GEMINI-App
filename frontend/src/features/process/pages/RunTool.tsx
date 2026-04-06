@@ -249,6 +249,7 @@ export function RunTool() {
 
         {step === "plot_boundary_prep" && (
           <PlotBoundaryPrep
+            key={runId}
             runId={runId}
             pipelineType={pipeline?.type as "aerial" | "ground" | undefined}
             onSaved={onSaved}
