@@ -941,7 +941,7 @@ export function InferenceTool({
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Overlap (IOU)</span>
+                <span className="text-xs text-muted-foreground">Overlap Threshold</span>
               </div>
               <div className="flex items-center gap-2">
                 <input
