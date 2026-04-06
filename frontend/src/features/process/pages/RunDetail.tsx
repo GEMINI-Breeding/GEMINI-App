@@ -3086,6 +3086,7 @@ export function RunDetail() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+      queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] });
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     },
     onError: () => showErrorToast("Failed to delete trait record"),

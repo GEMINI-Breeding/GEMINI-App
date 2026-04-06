@@ -570,6 +570,29 @@ def delete_trait_record(
     except Exception as _e:
         logger.warning("Could not delete PlotRecords for %s: %s", record_id, _e)
 
+    # Delete any inference results linked to this trait version.
+    # Aerial pipelines store inference in run.outputs["inference"] as a list of
+    # entries, each with a trait_version field matching the TraitRecord version.
+    existing_outputs = dict(run.outputs or {})
+    raw_inference = existing_outputs.get("inference", [])
+    if isinstance(raw_inference, dict):
+        inference_list = [{"label": lbl, "csv_path": rel} for lbl, rel in raw_inference.items()]
+    else:
+        inference_list = list(raw_inference)
+    kept_inference = []
+    for entry in inference_list:
+        if entry.get("trait_version") == record.version:
+            rel_path = entry.get("csv_path") or entry.get("csv_rel_path", "")
+            if rel_path:
+                paths.abs(rel_path).unlink(missing_ok=True)
+            logger.info("Deleted inference result '%s' for trait_version %s", entry.get("label"), record.version)
+        else:
+            kept_inference.append(entry)
+    if kept_inference:
+        existing_outputs["inference"] = kept_inference
+    elif raw_inference:
+        existing_outputs.pop("inference", None)
+
     # Check remaining records before deleting this one
     remaining = session.exec(
         select(TraitRecord).where(
@@ -580,25 +603,26 @@ def delete_trait_record(
 
     session.delete(record)
 
-    # If no records remain, clean up run outputs and mark step incomplete
+    # Build updated steps / outputs
+    steps_completed = dict(run.steps_completed or {})
     if not remaining:
-        existing_outputs = dict(run.outputs or {})
         existing_outputs.pop("traits_geojson", None)
         for key in list(existing_outputs.keys()):
             if key == "cropped_images" or key.startswith("cropped_images_v"):
                 existing_outputs.pop(key)
-        steps_completed = dict(run.steps_completed or {})
         steps_completed.pop("trait_extraction", None)
-        update_pipeline_run(
-            session=session,
-            db_run=run,
-            run_in=PipelineRunUpdate(
-                outputs=existing_outputs,
-                steps_completed=steps_completed,
-            ),
-        )
-    else:
-        session.commit()
+    # If inference was cleared, also mark the inference step incomplete
+    if not kept_inference and raw_inference:
+        steps_completed.pop("inference", None)
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(
+            outputs=existing_outputs,
+            steps_completed=steps_completed,
+        ),
+    )
 
 
 def _extract_plot_id(filename: str) -> str | None:

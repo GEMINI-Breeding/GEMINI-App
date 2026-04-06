@@ -467,6 +467,11 @@ def _discover_pm_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
                 "run_id": meta.get("run_id") or "",
                 "run_label": meta.get("run_label") or "",
             })
+    # Default to the latest on-disk version when active is unset, so the tool
+    # always highlights the most-recent version in the dropdown (matches
+    # _discover_pb_versions behaviour for plot boundaries).
+    if active is None and versions:
+        active = versions[-1]["version"]
     return versions, active
 
 
@@ -739,7 +744,9 @@ def load_plot_marking(
         )
         gps_translated = False
 
-    active_version = (run.outputs or {}).get("active_plot_marking_version")
+    # Use _discover_pm_versions so the returned active_version matches the dropdown
+    # even for runs that pre-date the active_plot_marking_version output key.
+    _, active_version = _discover_pm_versions(paths, dict(run.outputs or {}))
     return {
         "selections": selections,
         "gps_translated": gps_translated,
