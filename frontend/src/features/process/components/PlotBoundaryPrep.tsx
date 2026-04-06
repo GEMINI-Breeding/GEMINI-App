@@ -990,6 +990,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     number | null
   >(null);
   const [selectedBoundaryVersion, setSelectedBoundaryVersion] = useState<number | null>(null);
+  const [boundaryVersionLoading, setBoundaryVersionLoading] = useState(false);
   const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | null>(null);
   const [mapInitialized, setMapInitialized] = useState(false);
   const [noFdWarningOpen, setNoFdWarningOpen] = useState(false);
@@ -1735,6 +1736,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
   // Load a specific plot boundary version and make it the editing base
   async function loadBoundaryVersion(version: number) {
+    setBoundaryVersionLoading(true);
     try {
       const res = await fetch(
         apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`),
@@ -1766,6 +1768,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       setSelectedBoundaryVersion(version);
     } catch {
       showErrorToast("Failed to load boundary version");
+    } finally {
+      setBoundaryVersionLoading(false);
     }
   }
 
@@ -2030,17 +2034,23 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           )}
           {/* Boundary version selector */}
           {orthoInfo.plot_boundary_versions && orthoInfo.plot_boundary_versions.length > 1 && (
-            <select
-              value={selectedBoundaryVersion ?? ""}
-              onChange={(e) => loadBoundaryVersion(Number(e.target.value))}
-              className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none"
-            >
-              {orthoInfo.plot_boundary_versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  Boundary: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={selectedBoundaryVersion ?? ""}
+                onChange={(e) => loadBoundaryVersion(Number(e.target.value))}
+                disabled={boundaryVersionLoading}
+                className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none disabled:opacity-60"
+              >
+                {orthoInfo.plot_boundary_versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    Boundary: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
+                  </option>
+                ))}
+              </select>
+              {boundaryVersionLoading && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              )}
+            </div>
           )}
         </div>
       </div>

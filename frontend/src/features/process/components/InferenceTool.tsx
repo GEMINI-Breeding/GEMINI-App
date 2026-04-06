@@ -22,7 +22,7 @@ import {
   ZoomOut,
   Maximize2,
 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -137,6 +137,37 @@ function classColour(cls: string): string {
   let hash = 0
   for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
   return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
+}
+
+// ── Client-side NMS ───────────────────────────────────────────────────────────
+
+function calcIou(a: Prediction, b: Prediction): number {
+  const ax0 = a.x - a.width / 2, ay0 = a.y - a.height / 2
+  const ax1 = a.x + a.width / 2, ay1 = a.y + a.height / 2
+  const bx0 = b.x - b.width / 2, by0 = b.y - b.height / 2
+  const bx1 = b.x + b.width / 2, by1 = b.y + b.height / 2
+  const ix0 = Math.max(ax0, bx0), iy0 = Math.max(ay0, by0)
+  const ix1 = Math.min(ax1, bx1), iy1 = Math.min(ay1, by1)
+  if (ix1 <= ix0 || iy1 <= iy0) return 0
+  const inter = (ix1 - ix0) * (iy1 - iy0)
+  const union = a.width * a.height + b.width * b.height - inter
+  return union > 0 ? inter / union : 0
+}
+
+function applyNms(preds: Prediction[], iouThresh: number): Prediction[] {
+  if (iouThresh >= 1.0) return preds
+  const byClass: Record<string, Prediction[]> = {}
+  for (const p of preds) { (byClass[p.class] ??= []).push(p) }
+  const kept: Prediction[] = []
+  for (const classPreds of Object.values(byClass)) {
+    let remaining = [...classPreds].sort((a, b) => b.confidence - a.confidence)
+    while (remaining.length > 0) {
+      const best = remaining.shift()!
+      kept.push(best)
+      remaining = remaining.filter((p) => calcIou(best, p) < iouThresh)
+    }
+  }
+  return kept
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -450,6 +481,7 @@ export function InferenceTool({
   // Traits output state
   const [selectedTraitsModel, setSelectedTraitsModel] = useState<string>("")
   const [traitsThreshold, setTraitsThreshold] = useState(50)
+  const [iouThreshold, setIouThreshold] = useState(50)
   const [traitsStatus, setTraitsStatus] = useState<{ loading: boolean; message: string | null }>({ loading: false, message: null })
   const [logLines, setLogLines] = useState<string[]>([])
   const [logTotal, setLogTotal] = useState<number | null>(null)
@@ -498,7 +530,7 @@ export function InferenceTool({
       } else {
         const data = await res.json()
         const applied = (data.applied as string[]).join(", ")
-        setTraitsStatus({ loading: false, message: `Applied ${traitsThreshold}% → ${applied}` })
+        setTraitsStatus({ loading: false, message: `Applied conf=${traitsThreshold}% iou=${iouThreshold}% → ${applied}` })
         queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] })
       }
     } catch (e) {
@@ -603,10 +635,16 @@ export function InferenceTool({
 
   const currentImage = filteredImages[imageIdx] ?? null
 
-  // Predictions visible given current filters
-  const visiblePreds = predictions.filter(
-    (p) => p.confidence >= confThreshold / 100 && !hiddenClasses.has(p.class)
-  )
+  // Predictions visible given current filters + client-side NMS (display-only, never modifies stored data)
+  const visiblePreds = useMemo(() => {
+    const confFiltered = predictions.filter(
+      (p) => p.confidence >= confThreshold / 100 && !hiddenClasses.has(p.class)
+    )
+    if (iouThreshold >= 100) return confFiltered
+    const byImage: Record<string, Prediction[]> = {}
+    for (const p of confFiltered) { (byImage[p.image] ??= []).push(p) }
+    return Object.values(byImage).flatMap((preds) => applyNms(preds, iouThreshold / 100))
+  }, [predictions, confThreshold, hiddenClasses, iouThreshold])
   const currentPreds = currentImage
     ? visiblePreds.filter((p) => p.image === currentImage.name)
     : []
@@ -679,7 +717,7 @@ export function InferenceTool({
         }}
       >
         {filteredImages.map((im) => {
-          const detCount = predictions.filter((p) => p.image === im.name && p.confidence >= confThreshold / 100).length
+          const detCount = visiblePreds.filter((p) => p.image === im.name).length
           const parts: string[] = []
           if (im.plot) parts.push(`Plot ${im.plot}`)
           if (im.col) parts.push(`Col ${im.col}`)
@@ -884,17 +922,39 @@ export function InferenceTool({
                 ))}
               </select>
             )}
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={traitsThreshold}
-                onChange={(e) => { setTraitsThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
-                className="flex-1 h-1.5 accent-primary"
-              />
-              <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Confidence</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={traitsThreshold}
+                  onChange={(e) => { setTraitsThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
+                  className="flex-1 h-1.5 accent-primary"
+                />
+                <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Overlap (IOU)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={iouThreshold}
+                  onChange={(e) => { setIouThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
+                  className="flex-1 h-1.5 accent-primary"
+                />
+                <span className="text-xs font-mono w-8 text-right shrink-0">{iouThreshold}%</span>
+              </div>
             </div>
             <Button
               type="button"
@@ -906,7 +966,7 @@ export function InferenceTool({
             >
               {traitsStatus.loading
                 ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Applying…</>
-                : `Apply ${traitsThreshold}%`}
+                : `Apply`}
             </Button>
             {traitsStatus.message && (
               <p className={`text-xs ${traitsStatus.message.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"}`}>

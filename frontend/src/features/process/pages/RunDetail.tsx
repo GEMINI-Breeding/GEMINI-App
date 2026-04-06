@@ -4356,7 +4356,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                         />
                       );
                     }
-                    if (step.key === "inference" && pipelineType === "ground") {
+                    if (step.key === "inference") {
                       return (
                         <GroundVersionsPanel
                           runId={runId}
