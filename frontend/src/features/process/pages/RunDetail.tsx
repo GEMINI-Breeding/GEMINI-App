@@ -3213,6 +3213,27 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       refetchInterval: false,
     });
 
+  // Auto-complete plot_boundary_prep when boundary versions already exist
+  useEffect(() => {
+    if (
+      pipelineType === "aerial" &&
+      run &&
+      !run.steps_completed?.plot_boundary_prep &&
+      (plotBoundaryVersions?.length ?? 0) > 0
+    ) {
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/mark-step-complete`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+        body: JSON.stringify({ step: "plot_boundary_prep" }),
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      });
+    }
+  }, [pipelineType, run?.steps_completed?.plot_boundary_prep, plotBoundaryVersions?.length]);
+
   // Plot marking versions (for stitching dialog version picker)
   const { data: plotMarkingVersions } = useQuery<{ version: number; name: string; created_at: string }[]>({
     queryKey: ["plot-markings", runId],
@@ -4283,32 +4304,6 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                       >
                         <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
                         Import
-                      </Button>
-                    ) : step.key === "plot_boundary_prep" &&
-                      pipelineType === "aerial" &&
-                      (plotBoundaryVersions?.length ?? 0) > 0 &&
-                      !run.steps_completed?.plot_boundary_prep ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isExecuting || isRunning}
-                        onClick={async () => {
-                          await fetch(
-                            apiUrl(`/api/v1/pipeline-runs/${runId}/mark-step-complete`),
-                            {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                                Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-                              },
-                              body: JSON.stringify({ step: "plot_boundary_prep" }),
-                            }
-                          );
-                          queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-                        }}
-                      >
-                        <Check className="mr-1.5 h-3.5 w-3.5" />
-                        Use Existing
                       </Button>
                     ) : undefined
                   }
