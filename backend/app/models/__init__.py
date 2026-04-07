@@ -44,6 +44,16 @@ from app.models.user import (
 )
 from app.models.workspace import Workspace, WorkspaceCreate, WorkspaceUpdate
 from app.models.plot_record import PlotRecord  # noqa: F401 — ensures table is created
+from app.models.reference_data import (  # noqa: F401 — ensures tables are created
+    ReferenceDataset,
+    ReferenceDatasetPublic,
+    ReferenceDatasetWithMatch,
+    ReferencePlot,
+    ReferencePlotPublic,
+    ReferencePlotsPublic,
+    WorkspaceReferenceDataset,
+    MatchReport,
+)
 from app.models.pipeline import (
     Pipeline,
     PipelineCreate,

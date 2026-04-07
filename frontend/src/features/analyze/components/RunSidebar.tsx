@@ -33,6 +33,8 @@ interface RunSidebarProps {
   onDownloadAll: () => void
   onDownloadFiltered: () => void
   hasFilter: boolean
+  /** Reference trait columns — shown under "Reference Data" divider in Color By dropdown */
+  referenceColumns?: string[]
 }
 
 export function RunSidebar({
@@ -46,6 +48,7 @@ export function RunSidebar({
   onDownloadAll,
   onDownloadFiltered,
   hasFilter,
+  referenceColumns = [],
 }: RunSidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -86,6 +89,7 @@ export function RunSidebar({
                 columns={metricColumns}
                 value={selectedMetric}
                 onChange={onMetricChange}
+                referenceColumns={referenceColumns}
               />
             </div>
           )}

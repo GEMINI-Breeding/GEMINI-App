@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AnalyzeListRunsResponse, AnalyzeGetTraitsData, AnalyzeGetTraitsResponse, AnalyzeListTraitRecordsData, AnalyzeListTraitRecordsResponse, AnalyzeGetTraitRecordGeojsonData, AnalyzeGetTraitRecordGeojsonResponse, AnalyzeGetTraitRecordOrthoInfoData, AnalyzeGetTraitRecordOrthoInfoResponse, AnalyzeGetTraitRecordPlotImageData, AnalyzeGetTraitRecordPlotImageResponse, AnalyzeDeleteTraitRecordData, AnalyzeDeleteTraitRecordResponse, AnalyzeGetOrthoInfoData, AnalyzeGetOrthoInfoResponse, FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesListUploadImagesData, FilesListUploadImagesResponse, FilesDownloadUploadZipData, FilesDownloadUploadZipResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCheckGeotiffData, FilesCheckGeotiffResponse, FilesConvertGeotiffData, FilesConvertGeotiffResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingLoadPlotMarkingData, ProcessingLoadPlotMarkingResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingGetGpsDataData, ProcessingGetGpsDataResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingGetFieldDesignData, ProcessingGetFieldDesignResponse, ProcessingSaveFieldDesignData, ProcessingSaveFieldDesignResponse, ProcessingSavePlotGridData, ProcessingSavePlotGridResponse, ProcessingGeneratePlotGridData, ProcessingGeneratePlotGridResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingListPlotBoundariesData, ProcessingListPlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingMosaicPreviewData, ProcessingMosaicPreviewResponse, ProcessingListOrthomosaicsData, ProcessingListOrthomosaicsResponse, ProcessingOrthomosaicVersionPreviewData, ProcessingOrthomosaicVersionPreviewResponse, ProcessingDeleteOrthomosaicData, ProcessingDeleteOrthomosaicResponse, ProcessingActivateOrthomosaicData, ProcessingActivateOrthomosaicResponse, ProcessingRenameOrthomosaicData, ProcessingRenameOrthomosaicResponse, ProcessingRenamePlotBoundaryData, ProcessingRenamePlotBoundaryResponse, ProcessingDeletePlotBoundaryData, ProcessingDeletePlotBoundaryResponse, ProcessingDownloadCropsForBoundaryData, ProcessingDownloadCropsForBoundaryResponse, ProcessingUseUploadedOrthoData, ProcessingUseUploadedOrthoResponse, ProcessingCheckUploadedOrthoData, ProcessingCheckUploadedOrthoResponse, ProcessingGetInferenceResultsData, ProcessingGetInferenceResultsResponse, ProcessingGetStitchOutputsData, ProcessingGetStitchOutputsResponse, ProcessingDeleteInferenceResultData, ProcessingDeleteInferenceResultResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsDockerCheckResponse, UtilsCapabilitiesResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse, WorkspacesWorkspaceCardImagesData, WorkspacesWorkspaceCardImagesResponse } from './types.gen';
+import type { AnalyzeListRunsResponse, AnalyzeGetTraitsData, AnalyzeGetTraitsResponse, AnalyzeListTraitRecordsData, AnalyzeListTraitRecordsResponse, AnalyzeGetTraitRecordGeojsonData, AnalyzeGetTraitRecordGeojsonResponse, AnalyzeGetTraitRecordOrthoInfoData, AnalyzeGetTraitRecordOrthoInfoResponse, AnalyzeGetTraitRecordPlotImageData, AnalyzeGetTraitRecordPlotImageResponse, AnalyzeGetTraitRecordImagePlotIdsData, AnalyzeGetTraitRecordImagePlotIdsResponse, AnalyzeDeleteTraitRecordData, AnalyzeDeleteTraitRecordResponse, AnalyzeGetOrthoInfoData, AnalyzeGetOrthoInfoResponse, AnalyzeListPlotRecordsData, AnalyzeListPlotRecordsResponse, AnalyzeGetMasterTableData, AnalyzeGetMasterTableResponse, FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesListUploadedOrthosResponse, FilesListUploadedDemsResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDeleteUploadImagesData, FilesDeleteUploadImagesResponse, FilesListUploadImagesData, FilesListUploadImagesResponse, FilesDownloadUploadZipData, FilesDownloadUploadZipResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCheckGeotiffData, FilesCheckGeotiffResponse, FilesConvertGeotiffData, FilesConvertGeotiffResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesSaveMsgsSyncedData, FilesSaveMsgsSyncedResponse, FilesCheckExistingFilesData, FilesCheckExistingFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingAvailableSyncSourcesData, ProcessingAvailableSyncSourcesResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingListPlotMarkingsData, ProcessingListPlotMarkingsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingLoadPlotMarkingData, ProcessingLoadPlotMarkingResponse, ProcessingRenamePlotMarkingData, ProcessingRenamePlotMarkingResponse, ProcessingDeletePlotMarkingVersionData, ProcessingDeletePlotMarkingVersionResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingGetGpsDataData, ProcessingGetGpsDataResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingGetFieldDesignData, ProcessingGetFieldDesignResponse, ProcessingSaveFieldDesignData, ProcessingSaveFieldDesignResponse, ProcessingSavePlotGridData, ProcessingSavePlotGridResponse, ProcessingTraitExtractionPreviewData, ProcessingTraitExtractionPreviewResponse, ProcessingGeneratePlotGridData, ProcessingGeneratePlotGridResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingListPlotBoundariesData, ProcessingListPlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingAutoBoundaryData, ProcessingAutoBoundaryResponse, ProcessingGetPlotBoundaryVersionData, ProcessingGetPlotBoundaryVersionResponse, ProcessingDeletePlotBoundaryData, ProcessingDeletePlotBoundaryResponse, ProcessingMosaicPreviewData, ProcessingMosaicPreviewResponse, ProcessingListOrthomosaicsData, ProcessingListOrthomosaicsResponse, ProcessingOrthomosaicVersionPreviewData, ProcessingOrthomosaicVersionPreviewResponse, ProcessingDeleteOrthomosaicData, ProcessingDeleteOrthomosaicResponse, ProcessingActivateOrthomosaicData, ProcessingActivateOrthomosaicResponse, ProcessingRenameOrthomosaicData, ProcessingRenameOrthomosaicResponse, ProcessingRenamePlotBoundaryData, ProcessingRenamePlotBoundaryResponse, ProcessingDownloadCropsForBoundaryData, ProcessingDownloadCropsForBoundaryResponse, ProcessingUseUploadedOrthoData, ProcessingUseUploadedOrthoResponse, ProcessingCheckUploadedOrthoData, ProcessingCheckUploadedOrthoResponse, ProcessingInferenceResultsData, ProcessingInferenceResultsResponse, ProcessingMarkStepCompleteData, ProcessingMarkStepCompleteResponse, ProcessingApplyInferenceThresholdData, ProcessingApplyInferenceThresholdResponse, ProcessingListStitchingsData, ProcessingListStitchingsResponse, ProcessingDownloadStitchingImagesData, ProcessingDownloadStitchingImagesResponse, ProcessingRenameStitchingData, ProcessingRenameStitchingResponse, ProcessingDeleteStitchingData, ProcessingDeleteStitchingResponse, ProcessingListAssociationsData, ProcessingListAssociationsResponse, ProcessingDeleteAssociationData, ProcessingDeleteAssociationResponse, ProcessingGetStitchOutputsData, ProcessingGetStitchOutputsResponse, ProcessingGetInferenceResultsData, ProcessingGetInferenceResultsResponse, ProcessingDeleteInferenceResultData, ProcessingDeleteInferenceResultResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, ProcessingMigratePlotBoundariesResponse, ReferenceDataParseHeadersData, ReferenceDataParseHeadersResponse, ReferenceDataUploadReferenceDataData, ReferenceDataUploadReferenceDataResponse, ReferenceDataListDatasetsData, ReferenceDataListDatasetsResponse, ReferenceDataGetDatasetData, ReferenceDataGetDatasetResponse, ReferenceDataDeleteDatasetData, ReferenceDataDeleteDatasetResponse, ReferenceDataListPlotsData, ReferenceDataListPlotsResponse, ReferenceDataListWorkspaceDatasetsData, ReferenceDataListWorkspaceDatasetsResponse, ReferenceDataAssociateDatasetData, ReferenceDataAssociateDatasetResponse, ReferenceDataRemoveDatasetFromWorkspaceData, ReferenceDataRemoveDatasetFromWorkspaceResponse, ReferenceDataMatchPlotData, ReferenceDataMatchPlotResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, SettingsReadSystemInfoResponse, SettingsReadDockerResourcesResponse, SettingsUpdateDockerResourcesData, SettingsUpdateDockerResourcesResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsGetLogsResponse, UtilsDockerCheckResponse, UtilsCapabilitiesResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesSyncWorkspacesResponse, WorkspacesWorkspaceStatsResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse, WorkspacesWorkspaceCardImagesData, WorkspacesWorkspaceCardImagesResponse } from './types.gen';
 
 export class AnalyzeService {
     /**
@@ -147,6 +147,28 @@ export class AnalyzeService {
     }
     
     /**
+     * Get Trait Record Image Plot Ids
+     * Return the list of plot_ids that have a cropped image on disk for this trait record.
+     * Used by the frontend to highlight which plots have image data available.
+     * @param data The data for the request.
+     * @param data.recordId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getTraitRecordImagePlotIds(data: AnalyzeGetTraitRecordImagePlotIdsData): CancelablePromise<AnalyzeGetTraitRecordImagePlotIdsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/trait-records/{record_id}/image-plot-ids',
+            path: {
+                record_id: data.recordId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Delete Trait Record
      * @param data The data for the request.
      * @param data.recordId
@@ -186,6 +208,105 @@ export class AnalyzeService {
             url: '/api/v1/analyze/runs/{run_id}/ortho-info',
             path: {
                 run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Plot Records
+     * Query the PlotRecord table with optional filters.
+     *
+     * All string filters are case-insensitive substring matches.
+     * Returns matching rows plus total count.
+     *
+     * Example CLI usage (with httpie):
+     * http GET :8000/api/v1/analyze/plot-records             accession==ABC123             "Authorization:Bearer <token>"
+     *
+     * Or with curl:
+     * curl -s -H "Authorization: Bearer <token>"             "http://localhost:8000/api/v1/analyze/plot-records?accession=ABC123" | python3 -m json.tool
+     * @param data The data for the request.
+     * @param data.workspaceName
+     * @param data.pipelineName
+     * @param data.pipelineType
+     * @param data.date
+     * @param data.experiment
+     * @param data.location
+     * @param data.plotId
+     * @param data.accession
+     * @param data.col
+     * @param data.row
+     * @param data.limit
+     * @param data.offset
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listPlotRecords(data: AnalyzeListPlotRecordsData = {}): CancelablePromise<AnalyzeListPlotRecordsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/plot-records',
+            query: {
+                workspace_name: data.workspaceName,
+                pipeline_name: data.pipelineName,
+                pipeline_type: data.pipelineType,
+                date: data.date,
+                experiment: data.experiment,
+                location: data.location,
+                plot_id: data.plotId,
+                accession: data.accession,
+                col: data.col,
+                row: data.row,
+                limit: data.limit,
+                offset: data.offset
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Master Table
+     * Workspace-level master table.
+     *
+     * Returns one row per unique (experiment, location, population, plot_id) identity
+     * found in PlotRecords for this workspace.  For each identity:
+     * - The most recent PlotRecord per pipeline contributes trait columns prefixed
+     * with  "<PipelineName>·<trait>".
+     * - Matched ReferencePlot rows from associated datasets contribute columns
+     * prefixed with  "<DatasetName>·<trait>".
+     *
+     * Response shape:
+     * {
+     * "pipelines":          [{ id, name, type, color }],
+     * "reference_datasets": [{ id, name, experiment, location, population }],
+     * "columns": [
+     * { "key": "PipeA·height", "group": "pipeline",   "pipeline_id": "...",   "label": "height" },
+     * { "key": "RefDS·lai",    "group": "reference",  "dataset_id": "...",    "label": "lai"    },
+     * ],
+     * "rows": [
+     * {
+     * "experiment": "...", "location": "...", "population": "...", "plot_id": "...",
+     * "accession": "...", "col": "...", "row": "...",
+     * "pipeline_ids": ["..."],
+     * "PipeA·height": 42.1,
+     * "RefDS·lai": 3.7,
+     * }
+     * ]
+     * }
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getMasterTable(data: AnalyzeGetMasterTableData): CancelablePromise<AnalyzeGetMasterTableResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/workspaces/{workspace_id}/master-table',
+            path: {
+                workspace_id: data.workspaceId
             },
             errors: {
                 422: 'Validation Error'
@@ -292,6 +413,32 @@ export class FilesService {
     }
     
     /**
+     * List Uploaded Orthos
+     * Return all FileUpload records with data_type='Orthomosaic' (RGB), with TIF filenames.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listUploadedOrthos(): CancelablePromise<FilesListUploadedOrthosResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/uploaded-orthos'
+        });
+    }
+    
+    /**
+     * List Uploaded Dems
+     * Return all FileUpload records with data_type='Orthomosaic DEM', with TIF filenames.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listUploadedDems(): CancelablePromise<FilesListUploadedDemsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/uploaded-dems'
+        });
+    }
+    
+    /**
      * Read File
      * @param data The data for the request.
      * @param data.id
@@ -348,6 +495,30 @@ export class FilesService {
             path: {
                 id: data.id
             },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Upload Images
+     * Delete specific image files from an upload and update file_count.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static deleteUploadImages(data: FilesDeleteUploadImagesData): CancelablePromise<FilesDeleteUploadImagesResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/files/{id}/images',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -494,6 +665,50 @@ export class FilesService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/copy-local',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Msgs Synced
+     * Overwrite an already-uploaded msgs_synced.csv with column-remapped content.
+     *
+     * The file was placed at dest_path by the upload step; this endpoint just
+     * rewrites it with the user-confirmed column mapping applied.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static saveMsgsSynced(data: FilesSaveMsgsSyncedData): CancelablePromise<FilesSaveMsgsSyncedResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/msgs-synced',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Check Existing Files
+     * Return which of the provided filenames already exist in the destination directory.
+     * Used by the frontend to warn the user before uploading.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static checkExistingFiles(data: FilesCheckExistingFilesData): CancelablePromise<FilesCheckExistingFilesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/check-existing',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
@@ -980,6 +1195,29 @@ export class PrivateService {
 
 export class ProcessingService {
     /**
+     * Available Sync Sources
+     * Return all runs in the same workspace whose msgs_synced.csv has both
+     * a timestamp column and GPS data — usable as cross-sensor sync sources.
+     * The requesting run itself is excluded.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static availableSyncSources(data: ProcessingAvailableSyncSourcesData): CancelablePromise<ProcessingAvailableSyncSourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/available-sync-sources',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Execute Step
      * @param data The data for the request.
      * @param data.id
@@ -1067,6 +1305,26 @@ export class ProcessingService {
     }
     
     /**
+     * List Plot Markings
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listPlotMarkings(data: ProcessingListPlotMarkingsData): CancelablePromise<ProcessingListPlotMarkingsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/plot-markings',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Save Plot Marking
      * @param data The data for the request.
      * @param data.id
@@ -1091,9 +1349,10 @@ export class ProcessingService {
     
     /**
      * Load Plot Marking
-     * Return existing plot marking selections from plot_borders.csv, if it exists.
+     * Return plot marking selections. Pass ?version=N to load a specific version.
      * @param data The data for the request.
      * @param data.id
+     * @param data.version
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1103,6 +1362,56 @@ export class ProcessingService {
             url: '/api/v1/pipeline-runs/{id}/plot-marking',
             path: {
                 id: data.id
+            },
+            query: {
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Rename Plot Marking
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static renamePlotMarking(data: ProcessingRenamePlotMarkingData): CancelablePromise<ProcessingRenamePlotMarkingResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/pipeline-runs/{id}/plot-markings/{version}/rename',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Plot Marking Version
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns null Successful Response
+     * @throws ApiError
+     */
+    public static deletePlotMarkingVersion(data: ProcessingDeletePlotMarkingVersionData): CancelablePromise<ProcessingDeletePlotMarkingVersionResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/plot-markings/{version}',
+            path: {
+                id: data.id,
+                version: data.version
             },
             errors: {
                 422: 'Validation Error'
@@ -1261,6 +1570,37 @@ export class ProcessingService {
     }
     
     /**
+     * Trait Extraction Preview
+     * Return a preview image + metrics for a single plot at a given ExG threshold.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.orthoVersion
+     * @param data.boundaryVersion
+     * @param data.plotIndex
+     * @param data.threshold
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static traitExtractionPreview(data: ProcessingTraitExtractionPreviewData): CancelablePromise<ProcessingTraitExtractionPreviewResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/trait-extraction-preview',
+            path: {
+                id: data.id
+            },
+            query: {
+                ortho_version: data.orthoVersion,
+                boundary_version: data.boundaryVersion,
+                plot_index: data.plotIndex,
+                threshold: data.threshold
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Generate Plot Grid
      * Generate a rectangular plot grid from the population boundary + grid options.
      * Saves Pop-Boundary-WGS84.geojson and Plot-Boundary-WGS84.geojson at pipeline level.
@@ -1397,6 +1737,9 @@ export class ProcessingService {
     
     /**
      * List Plot Boundaries
+     * Return all plot boundary versions for this run's population directory.
+     * Scans the shared intermediate directory so versions saved by other runs
+     * (e.g. different dates in the same pipeline) are always included.
      * @param data The data for the request.
      * @param data.id
      * @returns unknown Successful Response
@@ -1450,12 +1793,87 @@ export class ProcessingService {
     }
     
     /**
+     * Auto Boundary
+     * Estimate outer field boundary and grid options from available spatial data.
+     *
+     * Ground: derives boundary + grid from individual georeferenced plot TIF extents
+     * and their spatial layout (precise — matches actual plot positions).
+     * Aerial: derives boundary from the orthomosaic extent; derives plot dimensions
+     * from (boundary size / rows×cols) using the field design if available.
+     *
+     * Returns pop_boundary (GeoJSON Feature) and grid_options.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static autoBoundary(data: ProcessingAutoBoundaryData): CancelablePromise<ProcessingAutoBoundaryResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/auto-boundary',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Plot Boundary Version
+     * Return the GeoJSON for a specific saved plot boundary version.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getPlotBoundaryVersion(data: ProcessingGetPlotBoundaryVersionData): CancelablePromise<ProcessingGetPlotBoundaryVersionResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Plot Boundary
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns null Successful Response
+     * @throws ApiError
+     */
+    public static deletePlotBoundary(data: ProcessingDeletePlotBoundaryData): CancelablePromise<ProcessingDeletePlotBoundaryResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Mosaic Preview
      * Return the mosaic as a downscaled JPEG so WebKit can render it.
      * TIF files are not renderable as <img> in WebKit/Tauri.
+     * For ground runs, pass stitch_version to preview a specific stitching version.
      * @param data The data for the request.
      * @param data.id
      * @param data.maxSize
+     * @param data.stitchVersion
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1467,7 +1885,8 @@ export class ProcessingService {
                 id: data.id
             },
             query: {
-                max_size: data.maxSize
+                max_size: data.maxSize,
+                stitch_version: data.stitchVersion
             },
             errors: {
                 422: 'Validation Error'
@@ -1618,28 +2037,6 @@ export class ProcessingService {
     }
     
     /**
-     * Delete Plot Boundary
-     * @param data The data for the request.
-     * @param data.id
-     * @param data.version
-     * @returns null Successful Response
-     * @throws ApiError
-     */
-    public static deletePlotBoundary(data: ProcessingDeletePlotBoundaryData): CancelablePromise<ProcessingDeletePlotBoundaryResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{version}',
-            path: {
-                id: data.id,
-                version: data.version
-            },
-            errors: {
-                422: 'Validation Error'
-            }
-        });
-    }
-    
-    /**
      * Download Crops For Boundary
      * Crop the specified ortho version using the specified boundary version and return as ZIP.
      * @param data The data for the request.
@@ -1651,7 +2048,7 @@ export class ProcessingService {
      */
     public static downloadCropsForBoundary(data: ProcessingDownloadCropsForBoundaryData): CancelablePromise<ProcessingDownloadCropsForBoundaryResponse> {
         return __request(OpenAPI, {
-            method: 'POST',
+            method: 'GET',
             url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops',
             path: {
                 id: data.id,
@@ -1671,13 +2068,15 @@ export class ProcessingService {
      * Register a user-uploaded orthomosaic TIF as the orthomosaic output for this
      * run, skipping ODM generation entirely.
      *
-     * Expects the TIF to be in:
-     * Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/Orthomosaic/
+     * Without a body: looks in the run's own Raw/{...}/Orthomosaic/ dir (backward compat).
+     * With file_upload_id: uses that FileUpload record's storage path instead, so any
+     * uploaded ortho can be imported regardless of which fields it was uploaded with.
      *
-     * The file is hard-linked (or copied if cross-device) to the processed dir
-     * as {date}-RGB.tif and the run's orthomosaic step is marked complete.
+     * save_mode="new_version" (default) adds a new versioned entry.
+     * save_mode="replace" overwrites the currently active version.
      * @param data The data for the request.
      * @param data.id
+     * @param data.requestBody
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1688,6 +2087,8 @@ export class ProcessingService {
             path: {
                 id: data.id
             },
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -1696,7 +2097,17 @@ export class ProcessingService {
     
     /**
      * Check Uploaded Ortho
-     * Check whether an uploaded orthomosaic TIF exists for this run (non-destructive).
+     * Check whether an uploaded orthomosaic TIF exists in Raw/.../Orthomosaic/.
+     *
+     * Files are classified as DEM or RGB by filename: any TIF whose stem contains
+     * "dem" (case-insensitive) is treated as a DEM; all others are treated as RGB.
+     *
+     * Returns:
+     * available      – True if at least one RGB TIF was found
+     * filename       – name of the first RGB TIF (display only)
+     * rgb_files      – sorted list of RGB TIF filenames
+     * dem_files      – sorted list of DEM TIF filenames (may be empty)
+     * needs_selection – True when >1 RGB file exists (user must choose via Import dialog)
      * @param data The data for the request.
      * @param data.id
      * @returns unknown Successful Response
@@ -1716,19 +2127,106 @@ export class ProcessingService {
     }
     
     /**
-     * Get Inference Results
-     * Return a summary of each inference CSV stored in run.outputs["inference"].
+     * Inference Results
+     * Return parsed predictions CSV + image list for the inference viewer.
      *
-     * Each entry: { label, plot_count, total_predictions, classes, csv_rel_path }
+     * `model` query param selects which model's results to return (defaults to first).
+     *
+     * Response:
+     * {
+     * "available": bool,
+     * "models": ["ModelA", "ModelB"],   # all available model labels
+     * "active_model": "ModelA",
+     * "predictions": [...],
+     * "images": [{"name": str, "path": str}, ...]
+     * }
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.model
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static inferenceResults(data: ProcessingInferenceResultsData): CancelablePromise<ProcessingInferenceResultsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/inference-results',
+            path: {
+                id: data.id
+            },
+            query: {
+                model: data.model
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Mark Step Complete
+     * Mark a pipeline step as complete without running it (e.g. skip inference).
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static markStepComplete(data: ProcessingMarkStepCompleteData): CancelablePromise<ProcessingMarkStepCompleteResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/mark-step-complete',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Apply Inference Threshold
+     * Re-merge inference predictions into the Traits GeoJSON using a specific
+     * confidence threshold, without re-running inference.
+     *
+     * Reads the saved prediction CSV(s), filters rows by confidence, then
+     * re-runs merge_inference_into_geojson so the GeoJSON reflects only
+     * detections above the chosen threshold.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static applyInferenceThreshold(data: ProcessingApplyInferenceThresholdData): CancelablePromise<ProcessingApplyInferenceThresholdResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/apply-inference-threshold',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Stitchings
+     * Return all stitching versions stored in run.outputs['stitchings'].
      * @param data The data for the request.
      * @param data.id
      * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static getInferenceResults(data: ProcessingGetInferenceResultsData): CancelablePromise<ProcessingGetInferenceResultsResponse> {
+    public static listStitchings(data: ProcessingListStitchingsData): CancelablePromise<ProcessingListStitchingsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/v1/pipeline-runs/{id}/inference-results',
+            url: '/api/v1/pipeline-runs/{id}/stitchings',
             path: {
                 id: data.id
             },
@@ -1739,11 +2237,138 @@ export class ProcessingService {
     }
     
     /**
-     * Get Stitch Outputs
-     * Return the list of stitched plot images produced by AgRowStitch.
-     * Each entry has a name and a serve URL.
+     * Download Stitching Images
+     * Download all stitch plot images for a given version as a ZIP.
+     *
+     * association_version selects which association CSV to use for naming.
+     * If omitted, picks the latest association whose stitch_version matches,
+     * falling back to the active association, then any association.
+     *
+     * Naming:
+     * - If association.csv exists and a plot is matched: plot-{Plot}_row-{Row}_col-{Col}_accession-{Accession}.png
+     * - Otherwise: plot_{N}.png  (N = plot index from original filename)
      * @param data The data for the request.
      * @param data.id
+     * @param data.version
+     * @param data.associationVersion
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadStitchingImages(data: ProcessingDownloadStitchingImagesData): CancelablePromise<ProcessingDownloadStitchingImagesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/stitchings/{version}/download',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            query: {
+                association_version: data.associationVersion
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Rename Stitching
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static renameStitching(data: ProcessingRenameStitchingData): CancelablePromise<ProcessingRenameStitchingResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/pipeline-runs/{id}/stitchings/{version}/rename',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Stitching
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static deleteStitching(data: ProcessingDeleteStitchingData): CancelablePromise<ProcessingDeleteStitchingResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/stitchings/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Associations
+     * Return all association versions stored in run.outputs['associations'].
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listAssociations(data: ProcessingListAssociationsData): CancelablePromise<ProcessingListAssociationsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/associations',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Association
+     * Delete a specific association version and its CSV file.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static deleteAssociation(data: ProcessingDeleteAssociationData): CancelablePromise<ProcessingDeleteAssociationResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/associations/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Stitch Outputs
+     * Return stitched plot images for a stitching version.
+     * If version is omitted, returns the active stitching version (used for live polling).
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1751,6 +2376,37 @@ export class ProcessingService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/pipeline-runs/{id}/stitch-outputs',
+            path: {
+                id: data.id
+            },
+            query: {
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Inference Results
+     * Return a summary of each inference CSV stored in run.outputs["inference"].
+     *
+     * Handles both:
+     * - New list format: [{ label, csv_path, stitch_version, association_version, created_at }]
+     * - Legacy dict format: { label: rel_path }
+     *
+     * Each returned entry includes: label, csv_rel_path, plot_count, total_predictions, classes,
+     * stitch_version, association_version, created_at.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getInferenceResults(data: ProcessingGetInferenceResultsData): CancelablePromise<ProcessingGetInferenceResultsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/inference-summary',
             path: {
                 id: data.id
             },
@@ -1762,7 +2418,7 @@ export class ProcessingService {
     
     /**
      * Delete Inference Result
-     * Delete the inference CSV and remove the entry from run.outputs.
+     * Delete the inference CSV and remove the entry from run.outputs. Handles both list and legacy dict format.
      * @param data The data for the request.
      * @param data.id
      * @param data.label
@@ -1793,13 +2449,292 @@ export class ProcessingService {
      */
     public static downloadCrops(data: ProcessingDownloadCropsData): CancelablePromise<ProcessingDownloadCropsResponse> {
         return __request(OpenAPI, {
-            method: 'POST',
+            method: 'GET',
             url: '/api/v1/pipeline-runs/{id}/download-crops',
             path: {
                 id: data.id
             },
             query: {
                 ortho_version: data.orthoVersion
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Migrate Plot Boundaries
+     * One-time migration: move Plot-Boundary / Pop-Boundary files from the old
+     * workspace-scoped path to the new shared (workspace-independent) path and
+     * update run.outputs references accordingly.
+     *
+     * Old: Intermediate/{workspace}/{year}/{exp}/{loc}/{pop}/Plot-Boundary-WGS84*.geojson
+     * New: Intermediate/{year}/{exp}/{loc}/{pop}/Plot-Boundary-WGS84*.geojson
+     *
+     * Safe to run multiple times — skips files that have already been moved.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static migratePlotBoundaries(): CancelablePromise<ProcessingMigratePlotBoundariesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/migrate/plot-boundaries'
+        });
+    }
+}
+
+export class ReferenceDataService {
+    /**
+     * Parse Headers
+     * Return the column headers from a CSV or Excel file without persisting anything.
+     * @param data The data for the request.
+     * @param data.formData
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static parseHeaders(data: ReferenceDataParseHeadersData): CancelablePromise<ReferenceDataParseHeadersResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/reference-data/parse-headers',
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Upload Reference Data
+     * Upload a CSV or Excel file as a Reference Dataset.
+     *
+     * Steps:
+     * 1. Parse the file
+     * 2. Apply column mapping
+     * 3. Validate mapping (requires plot_id or col+row)
+     * 4. Extract ReferencePlot rows
+     * 5. Persist ReferenceDataset + ReferencePlots
+     * @param data The data for the request.
+     * @param data.name Required dataset name
+     * @param data.columnMappingJson JSON string: { original_col: canonical_name }
+     * @param data.formData
+     * @param data.experiment
+     * @param data.location
+     * @param data.population
+     * @param data.date
+     * @returns ReferenceDatasetWithMatch Successful Response
+     * @throws ApiError
+     */
+    public static uploadReferenceData(data: ReferenceDataUploadReferenceDataData): CancelablePromise<ReferenceDataUploadReferenceDataResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/reference-data/upload',
+            query: {
+                name: data.name,
+                experiment: data.experiment,
+                location: data.location,
+                population: data.population,
+                date: data.date,
+                column_mapping_json: data.columnMappingJson
+            },
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Datasets
+     * List all uploaded ReferenceDatasets, optionally filtered by experiment/location/population.
+     * @param data The data for the request.
+     * @param data.experiment
+     * @param data.location
+     * @param data.population
+     * @returns ReferenceDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static listDatasets(data: ReferenceDataListDatasetsData = {}): CancelablePromise<ReferenceDataListDatasetsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/',
+            query: {
+                experiment: data.experiment,
+                location: data.location,
+                population: data.population
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Dataset
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @returns ReferenceDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static getDataset(data: ReferenceDataGetDatasetData): CancelablePromise<ReferenceDataGetDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/{dataset_id}',
+            path: {
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Dataset
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static deleteDataset(data: ReferenceDataDeleteDatasetData): CancelablePromise<ReferenceDataDeleteDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/reference-data/{dataset_id}',
+            path: {
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Plots
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @param data.skip
+     * @param data.limit
+     * @returns ReferencePlotsPublic Successful Response
+     * @throws ApiError
+     */
+    public static listPlots(data: ReferenceDataListPlotsData): CancelablePromise<ReferenceDataListPlotsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/{dataset_id}/plots',
+            path: {
+                dataset_id: data.datasetId
+            },
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Workspace Datasets
+     * List all ReferenceDatasets associated with this workspace, with match reports.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @returns ReferenceDatasetWithMatch Successful Response
+     * @throws ApiError
+     */
+    public static listWorkspaceDatasets(data: ReferenceDataListWorkspaceDatasetsData): CancelablePromise<ReferenceDataListWorkspaceDatasetsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/{workspace_id}/reference-data/',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Associate Dataset
+     * Associate an uploaded ReferenceDataset with this workspace.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.datasetId
+     * @returns ReferenceDatasetWithMatch Successful Response
+     * @throws ApiError
+     */
+    public static associateDataset(data: ReferenceDataAssociateDatasetData): CancelablePromise<ReferenceDataAssociateDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/workspaces/{workspace_id}/reference-data/{dataset_id}',
+            path: {
+                workspace_id: data.workspaceId,
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Remove Dataset From Workspace
+     * Remove the association between a dataset and this workspace (does not delete the dataset).
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.datasetId
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static removeDatasetFromWorkspace(data: ReferenceDataRemoveDatasetFromWorkspaceData): CancelablePromise<ReferenceDataRemoveDatasetFromWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/workspaces/{workspace_id}/reference-data/{dataset_id}',
+            path: {
+                workspace_id: data.workspaceId,
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Match Plot
+     * Return all reference trait values for a given plot across all datasets
+     * associated with this workspace. Used by plot viewers.
+     *
+     * Response: [ { dataset_id, dataset_name, traits: { trait: value } } ]
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.experiment
+     * @param data.location
+     * @param data.population
+     * @param data.plotId
+     * @param data.col
+     * @param data.row
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static matchPlot(data: ReferenceDataMatchPlotData): CancelablePromise<ReferenceDataMatchPlotResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/{workspace_id}/reference-data/match',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            query: {
+                experiment: data.experiment,
+                location: data.location,
+                population: data.population,
+                plot_id: data.plotId,
+                col: data.col,
+                row: data.row
             },
             errors: {
                 422: 'Validation Error'
@@ -1832,6 +2767,49 @@ export class SettingsService {
         return __request(OpenAPI, {
             method: 'PUT',
             url: '/api/v1/settings/data-root',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read System Info
+     * @returns SystemInfoPublic Successful Response
+     * @throws ApiError
+     */
+    public static readSystemInfo(): CancelablePromise<SettingsReadSystemInfoResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/settings/system-info'
+        });
+    }
+    
+    /**
+     * Read Docker Resources
+     * @returns DockerResourcesPublic Successful Response
+     * @throws ApiError
+     */
+    public static readDockerResources(): CancelablePromise<SettingsReadDockerResourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/settings/docker-resources'
+        });
+    }
+    
+    /**
+     * Update Docker Resources
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns DockerResourcesPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateDockerResources(data: SettingsUpdateDockerResourcesData): CancelablePromise<SettingsUpdateDockerResourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/settings/docker-resources',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
@@ -2073,8 +3051,21 @@ export class UtilsService {
     }
     
     /**
+     * Get Logs
+     * Return the last 500 backend log lines for the frontend Console tab.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getLogs(): CancelablePromise<UtilsGetLogsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/utils/logs'
+        });
+    }
+    
+    /**
      * Docker Check
-     * Return whether Docker is available on the host system.
+     * Return whether Docker is installed and the daemon is running.
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -2143,6 +3134,40 @@ export class WorkspacesService {
     }
     
     /**
+     * Sync Workspaces
+     * Scan the filesystem and remove workspaces whose data directories no longer exist.
+     *
+     * A workspace is considered stale when BOTH of these directories are absent:
+     * {data_root}/Intermediate/{workspace_name}/
+     * {data_root}/Processed/{workspace_name}/
+     *
+     * Mirrors the file-upload /sync endpoint behaviour.
+     * Returns { removed: [name, ...], remaining: WorkspacesPublic }
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static syncWorkspaces(): CancelablePromise<WorkspacesSyncWorkspacesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/workspaces/sync'
+        });
+    }
+    
+    /**
+     * Workspace Stats
+     * Return aerial/ground run counts for all workspaces owned by the current user.
+     * Response: { workspace_id: { aerial: N, ground: N } }
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static workspaceStats(): CancelablePromise<WorkspacesWorkspaceStatsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/stats'
+        });
+    }
+    
+    /**
      * Read One
      * @param data The data for the request.
      * @param data.id
@@ -2207,12 +3232,8 @@ export class WorkspacesService {
     
     /**
      * Workspace Card Images
-     * Return up to 4 sampled raw frame URLs for the workspace card background.
-     *
-     * Uses the FileUpload database to find "Image Data" uploads that match the
-     * experiment/location/population/date/platform/sensor of any run belonging
-     * to this workspace, then samples frames spread across the image sequence.
-     * Raw JPEGs served directly via /files/serve — no image processing.
+     * Return up to 2 images for the workspace card: one from the latest aerial run
+     * and one from the latest ground run (whichever exist).
      * @param data The data for the request.
      * @param data.id
      * @returns unknown Successful Response

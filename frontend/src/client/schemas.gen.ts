@@ -31,6 +31,29 @@ export const AppSettingUpdateSchema = {
     title: 'AppSettingUpdate'
 } as const;
 
+export const ApplyThresholdRequestSchema = {
+    properties: {
+        confidence_threshold: {
+            type: 'number',
+            title: 'Confidence Threshold'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        }
+    },
+    type: 'object',
+    required: ['confidence_threshold'],
+    title: 'ApplyThresholdRequest'
+} as const;
+
 export const Body_login_login_access_tokenSchema = {
     properties: {
         grant_type: {
@@ -86,6 +109,56 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const Body_reference_data_parse_headersSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_reference-data-parse_headers'
+} as const;
+
+export const Body_reference_data_upload_reference_dataSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_reference-data-upload_reference_data'
+} as const;
+
+export const CheckExistingRequestSchema = {
+    properties: {
+        target_root_dir: {
+            type: 'string',
+            title: 'Target Root Dir'
+        },
+        file_names: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'File Names'
+        },
+        data_type: {
+            type: 'string',
+            title: 'Data Type',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['target_root_dir', 'file_names'],
+    title: 'CheckExistingRequest'
+} as const;
+
 export const ConvertGeoTiffRequestSchema = {
     properties: {
         file_path: {
@@ -96,6 +169,101 @@ export const ConvertGeoTiffRequestSchema = {
     type: 'object',
     required: ['file_path'],
     title: 'ConvertGeoTiffRequest'
+} as const;
+
+export const DeleteImagesRequestSchema = {
+    properties: {
+        paths: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Paths'
+        }
+    },
+    type: 'object',
+    required: ['paths'],
+    title: 'DeleteImagesRequest'
+} as const;
+
+export const DockerResourcesPublicSchema = {
+    properties: {
+        cpus: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cpus'
+        },
+        memory_gb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Memory Gb'
+        },
+        swap_gb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Swap Gb'
+        }
+    },
+    type: 'object',
+    title: 'DockerResourcesPublic'
+} as const;
+
+export const DockerResourcesUpdateSchema = {
+    properties: {
+        cpus: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cpus'
+        },
+        memory_gb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Memory Gb'
+        },
+        swap_gb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Swap Gb'
+        }
+    },
+    type: 'object',
+    title: 'DockerResourcesUpdate'
 } as const;
 
 export const ExecuteStepRequestSchema = {
@@ -112,10 +280,27 @@ export const ExecuteStepRequestSchema = {
             title: 'Models',
             default: []
         },
-        agrowstitch_version: {
-            type: 'integer',
-            title: 'Agrowstitch Version',
-            default: 1
+        stitch_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stitch Name'
+        },
+        plot_marking_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Plot Marking Version'
         },
         ortho_name: {
             anyOf: [
@@ -149,6 +334,81 @@ export const ExecuteStepRequestSchema = {
                 }
             ],
             title: 'Boundary Version'
+        },
+        exg_threshold: {
+            type: 'number',
+            title: 'Exg Threshold',
+            default: 0.1
+        },
+        stitch_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stitch Version'
+        },
+        association_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Association Version'
+        },
+        trait_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Trait Version'
+        },
+        inference_mode: {
+            type: 'string',
+            title: 'Inference Mode',
+            default: 'cloud'
+        },
+        local_server_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Local Server Url'
+        },
+        sync_mode: {
+            type: 'string',
+            title: 'Sync Mode',
+            default: 'own_metadata'
+        },
+        sync_source_run_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sync Source Run Id'
+        },
+        sync_max_extrapolation_sec: {
+            type: 'number',
+            title: 'Sync Max Extrapolation Sec',
+            default: 30
         }
     },
     type: 'object',
@@ -211,6 +471,18 @@ export const FileUploadCreateSchema = {
             type: 'string',
             maxLength: 1000,
             title: 'Storage Path'
+        },
+        msgs_synced_path: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Msgs Synced Path'
         }
     },
     type: 'object',
@@ -274,6 +546,17 @@ export const FileUploadPublicSchema = {
             maxLength: 1000,
             title: 'Storage Path'
         },
+        msgs_synced_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Msgs Synced Path'
+        },
         id: {
             type: 'string',
             format: 'uuid',
@@ -331,7 +614,7 @@ export const FileUploadPublicSchema = {
         }
     },
     type: 'object',
-    required: ['data_type', 'experiment', 'location', 'population', 'date', 'storage_path', 'id', 'owner_id', 'original_filename', 'file_count', 'file_size_bytes', 'status', 'notes', 'created_at'],
+    required: ['data_type', 'experiment', 'location', 'population', 'date', 'storage_path', 'msgs_synced_path', 'id', 'owner_id', 'original_filename', 'file_count', 'file_size_bytes', 'status', 'notes', 'created_at'],
     title: 'FileUploadPublic'
 } as const;
 
@@ -467,6 +750,18 @@ export const FileUploadUpdateSchema = {
                 }
             ],
             title: 'Notes'
+        },
+        msgs_synced_path: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Msgs Synced Path'
         }
     },
     type: 'object',
@@ -764,6 +1059,49 @@ export const LocalCopyRequestSchema = {
     type: 'object',
     required: ['file_paths', 'data_type', 'target_root_dir'],
     title: 'LocalCopyRequest'
+} as const;
+
+export const MarkStepCompleteBodySchema = {
+    properties: {
+        step: {
+            type: 'string',
+            title: 'Step'
+        }
+    },
+    type: 'object',
+    required: ['step'],
+    title: 'MarkStepCompleteBody'
+} as const;
+
+export const MatchReportSchema = {
+    properties: {
+        total: {
+            type: 'integer',
+            title: 'Total'
+        },
+        matched: {
+            type: 'integer',
+            title: 'Matched'
+        },
+        unmatched: {
+            type: 'integer',
+            title: 'Unmatched'
+        },
+        unmatched_plots: {
+            items: {
+                additionalProperties: {
+                    type: 'string'
+                },
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Unmatched Plots'
+        }
+    },
+    type: 'object',
+    required: ['total', 'matched', 'unmatched', 'unmatched_plots'],
+    title: 'MatchReport',
+    description: 'Returned after upload or association to show how many plots matched.'
 } as const;
 
 export const MessageSchema = {
@@ -1333,6 +1671,22 @@ export const PlotMarkingRequestSchema = {
             },
             type: 'array',
             title: 'Selections'
+        },
+        save_as: {
+            type: 'boolean',
+            title: 'Save As',
+            default: false
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
         }
     },
     type: 'object',
@@ -1365,6 +1719,198 @@ export const PrivateUserCreateSchema = {
     title: 'PrivateUserCreate'
 } as const;
 
+export const ReferenceDatasetPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        experiment: {
+            type: 'string',
+            title: 'Experiment'
+        },
+        location: {
+            type: 'string',
+            title: 'Location'
+        },
+        population: {
+            type: 'string',
+            title: 'Population'
+        },
+        date: {
+            type: 'string',
+            title: 'Date'
+        },
+        plot_count: {
+            type: 'integer',
+            title: 'Plot Count'
+        },
+        trait_columns: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Trait Columns'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'experiment', 'location', 'population', 'date', 'plot_count', 'trait_columns', 'created_at'],
+    title: 'ReferenceDatasetPublic'
+} as const;
+
+export const ReferenceDatasetWithMatchSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        experiment: {
+            type: 'string',
+            title: 'Experiment'
+        },
+        location: {
+            type: 'string',
+            title: 'Location'
+        },
+        population: {
+            type: 'string',
+            title: 'Population'
+        },
+        date: {
+            type: 'string',
+            title: 'Date'
+        },
+        plot_count: {
+            type: 'integer',
+            title: 'Plot Count'
+        },
+        trait_columns: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Trait Columns'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        match_report: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/MatchReport'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'experiment', 'location', 'population', 'date', 'plot_count', 'trait_columns', 'created_at'],
+    title: 'ReferenceDatasetWithMatch'
+} as const;
+
+export const ReferencePlotPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        dataset_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Dataset Id'
+        },
+        plot_id: {
+            type: 'string',
+            title: 'Plot Id'
+        },
+        col: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Col'
+        },
+        row: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Row'
+        },
+        accession: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Accession'
+        },
+        traits: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Traits'
+        }
+    },
+    type: 'object',
+    required: ['id', 'dataset_id', 'plot_id', 'col', 'row', 'accession', 'traits'],
+    title: 'ReferencePlotPublic'
+} as const;
+
+export const ReferencePlotsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ReferencePlotPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ReferencePlotsPublic'
+} as const;
+
 export const RenameOrthoRequestSchema = {
     properties: {
         name: {
@@ -1387,6 +1933,36 @@ export const RenamePlotBoundaryRequestSchema = {
     type: 'object',
     required: ['name'],
     title: 'RenamePlotBoundaryRequest'
+} as const;
+
+export const RenamePlotMarkingRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'RenamePlotMarkingRequest'
+} as const;
+
+export const RenameStitchingRequestSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    title: 'RenameStitchingRequest'
 } as const;
 
 export const SaveFieldDesignRequestSchema = {
@@ -1413,6 +1989,22 @@ export const SaveGcpLocationsRequestSchema = {
     title: 'SaveGcpLocationsRequest'
 } as const;
 
+export const SaveMsgsSyncedRequestSchema = {
+    properties: {
+        csv_text: {
+            type: 'string',
+            title: 'Csv Text'
+        },
+        dest_path: {
+            type: 'string',
+            title: 'Dest Path'
+        }
+    },
+    type: 'object',
+    required: ['csv_text', 'dest_path'],
+    title: 'SaveMsgsSyncedRequest'
+} as const;
+
 export const SavePlotGridRequestSchema = {
     properties: {
         geojson: {
@@ -1421,8 +2013,15 @@ export const SavePlotGridRequestSchema = {
             title: 'Geojson'
         },
         pop_boundary: {
-            additionalProperties: true,
-            type: 'object',
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'Pop Boundary'
         },
         grid_options: {
@@ -1460,6 +2059,17 @@ export const SavePlotGridRequestSchema = {
             ],
             title: 'Ortho Version'
         },
+        stitch_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stitch Version'
+        },
         save_as: {
             type: 'boolean',
             title: 'Save As',
@@ -1478,8 +2088,24 @@ export const SavePlotGridRequestSchema = {
         }
     },
     type: 'object',
-    required: ['geojson', 'pop_boundary'],
+    required: ['geojson'],
     title: 'SavePlotGridRequest'
+} as const;
+
+export const SystemInfoPublicSchema = {
+    properties: {
+        cpu_count: {
+            type: 'integer',
+            title: 'Cpu Count'
+        },
+        total_ram_gb: {
+            type: 'number',
+            title: 'Total Ram Gb'
+        }
+    },
+    type: 'object',
+    required: ['cpu_count', 'total_ram_gb'],
+    title: 'SystemInfoPublic'
 } as const;
 
 export const TokenSchema = {
@@ -1882,4 +2508,49 @@ export const WorkspacesPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'WorkspacesPublic'
+} as const;
+
+export const _UseUploadedOrthoRequestSchema = {
+    properties: {
+        file_upload_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Upload Id'
+        },
+        dem_file_upload_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dem File Upload Id'
+        },
+        save_mode: {
+            type: 'string',
+            title: 'Save Mode',
+            default: 'new_version'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    title: '_UseUploadedOrthoRequest'
 } as const;

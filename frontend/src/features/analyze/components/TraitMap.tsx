@@ -15,12 +15,13 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
-import { X, Download, Loader2, ZoomIn, Tag } from "lucide-react"
+import { X, Download, Loader2, ZoomIn, Tag, FlaskConical } from "lucide-react"
 import { useExpandable, ExpandButton, FullscreenModal } from "@/components/Common/ExpandableSection"
 import { useQuery } from "@tanstack/react-query"
 import { buildColorScale } from "../utils/colorScale"
 import { POSITION_KEY_SET, lookupProperty } from "../utils/traitAliases"
 import { ColorLegend } from "./ColorLegend"
+import { ReferenceDataPanel, type ReferenceDataPanelProps } from "./ReferenceDataPanel"
 
 // Satellite base → ortho image overlay → trait polygons
 const MAP_STYLE = {
@@ -74,6 +75,8 @@ interface TraitMapProps {
   showPolygons?: boolean
   /** Fill opacity for colored polygons, 0-100 (default 70) */
   plotOpacity?: number
+  /** Reference data context — if provided, enables REF toggle in plot panel */
+  refContext?: Omit<ReferenceDataPanelProps, "plotId" | "col" | "row">
 }
 
 interface TooltipState {
@@ -109,6 +112,7 @@ export function TraitMap({
   runId,
   showPolygons = true,
   plotOpacity = 70,
+  refContext,
 }: TraitMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [viewState, setViewState] = useState({ longitude: 0, latitude: 0, zoom: 2, pitch: 0, bearing: 0 })
@@ -273,6 +277,12 @@ export function TraitMap({
           selectedModel={selectedModel ?? inferenceData?.active_model ?? null}
           onModelChange={setSelectedModel}
           onClose={() => setPlotImage(null)}
+          refContext={refContext ? {
+            ...refContext,
+            plotId: plotImage.plotId,
+            col: plotImage.properties.col ? String(plotImage.properties.col) : null,
+            row: plotImage.properties.row ? String(plotImage.properties.row) : null,
+          } : undefined}
         />
       )}
     </div>
@@ -302,6 +312,7 @@ function PlotImagePanel({
   selectedModel,
   onModelChange,
   onClose,
+  refContext,
 }: {
   recordId: string
   plotId: string
@@ -312,6 +323,7 @@ function PlotImagePanel({
   selectedModel?: string | null
   onModelChange?: (model: string) => void
   onClose: () => void
+  refContext?: ReferenceDataPanelProps
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -320,6 +332,7 @@ function PlotImagePanel({
   const [downloading, setDownloading] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [showRef, setShowRef] = useState(false)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const hasDetections = predictions.length > 0
   const exp = useExpandable()
@@ -513,6 +526,16 @@ function PlotImagePanel({
               )}
             </>
           )}
+          {refContext && (
+            <button
+              type="button"
+              title={showRef ? "Hide reference data" : "Show reference data"}
+              onClick={() => setShowRef((v) => !v)}
+              className={`transition-colors ${showRef ? "text-orange-500" : "text-muted-foreground hover:text-orange-400"}`}
+            >
+              <FlaskConical className="w-4 h-4" />
+            </button>
+          )}
           <ExpandButton onClick={exp.open} title="Expand plot" className="h-7 w-7" />
           <button
             onClick={handleDownload}
@@ -529,6 +552,14 @@ function PlotImagePanel({
       </div>
 
       <PanelInfo />
+      {showRef && refContext && (
+        <div className="border-t px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+            Reference Data
+          </p>
+          <ReferenceDataPanel {...refContext} />
+        </div>
+      )}
       <PanelImage maxH="max-h-64" />
     </div>
 

@@ -39,6 +39,7 @@ import {
   PanelLeftOpen,
   Search,
   Table2,
+  LayoutGrid,
 } from "lucide-react";
 import {
   useExpandable,
@@ -83,6 +84,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MasterTableTab } from "../components/MasterTable";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -742,6 +744,39 @@ const traitRecordColumns: ColumnDef<TraitRecord>[] = [
   { id: "boundary", enableColumnFilter: false },
   { id: "plot_count", enableColumnFilter: false },
 ];
+
+function TableTabWithToggle({ records }: { records: TraitRecord[] }) {
+  const [showMaster, setShowMaster] = useState(false);
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground">
+        <button
+          onClick={() => setShowMaster(false)}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+            !showMaster
+              ? "bg-background text-foreground shadow-sm"
+              : "hover:text-foreground"
+          }`}
+        >
+          <Table2 className="h-3.5 w-3.5" />
+          Pipeline Runs
+        </button>
+        <button
+          onClick={() => setShowMaster(true)}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+            showMaster
+              ? "bg-background text-foreground shadow-sm"
+              : "hover:text-foreground"
+          }`}
+        >
+          <LayoutGrid className="h-3.5 w-3.5" />
+          Master Table
+        </button>
+      </div>
+      {showMaster ? <MasterTableTab records={records} /> : <TableTab records={records} />}
+    </div>
+  );
+}
 
 function TableTab({ records }: { records: TraitRecord[] }) {
   const [wsFilter, setWsFilter] = useState("__all__");
@@ -2039,7 +2074,7 @@ export function AnalyzeDashboard() {
         </TabsList>
 
         <TabsContent value="table" className="mt-0 flex-1 overflow-auto pb-6">
-          <TableTab records={records} />
+          <TableTabWithToggle records={records} />
         </TabsContent>
 
         <TabsContent value="query" className="mt-0 flex-1 overflow-auto pb-6">
@@ -2055,6 +2090,7 @@ export function AnalyzeDashboard() {
             <MapTab records={records} />
           </div>
         </TabsContent>
+
       </Tabs>
     </div>
   );

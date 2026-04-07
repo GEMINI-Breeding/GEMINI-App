@@ -26,6 +26,7 @@ export interface AnalyzableRun {
   pipeline_id: string
   pipeline_name: string
   pipeline_type: "aerial" | "ground"
+  workspace_id: string
   workspace_name: string
   date: string
   experiment: string

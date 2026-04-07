@@ -123,6 +123,7 @@ def list_runs(
             "pipeline_id": str(pipeline.id),
             "pipeline_name": pipeline.name,
             "pipeline_type": pipeline.type,
+            "workspace_id": str(pipeline.workspace_id) if pipeline else "",
             "workspace_name": workspace.name if workspace else "",
             "date": run.date,
             "experiment": run.experiment,
@@ -793,4 +794,228 @@ def list_plot_records(
             }
             for r in rows
         ],
+    }
+
+# ── 9. Master Table ───────────────────────────────────────────────────────────
+
+@router.get("/workspaces/{workspace_id}/master-table")
+def get_master_table(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """
+    Workspace-level master table.
+
+    Returns one row per unique (experiment, location, population, plot_id) identity
+    found in PlotRecords for this workspace.  For each identity:
+      - The most recent PlotRecord per pipeline contributes trait columns prefixed
+        with  "<PipelineName>·<trait>".
+      - Matched ReferencePlot rows from associated datasets contribute columns
+        prefixed with  "<DatasetName>·<trait>".
+
+    Response shape:
+    {
+      "pipelines":          [{ id, name, type, color }],
+      "reference_datasets": [{ id, name, experiment, location, population }],
+      "columns": [
+        { "key": "PipeA·height", "group": "pipeline",   "pipeline_id": "...",   "label": "height" },
+        { "key": "RefDS·lai",    "group": "reference",  "dataset_id": "...",    "label": "lai"    },
+      ],
+      "rows": [
+        {
+          "experiment": "...", "location": "...", "population": "...", "plot_id": "...",
+          "accession": "...", "col": "...", "row": "...",
+          "pipeline_ids": ["..."],
+          "PipeA·height": 42.1,
+          "RefDS·lai": 3.7,
+        }
+      ]
+    }
+    """
+    from collections import defaultdict
+
+    from app.models.plot_record import PlotRecord
+    from app.models.reference_data import (
+        ReferenceDataset,
+        ReferencePlot,
+        WorkspaceReferenceDataset,
+    )
+
+    ws_id_str = str(workspace_id)
+
+    # ── Fetch all PlotRecords for this workspace ──────────────────────────────
+    records = session.exec(
+        select(PlotRecord).where(PlotRecord.workspace_id == ws_id_str)
+    ).all()
+
+    if not records:
+        return {
+            "pipelines": [],
+            "reference_datasets": [],
+            "columns": [],
+            "rows": [],
+        }
+
+    # ── Collect pipeline metadata ─────────────────────────────────────────────
+    def _pipeline_color(pipeline_type: str) -> str:
+        if pipeline_type == "aerial":
+            return "#3B82F6"  # blue
+        if pipeline_type == "ground":
+            return "#10B981"  # green
+        return "#8B5CF6"      # violet fallback
+
+    pipeline_meta: dict[str, dict] = {}
+
+    for rec in records:
+        pid = rec.pipeline_id
+        if pid not in pipeline_meta:
+            pipeline_meta[pid] = {
+                "id": pid,
+                "name": rec.pipeline_name,
+                "type": rec.pipeline_type,
+                "color": _pipeline_color(rec.pipeline_type),
+            }
+
+    # ── Group records by plot identity ────────────────────────────────────────
+    # identity key → { pipeline_id → most-recent PlotRecord }
+    PlotKey = tuple  # (experiment, location, population, plot_id)
+
+    identity_map: dict[tuple, dict[str, Any]] = defaultdict(dict)
+
+    for rec in records:
+        key = (
+            rec.experiment or "",
+            rec.location or "",
+            rec.population or "",
+            rec.plot_id or "",
+        )
+        pid = rec.pipeline_id
+        existing = identity_map[key].get(pid)
+        if existing is None or rec.created_at > existing.created_at:
+            identity_map[key][pid] = rec
+
+    # ── Collect all trait column names per pipeline ───────────────────────────
+    pipeline_traits: dict[str, set[str]] = defaultdict(set)
+    for pipeline_records in identity_map.values():
+        for pid, rec in pipeline_records.items():
+            for trait_name in (rec.traits or {}).keys():
+                pipeline_traits[pid].add(trait_name)
+
+    # Build ordered pipeline column defs
+    column_defs: list[dict[str, str]] = []
+    for pid, meta in pipeline_meta.items():
+        for trait in sorted(pipeline_traits.get(pid, [])):
+            col_key = f"{meta['name']}·{trait}"
+            column_defs.append({
+                "key": col_key,
+                "group": "pipeline",
+                "pipeline_id": pid,
+                "label": trait,
+            })
+
+    # ── Fetch associated reference datasets ───────────────────────────────────
+    wrd_rows = session.exec(
+        select(WorkspaceReferenceDataset).where(
+            WorkspaceReferenceDataset.workspace_id == workspace_id
+        )
+    ).all()
+    dataset_ids = [r.dataset_id for r in wrd_rows]
+
+    ref_datasets: list[Any] = []
+    ref_traits: dict[uuid.UUID, set[str]] = defaultdict(set)
+
+    if dataset_ids:
+        ref_datasets = session.exec(
+            select(ReferenceDataset).where(ReferenceDataset.id.in_(dataset_ids))  # type: ignore[attr-defined]
+        ).all()
+        for ds in ref_datasets:
+            for col in ds.trait_columns or []:
+                ref_traits[ds.id].add(col)
+
+    # Build reference column defs
+    ref_column_defs: list[dict[str, str]] = []
+    for ds in ref_datasets:
+        for trait in sorted(ref_traits.get(ds.id, [])):
+            col_key = f"{ds.name}·{trait}"
+            ref_column_defs.append({
+                "key": col_key,
+                "group": "reference",
+                "dataset_id": str(ds.id),
+                "label": trait,
+            })
+
+    # ── Pre-load reference plots for efficient matching ───────────────────────
+    # dataset_id → { plot_id → ReferencePlot }
+    ref_plot_by_pid: dict[uuid.UUID, dict[str, Any]] = defaultdict(dict)
+    # dataset_id → { (col, row) → ReferencePlot } (col+row fallback)
+    ref_plot_by_colrow: dict[uuid.UUID, dict[tuple, Any]] = defaultdict(dict)
+
+    if dataset_ids:
+        ref_plots = session.exec(
+            select(ReferencePlot).where(ReferencePlot.dataset_id.in_(dataset_ids))  # type: ignore[attr-defined]
+        ).all()
+        for rp in ref_plots:
+            ref_plot_by_pid[rp.dataset_id][rp.plot_id] = rp
+            if rp.col and rp.row:
+                ref_plot_by_colrow[rp.dataset_id][(rp.col, rp.row)] = rp
+
+    # ── Build rows ────────────────────────────────────────────────────────────
+    rows: list[dict[str, Any]] = []
+
+    for (exp, loc, pop, plot_id), pipeline_records in sorted(identity_map.items()):
+        rep_rec = next(iter(pipeline_records.values()))
+
+        row: dict[str, Any] = {
+            "experiment": exp,
+            "location": loc,
+            "population": pop,
+            "plot_id": plot_id,
+            "accession": rep_rec.accession,
+            "col": rep_rec.col,
+            "row": rep_rec.row,
+            "pipeline_ids": list(pipeline_records.keys()),
+            # Per-pipeline provenance for the Merged Plot Viewer (prefixed __ to exclude from CSV)
+            "__records__": {
+                pid: {
+                    "trait_record_id": str(rec.trait_record_id),
+                    "run_id": str(rec.run_id),
+                    "pipeline_name": pipeline_meta[pid]["name"],
+                }
+                for pid, rec in pipeline_records.items()
+            },
+        }
+
+        # Pipeline traits
+        for pid, rec in pipeline_records.items():
+            pipe_name = pipeline_meta[pid]["name"]
+            for trait, value in (rec.traits or {}).items():
+                row[f"{pipe_name}·{trait}"] = value
+
+        # Reference traits — match by plot_id, then col+row fallback
+        for ds in ref_datasets:
+            rp = ref_plot_by_pid[ds.id].get(plot_id)
+            if rp is None and rep_rec.col and rep_rec.row:
+                rp = ref_plot_by_colrow[ds.id].get((rep_rec.col, rep_rec.row))
+            if rp and rp.traits:
+                for trait, value in rp.traits.items():
+                    row[f"{ds.name}·{trait}"] = value
+
+        rows.append(row)
+
+    return {
+        "pipelines": list(pipeline_meta.values()),
+        "reference_datasets": [
+            {
+                "id": str(ds.id),
+                "name": ds.name,
+                "experiment": ds.experiment,
+                "location": ds.location,
+                "population": ds.population,
+                "trait_columns": ds.trait_columns or [],
+            }
+            for ds in ref_datasets
+        ],
+        "columns": column_defs + ref_column_defs,
+        "rows": rows,
     }

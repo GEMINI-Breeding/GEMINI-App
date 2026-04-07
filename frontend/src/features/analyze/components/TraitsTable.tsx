@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react"
-import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Loader2, Tag } from "lucide-react"
+import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Loader2, Tag, FlaskConical } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ReferenceDataPanel, useHasReferenceData } from "./ReferenceDataPanel"
 
 interface TraitsTableProps {
   geojson: GeoJSON.FeatureCollection
@@ -18,6 +19,13 @@ interface TraitsTableProps {
   runId?: string
   /** Trait record ID — used for the plot-image endpoint */
   recordId?: string | null
+  /** Reference data context — if provided, enables the REF toggle in the plot viewer */
+  refContext?: {
+    workspaceId: string
+    experiment: string
+    location: string
+    population: string
+  }
 }
 
 function apiUrl(path: string): string {
@@ -154,13 +162,27 @@ function PlotViewer({ recordId, plotId, predictions, showDetections, showLabels 
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
+export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTableProps) {
   const [search, setSearch] = useState("")
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortAsc, setSortAsc] = useState(true)
   const [viewPlotId, setViewPlotId] = useState<string | null>(null)
+  const [viewRow, setViewRow] = useState<Record<string, unknown> | null>(null)
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [showRefData, setShowRefData] = useState(false)
+
+  const refProps = refContext && viewPlotId && viewRow ? {
+    workspaceId: refContext.workspaceId,
+    experiment: refContext.experiment,
+    location: refContext.location,
+    population: refContext.population,
+    plotId: viewPlotId,
+    col: viewRow.col ? String(viewRow.col) : null,
+    row: viewRow.row ? String(viewRow.row) : null,
+  } : null
+
+  const hasRefData = useHasReferenceData(refProps)
 
   // Fetch inference results (only if runId provided)
   const { data: inferenceData } = useQuery({
@@ -294,7 +316,9 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
                             className="text-muted-foreground hover:text-foreground transition-colors"
                             onClick={() => {
                               setViewPlotId(isViewing ? null : plotId)
+                              setViewRow(isViewing ? null : row)
                               setShowDetections(false)
+                              setShowRefData(false)
                             }}
                           >
                             {isViewing ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -307,6 +331,7 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
                             className="text-muted-foreground hover:text-foreground transition-colors"
                             onClick={() => {
                               setViewPlotId(plotId)
+                              setViewRow(row)
                               setShowDetections(true)
                             }}
                           >
@@ -358,25 +383,53 @@ export function TraitsTable({ geojson, runId, recordId }: TraitsTableProps) {
                   )}
                 </>
               )}
+              {refContext && (
+                <button
+                  type="button"
+                  title={hasRefData ? (showRefData ? "Hide reference data" : "Show reference data") : "No reference data for this plot"}
+                  disabled={!hasRefData}
+                  className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${
+                    !hasRefData
+                      ? "opacity-40 cursor-not-allowed border-input text-muted-foreground"
+                      : showRefData
+                        ? "bg-orange-500 text-white border-orange-500"
+                        : "text-orange-500 border-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950"
+                  }`}
+                  onClick={() => hasRefData && setShowRefData((v) => !v)}
+                >
+                  <FlaskConical className="w-3 h-3" />
+                  REF
+                </button>
+              )}
               <button
                 type="button"
                 title="Close"
                 className="text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => { setViewPlotId(null); setShowDetections(false) }}
+                onClick={() => { setViewPlotId(null); setViewRow(null); setShowDetections(false); setShowRefData(false) }}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
-          <div style={{ height: 360 }}>
-            <PlotViewer
-              key={viewPlotId}
-              recordId={recordId}
-              plotId={viewPlotId}
-              predictions={viewPredictions}
-              showDetections={showDetections}
-              showLabels={showLabels}
-            />
+          <div className="flex" style={{ height: 360 }}>
+            <div className={showRefData && refProps ? "flex-1 min-w-0" : "w-full"}>
+              <PlotViewer
+                key={viewPlotId}
+                recordId={recordId}
+                plotId={viewPlotId}
+                predictions={viewPredictions}
+                showDetections={showDetections}
+                showLabels={showLabels}
+              />
+            </div>
+            {showRefData && refProps && (
+              <div className="w-52 shrink-0 border-l px-3 py-3 overflow-y-auto">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Reference Data
+                </p>
+                <ReferenceDataPanel {...refProps} />
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -39,8 +39,9 @@ function isExtensionAllowed(filePath: string, fileType: string): boolean {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
   if (fileType === "*") return true
   if (fileType === "image/*") return IMAGE_EXTS.has(ext)
-  // Specific extension(s) like ".tif" or ".csv"
-  return ext === fileType.toLowerCase() || (fileType === ".tif" && ext === ".tiff")
+  // Comma-separated list (e.g. ".csv,.xlsx,.xls") or single extension
+  const allowed = fileType.split(",").map((s) => s.trim().toLowerCase())
+  return allowed.some((a) => ext === a) || (allowed.includes(".tif") && ext === ".tiff")
 }
 
 export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete, onDockerError, label, subDir }: UploadListProps) {

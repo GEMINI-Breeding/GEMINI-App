@@ -3,6 +3,7 @@ import { FilesService, OpenAPI } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard";
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog";
+import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,7 @@ export function UploadData() {
   const [syncedCsvText, setSyncedCsvText] = useState<string | null>(null);
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null);
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null);
+  const [refDataFile, setRefDataFile] = useState<File | null>(null);
 
   const handleDockerError = useCallback((msg: string) => {
     setDockerErrorMsg(msg);
@@ -91,6 +93,20 @@ export function UploadData() {
         } catch {
           // silently ignore — user can upload again
         }
+      } else if (selectedFileType === "Reference Data") {
+        const filePath = destPaths[0];
+        if (!filePath) return;
+        const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(filePath)}`);
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+        });
+        if (!res.ok) {
+          console.error("Could not read uploaded reference file:", await res.text());
+          return;
+        }
+        const blob = await res.blob();
+        const fileName = filePath.split(/[\\/]/).pop() ?? "reference.csv";
+        setRefDataFile(new File([blob], fileName));
       }
     },
     [selectedFileType],
@@ -140,8 +156,18 @@ export function UploadData() {
               onDockerError={handleDockerError}
             />
           )}
+
         </div>
       </div>
+
+      {refDataFile && (
+        <ReferenceDataUploadDialog
+          open
+          file={refDataFile}
+          formValues={formValues}
+          onClose={() => setRefDataFile(null)}
+        />
+      )}
 
       {syncedCsvText !== null && (
         <MsgsSyncedUploadDialog

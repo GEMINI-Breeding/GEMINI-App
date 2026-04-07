@@ -10,6 +10,7 @@ import { RunSidebar } from "../components/RunSidebar"
 import { TraitsTable } from "../components/TraitsTable"
 import { TraitHistogram } from "../components/TraitHistogram"
 import { QueryTab } from "../components/QueryTab"
+import { ReferenceDataService } from "@/client"
 
 // ── CSV export ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,25 @@ export function AnalyzeRun() {
     staleTime: 60_000,
   })
   const recordId = traitRecords?.[0]?.id ?? null
+
+  // Fetch workspace reference datasets to populate Color By dropdown
+  const { data: refDatasets = [] } = useQuery({
+    queryKey: ["workspace-ref-data", runMeta?.workspace_id],
+    queryFn: () => ReferenceDataService.listWorkspaceDatasets({ workspaceId: runMeta!.workspace_id }),
+    enabled: !!runMeta?.workspace_id,
+    staleTime: 60_000,
+  })
+
+  const referenceColumns = useMemo(() => {
+    const seen = new Set<string>()
+    const cols: string[] = []
+    for (const ds of refDatasets as Array<{ trait_columns: string[] }>) {
+      for (const col of ds.trait_columns ?? []) {
+        if (!seen.has(col)) { seen.add(col); cols.push(col) }
+      }
+    }
+    return cols
+  }, [refDatasets])
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +196,12 @@ export function AnalyzeRun() {
                   filteredIds={filteredIds}
                   recordId={recordId}
                   runId={runId}
+                  refContext={runMeta ? {
+                    workspaceId: runMeta.workspace_id,
+                    experiment: runMeta.experiment,
+                    location: runMeta.location,
+                    population: runMeta.population,
+                  } : undefined}
                 />
               </div>
               {runMeta && (
@@ -190,6 +216,7 @@ export function AnalyzeRun() {
                   onDownloadAll={handleDownloadAll}
                   onDownloadFiltered={handleDownloadFiltered}
                   hasFilter={selectedAccession !== "__all__"}
+                  referenceColumns={referenceColumns}
                 />
               )}
             </>
@@ -216,6 +243,12 @@ export function AnalyzeRun() {
                   geojson={geojson}
                   runId={runId}
                   recordId={recordId}
+                  refContext={runMeta ? {
+                    workspaceId: runMeta.workspace_id,
+                    experiment: runMeta.experiment,
+                    location: runMeta.location,
+                    population: runMeta.population,
+                  } : undefined}
                 />
               </section>
               <section>
@@ -247,6 +280,12 @@ export function AnalyzeRun() {
               geojson={geojson}
               metricColumns={metricColumns}
               runId={runId}
+              refContext={runMeta ? {
+                workspaceId: runMeta.workspace_id,
+                experiment: runMeta.experiment,
+                location: runMeta.location,
+                population: runMeta.population,
+              } : undefined}
             />
           )}
         </TabsContent>

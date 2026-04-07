@@ -7,6 +7,7 @@ import { FilesService } from "@/client";
 interface DataStructureFormProps {
   fileType?: string | null;
   values?: {
+    name?: string;
     experiment?: string;
     location?: string;
     population?: string;

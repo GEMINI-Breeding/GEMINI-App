@@ -40,9 +40,12 @@ import {
   FilesService,
   PipelinesService,
   ProcessingService,
+  ReferenceDataService,
   type PipelinePublic,
   type PipelineRunPublic,
   type FileUploadPublic,
+  type ReferenceDatasetWithMatch,
+  type ReferenceDatasetPublic,
 } from "@/client";
 import useCustomToast from "@/hooks/useCustomToast";
 import {
@@ -332,6 +335,332 @@ function NewRunDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+// ── Add Reference Data dialog ─────────────────────────────────────────────────
+
+interface AddReferenceDataDialogProps {
+  workspaceId: string
+  open: boolean
+  onClose: () => void
+  alreadyLinkedIds: Set<string>
+}
+
+function AddReferenceDataDialog({
+  workspaceId,
+  open,
+  onClose,
+  alreadyLinkedIds,
+}: AddReferenceDataDialogProps) {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [selectedId, setSelectedId] = useState<string>("")
+  const [filters, setFilters] = useState({ experiment: "", location: "", population: "" })
+  const setFilter = (k: keyof typeof filters, v: string) =>
+    setFilters((prev) => ({ ...prev, [k]: v }))
+
+  const { data: allDatasets = [], isLoading } = useQuery({
+    queryKey: ["reference-data-all", filters.experiment, filters.location, filters.population],
+    queryFn: () =>
+      ReferenceDataService.listDatasets({
+        experiment: filters.experiment || undefined,
+        location: filters.location || undefined,
+        population: filters.population || undefined,
+      }),
+    enabled: open,
+  })
+
+  const associateMutation = useMutation({
+    mutationFn: () =>
+      ReferenceDataService.associateDataset({
+        workspaceId,
+        datasetId: selectedId,
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["workspace-ref-data", workspaceId] })
+      const report = data.match_report
+      if (report && report.unmatched > 0) {
+        showSuccessToast(
+          `"${data.name}" added — ${report.matched}/${report.total} plots matched.`
+        )
+      } else {
+        showSuccessToast(`"${data.name}" added to workspace.`)
+      }
+      setSelectedId("")
+      onClose()
+    },
+    onError: () => showErrorToast("Failed to associate dataset"),
+  })
+
+  const filteredDatasets = allDatasets.filter(
+    (d: ReferenceDatasetPublic) => !alreadyLinkedIds.has(d.id)
+  )
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Add Reference Data</DialogTitle>
+          <DialogDescription>
+            Select an uploaded reference dataset to associate with this workspace.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {/* Filters */}
+          <div className="grid grid-cols-3 gap-2">
+            {(["experiment", "location", "population"] as const).map((f) => (
+              <input
+                key={f}
+                placeholder={f.charAt(0).toUpperCase() + f.slice(1)}
+                value={filters[f]}
+                onChange={(e) => setFilter(f, e.target.value)}
+                className="border-input bg-background text-foreground placeholder:text-muted-foreground h-8 w-full rounded-md border px-3 text-xs"
+              />
+            ))}
+          </div>
+
+          {isLoading ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm py-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading…
+            </div>
+          ) : filteredDatasets.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-4">
+              No reference datasets found. Upload one in the Files tab.
+            </p>
+          ) : (
+            <div className="border rounded-md overflow-hidden">
+              <div className="max-h-64 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60 sticky top-0">
+                    <tr>
+                      <th className="px-2 py-1.5 w-5" />
+                      {["Name", "Experiment", "Location", "Population", "Date", "Plots"].map((h) => (
+                        <th key={h} className="px-2 py-1.5 text-left font-medium text-muted-foreground">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDatasets.map((d: ReferenceDatasetPublic) => (
+                      <tr
+                        key={d.id}
+                        onClick={() => setSelectedId(d.id)}
+                        className={`border-t cursor-pointer transition-colors ${
+                          d.id === selectedId
+                            ? "bg-primary/10"
+                            : "hover:bg-muted/50"
+                        }`}
+                      >
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="radio"
+                            readOnly
+                            checked={d.id === selectedId}
+                            className="h-3 w-3"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5 font-medium max-w-[140px] truncate">{d.name}</td>
+                        <td className="px-2 py-1.5 text-muted-foreground">{d.experiment}</td>
+                        <td className="px-2 py-1.5 text-muted-foreground">{d.location}</td>
+                        <td className="px-2 py-1.5 text-muted-foreground">{d.population}</td>
+                        <td className="px-2 py-1.5 text-muted-foreground">{d.date}</td>
+                        <td className="px-2 py-1.5 tabular-nums text-right">{d.plot_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!selectedId || associateMutation.isPending}
+            onClick={() => associateMutation.mutate()}
+          >
+            {associateMutation.isPending ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Adding…</>
+            ) : (
+              "Add to Workspace"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Reference Data section ────────────────────────────────────────────────────
+
+function WorkspaceReferenceDataSection({ workspaceId }: { workspaceId: string }) {
+  const queryClient = useQueryClient()
+  const { showErrorToast } = useCustomToast()
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState<ReferenceDatasetWithMatch | null>(null)
+  const [unmatchedDataset, setUnmatchedDataset] = useState<ReferenceDatasetWithMatch | null>(null)
+
+  const { data: datasets = [], isLoading } = useQuery({
+    queryKey: ["workspace-ref-data", workspaceId],
+    queryFn: () => ReferenceDataService.listWorkspaceDatasets({ workspaceId }),
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: (datasetId: string) =>
+      ReferenceDataService.removeDatasetFromWorkspace({ workspaceId, datasetId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspace-ref-data", workspaceId] })
+      setConfirmRemove(null)
+    },
+    onError: () => showErrorToast("Failed to remove dataset"),
+  })
+
+  const linkedIds = new Set((datasets as ReferenceDatasetWithMatch[]).map((d) => d.id))
+
+  return (
+    <>
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-medium">Reference Data</h2>
+          <Button size="sm" variant="outline" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            Add Reference Data
+          </Button>
+        </div>
+
+        {isLoading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : (datasets as ReferenceDatasetWithMatch[]).length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            No reference data associated. Upload in the Files tab, then add here.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(datasets as ReferenceDatasetWithMatch[]).map((d) => {
+              const report = d.match_report
+              const hasUnmatched = report && report.unmatched > 0
+              return (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between rounded-md border px-4 py-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {hasUnmatched && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {report!.unmatched} of {report!.total} plots unmatched
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{d.name}</span>
+                        {report && (
+                          <span
+                            className="text-xs text-muted-foreground cursor-pointer hover:underline"
+                            onClick={() => hasUnmatched && setUnmatchedDataset(d)}
+                          >
+                            {report.matched}/{report.total} plots matched
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground text-xs mt-0.5">
+                        {[d.experiment, d.location, d.population, d.date]
+                          .filter(Boolean)
+                          .join(" / ")}{" "}
+                        · {d.trait_columns.join(", ")}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => setConfirmRemove(d)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <AddReferenceDataDialog
+        workspaceId={workspaceId}
+        open={addDialogOpen}
+        onClose={() => setAddDialogOpen(false)}
+        alreadyLinkedIds={linkedIds}
+      />
+
+      {/* Confirm remove */}
+      <Dialog open={!!confirmRemove} onOpenChange={(v) => !v && setConfirmRemove(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Reference Data</DialogTitle>
+            <DialogDescription>
+              Remove <strong>{confirmRemove?.name}</strong> from this workspace?
+              The dataset will not be deleted — you can re-add it later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRemove(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={removeMutation.isPending}
+              onClick={() => confirmRemove && removeMutation.mutate(confirmRemove.id)}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unmatched rows detail */}
+      <Dialog open={!!unmatchedDataset} onOpenChange={(v) => !v && setUnmatchedDataset(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Unmatched Plots — {unmatchedDataset?.name}</DialogTitle>
+            <DialogDescription>
+              These reference plots could not be matched to any plot in this workspace.
+              Verify that Experiment, Location, Population, and Plot ID match your pipeline runs.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-64 overflow-y-auto">
+            <table className="w-full text-xs border rounded">
+              <thead className="bg-muted/60">
+                <tr>
+                  {["plot_id", "col", "row"].map((h) => (
+                    <th key={h} className="px-2 py-1.5 text-left font-medium text-muted-foreground">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {unmatchedDataset?.match_report?.unmatched_plots?.map((p, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1.5">{p.plot_id || "—"}</td>
+                    <td className="px-2 py-1.5">{p.col || "—"}</td>
+                    <td className="px-2 py-1.5">{p.row || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnmatchedDataset(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
 }
 
 // ── Pipeline card with its runs ───────────────────────────────────────────────
@@ -714,7 +1043,7 @@ export function WorkspaceDetail() {
         </div>
 
         {/* Existing pipelines */}
-        <div>
+        <div className="mb-10">
           <h2 className="mb-4 text-lg font-medium">Pipelines</h2>
           {isLoading ? (
             <p className="text-muted-foreground text-sm">Loading…</p>
@@ -733,6 +1062,11 @@ export function WorkspaceDetail() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Reference Data */}
+        <div className="border-t pt-8">
+          <WorkspaceReferenceDataSection workspaceId={workspaceId} />
         </div>
       </div>
     </div>

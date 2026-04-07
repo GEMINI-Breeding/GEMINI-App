@@ -5,6 +5,8 @@ type DataTypeConfig = {
   defaultPlatform?: string;
   defaultSensor?: string;
   hidden?: true;
+  /** When true, UploadData renders a custom upload dialog instead of the standard UploadList. */
+  customUpload?: true;
 };
 
 export const dataTypes: Record<string, DataTypeConfig> = {
@@ -146,5 +148,10 @@ export const dataTypes: Record<string, DataTypeConfig> = {
       "Population",
       "FieldDesign",
     ],
+  },
+  "Reference Data": {
+    fields: ["name", "experiment", "location", "population", "date"],
+    fileType: ".csv,.xlsx,.xls",
+    directory: ["ReferenceData"],
   },
 };

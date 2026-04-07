@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Loader2, Tag } from "lucide-react"
+import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Loader2, Tag, FlaskConical } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table"
 import { useExpandable, ExpandButton, FullscreenModal } from "@/components/Common/ExpandableSection"
 import { analyzeApi } from "../api"
+import { ReferenceDataPanel } from "./ReferenceDataPanel"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,10 +50,18 @@ interface PlotRow {
   properties: Record<string, unknown>
 }
 
+export interface RefContext {
+  workspaceId: string
+  experiment: string
+  location: string
+  population: string
+}
+
 interface QueryTabProps {
   geojson: GeoJSON.FeatureCollection
   metricColumns: string[]
   runId: string
+  refContext?: RefContext
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -219,11 +228,23 @@ interface PinnedCardProps {
   hasDetections: boolean
   onUnpin: () => void
   onDownload: () => void
+  refContext?: RefContext
 }
 
-function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDownload }: PinnedCardProps) {
+function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDownload, refContext }: PinnedCardProps) {
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [showRef, setShowRef] = useState(false)
+
+  const refProps = refContext ? {
+    workspaceId: refContext.workspaceId,
+    experiment: refContext.experiment,
+    location: refContext.location,
+    population: refContext.population,
+    plotId: row.plotId,
+    col: row.properties.col ? String(row.properties.col) : null,
+    row: row.properties.row ? String(row.properties.row) : null,
+  } : null
 
   return (
     <div className="rounded-lg border overflow-hidden flex flex-col">
@@ -258,6 +279,16 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
               )}
             </>
           )}
+          {refContext && (
+            <button
+              type="button"
+              title={showRef ? "Hide reference data" : "Show reference data"}
+              className={`transition-colors ${showRef ? "text-orange-500" : "text-muted-foreground hover:text-orange-400"}`}
+              onClick={() => setShowRef((v) => !v)}
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="button"
             title="Download image"
@@ -286,19 +317,28 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
           showLabels={showLabels}
         />
       </div>
+      {/* Reference data panel */}
+      {showRef && refProps && (
+        <div className="border-t px-3 py-2 bg-muted/5">
+          <ReferenceDataPanel {...refProps} />
+        </div>
+      )}
     </div>
   )
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
+export function QueryTab({ geojson, metricColumns, runId, refContext }: QueryTabProps) {
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
   const [viewPlotId, setViewPlotId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const comparisonExp = useExpandable()
   const [viewShowDetections, setViewShowDetections] = useState(false)
   const [viewShowLabels, setViewShowLabels] = useState(true)
+  const [viewShowRef, setViewShowRef] = useState(false)
+  /** plotId of the row whose inline REF sub-row is expanded */
+  const [refExpandedId, setRefExpandedId] = useState<string | null>(null)
 
   // Fetch trait records for this run → get recordId for plot image API
   const { data: traitRecords } = useQuery({
@@ -412,6 +452,7 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
           hasDetections={row.plotId in predsByPlot}
           onUnpin={() => togglePin(row.plotId)}
           onDownload={() => handleDownload(row.plotId)}
+          refContext={refContext}
         />
       ))}
     </div>
@@ -455,6 +496,7 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
                 const hasDetections = row.plotId in predsByPlot
                 const isViewing = viewPlotId === row.plotId
                 return (
+                  <>
                   <TableRow key={row.plotId} className={isViewing ? "bg-muted/30" : undefined}>
                     <TableCell className="py-1 px-2">
                       <div className="flex items-center gap-1">
@@ -493,6 +535,19 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
                             <Scan className="w-3.5 h-3.5" />
                           </button>
                         )}
+                        {/* Reference data chip */}
+                        {refContext && (
+                          <button
+                            type="button"
+                            title={refExpandedId === row.plotId ? "Hide reference data" : "Show reference data"}
+                            className={`transition-colors ${refExpandedId === row.plotId ? "text-orange-500" : "text-muted-foreground hover:text-orange-400"}`}
+                            onClick={() => setRefExpandedId(
+                              refExpandedId === row.plotId ? null : row.plotId
+                            )}
+                          >
+                            <FlaskConical className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {/* Download */}
                         {recordId && (
                           <button
@@ -514,6 +569,26 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
                       </TableCell>
                     ))}
                   </TableRow>
+                  {/* Inline reference data sub-row */}
+                  {refContext && refExpandedId === row.plotId && (
+                    <TableRow className="bg-orange-50/50 dark:bg-orange-950/20">
+                      <TableCell
+                        colSpan={4 + shownMetrics.length}
+                        className="px-4 py-2"
+                      >
+                        <ReferenceDataPanel
+                          workspaceId={refContext.workspaceId}
+                          experiment={refContext.experiment}
+                          location={refContext.location}
+                          population={refContext.population}
+                          plotId={row.plotId}
+                          col={row.properties.col ? String(row.properties.col) : null}
+                          row={row.properties.row ? String(row.properties.row) : null}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </>
                 )
               })}
             </TableBody>
@@ -553,6 +628,21 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
                 )}
               </>
             )}
+            {refContext && (
+              <button
+                type="button"
+                title={viewShowRef ? "Hide reference data" : "Show reference data"}
+                className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${
+                  viewShowRef
+                    ? "bg-orange-500 text-white border-orange-500"
+                    : "text-orange-500 border-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950"
+                }`}
+                onClick={() => setViewShowRef((v) => !v)}
+              >
+                <FlaskConical className="w-3 h-3" />
+                REF
+              </button>
+            )}
             <button
               type="button"
               title="Download"
@@ -565,20 +655,38 @@ export function QueryTab({ geojson, metricColumns, runId }: QueryTabProps) {
               type="button"
               title="Close viewer"
               className="text-muted-foreground hover:text-foreground transition-colors ml-auto"
-              onClick={() => setViewPlotId(null)}
+              onClick={() => { setViewPlotId(null); setViewShowRef(false) }}
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="rounded-lg border overflow-hidden" style={{ height: 420 }}>
-            <PlotImageViewer
-              key={viewPlotId}
-              recordId={recordId}
-              plotId={viewPlotId}
-              predictions={viewShowDetections ? viewPredictions : []}
-              showDetections={viewShowDetections}
-              showLabels={viewShowLabels}
-            />
+          <div className="flex rounded-lg border overflow-hidden" style={{ height: 420 }}>
+            <div className={viewShowRef && refContext ? "flex-1 min-w-0" : "w-full"}>
+              <PlotImageViewer
+                key={viewPlotId}
+                recordId={recordId}
+                plotId={viewPlotId}
+                predictions={viewShowDetections ? viewPredictions : []}
+                showDetections={viewShowDetections}
+                showLabels={viewShowLabels}
+              />
+            </div>
+            {viewShowRef && refContext && viewRow && (
+              <div className="w-52 shrink-0 border-l px-3 py-3 overflow-y-auto">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Reference Data
+                </p>
+                <ReferenceDataPanel
+                  workspaceId={refContext.workspaceId}
+                  experiment={refContext.experiment}
+                  location={refContext.location}
+                  population={refContext.population}
+                  plotId={viewPlotId}
+                  col={viewRow.properties.col ? String(viewRow.properties.col) : null}
+                  row={viewRow.properties.row ? String(viewRow.properties.row) : null}
+                />
+              </div>
+            )}
           </div>
         </section>
       )}

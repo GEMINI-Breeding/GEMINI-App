@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Allowed extensions for the serve endpoint — prevents arbitrary file reads
 _SERVEABLE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".gif", ".bmp",
-    ".geojson", ".csv",
+    ".geojson", ".csv", ".xlsx", ".xls",
 }
 
 
