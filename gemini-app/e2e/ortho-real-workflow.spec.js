@@ -238,18 +238,14 @@ test.describe("Real ortho generation: upload → generate → verify", () => {
         // ImageViewer dialog should open — first it shows a GCP options dialog
         // asking to upload gcp_locations.csv. Upload the test fixture CSV.
         const gcpFileInput = page.locator("input[type='file']").last();
-        const gcpCsvPath = path.join(__dirname, "fixtures", "csv", "test_gcp_locations.csv");
+        const gcpCsvPath = path.join(__dirname, "fixtures", "csv", "gcp_locations.csv");
         await gcpFileInput.setInputFiles(gcpCsvPath);
         await page.waitForTimeout(2_000);
 
-        // After upload, the button should change to "Continue with current GCP"
-        const continueBtn = page.locator("button:has-text('Continue')").or(
-            page.locator("text=Continue with current GCP").or(
-                page.locator("text=Continue without GCP")
-            )
-        );
-        await expect(continueBtn.first()).toBeVisible({ timeout: 15_000 });
-        await continueBtn.first().click();
+        // After upload, the button must change to "Continue with current GCP"
+        const continueBtn = page.locator("button:has-text('Continue with current GCP')");
+        await expect(continueBtn).toBeVisible({ timeout: 15_000 });
+        await continueBtn.click();
         await page.waitForTimeout(2_000);
 
         // Now the image viewer should load images and show the Generate Orthophoto button
@@ -297,32 +293,64 @@ test.describe("Real ortho generation: upload → generate → verify", () => {
             }
         }
 
-        // Wait for either:
-        // - "DONE" button appears (user can dismiss), or
-        // - progress bar disappears (WebSocket completion auto-reset the state)
+        // Wait for completion: success message and DONE button should appear
         // ODM with 5 small downscaled images should take 1-5 minutes
+        const successMessage = page.locator("text=Orthophoto generated successfully");
         const doneButton = page.locator("button:has-text('DONE')");
-        const progressBar = page.locator("text=Ortho Generation in Progress");
 
-        for (let elapsed = 0; elapsed < 540; elapsed += 5) {
-            const doneVisible = await doneButton.isVisible().catch(() => false);
-            if (doneVisible) {
-                console.log(`ODM complete — DONE button visible after ~${elapsed}s`);
-                await doneButton.click();
-                break;
-            }
+        await expect(successMessage).toBeVisible({ timeout: 540_000 });
+        console.log("ODM complete — success message visible");
 
-            const progressVisible = await progressBar.isVisible().catch(() => false);
-            if (!progressVisible && elapsed > 30) {
-                // Progress bar disappeared — job completed and UI reset
-                console.log(`ODM complete — progress bar gone after ~${elapsed}s`);
-                break;
-            }
+        // Verify the DONE button is visible alongside the success message
+        await expect(doneButton).toBeVisible({ timeout: 5_000 });
 
-            await page.waitForTimeout(5_000);
-        }
+        // Wait a few seconds to confirm the completion state persists (doesn't vanish)
+        await page.waitForTimeout(5_000);
+        await expect(successMessage).toBeVisible();
+        await expect(doneButton).toBeVisible();
 
         await page.screenshot({ path: "test-results/ortho-complete.png" });
+
+        // Dismiss the completion bar — this triggers AerialDataPrep to re-fetch
+        await doneButton.click();
+        await page.waitForTimeout(3_000);
+
+        // Verify the progress bar is gone after dismissal
+        await expect(successMessage).not.toBeVisible({ timeout: 5_000 });
+
+        // Wait for AerialDataPrep to re-fetch and re-render with updated ortho status
+        await page.waitForTimeout(5_000);
+
+        // Expand the platform/sensor accordion to see the date row
+        // (may already be expanded, click to toggle then re-expand if needed)
+        const platformRow = page.locator(`text=${FIELDS.platform}`).first();
+        await platformRow.click();
+        await page.waitForTimeout(1_000);
+
+        // Check if sensor is visible; if not, platform was just collapsed — click again
+        const sensorRow = page.locator(`text=${FIELDS.sensor}`).first();
+        if (!await sensorRow.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await platformRow.click();
+            await page.waitForTimeout(1_000);
+        }
+        await sensorRow.click();
+        await page.waitForTimeout(2_000);
+
+        // The date row should now show a checkbox instead of "Start"
+        // Poll briefly in case the re-fetch is still in progress
+        for (let i = 0; i < 5; i++) {
+            const startVisible = await page.locator("button:has-text('Start')").first()
+                .isVisible({ timeout: 2_000 }).catch(() => false);
+            if (!startVisible) {
+                console.log("Date row updated: Start button replaced after ortho completion");
+                break;
+            }
+            if (i === 4) {
+                await page.screenshot({ path: "test-results/ortho-checkbox-missing.png" });
+                throw new Error("Date row still shows 'Start' button after ortho completed — checkbox should appear");
+            }
+            await page.waitForTimeout(3_000);
+        }
     });
 
     test("verify GCP locations CSV was uploaded to MinIO", async ({ request }) => {
@@ -331,21 +359,41 @@ test.describe("Real ortho generation: upload → generate → verify", () => {
         expect(resp.ok()).toBeTruthy();
         const files = await resp.json();
         const names = files.map(f => f.object_name || "");
-        expect(names.some(n => n.includes("test_gcp_locations.csv"))).toBeTruthy();
+        expect(names.some(n => n.includes("gcp_locations.csv"))).toBeTruthy();
     });
 
-    test("verify orthophoto exists in MinIO and is valid", async ({ request }) => {
-        const resp = await request.get(`${API_BASE}/files/list/gemini/${PROCESSED_PREFIX}/`);
-        expect(resp.ok()).toBeTruthy();
-        const files = await resp.json();
+    test("verify orthophoto and COG pyramid exist in MinIO", async ({ request }) => {
+        // The COG job runs asynchronously after ODM — poll until it appears
+        let pyramid = null;
+        for (let i = 0; i < 30; i++) {
+            const resp = await request.get(`${API_BASE}/files/list/gemini/${PROCESSED_PREFIX}/`);
+            expect(resp.ok()).toBeTruthy();
+            const files = await resp.json();
 
-        const ortho = files.find(f => (f.object_name || "").includes("odm_orthophoto.tif"));
-        expect(ortho).toBeTruthy();
-        // A real orthophoto from 5 images should be at least 100KB
-        expect(ortho.size).toBeGreaterThan(100_000);
-        console.log(`Orthophoto size: ${(ortho.size / 1024 / 1024).toFixed(1)} MB`);
+            const ortho = files.find(f => (f.object_name || "").includes("odm_orthophoto.tif"));
+            if (!ortho && i < 5) {
+                // ODM may still be uploading — wait
+                await new Promise(r => setTimeout(r, 5_000));
+                continue;
+            }
+            expect(ortho).toBeTruthy();
+            expect(ortho.size).toBeGreaterThan(100_000);
+            console.log(`Orthophoto size: ${(ortho.size / 1024 / 1024).toFixed(1)} MB`);
 
-        const log = files.find(f => (f.object_name || "").includes("odm_log.txt"));
-        expect(log).toBeTruthy();
+            const log = files.find(f => (f.object_name || "").includes("odm_log.txt"));
+            expect(log).toBeTruthy();
+
+            // Check for COG pyramid (created by chained CREATE_COG job)
+            pyramid = files.find(f => (f.object_name || "").includes("Pyramid.tif"));
+            if (pyramid) {
+                console.log(`COG pyramid size: ${(pyramid.size / 1024 / 1024).toFixed(1)} MB`);
+                break;
+            }
+
+            // COG job may still be processing — wait and retry
+            console.log(`Waiting for COG pyramid... (attempt ${i + 1})`);
+            await new Promise(r => setTimeout(r, 5_000));
+        }
+        expect(pyramid).toBeTruthy();
     });
 });

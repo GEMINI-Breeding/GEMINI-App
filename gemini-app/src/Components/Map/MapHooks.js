@@ -12,7 +12,7 @@ const useExtentFromBounds = (url) => {
       try {
         const response = await fetch(url);
         const data = await response.json();
-        setBounds(data.bounds);
+        setBounds(data.bounds || data.bbox);
       } catch (error) {
         console.error('Could not fetch bounds of GeoTIFF:', error);
       }

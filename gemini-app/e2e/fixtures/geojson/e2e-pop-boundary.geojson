@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Test Population Boundary"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.78255, 38.53354],
+          [-121.78237, 38.53354],
+          [-121.78237, 38.53372],
+          [-121.78255, 38.53372],
+          [-121.78255, 38.53354]
+        ]]
+      }
+    }
+  ]
+}

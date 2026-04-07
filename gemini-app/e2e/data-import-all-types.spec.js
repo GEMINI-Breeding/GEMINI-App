@@ -160,16 +160,16 @@ test.describe("GCP Locations upload", () => {
     test.afterEach(async ({ page, request }) => {
         await page.goto("about:blank");
         await cleanupMinIOPrefix(request, expectedDir);
-        await clearUploadCache(request, "test_gcp_locations.csv");
+        await clearUploadCache(request, "gcp_locations.csv");
     });
 
     test("uploads GCP locations CSV to MinIO", async ({ page, request }) => {
         await navigateToUpload(page);
         await selectDataType(page, "GCP Locations");
         await fillFormFields(page, GCP_FIELDS);
-        await dropFiles(page, [fixturePath("csv", "test_gcp_locations.csv")]);
+        await dropFiles(page, [fixturePath("csv", "gcp_locations.csv")]);
 
-        await expect(page.locator("text=test_gcp_locations.csv")).toBeVisible();
+        await expect(page.locator("text=gcp_locations.csv")).toBeVisible();
 
         await submitUpload(page);
         await waitForUploadComplete(page);
@@ -177,7 +177,7 @@ test.describe("GCP Locations upload", () => {
         const exists = await verifyFileInMinIO(
             request,
             expectedDir,
-            "test_gcp_locations.csv"
+            "gcp_locations.csv"
         );
         expect(exists).toBeTruthy();
     });

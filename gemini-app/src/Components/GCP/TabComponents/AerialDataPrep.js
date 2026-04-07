@@ -26,7 +26,8 @@ function AerialDataPrep() {
         isGCPReady,
         prepGcpFilePath,
         isImageViewerReady,
-        isImageViewerOpen
+        isImageViewerOpen,
+        isOrthoProcessing
     } = useDataState();
 
     const {
@@ -39,7 +40,8 @@ function AerialDataPrep() {
 
     const [submitError, setSubmitError] = useState("");
     const [activeTab, setActiveTab] = useState(0);
-    const [loading, setLoading] = useState(true); // New loading state
+    const [loading, setLoading] = useState(true);
+    const [refreshKey, setRefreshKey] = useState(0);
 
     // processing images and existing gcps
     const handleProcessImages = useHandleProcessImages();
@@ -215,7 +217,17 @@ function AerialDataPrep() {
         if (activeTab === 0) {
             fetchDataAndUpdate();
         }
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, activeTab]);
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, activeTab, refreshKey]);
+
+    // Increment refreshKey when ortho processing finishes (user clicks DONE)
+    // so the checkbox replaces the Start button without manual navigation
+    const prevOrthoProcessing = useRef(isOrthoProcessing);
+    useEffect(() => {
+        if (prevOrthoProcessing.current && !isOrthoProcessing) {
+            setRefreshKey(k => k + 1);
+        }
+        prevOrthoProcessing.current = isOrthoProcessing;
+    }, [isOrthoProcessing]);
 
     const titleStyle = {
         fontSize: "1.25rem", // Adjust for desired size

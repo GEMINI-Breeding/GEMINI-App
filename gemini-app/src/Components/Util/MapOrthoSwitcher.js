@@ -6,7 +6,7 @@ import { listDirs, listFiles } from "../../api/files";
 import ImageIcon from "@mui/icons-material/Image";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import Button from "@mui/material/Button";
-import { Select, MenuItem, FormControl, InputLabel, Typography } from "@mui/material";
+import { Select, MenuItem, FormControl, InputLabel, Typography, CircularProgress, Box } from "@mui/material";
 
 export const MapOrthoSwitcher = () => {
     const { selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP } =
@@ -20,6 +20,7 @@ export const MapOrthoSwitcher = () => {
     const [selectedDate, setSelectedDate] = useState(null);
     const [availableOrthoTypes, setAvailableOrthoTypes] = useState([]);
     const [selectedOrthoType, setSelectedOrthoType] = useState('');
+    const [orthoLoading, setOrthoLoading] = useState(false);
 
     // Toggle function
     const toggleMinimize = () => setIsMinimized(!isMinimized);
@@ -160,6 +161,7 @@ export const MapOrthoSwitcher = () => {
         // Clear previous orthomosaic selections
         setPrepOrthoImagePath('');
         setPrepAgRowStitchPlotPaths([]);
+        setOrthoLoading(false);
         
         if (!selectedDate) return;
 
@@ -179,11 +181,12 @@ export const MapOrthoSwitcher = () => {
                     // Check for drone Pyramid.tif
                     try {
                         const files = await listFiles(`${basePath}/${platform}/${sensor}`);
-                        if (files.some(file => file.includes("Pyramid.tif"))) {
+                        const pyramidFile = files.find(file => file.includes("Pyramid.tif"));
+                        if (pyramidFile) {
                             orthoTypes.push({
                                 type: 'drone',
                                 label: `Drone Orthomosaic (${platform}/${sensor})`,
-                                path: `${basePath}/${platform}/${sensor}/${selectedDate}-RGB-Pyramid.tif`,
+                                path: `${basePath}/${platform}/${sensor}/${pyramidFile}`,
                                 platform,
                                 sensor
                             });
@@ -254,7 +257,11 @@ export const MapOrthoSwitcher = () => {
 
     const handleOrthoTypeSelection = (orthoType) => {
         setSelectedOrthoType(orthoType);
-        
+        setOrthoLoading(true);
+
+        // Auto-clear loading after tiles have had time to render
+        setTimeout(() => setOrthoLoading(false), 15_000);
+
         if (orthoType.type === 'drone') {
             // For drone orthomosaics, set the path directly and clear AgRowStitch paths
             setPrepOrthoImagePath(orthoType.path);
@@ -339,14 +346,19 @@ export const MapOrthoSwitcher = () => {
                     )}
                     
                     {selectedOrthoType && (
-                        <Typography variant="caption" style={{ marginTop: "5px", fontSize: "0.7rem" }}>
-                            {selectedOrthoType.type === 'drone' ? 
-                                'Using drone orthomosaic' : 
-                                selectedOrthoType.type === 'agrowstitch_combined' ?
-                                    'Using AgRowStitch combined mosaic' :
-                                    `Using ${selectedOrthoType.version} - Individual plots (${selectedOrthoType.plots?.length || 0} plots)`
-                            }
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", mt: "5px", gap: 1 }}>
+                            {orthoLoading && <CircularProgress size={14} />}
+                            <Typography variant="caption" sx={{ fontSize: "0.7rem" }}>
+                                {orthoLoading
+                                    ? "Loading orthophoto..."
+                                    : selectedOrthoType.type === 'drone'
+                                        ? 'Using drone orthomosaic'
+                                        : selectedOrthoType.type === 'agrowstitch_combined'
+                                            ? 'Using AgRowStitch combined mosaic'
+                                            : `Using ${selectedOrthoType.version} - Individual plots (${selectedOrthoType.plots?.length || 0} plots)`
+                                }
+                            </Typography>
+                        </Box>
                     )}
                     <Button
                         onClick={toggleMinimize}

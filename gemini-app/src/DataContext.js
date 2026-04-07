@@ -30,8 +30,8 @@ export const useDataSetters = () => {
 };
 
 export const TILE_URL_TEMPLATE =
-     TILE_SERVER_URL + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?scale=1&url=${FILE_PATH}&unscale=false&resampling=nearest&return_mask=true";
-export const BOUNDS_URL_TEMPLATE = TILE_SERVER_URL + "/cog/bounds?url=${FILE_PATH}";
+     TILE_SERVER_URL + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url=${FILE_PATH}&resampling=nearest&return_mask=true";
+export const BOUNDS_URL_TEMPLATE = TILE_SERVER_URL + "/cog/info.geojson?url=${FILE_PATH}";
 
 export const DataProvider = ({ children }) => {
     const initialViewState = {

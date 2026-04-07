@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { 
     Box, 
     Button, 
@@ -17,7 +17,7 @@ import DashboardCustomizeIcon from "@mui/icons-material/DashboardCustomize";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { listDirs, getFileUrl } from '../../api/files';
-import { centerOfMass, booleanContains, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
+import { centerOfMass, bbox as turfBbox, bboxPolygon, transformRotate, featureCollection } from "@turf/turf";
 
 export function parseCsv(csvText) {
     const lines = csvText.trim().split("\n");
@@ -37,7 +37,7 @@ function getAndParseFieldDesign(
     selectedLocationGCP,
     selectedPopulationGCP
 ) {
-    const filePath = getFileUrl(`Processed/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`);
+    const filePath = getFileUrl(`Intermediate/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/FieldDesign.csv`);
     return fetch(filePath)
         .then((response) => response.text())
         .then((text) => parseCsv(text))
@@ -49,7 +49,7 @@ function getAndParseFieldDesign(
 
 // Merge CSV data with GeoJSON data correctly and ensure field design is updated.
 export function mergeCsvDataWithGeoJson(featureCollection, csvData) {
-    const csvKeys = Object.keys(csvData[0]);
+    if (!csvData || csvData.length === 0) return;
 
     featureCollection.features.forEach((feature) => {
         const { row, column } = feature.properties;
@@ -75,65 +75,108 @@ export function mergeCsvDataWithGeoJson(featureCollection, csvData) {
     });
 }
 
+/**
+ * Validate that a grid of plots with the given spacing fits within the boundary.
+ * Returns { valid: true, plotWidth, plotLength } or { valid: false, error: string }.
+ *
+ * @param {Feature} mainPolygon - Population boundary polygon
+ * @param {object} options - { rows, columns, verticalSpacing, horizontalSpacing }
+ * @returns {object} validation result
+ */
+export function validateAndCalcPlotDimensions(mainPolygon, options) {
+    const { rows, columns, verticalSpacing, horizontalSpacing } = options;
+
+    if (!rows || rows < 1) return { valid: false, error: "Rows must be at least 1." };
+    if (!columns || columns < 1) return { valid: false, error: "Columns must be at least 1." };
+    if (verticalSpacing < 0) return { valid: false, error: "Vertical spacing cannot be negative." };
+    if (horizontalSpacing < 0) return { valid: false, error: "Horizontal spacing cannot be negative." };
+
+    const [minX, minY, maxX, maxY] = turfBbox(mainPolygon);
+    const center = centerOfMass(mainPolygon);
+    const [, centerY] = center.geometry.coordinates;
+
+    // Convert boundary size from degrees to meters
+    const metersPerDegreeLon = 111320 * Math.cos((centerY * Math.PI) / 180);
+    const metersPerDegreeLat = 111320;
+
+    const boundaryWidthM = (maxX - minX) * metersPerDegreeLon;
+    const boundaryHeightM = (maxY - minY) * metersPerDegreeLat;
+
+    // Available space after subtracting all spacing gaps
+    const totalHSpacing = (columns - 1) * horizontalSpacing;
+    const totalVSpacing = (rows - 1) * verticalSpacing;
+
+    const availableWidth = boundaryWidthM - totalHSpacing;
+    const availableHeight = boundaryHeightM - totalVSpacing;
+
+    if (availableWidth <= 0) {
+        return { valid: false, error: `Horizontal spacing (${totalHSpacing.toFixed(1)}m total) exceeds boundary width (${boundaryWidthM.toFixed(1)}m). Reduce spacing or columns.` };
+    }
+    if (availableHeight <= 0) {
+        return { valid: false, error: `Vertical spacing (${totalVSpacing.toFixed(1)}m total) exceeds boundary height (${boundaryHeightM.toFixed(1)}m). Reduce spacing or rows.` };
+    }
+
+    const plotWidth = availableWidth / columns;
+    const plotLength = availableHeight / rows;
+
+    if (plotWidth < 0.1) {
+        return { valid: false, error: `Calculated plot width (${plotWidth.toFixed(2)}m) is too small. Reduce columns or spacing.` };
+    }
+    if (plotLength < 0.1) {
+        return { valid: false, error: `Calculated plot length (${plotLength.toFixed(2)}m) is too small. Reduce rows or spacing.` };
+    }
+
+    return { valid: true, plotWidth, plotLength, boundaryWidthM, boundaryHeightM };
+}
+
 export function fillPolygonWithRectangles(mainPolygon, options) {
-    // Options
-    const { width, length, rows, columns, verticalSpacing, horizontalSpacing, angle } = options;
+    const { rows, columns, verticalSpacing, horizontalSpacing, angle } = options;
+
+    // Auto-calculate plot width/length from boundary
+    const validation = validateAndCalcPlotDimensions(mainPolygon, options);
+    if (!validation.valid) {
+        throw new Error(validation.error);
+    }
+    const { plotWidth, plotLength } = validation;
 
     // Calculate the center of the main polygon
+    const [minX, minY, , ] = turfBbox(mainPolygon);
     const center = centerOfMass(mainPolygon);
     const [centerX, centerY] = center.geometry.coordinates;
 
     // Calculate scale factor (degrees per meter) at the latitude of the center
     const scaleFactor = 1 / (111320 * Math.cos((centerY * Math.PI) / 180));
+    const scaleFactorLat = 1 / 111320;
 
     // Convert dimensions and spacings from meters to degrees
-    const widthInDegrees = width * scaleFactor;
-    const lengthInDegrees = length * scaleFactor;
-    const verticalSpacingInDegrees = verticalSpacing * scaleFactor;
+    const widthInDegrees = plotWidth * scaleFactor;
+    const lengthInDegrees = plotLength * scaleFactorLat;
+    const verticalSpacingInDegrees = verticalSpacing * scaleFactorLat;
     const horizontalSpacingInDegrees = horizontalSpacing * scaleFactor;
 
-    // Calculate the total width and height in degrees
-    const totalWidthInDegrees = columns * (widthInDegrees + horizontalSpacingInDegrees) - horizontalSpacingInDegrees;
-    const totalHeightInDegrees = rows * (lengthInDegrees + verticalSpacingInDegrees) - verticalSpacingInDegrees;
-
-    // Initialize an array to hold all valid rectangles
+    // Start from the boundary's min corner so plots fill the boundary exactly
     let validRectangles = [];
 
-    // Generate rectangles
     for (let i = 0; i < rows; i++) {
         for (let j = 0; j < columns; j++) {
-            // Calculate the position of each rectangle in degrees
-            // const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
-            // const y = centerY - totalHeightInDegrees / 2 + i * (lengthInDegrees + verticalSpacingInDegrees);
+            const x = minX + j * (widthInDegrees + horizontalSpacingInDegrees);
+            const y = minY + (rows - 1 - i) * (lengthInDegrees + verticalSpacingInDegrees);
 
-            // Adjusted calculation for `x` to start from the left and shift right by one rectangle's width
-            const x = centerX - totalWidthInDegrees / 2 + j * (widthInDegrees + horizontalSpacingInDegrees);
-            const y =
-                centerY + totalHeightInDegrees / 2 - i * (lengthInDegrees + verticalSpacingInDegrees) - lengthInDegrees;
-
-            // Create rectangle (unrotated for now)
             let rectangle = bboxPolygon([x, y, x + widthInDegrees, y + lengthInDegrees]);
 
-            // Add row and column information as properties
             rectangle.properties = {
-                row: i + 1, // Adding 1 to start the count from 1 instead of 0
-                column: j + 1, // Same as above
+                row: i + 1,
+                column: j + 1,
             };
 
-            // Rotate the rectangle if an angle is specified
             if (angle !== 0) {
                 rectangle = transformRotate(rectangle, angle, { pivot: [centerX, centerY] });
             }
 
-            // Check if the rectangle is fully within the main polygon
-            //if (booleanContains(mainPolygon, rectangle)) {
-            // Add the valid rectangle to the array
             validRectangles.push(rectangle);
-            //}
         }
     }
 
-    // Combine valid rectangles into a single FeatureCollection
     return featureCollection(validRectangles);
 }
 
@@ -150,6 +193,14 @@ function PlotProposalSwitcher() {
     } = useDataState();
     const { setFeatureCollectionPlot } = useDataSetters();
     const [options, setOptions] = useState(polygonProposalOptions);
+    const [hasAutoApplied, setHasAutoApplied] = useState(false);
+
+    // Sync local options when polygonProposalOptions changes (e.g., from ImportSettingsModal)
+    useEffect(() => {
+        setOptions(polygonProposalOptions);
+        setHasAutoApplied(false);
+    }, [polygonProposalOptions]);
+
     const [fieldDesign, setFieldDesign] = useState(null);
     const [agrowstitchAvailable, setAgrowstitchAvailable] = useState(false);
     
@@ -292,25 +343,80 @@ function PlotProposalSwitcher() {
         }
     };
 
+    const [validationError, setValidationError] = useState("");
+    const [calcDimensions, setCalcDimensions] = useState(null);
+
+    // Recalculate dimensions whenever options or pop boundary change
+    useEffect(() => {
+        if (!featureCollectionPop?.features?.length || !options.rows || !options.columns) {
+            setCalcDimensions(null);
+            setValidationError("");
+            return;
+        }
+        const result = validateAndCalcPlotDimensions(featureCollectionPop.features[0], options);
+        if (result.valid) {
+            setCalcDimensions(result);
+            setValidationError("");
+        } else {
+            setCalcDimensions(null);
+            setValidationError(result.error);
+        }
+    }, [featureCollectionPop, options]);
+
     const applyUpdatedOptions = useCallback(
         (updatedOptions) => {
+            if (!featureCollectionPop?.features?.length) return;
             const mainPolygon = featureCollectionPop.features[0];
-            const newRectangles = fillPolygonWithRectangles(mainPolygon, updatedOptions);
-            console.log("Filling polygon with rectangles...")
-            if (fieldDesign) {
-                mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
+
+            try {
+                const newRectangles = fillPolygonWithRectangles(mainPolygon, updatedOptions);
+                if (fieldDesign) {
+                    mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
+                }
+
+                if (featureCollectionPlot?.features?.length > 0) {
+                    addToHistory(featureCollectionPlot, options);
+                }
+
+                setFeatureCollectionPlot(newRectangles);
+                setValidationError("");
+            } catch (error) {
+                setValidationError(error.message);
             }
-            
-            // Save current state to history before applying changes
-            if (featureCollectionPlot && featureCollectionPlot.features && featureCollectionPlot.features.length > 0) {
-                addToHistory(featureCollectionPlot, options);
-            }
-            
-            // Set the rectangles without transformation first
-            setFeatureCollectionPlot(newRectangles);
         },
-        [fieldDesign, featureCollectionPop.features, setFeatureCollectionPlot, featureCollectionPlot, options, addToHistory]
+        [fieldDesign, featureCollectionPop, setFeatureCollectionPlot, featureCollectionPlot, options, addToHistory]
     );
+
+    // Auto-apply plot proposals when population boundary and options are available
+    // Use a ref to track if we've applied, since state updates can be batchy
+    const autoApplyAttempted = useRef(false);
+    useEffect(() => {
+        if (autoApplyAttempted.current) return;
+        if (!featureCollectionPop?.features?.length) return;
+        if (!options.rows || !options.columns) return;
+
+        // Small delay to let all state settle after step transition
+        const timer = setTimeout(() => {
+            if (autoApplyAttempted.current) return;
+            if (!featureCollectionPop?.features?.length) return;
+
+            try {
+                const mainPolygon = featureCollectionPop.features[0];
+                const newRectangles = fillPolygonWithRectangles(mainPolygon, options);
+                if (fieldDesign) {
+                    mergeCsvDataWithGeoJson(newRectangles, fieldDesign);
+                }
+                setFeatureCollectionPlot(newRectangles);
+                autoApplyAttempted.current = true;
+                setHasAutoApplied(true);
+                console.log("Auto-applied plot proposals:", newRectangles.features.length, "plots");
+            } catch (error) {
+                console.error("Auto-apply skipped:", error.message);
+            }
+        }, 500);
+
+        return () => clearTimeout(timer);
+    }, [featureCollectionPop, options, fieldDesign, setFeatureCollectionPlot]);
 
     const handleChange = (event) => {
         setOptions({ ...options, [event.target.name]: event.target.value });
@@ -384,33 +490,28 @@ function PlotProposalSwitcher() {
                             <VisibilityIcon name="minimize" />
                         </Button>
                         <Box sx={{ margin: 0 }}>
-                            <Typography variant="h6">Rectangle Options</Typography>
+                            <Typography variant="h6">Plot Grid Options</Typography>
                             {agrowstitchAvailable && (
                                 <Typography variant="caption" color="success.main" sx={{ display: 'block', mb: 1 }}>
-                                    ✓ AgRowStitch data detected - plot labeling available
+                                    AgRowStitch data detected - plot labeling available
                                 </Typography>
                             )}
                             {fieldDesign && (
                                 <Typography variant="caption" color="info.main" sx={{ display: 'block', mb: 1 }}>
-                                    ✓ Field design data loaded ({fieldDesign.length} entries)
+                                    Field design data loaded ({fieldDesign.length} entries)
                                 </Typography>
                             )}
-                            <TextField
-                                label="Width (m)"
-                                name="width"
-                                value={options.width}
-                                onChange={handleChange}
-                                type="number"
-                                sx={{ my: 0.5 }}
-                            />
-                            <TextField
-                                label="Length (m)"
-                                name="length"
-                                value={options.length}
-                                onChange={handleChange}
-                                type="number"
-                                sx={{ my: 0.5 }}
-                            />
+                            {calcDimensions && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                                    Plot size: {calcDimensions.plotWidth.toFixed(1)}m x {calcDimensions.plotLength.toFixed(1)}m
+                                    (field: {calcDimensions.boundaryWidthM.toFixed(1)}m x {calcDimensions.boundaryHeightM.toFixed(1)}m)
+                                </Typography>
+                            )}
+                            {validationError && (
+                                <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>
+                                    {validationError}
+                                </Typography>
+                            )}
                             <TextField
                                 label="Rows"
                                 name="rows"
@@ -462,7 +563,7 @@ function PlotProposalSwitcher() {
                                 sx={{ my: 0.5 }}
                             />
 
-                            <Button variant="contained" color="primary" onClick={applyOptions}>
+                            <Button variant="contained" color="primary" onClick={applyOptions} disabled={!!validationError}>
                                 Apply
                             </Button>
                             

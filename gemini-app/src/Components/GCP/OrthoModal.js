@@ -315,11 +315,17 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
 
     const isOrthoComplete = currentOrthoProgress >= 100;
 
+    const statusText = isOrthoComplete
+        ? "Orthophoto generated successfully!"
+        : "Ortho Generation in Progress...";
+
+    const statusColor = isOrthoComplete ? "success.main" : "text.primary";
+
     return (
         <Box sx={{ backgroundColor: "white", padding: "10px", border: "1px solid #e0e0e0", boxSizing: "border-box" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "start" }}>
-                <Typography variant="body2" sx={{ marginRight: "10px" }}>
-                    Ortho Generation in Progress...
+                <Typography variant="body2" sx={{ marginRight: "10px", color: statusColor, fontWeight: isOrthoComplete ? "bold" : "normal" }}>
+                    {statusText}
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
                     <Box sx={{ width: "100%", mr: 1 }}>

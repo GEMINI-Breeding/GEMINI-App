@@ -86,7 +86,7 @@ test.describe("GCP file operations via API", () => {
 
     test("upload and retrieve GCP locations CSV", async ({ request }) => {
         const gcpContent = fs.readFileSync(
-            path.join(__dirname, "fixtures", "csv", "test_gcp_locations.csv"),
+            path.join(__dirname, "fixtures", "csv", "gcp_locations.csv"),
             "utf-8"
         );
         const gcpPath = `${RAW_PREFIX}/GCPLocations.csv`;

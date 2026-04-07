@@ -281,6 +281,7 @@ async function seedExperimentEntities(request, fields) {
 }
 
 module.exports = {
+    selectAutocompleteOption,
     navigateToProcessingAndInitiatePrep,
     navigateToStatsAndSelectData,
     navigateToMap,

@@ -16,8 +16,9 @@ import {
 } from "@mui/material";
 import { ImageOutlined, CropFree } from "@mui/icons-material";
 import { useDataState } from "../../../DataContext";
-import { listDirs } from "../../../api/files";
+import { listDirs, listFiles } from "../../../api/files";
 import { splitOrthomosaics } from "../../../api/processing";
+import { getJobStatus } from "../../../api/jobs";
 
 function PlotImageExtractor() {
     const {
@@ -85,14 +86,19 @@ function PlotImageExtractor() {
 
                     for (const sensor of sensors) {
                         try {
+                            // Check for odm_orthophoto.tif file directly at sensor level
+                            const files = await listFiles(`${basePath}/${date}/${platform}/${sensor}`);
+                            if (files.some(f => f.toLowerCase().includes('odm_orthophoto'))) {
+                                return true;
+                            }
+
+                            // Also check for ODM/OpenDroneMap subdirectories
                             const processingDirs = await listDirs(`${basePath}/${date}/${platform}/${sensor}`);
-                            
-                            // Look for ODM or OpenDroneMap directories
-                            const hasOdm = processingDirs.some(dir => 
-                                dir.toLowerCase().includes('odm') || 
+                            const hasOdm = processingDirs.some(dir =>
+                                dir.toLowerCase().includes('odm') ||
                                 dir.toLowerCase().includes('opendronemap')
                             );
-                            
+
                             if (hasOdm) {
                                 return true;
                             }
@@ -104,7 +110,7 @@ function PlotImageExtractor() {
                     // Continue checking other platforms
                 }
             }
-            
+
             return false;
         } catch (error) {
             return false;
@@ -122,7 +128,8 @@ function PlotImageExtractor() {
             setError('');
             setMessage('');
 
-            const data = await splitOrthomosaics({
+            // Submit the job to the queue
+            const job = await splitOrthomosaics({
                 year: selectedYearGCP,
                 experiment: selectedExperimentGCP,
                 location: selectedLocationGCP,
@@ -130,10 +137,52 @@ function PlotImageExtractor() {
                 date: selectedDate,
                 boundaries: featureCollectionPlot
             });
-            setMessage(`Successfully extracted ${data.plots_processed || 0} plot images from orthomosaics`);
+
+            const jobId = job.id || job.job_id;
+            if (!jobId) {
+                setError('Failed to submit split job — no job ID returned');
+                setLoading(false);
+                return;
+            }
+
+            // Poll for job completion
+            const pollInterval = 3000; // 3 seconds
+            const maxWait = 600000; // 10 minutes
+            const startTime = Date.now();
+
+            const poll = async () => {
+                if (Date.now() - startTime > maxWait) {
+                    setError('Job timed out after 10 minutes');
+                    setLoading(false);
+                    return;
+                }
+
+                try {
+                    const status = await getJobStatus(jobId);
+                    if (status.status === 'COMPLETED') {
+                        const result = status.result || {};
+                        setMessage(`Successfully extracted ${result.plots_processed || 0} plot images from orthomosaics`);
+                        setLoading(false);
+                    } else if (status.status === 'FAILED') {
+                        setError(`Job failed: ${status.error_message || 'Unknown error'}`);
+                        setLoading(false);
+                    } else if (status.status === 'CANCELLED') {
+                        setError('Job was cancelled');
+                        setLoading(false);
+                    } else {
+                        // Still running or pending — poll again
+                        setTimeout(poll, pollInterval);
+                    }
+                } catch (pollError) {
+                    console.error('Error polling job status:', pollError);
+                    setTimeout(poll, pollInterval);
+                }
+            };
+
+            // Start polling after a brief delay
+            setTimeout(poll, pollInterval);
         } catch (error) {
             setError('Error splitting orthomosaics: ' + error.message);
-        } finally {
             setLoading(false);
         }
     };

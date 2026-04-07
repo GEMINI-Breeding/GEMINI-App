@@ -252,7 +252,7 @@ function App() {
         if (currentJobId) {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentOrthoProgress(data.progress || 0),
-                onComplete: () => { setIsOrthoProcessing(false); setProcessRunning(false); setCurrentOrthoProgress(100); },
+                onComplete: () => { setCurrentOrthoProgress(100); },
                 onError: (data) => {
                     setIsOrthoProcessing(false);
                     setProcessRunning(false);

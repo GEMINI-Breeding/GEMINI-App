@@ -307,6 +307,21 @@ function BoundaryMap({ task }) {
         },
     });
 
+    // Read-only reference layer showing population boundary on the plot_boundary step
+    const popReferenceLayer = task === "plot_boundary" && featureCollectionPop?.features?.length > 0
+        ? new GeoJsonLayer({
+            id: "pop-boundary-reference",
+            data: featureCollectionPop,
+            stroked: true,
+            filled: true,
+            getFillColor: [255, 255, 0, 15],
+            lineWidthMinPixels: 1,
+            lineWidthMaxPixels: 1,
+            getLineColor: [255, 255, 0, 150],
+            pickable: false,
+        })
+        : null;
+
     const selectionLayer = new SelectionLayer({
         id: "selection-layer",
         minZoom: 10,
@@ -331,9 +346,9 @@ function BoundaryMap({ task }) {
                 initialViewState={viewState}
                 controller={controller}
                 layers={
-                    mode === selectionMode ? 
-                        [prepOrthoTileLayer, ...agRowStitchTileLayers, layer, selectionLayer].filter(Boolean) : 
-                        [prepOrthoTileLayer, ...agRowStitchTileLayers, layer].filter(Boolean)
+                    mode === selectionMode ?
+                        [prepOrthoTileLayer, ...agRowStitchTileLayers, popReferenceLayer, layer, selectionLayer].filter(Boolean) :
+                        [prepOrthoTileLayer, ...agRowStitchTileLayers, popReferenceLayer, layer].filter(Boolean)
                 }
                 onViewStateChange={({ viewState }) => setViewState(viewState)}
                 getCursor={() => cursorStyle}

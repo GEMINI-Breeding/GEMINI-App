@@ -76,6 +76,10 @@ const ImportSettingsModal = ({ importedData, onClose, open }) => {
                 <Typography variant="h6" sx={{ marginBottom: 2 }}>
                     Field Design Settings
                 </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ marginBottom: 2 }}>
+                    Plot dimensions are automatically calculated from the population boundary.
+                    Set the spacing between plots and the grid layout below.
+                </Typography>
                 <FormControl component="fieldset" sx={{ marginBottom: 2 }}>
                     <RadioGroup row value={unit} onChange={handleUnitChange}>
                         <FormControlLabel value="meters" control={<Radio />} label="Meters" />
@@ -83,24 +87,6 @@ const ImportSettingsModal = ({ importedData, onClose, open }) => {
                     </RadioGroup>
                 </FormControl>
                 <form onSubmit={handleSubmit}>
-                    <TextField
-                        label="Width"
-                        name="width"
-                        value={modalOptions.width}
-                        onChange={handleChange}
-                        type="number"
-                        fullWidth
-                        margin="normal"
-                    />
-                    <TextField
-                        label="Length"
-                        name="length"
-                        value={modalOptions.length}
-                        onChange={handleChange}
-                        type="number"
-                        fullWidth
-                        margin="normal"
-                    />
                     <TextField
                         label="Vertical Spacing"
                         name="verticalSpacing"

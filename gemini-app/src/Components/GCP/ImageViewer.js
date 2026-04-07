@@ -13,7 +13,8 @@ import {
     FormControl,
     InputLabel,
     MenuItem,
-    Select
+    Select,
+    Alert
 } from "@mui/material";
 import Slider from "@mui/material/Slider";
 import PointPicker from "./PointPicker";
@@ -65,6 +66,7 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     
     const [buttonLabel, setButtonLabel] = useState("Continue without GCP")
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [gcpError, setGcpError] = useState("");
     const [nextImageUrl, setNextImageUrl] = useState(null);
     const [prevImageUrl, setPrevImageUrl] = useState(null);
     const handleGcpRefreshImages = useHandleGcpRefreshImages();
@@ -109,7 +111,17 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     const handleFileUpload = async (event) => {
-        await uploadFileWithTimeout(event.target.files[0]);
+        const file = event.target.files[0];
+        if (!file) return;
+
+        if (file.name !== "gcp_locations.csv") {
+            setGcpError(`Invalid file: "${file.name}". The file must be named exactly "gcp_locations.csv".`);
+            event.target.value = "";
+            return;
+        }
+
+        setGcpError("");
+        await uploadFileWithTimeout(file);
         await fetchAndSetGcpFilePath();
         console.log("prepGcpFilePath after setting: ", prepGcpFilePath);
     };
@@ -420,9 +432,16 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
                     <TextField
                         type="file"
                         onChange={handleFileUpload}
-                        fullWidth 
+                        fullWidth
                         sx={{ mt: 2 }}
+                        inputProps={{ accept: ".csv" }}
                     />
+
+                    {gcpError && (
+                        <Alert severity="error" sx={{ mt: 2 }}>
+                            {gcpError}
+                        </Alert>
+                    )}
 
                     <FormControl fullWidth sx={{ mt: 3 }}>
                         <InputLabel id="ortho-method-label">Orthomosaic Method</InputLabel>

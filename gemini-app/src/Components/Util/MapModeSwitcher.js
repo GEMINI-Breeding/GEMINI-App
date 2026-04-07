@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { drawPolygonMode, modifyMode, translateMode, viewMode, selectionMode } from "../GCP/TabComponents/BoundaryMap";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { saveGeojson } from "../../api/queries";
-import { Button } from "@mui/material";
+import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle } from "@mui/material";
 import { save } from "@loaders.gl/core";
 import SettingsIcon from "@mui/icons-material/Settings";
 import VisibilityIcon from "@mui/icons-material/Visibility";
@@ -32,6 +32,7 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
 
     const [buttonText, setButtonText] = useState("Save");
     const [proceedButtonText, setProceedButtonText] = useState("Proceed");
+    const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     // State to track if the component is minimized
     const [isMinimized, setIsMinimized] = useState(false);
 
@@ -291,6 +292,44 @@ export const ModeSwitcher = ({ currentMode, setMode, task, featureCollection, se
                         </div>
                     )}
 
+                    <div style={{ marginBottom: "5px", marginTop: "5px" }}>
+                        <Button
+                            fullWidth
+                            variant="outlined"
+                            color="error"
+                            onClick={() => setClearConfirmOpen(true)}
+                            disabled={!featureCollection?.features?.length}
+                        >
+                            Clear All
+                        </Button>
+                    </div>
+                    <Dialog open={clearConfirmOpen} onClose={() => setClearConfirmOpen(false)}>
+                        <DialogTitle>Clear All Boundaries</DialogTitle>
+                        <DialogContent>
+                            <DialogContentText>
+                                This will remove all {task === "pop_boundary" ? "population" : "plot"} boundaries from the map and save the empty state. This cannot be undone.
+                            </DialogContentText>
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setClearConfirmOpen(false)}>Cancel</Button>
+                            <Button
+                                color="error"
+                                onClick={() => {
+                                    const emptyFc = { type: "FeatureCollection", features: [] };
+                                    if (task === "plot_boundary") {
+                                        setFeatureCollectionPlot(emptyFc);
+                                    } else if (task === "pop_boundary") {
+                                        setFeatureCollectionPop(emptyFc);
+                                    }
+                                    setSelectedFeatureIndexes([]);
+                                    saveFeatureCollection(emptyFc);
+                                    setClearConfirmOpen(false);
+                                }}
+                            >
+                                Clear All
+                            </Button>
+                        </DialogActions>
+                    </Dialog>
                     <div style={{ marginBottom: "5px", marginTop: "5px" }}>
                         <Button fullWidth variant="contained" color="primary" onClick={() => saveFeatureCollection()}>
                             {buttonText}
