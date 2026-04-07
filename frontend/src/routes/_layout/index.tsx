@@ -1,27 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { DashboardBuilder } from "@/features/dashboard/components/DashboardBuilder"
 
 export const Route = createFileRoute("/_layout/")({
-  component: Dashboard,
+  component: DashboardPage,
   head: () => ({
-    meta: [
-      {
-        title: "Dashboard - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Dashboard - GEMINI" }],
   }),
 })
 
-function Dashboard() {
-  return (
-    <div>
-      <div>
-        <h1 className="text-2xl truncate max-w-sm">
-          Hi 👋
-        </h1>
-        <p className="text-muted-foreground">
-          Welcome back, nice to see you again
-        </p>
-      </div>
-    </div>
-  )
+function DashboardPage() {
+  return <DashboardBuilder />
 }

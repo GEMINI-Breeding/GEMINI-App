@@ -1,0 +1,123 @@
+/** All TypeScript types for the Dashboard feature. */
+
+// ── Span ──────────────────────────────────────────────────────────────────────
+
+export type WidgetSpan = "sm" | "md" | "lg" | "full"
+
+export const SPAN_CLASSES: Record<WidgetSpan, string> = {
+  sm: "col-span-12 md:col-span-6 lg:col-span-3",
+  md: "col-span-12 md:col-span-6 lg:col-span-6",
+  lg: "col-span-12 lg:col-span-8",
+  full: "col-span-12",
+}
+
+// ── Widget configs ─────────────────────────────────────────────────────────────
+
+export interface KpiConfig {
+  traitRecordId: string | null
+  metric: string | null
+  aggregation: "avg" | "min" | "max" | "count"
+  /** Optional second record to compute % change vs */
+  compareRecordId: string | null
+  /** field → selected values; empty array = show all for that field */
+  filters: Record<string, string[]>
+}
+
+export type ChartMode = "spatial" | "temporal" | "correlation"
+export type ChartType = "bar" | "line" | "area" | "scatter" | "histogram"
+
+export interface ChartConfig {
+  mode: ChartMode
+  chartType: ChartType
+  /** For spatial / correlation / histogram */
+  traitRecordId: string | null
+  /** X-axis: categorical field (spatial) or metric (correlation) */
+  xAxis: string | null
+  /** Y-axis: metric */
+  yAxis: string | null
+  /** Group-by field (e.g. 'accession') — optional, produces multiple series */
+  groupBy: string | null
+  /** For temporal: which pipeline to pull records from */
+  pipelineId: string | null
+  /** For temporal: explicit record IDs in display order */
+  temporalRecordIds: string[]
+  /** field → selected values; empty array = show all for that field */
+  filters: Record<string, string[]>
+}
+
+export interface TableConfig {
+  traitRecordId: string | null
+  /** Empty = show all columns */
+  columns: string[]
+  /** field → selected values; empty array = show all for that field */
+  filters: Record<string, string[]>
+  maxRows: number
+}
+
+export interface PlotViewerConfig {
+  traitRecordId: string | null
+  pinnedPlotIds: string[]
+  /** field → selected values; empty array = show all for that field */
+  filters: Record<string, string[]>
+}
+
+// ── Widget definitions ─────────────────────────────────────────────────────────
+
+interface BaseWidget {
+  instanceId: string
+  title: string
+  span: WidgetSpan
+}
+
+export interface KpiWidgetDef extends BaseWidget {
+  type: "kpi"
+  config: KpiConfig
+}
+
+export interface ChartWidgetDef extends BaseWidget {
+  type: "chart"
+  config: ChartConfig
+}
+
+export interface TableWidgetDef extends BaseWidget {
+  type: "table"
+  config: TableConfig
+}
+
+export interface PlotViewerWidgetDef extends BaseWidget {
+  type: "plot-viewer"
+  config: PlotViewerConfig
+}
+
+export type DashboardWidget =
+  | KpiWidgetDef
+  | ChartWidgetDef
+  | TableWidgetDef
+  | PlotViewerWidgetDef
+
+// ── Tab & state ───────────────────────────────────────────────────────────────
+
+export interface DashboardTab {
+  id: string
+  name: string
+  widgets: DashboardWidget[]
+}
+
+export interface DashboardState {
+  tabs: DashboardTab[]
+  activeTabId: string
+}
+
+// ── Template (toolbox items) ───────────────────────────────────────────────────
+
+export interface WidgetTemplate {
+  templateId: string
+  type: DashboardWidget["type"]
+  name: string
+  description: string
+  /** Lucide icon name (string — imported separately in WidgetToolbox) */
+  iconName: string
+  defaultSpan: WidgetSpan
+  category: "Metrics" | "Charts" | "Tables" | "Visual"
+  defaultConfig: Partial<KpiConfig> | Partial<ChartConfig> | Partial<TableConfig> | Partial<PlotViewerConfig>
+}

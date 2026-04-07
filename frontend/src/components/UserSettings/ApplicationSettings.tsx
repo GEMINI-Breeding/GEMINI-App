@@ -194,7 +194,7 @@ function DockerSettings() {
     <div className="max-w-xl flex flex-col gap-4">
       <p className="text-muted-foreground text-sm">
         Limit resources used by Docker containers (ODM, bin extractor). Leave blank for no limit.
-        Changes apply to the next container run — no restart required.
+        Changes apply to the next container run, no restart required.
       </p>
       {sysInfo && (
         <p className="text-xs text-orange-500 font-mono">

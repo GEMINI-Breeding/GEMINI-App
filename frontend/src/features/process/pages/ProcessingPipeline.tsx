@@ -321,7 +321,7 @@ export function ProcessingPipeline() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-semibold">
+            <h1 className="text-xl font-semibold">
               {editingPipelineId ? "Edit" : "New"}{" "}
               {pipelineType === "aerial" ? "Aerial" : "Ground"} Pipeline
             </h1>

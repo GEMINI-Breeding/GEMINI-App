@@ -2053,7 +2053,7 @@ export function AnalyzeDashboard() {
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       {/* Header */}
       <div className="flex-shrink-0 px-6 pt-5 pb-3">
-        <h1 className="text-2xl font-semibold">Analyze</h1>
+        <h1 className="text-xl font-semibold">Analyze</h1>
       </div>
 
       {/* Tabs */}
