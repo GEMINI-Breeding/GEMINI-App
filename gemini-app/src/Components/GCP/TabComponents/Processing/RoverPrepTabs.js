@@ -125,19 +125,19 @@ export default function RoverPrepTabs() {
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
                     const dates = await listDirs(
-                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                        `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
 
                     let updatedData = {};
 
                     for (const date of dates) {
                         const platforms = await listDirs(
-                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                            `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
                             const sensors = await listDirs(
-                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                                `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {
@@ -159,7 +159,7 @@ export default function RoverPrepTabs() {
                                             // labels = false; // Assume no folder for the sensor initially
 
                                             files = await listDirs(
-                                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                                `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             if (Object.keys(files).length) {
@@ -209,7 +209,7 @@ export default function RoverPrepTabs() {
                                             break;
                                         case 1: // For "Label Traits"
                                             files = await listDirs(
-                                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                                `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                             );
 
                                             if (Object.keys(files).length) {

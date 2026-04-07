@@ -1,0 +1,91 @@
+{
+  "source": "/Users/bnbailey/Downloads/Subset Drone Data/2022-06-27-DavisCowpeaSubset",
+  "scale_factor": 0.25,
+  "images": [
+    {
+      "filename": "2022-06-27_100MEDIA_DJI_0876.JPG",
+      "original_size": [
+        5472,
+        3078
+      ],
+      "downscaled_size": [
+        1368,
+        769
+      ],
+      "file_size_bytes": 196772,
+      "gps": {
+        "lat": 38.53371714656669,
+        "lon": -121.78245693338317,
+        "alt_m": 11.515043273245494
+      }
+    },
+    {
+      "filename": "2022-06-27_100MEDIA_DJI_0877.JPG",
+      "original_size": [
+        5472,
+        3078
+      ],
+      "downscaled_size": [
+        1368,
+        769
+      ],
+      "file_size_bytes": 194339,
+      "gps": {
+        "lat": 38.53367572134107,
+        "lon": -121.78245943641247,
+        "alt_m": 11.36171902017355
+      }
+    },
+    {
+      "filename": "2022-06-27_100MEDIA_DJI_0878.JPG",
+      "original_size": [
+        5472,
+        3078
+      ],
+      "downscaled_size": [
+        1368,
+        769
+      ],
+      "file_size_bytes": 192257,
+      "gps": {
+        "lat": 38.53363547776861,
+        "lon": -121.78246100865782,
+        "alt_m": 11.27136201470063
+      }
+    },
+    {
+      "filename": "2022-06-27_100MEDIA_DJI_0879.JPG",
+      "original_size": [
+        5472,
+        3078
+      ],
+      "downscaled_size": [
+        1368,
+        769
+      ],
+      "file_size_bytes": 196561,
+      "gps": {
+        "lat": 38.533594664551,
+        "lon": -121.7824620050631,
+        "alt_m": 11.142440200428886
+      }
+    },
+    {
+      "filename": "2022-06-27_100MEDIA_DJI_0880.JPG",
+      "original_size": [
+        5472,
+        3078
+      ],
+      "downscaled_size": [
+        1368,
+        769
+      ],
+      "file_size_bytes": 198090,
+      "gps": {
+        "lat": 38.533553399114155,
+        "lon": -121.78246292671919,
+        "alt_m": 11.080588638373232
+      }
+    }
+  ]
+}

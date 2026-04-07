@@ -184,7 +184,7 @@ function PredictStep() {
 
     const loadPlatforms = async () => {
         try {
-            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
+            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}`;
             const platforms = await listDirs(dirPath);
             setPlatformOptions(platforms || []);
         } catch (error) {
@@ -194,7 +194,7 @@ function PredictStep() {
 
     const loadSensors = async () => {
         try {
-            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${selectedPlatform}`;
+            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDate}/${selectedPlatform}`;
             const sensors = await listDirs(dirPath);
             setSensorOptions(sensors || []);
         } catch (error) {

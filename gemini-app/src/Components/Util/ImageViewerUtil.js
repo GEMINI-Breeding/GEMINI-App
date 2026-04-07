@@ -42,35 +42,40 @@ export function useHandleProcessImages() {
 
         try {
             const gcpData = await getGcpSelectedImages(data);
-            if (gcpData.num_total) {
-                setTotalImages(gcpData.num_total);
+            const images = gcpData.images || [];
+
+            if (images.length > 0) {
+                setTotalImages(images.length);
             }
 
-            const fileData = await initializeGcpFile({
-                basePath: gcpData.selected_images[0].image_path,
-                platform: selectedPlatformGCP,
-                sensor: selectedSensorGCP,
-            });
+            // Build GCP annotation file path from the image directory
+            const gcpFilePath = images.length > 0
+                ? `${data.year}/${data.experiment}/${data.location}/${data.population}/${data.date}/${data.platform}/${data.sensor}/gcp_annotations.json`
+                : null;
 
-            if (fileData && fileData.existing_data && fileData.existing_data.length > 0) {
-                const mergedList = mergeLists(gcpData.selected_images, fileData.existing_data);
-                setImageList(mergedList);
+            if (gcpFilePath) {
+                const fileData = await initializeGcpFile({
+                    filePath: gcpFilePath,
+                });
+
+                if (fileData && Array.isArray(fileData) && fileData.length > 0) {
+                    const mergedList = mergeLists(images, fileData);
+                    setImageList(mergedList);
+                } else {
+                    setImageList(images);
+                }
+
+                setGcpPath(gcpFilePath);
             } else {
-                setImageList(gcpData.selected_images);
+                setImageList(images);
             }
 
-            if (fileData && fileData.file_path) {
-                setGcpPath(fileData.file_path);
-            }
             setImageViewerLoading(false);
         } catch (error) {
             console.log("Error with data selection, " + error);
             setImageViewerLoading(false);
         }
 
-        if (!isSidebarCollapsed) {
-            setSidebarCollapsed(true);
-        }
     };
 
     return handleProcessImages;
@@ -114,26 +119,33 @@ export function useHandleGcpRefreshImages() {
 
         try {
             const gcpData = await refreshGcpSelectedImages(data);
-            if (gcpData.num_total) {
-                setTotalImages(gcpData.num_total);
+            const images = gcpData.images || [];
+
+            if (images.length > 0) {
+                setTotalImages(images.length);
             }
 
-            const fileData = await initializeGcpFile({
-                basePath: gcpData.selected_images[0].image_path,
-                platform: selectedPlatformGCP,
-                sensor: selectedSensorGCP,
-            });
+            const gcpFilePath = images.length > 0
+                ? `${data.year}/${data.experiment}/${data.location}/${data.population}/${data.date}/${data.platform}/${data.sensor}/gcp_annotations.json`
+                : null;
 
-            if (fileData && fileData.existing_data && fileData.existing_data.length > 0) {
-                const mergedList = mergeLists(gcpData.selected_images, fileData.existing_data);
-                setImageList(mergedList);
+            if (gcpFilePath) {
+                const fileData = await initializeGcpFile({
+                    filePath: gcpFilePath,
+                });
+
+                if (fileData && Array.isArray(fileData) && fileData.length > 0) {
+                    const mergedList = mergeLists(images, fileData);
+                    setImageList(mergedList);
+                } else {
+                    setImageList(images);
+                }
+
+                setGcpPath(gcpFilePath);
             } else {
-                setImageList(gcpData.selected_images);
+                setImageList(images);
             }
 
-            if (fileData && fileData.file_path) {
-                setGcpPath(fileData.file_path);
-            }
             setImageViewerLoading(false);
         } catch (error) {
             console.log("Error with data selection, " + error);

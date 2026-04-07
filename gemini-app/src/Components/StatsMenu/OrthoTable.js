@@ -41,9 +41,11 @@ const OrthoTable = () => {
                             // First check for regular drone orthomosaics directly in sensor directory
                             const orthoFiles = await listFiles(`${basePath}/${date}/${platform}/${sensor}`);
 
-                            // Check for drone orthomosaics
+                            // Check for drone orthomosaics (ODM, AgRowStitch, or uploaded RGB)
                             const rgbFiles = orthoFiles.filter(file =>
-                                (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) || file === `${date}-RGB.tif`
+                                file === 'odm_orthophoto.tif' ||
+                                (file.startsWith('AgRowStitch_') && file.endsWith('.tif')) ||
+                                file === `${date}-RGB.tif`
                             );
 
                             // Process regular drone orthomosaics

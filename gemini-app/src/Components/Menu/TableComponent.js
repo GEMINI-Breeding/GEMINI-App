@@ -48,6 +48,8 @@ export const TableComponent = () => {
     const [downloadProgress, setDownloadProgress] = useState(0);
     const [downloadCancelled, setDownloadCancelled] = useState(false);
     const [abortController, setAbortController] = useState(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [deleteTargetId, setDeleteTargetId] = useState(null);
 
     const {
         uploadedData
@@ -141,19 +143,12 @@ export const TableComponent = () => {
                             });
                         }
 
-                        // If no datasets but experiment exists, show a row for the experiment
+                        // If experiment has no datasets, it's an orphan — clean it up
                         if (datasets.length === 0) {
-                            allRows.push({
-                                id: exp.id,
-                                year: seasons.length > 0 ? seasons[0].season_name : '',
-                                experiment: exp.experiment_name,
-                                location: sites.length > 0 ? sites[0].site_name : '',
-                                population: populations.length > 0 ? populations[0].population_name : '',
-                                date: '',
-                                platform: '',
-                                sensor: '',
-                                _dataType: 'unknown',
-                            });
+                            const expId = exp.id || exp.experiment_id;
+                            fetch(`${FRAMEWORK_URL}experiments/id/${expId}`, {
+                                method: 'DELETE',
+                            }).catch(() => {});
                         }
                     } catch (e) {
                         console.error(`Error fetching hierarchy for ${exp.experiment_name}:`, e);
@@ -216,6 +211,20 @@ export const TableComponent = () => {
     };
 
     const handleDelete = (id) => {
+        setDeleteTargetId(id);
+        setDeleteConfirmOpen(true);
+    };
+
+    const handleDeleteCancel = () => {
+        setDeleteConfirmOpen(false);
+        setDeleteTargetId(null);
+    };
+
+    const handleDeleteConfirm = async () => {
+        const id = deleteTargetId;
+        setDeleteConfirmOpen(false);
+        setDeleteTargetId(null);
+
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
         const row = procData.find((row) => row.id === id);
@@ -223,38 +232,75 @@ export const TableComponent = () => {
             console.error("Row not found");
             return;
         }
-    
+
         setCurrentRow(row);
-    
-        const data_to_del = {
-            location: row.location,
-            population: row.population,
-            date: row.date,
-            year: row.year,
-            experiment: row.experiment,
-            sensor: row.sensor,
-            platform: row.platform
-        };
-    
-        deleteFiles({ data_to_del })
-            .then(() => {
-                setProcData((prevData) =>
-                    prevData.filter((row) => row.id !== id)
-                );
-                setShowDeleteSuccess(true);
-                listDirsNested()
-                    .then((data) => {
-                        setNestedDirectories(data);
-                    })
-                    .catch((error) => {
-                        console.error("Error fetching nested directories:", error);
-                        setUploadedData(false);
-                    });
-            })
-            .catch((error) => {
-                console.error("Error deleting data:", error);
-                setShowDeleteSuccess(false);
+
+        try {
+            // 1. Delete the dataset entity from the framework DB
+            const deleteResp = await fetch(`${FRAMEWORK_URL}datasets/id/${id}`, {
+                method: 'DELETE',
             });
+            if (!deleteResp.ok) {
+                const errText = await deleteResp.text().catch(() => deleteResp.statusText);
+                throw new Error(`Failed to delete dataset: ${errText}`);
+            }
+
+            // 2. Best-effort delete of MinIO files (don't fail if 404)
+            const data_to_del = {
+                location: row.location,
+                population: row.population,
+                date: row.date,
+                year: row.year,
+                experiment: row.experiment,
+                sensor: row.sensor,
+                platform: row.platform
+            };
+            try {
+                await deleteFiles({ data_to_del });
+            } catch (fileErr) {
+                console.warn("MinIO file cleanup (non-fatal):", fileErr.message);
+            }
+
+            // 3. If this was the last dataset in the experiment, delete the experiment too
+            try {
+                const expResp = await fetch(`${FRAMEWORK_URL}experiments?experiment_name=${encodeURIComponent(row.experiment)}`);
+                if (expResp.ok) {
+                    const experiments = await expResp.json();
+                    if (Array.isArray(experiments) && experiments.length > 0) {
+                        const expEntity = experiments[0];
+                        const expId = expEntity.id || expEntity.experiment_id;
+                        const hierResp = await fetch(`${FRAMEWORK_URL}experiments/id/${expId}/hierarchy`);
+                        if (hierResp.ok) {
+                            const hier = await hierResp.json();
+                            if (!hier.datasets || hier.datasets.length === 0) {
+                                await fetch(`${FRAMEWORK_URL}experiments/id/${expId}`, {
+                                    method: 'DELETE',
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (expErr) {
+                console.warn("Experiment cleanup (non-fatal):", expErr.message);
+            }
+
+            // 4. Update local state
+            setProcData((prevData) =>
+                prevData.filter((row) => row.id !== id)
+            );
+            setShowDeleteSuccess(true);
+            listDirsNested()
+                .then((data) => {
+                    setNestedDirectories(data);
+                })
+                .catch((error) => {
+                    console.error("Error fetching nested directories:", error);
+                    setUploadedData(false);
+                });
+        } catch (error) {
+            console.error("Error deleting data:", error);
+            setShowDeleteSuccess(false);
+        }
     };
 
     const handleDownloadImages = async (id) => {
@@ -427,9 +473,9 @@ export const TableComponent = () => {
             const camera = selectedCameras[id] || (row.cameras ? 'top' : '');
             let directory;
             if (row.platform === 'rover' || row.platform === 'Amiga') {
-                directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/RGB/Images/${camera}/`;
+                directory = `${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/RGB/Images/${camera}/`;
             } else {
-                directory = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}/Images/`;
+                directory = `${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}/Images/`;
             }
 
             try {
@@ -463,7 +509,7 @@ export const TableComponent = () => {
         setPlotIndices(prev => ({ ...prev, [id]: newIndex }));
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setShowEditSuccess(false);
         setShowDeleteSuccess(false);
         const oldData = {
@@ -475,7 +521,7 @@ export const TableComponent = () => {
             sensor: currentRow.sensor,
             platform: currentRow.platform
         };
-    
+
         const updatedData = {
             location: editFields.location || '',
             population: editFields.population || '',
@@ -485,22 +531,43 @@ export const TableComponent = () => {
             sensor: editFields.sensor || '',
             platform: editFields.platform || ''
         };
-    
-        updateData({ oldData, updatedData })
-            .then(() => {
-                setProcData((prevData) =>
-                    prevData.map((row) =>
-                        row.id === currentRow.id ? { ...row, ...editFields } : row
-                    )
-                );
-                handleDialogClose();
-            })
-            .then(() => {
-                setShowEditSuccess(true);
-            })
-            .catch((error) => {
-                console.error("Error updating data:", error);
+
+        try {
+            // 1. Move files in MinIO from old path to new path
+            await updateData({ oldData, updatedData });
+
+            // 2. Update the dataset entity's dataset_info in the database
+            //    so that the table shows the new values on reload and
+            //    delete uses the correct path.
+            const datasetId = currentRow.id;
+            const updatedInfo = {
+                ...(currentRow._datasetInfo || {}),
+                sensor: updatedData.sensor,
+                platform: updatedData.platform,
+                population: updatedData.population,
+            };
+            await fetch(`${FRAMEWORK_URL}datasets/id/${datasetId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dataset_info: updatedInfo,
+                    collection_date: updatedData.date || currentRow.date,
+                }),
             });
+
+            // 3. Update local state
+            setProcData((prevData) =>
+                prevData.map((row) =>
+                    row.id === currentRow.id
+                        ? { ...row, ...editFields, _datasetInfo: updatedInfo }
+                        : row
+                )
+            );
+            handleDialogClose();
+            setShowEditSuccess(true);
+        } catch (error) {
+            console.error("Error updating data:", error);
+        }
     };
     const convertToPath = (data) => {
         const paths = [];
@@ -568,7 +635,7 @@ export const TableComponent = () => {
         const row = procData.find((row) => row.id === id);  
         if (!row) return;
     
-        const baseDir = `Raw/${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}`;
+        const baseDir = `${row.year}/${row.experiment}/${row.location}/${row.population}/${row.date}/${row.platform}/${row.sensor}`;
     
         try {
             const data = await viewSyncedData({ base_dir: baseDir });
@@ -859,6 +926,18 @@ export const TableComponent = () => {
                         <Typography>Preparing plot marking interface...</Typography>
                     </Box>
                 </DialogContent>
+            </Dialog>
+            <Dialog open={deleteConfirmOpen} onClose={handleDeleteCancel} aria-labelledby="delete-confirm-dialog-title">
+                <DialogTitle id="delete-confirm-dialog-title">Delete Dataset</DialogTitle>
+                <DialogContent>
+                    <Typography>
+                        Are you sure you want to delete this dataset? This action cannot be undone.
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleDeleteCancel}>Cancel</Button>
+                    <Button onClick={handleDeleteConfirm} color="error" variant="contained">Delete</Button>
+                </DialogActions>
             </Dialog>
         </div>
     );

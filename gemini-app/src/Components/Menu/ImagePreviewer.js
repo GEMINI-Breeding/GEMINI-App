@@ -28,11 +28,11 @@ export const ImagePreviewer = ({ open, obj, onClose }) => {
         if (open) {
             setImageIndex(0);
             if(obj.platform === 'Amiga' || obj.platform === 'rover') {
-                const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
+                const newDirectory = `${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
                 setDirectory(newDirectory);
             }
             else {
-                const newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
+                const newDirectory = `${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
                 setDirectory(newDirectory);
             }
         }

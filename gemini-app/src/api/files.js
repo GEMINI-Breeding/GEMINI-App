@@ -62,10 +62,10 @@ export const listDirsNestedProcessed = () =>
 // -- File serving --
 
 export const getFileUrl = (filePath) =>
-    `${FRAMEWORK_URL}files/download/${filePath}`;
+    `${FRAMEWORK_URL}files/download/gemini/${filePath}`;
 
 export const getImageUrl = (filePath) =>
-    `${FRAMEWORK_URL}files/download/${filePath}`;
+    `${FRAMEWORK_URL}files/download/gemini/${filePath}`;
 
 /**
  * Get a presigned URL for direct MinIO access.
@@ -90,7 +90,7 @@ export const fetchDataRootDir = () =>
 // -- Upload --
 
 export const uploadFile = (formData) =>
-    postFormData(`${FRAMEWORK_URL}upload`, formData);
+    postFormData(`${FRAMEWORK_URL}files/upload`, formData);
 
 export const uploadChunk = (formData) =>
     postFormData(`${FRAMEWORK_URL}upload_chunk`, formData);
@@ -113,7 +113,31 @@ export const clearUploadCache = (body) =>
  * Delete files from MinIO.
  */
 export const deleteFiles = async (body) => {
-    const path = body.path || body.dirPath || '';
+    let path = body.path || body.dirPath || '';
+
+    // If called with data_to_del object (from manage table), build path from fields
+    if (!path && body.data_to_del) {
+        const d = body.data_to_del;
+        const parts = [d.year, d.experiment, d.location, d.population, d.date, d.platform, d.sensor].filter(Boolean);
+        path = parts.join('/');
+    }
+
+    if (!path) {
+        throw new Error('Delete failed: no path specified');
+    }
+
+    // Check if any files exist at this path before attempting delete.
+    // This avoids browser-level 404 error logs for datasets with no MinIO files.
+    try {
+        const items = await fetchJson(`${FRAMEWORK_URL}files/list/gemini/${path}`);
+        if (!items || items.length === 0) {
+            return { status: 'no_files' };
+        }
+    } catch {
+        // List returned 404 or error — no files to delete
+        return { status: 'no_files' };
+    }
+
     const response = await fetch(`${FRAMEWORK_URL}files/delete/gemini/${path}`, {
         method: 'DELETE',
     });
@@ -142,7 +166,7 @@ export const getTifToPng = async (body) => {
     }
     return postJson(`${FRAMEWORK_URL}jobs/submit`, {
         job_type: 'TIF_TO_PNG',
-        parameters: { file_path: tifPath },
+        parameters: { input_path: tifPath },
     });
 };
 
@@ -379,7 +403,7 @@ export const updateData = (params) =>
  */
 export const viewSyncedData = async (params) => {
     const { year, experiment, location, population, date, platform, sensor } = params;
-    const csvPath = `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/msgs_synced.csv`;
+    const csvPath = `${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/msgs_synced.csv`;
     try {
         const response = await fetch(`${FRAMEWORK_URL}files/download/gemini/${csvPath}`);
         if (response.ok) {

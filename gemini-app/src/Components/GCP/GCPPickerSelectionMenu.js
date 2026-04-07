@@ -45,6 +45,24 @@ const GCPPickerSelectionMenu = () => {
     const [experiments, setExperiments] = useState([]);
     const [hierarchy, setHierarchy] = useState(null);
 
+    // Track the "committed" selection so we know if the user changed anything
+    const committedSelection = useRef({
+        experiment: null, year: null, location: null, population: null,
+    });
+    const [hasChanges, setHasChanges] = useState(false);
+
+    // Detect changes vs the last committed selection
+    useEffect(() => {
+        const c = committedSelection.current;
+        const changed = (
+            selectedExperimentGCP !== c.experiment ||
+            selectedYearGCP !== c.year ||
+            selectedLocationGCP !== c.location ||
+            selectedPopulationGCP !== c.population
+        );
+        setHasChanges(changed);
+    }, [selectedExperimentGCP, selectedYearGCP, selectedLocationGCP, selectedPopulationGCP]);
+
     useEffect(() => {
         getExperiments()
             .then((data) => {
@@ -70,16 +88,33 @@ const GCPPickerSelectionMenu = () => {
         }
     }, [selectedYearGCP, selectedExperimentGCP]);
 
-
     const initiatePrep = () => {
-        if(selectedPopulationGCP !== null){
+        if (selectedPopulationGCP !== null) {
             setIsPrepInitiated(true);
             setIsGCPReady(true);
             if (!isSidebarCollapsed) {
                 setSidebarCollapsed(true);
             }
+            // Record the committed selection
+            committedSelection.current = {
+                experiment: selectedExperimentGCP,
+                year: selectedYearGCP,
+                location: selectedLocationGCP,
+                population: selectedPopulationGCP,
+            };
+            setHasChanges(false);
         }
     };
+
+    // First time: all fields required. After that: button disabled unless something changed.
+    const allFieldsSelected = (
+        selectedExperimentGCP !== null &&
+        selectedYearGCP !== null &&
+        selectedLocationGCP !== null &&
+        selectedPopulationGCP !== null
+    );
+    const isFirstTime = !isGCPReady;
+    const buttonDisabled = isFirstTime ? !allFieldsSelected : !hasChanges;
 
     // Experiment first, then Year/Location/Population populated from hierarchy
     const showYear = selectedExperimentGCP !== null;
@@ -111,7 +146,6 @@ const GCPPickerSelectionMenu = () => {
                     value={selectedYearGCP}
                     onChange={(event, newValue) => {
                         setSelectedYearGCP(newValue);
-                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Year" />}
                     sx={{ mb: 2 }}
@@ -126,7 +160,6 @@ const GCPPickerSelectionMenu = () => {
                     onChange={(event, newValue) => {
                         setSelectedLocationGCP(newValue);
                         setSelectedPopulationGCP(null);
-                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Location" />}
                     sx={{ mb: 2 }}
@@ -140,14 +173,18 @@ const GCPPickerSelectionMenu = () => {
                     value={selectedPopulationGCP}
                     onChange={(event, newValue) => {
                         setSelectedPopulationGCP(newValue);
-                        setIsGCPReady(false);
                     }}
                     renderInput={(params) => <TextField {...params} label="Population" />}
                     sx={{ mb: 2 }}
                 />
             ) : null}
 
-            <Button variant="contained" color="primary" onClick={initiatePrep}>
+            <Button
+                variant="contained"
+                color="primary"
+                onClick={initiatePrep}
+                disabled={buttonDisabled}
+            >
                 Begin Data Preparation
             </Button>
         </>

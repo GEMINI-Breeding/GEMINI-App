@@ -407,9 +407,9 @@ export const GroundPlotMarker = ({ open, obj, onClose, plotIndex: initialPlotInd
         if (open && obj) {
             let newDirectory = "";
             if(obj.platform === 'Amiga' || obj.platform === 'rover') {
-                newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
+                newDirectory = `${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/RGB/Images/${obj.camera}/`;
             } else {
-                newDirectory = `Raw/${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
+                newDirectory = `${obj.year}/${obj.experiment}/${obj.location}/${obj.population}/${obj.date}/${obj.platform}/${obj.sensor}/Images/`;
             }
             setDirectory(newDirectory);
         }

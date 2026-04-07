@@ -6,13 +6,14 @@ import IconButton from "@mui/material/IconButton";
 //import HelpIcon from "@mui/icons-material/Help";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
-import Snackbar from "@mui/material/Snackbar";
+
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogActions from "@mui/material/DialogActions";
 import Button from "@mui/material/Button";
+import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -252,7 +253,12 @@ function App() {
             const ws = connectJobProgress(currentJobId, {
                 onProgress: (data) => setCurrentOrthoProgress(data.progress || 0),
                 onComplete: () => { setIsOrthoProcessing(false); setProcessRunning(false); setCurrentOrthoProgress(100); },
-                onError: () => { setIsOrthoProcessing(false); setProcessRunning(false); setSubmitError("Ortho processing failed."); },
+                onError: (data) => {
+                    setIsOrthoProcessing(false);
+                    setProcessRunning(false);
+                    const msg = (data && data.error_message) || "Ortho processing failed.";
+                    setSubmitError(`Orthophoto generation failed: ${msg}`);
+                },
             });
             return () => ws.close();
         }
@@ -534,12 +540,15 @@ function App() {
                     )}
 
                 </div>
-                <Snackbar
-                    open={submitError !== ""}
-                    autoHideDuration={6000}
-                    onClose={() => setSubmitError("")}
-                    message={submitError}
-                />
+                <Dialog open={submitError !== ""} onClose={() => setSubmitError("")}>
+                    <DialogTitle>Processing Error</DialogTitle>
+                    <DialogContent>
+                        <Typography>{submitError}</Typography>
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setSubmitError("")} autoFocus>OK</Button>
+                    </DialogActions>
+                </Dialog>
             </ActiveComponentsProvider>
 
             <Dialog open={dataDirMissing} disableEscapeKeyDown maxWidth="sm" fullWidth>

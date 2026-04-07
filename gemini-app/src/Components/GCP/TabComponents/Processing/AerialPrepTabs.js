@@ -37,19 +37,19 @@ export default function AerialPrepTabs() {
             if (selectedLocationGCP && selectedPopulationGCP) {
                 try {
                     const dates = await listDirs(
-                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                        `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
 
                     let updatedData = {};
 
                     for (const date of dates) {
                         const platforms = await listDirs(
-                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                            `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
                             const sensors = await listDirs(
-                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                                `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {

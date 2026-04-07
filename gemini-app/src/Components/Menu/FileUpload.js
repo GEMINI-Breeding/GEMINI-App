@@ -359,7 +359,7 @@ const FileUploadComponent = ({ actionType = null }) => {
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5000);
-                await fetch(`${FRAMEWORK_URL}files/list/`, { signal: controller.signal });
+                await fetch(`${FRAMEWORK_URL}experiments`, { signal: controller.signal });
                 clearTimeout(timeoutId);
             } catch (error) {
                 setIsUploading(false);
@@ -579,6 +579,8 @@ const FileUploadComponent = ({ actionType = null }) => {
         const fieldIndex = dataTypes[selectedDataType].fields.indexOf(fieldName);
         const dependentFields = dataTypes[selectedDataType].fields.slice(fieldIndex + 1);
         dependentFields.forEach((dependentField) => {
+            // Don't clear the date field — it has a default value (today)
+            if (dependentField === "date") return;
             formik.setFieldValue(dependentField, "");
             setCurrentInputValues((prevValues) => ({ ...prevValues, [dependentField]: "" }));
         });

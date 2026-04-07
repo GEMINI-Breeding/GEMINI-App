@@ -25,6 +25,7 @@ export const getGcpSelectedImages = async (data) => {
                 return {
                     fileName: objectName.split('/').pop(),
                     url: `${FRAMEWORK_URL}files/download/gemini/${objectName}`,
+                    image_path: `/${objectName}`,
                 };
             });
         return { images };

@@ -196,7 +196,7 @@ const ImageSelection = () => {
     useEffect(() => {
         const fetchDates = async () => {
             setIsLoading(true);
-            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
             try {
                 const response = await listDirs(dirPath);
                 setDateOptions(response);
@@ -220,7 +220,7 @@ const ImageSelection = () => {
                 return;
             }
             setIsLoading(true);
-            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}`;
+            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}`;
             try {
                 const response = await listDirs(dirPath);
                 setPlatformOptions(response);
@@ -241,7 +241,7 @@ const ImageSelection = () => {
                 return;
             }
             setIsLoading(true);
-            const dirPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}`;
+            const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${selectedDateQuery}/${selectedPlatformQuery}`;
             try {
                 const response = await listDirs(dirPath);
                 setSensorOptions(response);

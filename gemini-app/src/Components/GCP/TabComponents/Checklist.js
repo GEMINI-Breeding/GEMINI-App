@@ -82,10 +82,10 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
 
         // Function to fetch and set the GCP file path
         const fetchAndSetGcpFilePath = async () => {
-            const files = await listFiles(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+            const files = await listFiles(`${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
             const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
             if (gcpLocationsFile) {
-                const newPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
+                const newPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
                 setPrepGcpFilePath(newPath);
                 console.log("GCP path found, setting to ", newPath);
             } else {
@@ -96,13 +96,13 @@ function Checklist({ onProceed, onDroneGcpProceed }) {
 
         // Function to fetch and set the drone image path
         const fetchAndSetDroneImagePath = async () => {
-            const dirs = await listDirs(`Raw/${selectedLocationGCP}/${selectedPopulationGCP}`);
+            const dirs = await listDirs(`${selectedLocationGCP}/${selectedPopulationGCP}`);
             for (const dir of dirs) {
                 const subDirs = await listDirs(
-                    `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
+                    `${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`
                 );
                 if (subDirs.includes("Drone")) {
-                    const newPath = `Raw/${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`;
+                    const newPath = `${selectedLocationGCP}/${selectedPopulationGCP}/${dir}`;
                     setPrepDroneImagePath(newPath);
                     console.log("Drone path found, setting to ", newPath);
                     break;

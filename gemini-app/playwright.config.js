@@ -4,6 +4,7 @@ module.exports = defineConfig({
     testDir: "./e2e",
     timeout: 60_000,
     retries: 0, // Failures are potential bugs — don't mask them with retries
+    workers: 1, // Serial execution — tests share a backend database
     reporter: [["html", { open: "never" }]],
     use: {
         baseURL: "http://localhost:3000",

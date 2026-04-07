@@ -53,7 +53,7 @@ export default function CollapsibleSidebar({
     onRadiusChange,
 }) {
     // ColorMap state management; see DataContext.js
-    const { isSidebarCollapsed } = useDataState();
+    const { isSidebarCollapsed, isGCPReady } = useDataState();
     const { setSidebarCollapsed } = useDataSetters();
 
     // New state for controlling tab selection sidebar visibility
@@ -88,6 +88,11 @@ export default function CollapsibleSidebar({
     });
 
     const handleDrawerToggle = (index) => {
+        // If clicking the same tab again, toggle the selection sidebar
+        if (index === currentView) {
+            setSidebarCollapsed(!isSidebarCollapsed);
+            return;
+        }
         setCurrentView(index);
         // Auto-expand View Data section when navigating to Stats, Map, or Query
         if (index === 0 || index === 2 || index === 4) {
@@ -868,6 +873,22 @@ export default function CollapsibleSidebar({
                         </ListItem>
                     </List>
                 </Drawer>
+
+                {/* Clickable backdrop to dismiss sidebar when re-opened for review */}
+                {shouldDrawerBeOpen() && isGCPReady && (
+                    <Box
+                        onClick={() => setSidebarCollapsed(true)}
+                        sx={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            zIndex: (theme) => theme.zIndex.drawer - 1,
+                            cursor: 'pointer',
+                        }}
+                    />
+                )}
 
                 {/* Floating Help Icon */}
                 <Box

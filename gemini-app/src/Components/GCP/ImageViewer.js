@@ -76,30 +76,12 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     ];
 
     const uploadFileWithTimeout = async (file, timeout = 30000) => {
-        const Values = {
-            year: selectedYearGCP,
-            experiment: selectedExperimentGCP,
-            location: selectedLocationGCP,
-            population: selectedPopulationGCP,
-            date: selectedDateGCP,
-            platform: selectedPlatformGCP,
-            sensor: selectedSensorGCP,
-        };
-        const gcpLocations = {
-            fields: ["year", "experiment", "location", "population"],
-            fileType: ".csv",
-            label: "GCP Locations"
-        };
-        let dirPath = "";
-        for (const field of gcpLocations.fields) {
-            if (Values[field]) {
-                dirPath += dirPath ? `/${Values[field]}` : Values[field];
-            }
-        }
+        const dirPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`;
+        const objectName = `${dirPath}/${file.name}`;
         const formData = new FormData();
-        formData.append("files", file);
-        formData.append("dirPath", dirPath);
-        formData.append("dataType", "gcpLocations");
+        formData.append("file", file);
+        formData.append("bucket_name", "gemini");
+        formData.append("object_name", objectName);
         try {
             const response = await uploadFile(formData);
             console.log(response);
@@ -111,11 +93,11 @@ function ImageViewer({ open, onClose, item, activeTab, platform, sensor }) {
     };
 
     const fetchAndSetGcpFilePath = async () => {
-        const files = await listFiles(`Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
+        const files = await listFiles(`${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`);
         const gcpLocationsFile = files.find((file) => file === "gcp_locations.csv");
         
         if (gcpLocationsFile) {
-            const newPath = `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
+            const newPath = `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${gcpLocationsFile}`;
             setPrepGcpFilePath(newPath);
             setButtonLabel("Continue with current GCP");
             console.log("GCP path found, setting to ", newPath);

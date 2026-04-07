@@ -10,7 +10,6 @@ import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 
 import useTrackComponent from "../../../useTrackComponent";
-import Snackbar from "@mui/material/Snackbar";
 
 function AerialDataPrep() {
     useTrackComponent("OrthoPrep");
@@ -114,23 +113,26 @@ function AerialDataPrep() {
 
     useEffect(() => {
         const fetchDataAndUpdate = async () => {
-            setLoading(true); // Start loading
-            if (selectedLocationGCP && selectedPopulationGCP) {
-                try {
+            if (!selectedLocationGCP || !selectedPopulationGCP) {
+                setLoading(false);
+                return;
+            }
+            setLoading(true);
+            try {
                     const dates = await listDirs(
-                        `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
+                        `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}`
                     );
                     let updatedData = {};
 
                     for (const date of dates) {
                         const platforms = await listDirs(
-                            `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
+                            `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}`
                         );
 
                         for (const platform of platforms) {
 
                             const sensors = await listDirs(
-                                `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
+                                `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}`
                             );
 
                             for (const sensor of sensors) {
@@ -144,7 +146,7 @@ function AerialDataPrep() {
                                 }
 
                                 const imageFolders = await listDirs(
-                                    `Raw/${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
+                                    `${selectedYearGCP}/${selectedExperimentGCP}/${selectedLocationGCP}/${selectedPopulationGCP}/${date}/${platform}/${sensor}`
                                 );
 
                                 if (imageFolders.includes("Images")) {
@@ -204,15 +206,16 @@ function AerialDataPrep() {
                     setSensorData(processedData);
                     console.log("Processed sensor data:", processedData);
                 } catch (error) {
-                    console.error("Error fetching Raw data:", error);
-                    setSubmitError("Could not fetch data from date ", error);
+                    console.error("Error fetching data:", error);
+                    setSubmitError("Could not fetch data: " + error.message);
                 } finally {
-                    setLoading(false); // Stop loading
+                    setLoading(false);
                 }
-            }
         };
-        fetchDataAndUpdate();
-    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP]);
+        if (activeTab === 0) {
+            fetchDataAndUpdate();
+        }
+    }, [selectedLocationGCP, selectedPopulationGCP, selectedYearGCP, selectedExperimentGCP, activeTab]);
 
     const titleStyle = {
         fontSize: "1.25rem", // Adjust for desired size
@@ -268,7 +271,7 @@ function AerialDataPrep() {
                     <Box sx={{ width: '100%', marginTop: 0.5 }}>
                         {activeTab === 0 && (
                             <>
-                                {sensorData && sensorData.length > 0 && isGCPReady && (
+                                {sensorData && sensorData.length > 0 ? (
                                     sensorData.map((platformData) => (
                                         <NestedSection
                                             key={platformData.title}
@@ -283,6 +286,10 @@ function AerialDataPrep() {
                                             CustomComponent={CustomComponent}
                                         />
                                     ))
+                                ) : (
+                                    <Typography variant="body1" sx={{ textAlign: 'center', mt: 4, color: 'text.secondary' }}>
+                                        No image data found for this experiment. Upload drone images first via Prepare → Upload.
+                                    </Typography>
                                 )}
                             </>
                         )}
@@ -294,12 +301,11 @@ function AerialDataPrep() {
                 </>
             )}
 
-            <Snackbar
-                open={submitError !== ""}
-                autoHideDuration={6000}
-                onClose={() => setSubmitError("")}
-                message={submitError}
-            />
+            {submitError && (
+                <Typography variant="body2" color="error" sx={{ textAlign: 'center', mt: 2 }}>
+                    {submitError}
+                </Typography>
+            )}
         </Grid>
     );
 }

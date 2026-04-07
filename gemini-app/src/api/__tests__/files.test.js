@@ -65,7 +65,7 @@ describe("getFileUrl", () => {
     test("returns framework download URL", () => {
         const { getFileUrl } = require("../files");
         const result = getFileUrl("Processed/2024/test.tif");
-        expect(result).toContain("/api/files/download/Processed/2024/test.tif");
+        expect(result).toContain("/api/files/download/gemini/Processed/2024/test.tif");
     });
 });
 
@@ -73,7 +73,7 @@ describe("getImageUrl", () => {
     test("returns framework download URL", () => {
         const { getImageUrl } = require("../files");
         const result = getImageUrl("some/image.jpg");
-        expect(result).toContain("/api/files/download/some/image.jpg");
+        expect(result).toContain("/api/files/download/gemini/some/image.jpg");
     });
 });
 

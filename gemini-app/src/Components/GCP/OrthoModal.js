@@ -15,7 +15,7 @@ import {
     IconButton
 } from "@mui/material";
 import dedent from "dedent";
-import Snackbar from "@mui/material/Snackbar";
+import DialogActions from "@mui/material/DialogActions";
 import { useDataState, useDataSetters } from "../../DataContext";
 import { checkMask, getOdmLogs } from '../../api/processing';
 import { runOdm, runStitch } from "../../api/processing";
@@ -143,10 +143,6 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
             reconstruction_quality: orthoSetting,
             custom_options: orthoCustomValue ? orthoCustomValue : [],
         };
-        // global variable to find ortho method and data
-        window.selectedOrthoMethod = selectedOrthoMethod;
-        window.orthoData = data;
-
         const apiFn = selectedOrthoMethod === "STITCH" ? runStitch : runOdm;
         apiFn(data)
             .then((result) => {
@@ -160,13 +156,15 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
             .catch((error) => {
                 console.error("Error:", error);
                 setOrthoServerStatus("Error generating ortho");
-                setSubmitError("Error starting ortho generation.");
+                setSubmitError(error?.message || "Error starting ortho generation. Please try again.");
+                setIsOrthoProcessing(false);
+                setProcessRunning(false);
                 setImageViewerLoading(false);
-                alert("Error starting ortho generation. Please try again.");
             });
     };
 
     return (
+        <>
         <Dialog open={isOrthoModalOpen && !isOrthoProcessing} onClose={() => setOrthoModalOpen(false)} maxWidth="md" fullWidth={true}>
             <DialogTitle style={{ textAlign: "center", fontWeight: "bold", fontSize: "x-large" }}>
                 Generate Orthophoto
@@ -233,18 +231,25 @@ const OrthoModal = ( {selectedOrthoMethod} ) => {
                     </Typography>
                 )}
             </DialogContent>
-            <Snackbar
-                open={submitError !== ""}
-                autoHideDuration={6000}
-                onClose={() => setSubmitError("")}
-                message={submitError}
-            />
         </Dialog>
+        <Dialog open={submitError !== ""} onClose={() => setSubmitError("")}>
+            <DialogTitle>Orthophoto Generation Error</DialogTitle>
+            <DialogContent>
+                <Typography>{submitError}</Typography>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setSubmitError("")} autoFocus>OK</Button>
+            </DialogActions>
+        </Dialog>
+        </>
     );
 };
 
 function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
-    const { selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP } = useDataState();
+    const {
+        selectedYearGCP, selectedExperimentGCP, selectedLocationGCP, selectedPopulationGCP,
+        selectedDateGCP, selectedPlatformGCP, selectedSensorGCP,
+    } = useDataState();
     const { setCurrentOrthoProgress, setIsOrthoProcessing, setProcessRunning, setCloseMenu } = useDataSetters();
     const [expanded, setExpanded] = useState(false);
     const validProgress = Number.isFinite(currentOrthoProgress) ? currentOrthoProgress : 0;
@@ -262,12 +267,13 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                 setLoadingLogs(true);
                 try {
                     const data = await getOdmLogs({
-                        method: window.selectedOrthoMethod,
-                        orthoData: window.orthoData,
                         year: selectedYearGCP,
                         experiment: selectedExperimentGCP,
                         location: selectedLocationGCP,
                         population: selectedPopulationGCP,
+                        date: selectedDateGCP,
+                        platform: selectedPlatformGCP,
+                        sensor: selectedSensorGCP,
                     });
                     if (data.logs || data.log_content) {
                         setLogContent(data.log_content || data.logs);
@@ -344,7 +350,10 @@ function OrthoProgressBar({ currentOrthoProgress, onStopOrtho }) {
                 </IconButton>
             </Box>
             {expanded && (
-                <Box sx={{ marginTop: "10px", maxHeight: "200px", overflowY: "scroll", border: "1px solid #e0e0e0", padding: "10px", borderRadius: "5px" }}>
+                <Box
+                    ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
+                    sx={{ marginTop: "10px", maxHeight: "200px", overflowY: "scroll", border: "1px solid #e0e0e0", padding: "10px", borderRadius: "5px" }}
+                >
                     {loadingLogs && !logContent ? (
                         <Typography variant="body2">Loading logs...</Typography>
                     ) : (
