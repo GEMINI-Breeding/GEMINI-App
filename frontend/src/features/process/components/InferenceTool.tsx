@@ -485,6 +485,7 @@ export function InferenceTool({
   const [selectedTraitsModel, setSelectedTraitsModel] = useState<string>("")
   const [traitsThreshold, setTraitsThreshold] = useState(50)
   const [iouThreshold, setIouThreshold] = useState(50)
+  const thresholdInitialized = useRef(false)
   const [showLabels, setShowLabels] = useState(true)
   const [traitsStatus, setTraitsStatus] = useState<{ loading: boolean; message: string | null }>({ loading: false, message: null })
   const [logLines, setLogLines] = useState<string[]>([])
@@ -596,6 +597,34 @@ export function InferenceTool({
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logLines])
+
+  // Fetch inference summary to restore the previously applied threshold
+  const { data: summaryData } = useQuery({
+    queryKey: ["inference-summary", runId],
+    queryFn: async () => {
+      const token = localStorage.getItem("access_token") || ""
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) return []
+      return res.json() as Promise<Array<{ confidence_threshold?: number | null }>>
+    },
+    enabled: inferenceComplete,
+    staleTime: 30_000,
+  })
+
+  // Seed the traits threshold slider from the last applied threshold (runs once)
+  useEffect(() => {
+    if (thresholdInitialized.current) return
+    const entries: Array<{ confidence_threshold?: number | null }> = summaryData ?? []
+    const stored = entries.find((e) => e.confidence_threshold != null)?.confidence_threshold
+    if (stored != null) {
+      const pct = Math.round(stored * 100)
+      setTraitsThreshold(pct)
+      setConfThreshold(pct)
+      thresholdInitialized.current = true
+    }
+  }, [summaryData])
 
   const { data, isLoading } = useQuery({
     queryKey: ["inference-results", runId, activeModel],

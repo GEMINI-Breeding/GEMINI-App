@@ -302,15 +302,18 @@ def translate_markers_by_gps(
         logger.warning("[translate_markers] GPS track is empty — cannot translate, returning original selections")
         return selections, False
 
-    def _nearest(lat: float, lon: float) -> str:
-        best_name = gps_track[0][2]
+    # ~50 m in degrees (≈ 0.00045°/m × 50 m); prevents wild snapping when GPS tracks don't overlap
+    _MAX_DIST_DEG_SQ = (50 * 0.000009) ** 2
+
+    def _nearest(lat: float, lon: float) -> str | None:
+        best_name: str | None = None
         best_dist = math.inf
         for tlat, tlon, tname in gps_track:
             d = (tlat - lat) ** 2 + (tlon - lon) ** 2
             if d < best_dist:
                 best_dist = d
                 best_name = tname
-        return best_name
+        return best_name if best_dist <= _MAX_DIST_DEG_SQ else None
 
     out = []
     any_translated = False
@@ -328,9 +331,13 @@ def translate_markers_by_gps(
             )
             if s_lat is not None and s_lon is not None:
                 try:
-                    row["start_image"] = _nearest(float(s_lat), float(s_lon))
-                    logger.debug("[translate_markers] plot %s: start → %s", row.get("plot_id"), row["start_image"])
-                    translated = True
+                    matched = _nearest(float(s_lat), float(s_lon))
+                    if matched is not None:
+                        row["start_image"] = matched
+                        logger.debug("[translate_markers] plot %s: start → %s", row.get("plot_id"), matched)
+                        translated = True
+                    else:
+                        logger.warning("[translate_markers] plot %s: start GPS (%.6f, %.6f) too far from any track point — skipping", row.get("plot_id"), float(s_lat), float(s_lon))
                 except (TypeError, ValueError) as exc:
                     logger.warning("[translate_markers] plot %s: start translation failed — %s", row.get("plot_id"), exc)
             else:
@@ -346,9 +353,13 @@ def translate_markers_by_gps(
             )
             if e_lat is not None and e_lon is not None:
                 try:
-                    row["end_image"] = _nearest(float(e_lat), float(e_lon))
-                    logger.debug("[translate_markers] plot %s: end → %s", row.get("plot_id"), row["end_image"])
-                    translated = True
+                    matched = _nearest(float(e_lat), float(e_lon))
+                    if matched is not None:
+                        row["end_image"] = matched
+                        logger.debug("[translate_markers] plot %s: end → %s", row.get("plot_id"), matched)
+                        translated = True
+                    else:
+                        logger.warning("[translate_markers] plot %s: end GPS (%.6f, %.6f) too far from any track point — skipping", row.get("plot_id"), float(e_lat), float(e_lon))
                 except (TypeError, ValueError) as exc:
                     logger.warning("[translate_markers] plot %s: end translation failed — %s", row.get("plot_id"), exc)
             else:

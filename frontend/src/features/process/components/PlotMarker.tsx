@@ -762,6 +762,11 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
                       <Label className="text-xs text-muted-foreground w-8 shrink-0">Start</Label>
+                      {activePlot.start_image && (
+                        <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.start_image)} onClick={() => jumpTo(activePlot.start_image)}>
+                          <ChevronRight className="w-3 h-3" />
+                        </Button>
+                      )}
                       <span className={`text-xs font-mono truncate flex-1 min-w-0 ${
                         activePlot.start_image && !images.includes(activePlot.start_image)
                           ? "text-amber-600 dark:text-amber-400"
@@ -773,18 +778,18 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                         <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" aria-label="Image not found in this run" />
                       )}
                       {activePlot.start_image && (
-                        <>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.start_image)} onClick={() => jumpTo(activePlot.start_image)}>
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </>
+                        <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
+                          <X className="w-3 h-3" />
+                        </Button>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
                       <Label className="text-xs text-muted-foreground w-8 shrink-0">End</Label>
+                      {activePlot.end_image && (
+                        <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.end_image)} onClick={() => jumpTo(activePlot.end_image)}>
+                          <ChevronRight className="w-3 h-3" />
+                        </Button>
+                      )}
                       <span className={`text-xs font-mono truncate flex-1 min-w-0 ${
                         activePlot.end_image && !images.includes(activePlot.end_image)
                           ? "text-amber-600 dark:text-amber-400"
@@ -796,14 +801,9 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                         <AlertCircle className="w-3 h-3 shrink-0 text-amber-500" aria-label="Image not found in this run" />
                       )}
                       {activePlot.end_image && (
-                        <>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" disabled={!images.includes(activePlot.end_image)} onClick={() => jumpTo(activePlot.end_image)}>
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </>
+                        <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlotsDirty((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
+                          <X className="w-3 h-3" />
+                        </Button>
                       )}
                     </div>
                   </div>

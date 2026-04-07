@@ -1,6 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
+# Suppress the "inference package is out of date" warning emitted by the
+# inference package on import — we can't pip-upgrade in a packaged desktop build.
+logging.getLogger("inference").setLevel(logging.ERROR)
+
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.routing import APIRoute

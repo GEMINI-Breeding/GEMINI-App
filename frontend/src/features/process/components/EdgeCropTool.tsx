@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, X, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, X, Check, Shuffle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { OpenAPI, PipelinesService } from "@/client"
@@ -408,6 +408,16 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
                       onClick={() => setImageIndex((i) => Math.min(images.length - 1, i + 1))}
                     >
                       <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      title="Random sample"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        const next = Math.floor(Math.random() * images.length)
+                        setImageIndex(next)
+                      }}
+                    >
+                      <Shuffle className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 )}

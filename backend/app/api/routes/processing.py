@@ -3334,6 +3334,19 @@ def apply_inference_threshold(
         )
         applied.append(label)
 
+    # Persist the applied threshold into run.outputs so the UI can restore it
+    if applied:
+        raw_inf = outputs.get("inference", [])
+        if isinstance(raw_inf, list):
+            for entry in raw_inf:
+                if not body.label or entry.get("label") == body.label:
+                    entry["confidence_threshold"] = body.confidence_threshold
+            from sqlalchemy.orm.attributes import flag_modified
+            run.outputs = {**outputs, "inference": raw_inf}
+            flag_modified(run, "outputs")
+            session.add(run)
+            session.commit()
+
     return {
         "status": "ok",
         "applied": applied,
@@ -3726,6 +3739,7 @@ def get_inference_results(
             "association_version": entry.get("association_version"),
             "trait_version": entry.get("trait_version"),
             "created_at": entry.get("created_at"),
+            "confidence_threshold": entry.get("confidence_threshold"),
             "plot_count": 0,
             "total_predictions": 0,
             "classes": {},
