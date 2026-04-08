@@ -199,6 +199,13 @@ export function DashboardBuilder() {
     [store]
   )
 
+  const handleReorderWidget = useCallback(
+    (instanceId: string, direction: "left" | "right") => {
+      store.reorderWidget(store.activeTab.id, instanceId, direction)
+    },
+    [store]
+  )
+
   // ── Sync ─────────────────────────────────────────────────────────────────────
 
   function handleSync() {
@@ -261,6 +268,7 @@ export function DashboardBuilder() {
           isOver={drag.isOverCanvas}
           onUpdateWidget={handleUpdateWidget}
           onRemoveWidget={handleRemoveWidget}
+          onReorderWidget={handleReorderWidget}
         />
       </div>
 

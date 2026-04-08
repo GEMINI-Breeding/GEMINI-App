@@ -62,6 +62,45 @@ export function useImagePlotIds(recordId: string | null) {
   })
 }
 
+// ── Value formatter ───────────────────────────────────────────────────────────
+
+/**
+ * Format a numeric dashboard value with column-name-aware precision.
+ *
+ * Rules:
+ *  - Detection counts (model/class columns like "yolo/plant", or names containing
+ *    "count" / "n_plants"): 1 decimal place
+ *  - Height / vegetation fraction columns: 3 decimal places
+ *  - Everything else: up to 4 significant decimals, trailing zeros stripped
+ */
+export function formatDashboardValue(value: unknown, col?: string): string {
+  if (value == null) return "—"
+  if (typeof value !== "number") return String(value)
+  if (Number.isInteger(value)) return String(value)
+
+  if (col) {
+    const lower = col.toLowerCase()
+    // Detection counts: model/class notation OR explicit count-like names
+    const isCount =
+      col.includes("/") ||
+      lower.includes("count") ||
+      lower === "n_plants" ||
+      lower.startsWith("n_") && !lower.includes("ndvi")
+    if (isCount) return value.toFixed(1)
+
+    // Physical measurements: height and vegetation fraction
+    const isMeasurement =
+      lower.includes("height") ||
+      lower.includes("vegetation") ||
+      lower.includes("veg_frac") ||
+      lower.includes("fraction")
+    if (isMeasurement) return value.toFixed(3)
+  }
+
+  // Default: 4 decimals, strip trailing zeros
+  return value.toFixed(4).replace(/\.?0+$/, "")
+}
+
 // ── Filter helper ─────────────────────────────────────────────────────────────
 
 /**

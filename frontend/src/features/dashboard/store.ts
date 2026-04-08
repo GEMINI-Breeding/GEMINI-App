@@ -118,6 +118,22 @@ export function useDashboardStore() {
     }))
   }, [setState])
 
+  const reorderWidget = useCallback((tabId: string, instanceId: string, direction: "left" | "right") => {
+    setState((s) => ({
+      ...s,
+      tabs: s.tabs.map((t) => {
+        if (t.id !== tabId) return t
+        const idx = t.widgets.findIndex((w) => w.instanceId === instanceId)
+        if (idx === -1) return t
+        const next = [...t.widgets]
+        const swap = direction === "left" ? idx - 1 : idx + 1
+        if (swap < 0 || swap >= next.length) return t
+        ;[next[idx], next[swap]] = [next[swap], next[idx]]
+        return { ...t, widgets: next }
+      }),
+    }))
+  }, [setState])
+
   const resizeWidget = useCallback((tabId: string, instanceId: string, span: WidgetSpan) => {
     setState((s) => ({
       ...s,
@@ -155,6 +171,7 @@ export function useDashboardStore() {
     addWidget,
     updateWidget,
     removeWidget,
+    reorderWidget,
     resizeWidget,
     resetDashboard,
   }

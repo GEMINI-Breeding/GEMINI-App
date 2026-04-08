@@ -19,6 +19,7 @@ import {
   useTraitRecordGeojson,
   useMultiTraitGeojson,
   groupBy,
+  groupByMulti,
   buildTemporalSeries,
   applyFilters,
 } from "../hooks/useTraitData"
@@ -57,19 +58,29 @@ function formatLabel(key: string) {
 function SpatialBarChart({ config }: { config: ChartConfig }) {
   const { data: geoData, isLoading, isError } = useTraitRecordGeojson(config.traitRecordId)
 
+  // Effective y-axes: prefer yAxes array, fall back to legacy yAxis
+  const effectiveYAxes = useMemo(
+    () => ((config.yAxes?.length ?? 0) > 0 ? config.yAxes : config.yAxis ? [config.yAxis] : []),
+    [config.yAxes, config.yAxis]
+  )
+  const isMulti = effectiveYAxes.length > 1
+
   const chartData = useMemo(() => {
-    if (!geoData || !config.xAxis || !config.yAxis) return []
+    if (!geoData || !config.xAxis || effectiveYAxes.length === 0) return []
     const filtered = { ...geoData.geojson, features: applyFilters(geoData.geojson.features, config.filters) }
-    return groupBy(filtered, config.xAxis, config.yAxis)
-  }, [geoData, config.xAxis, config.yAxis, config.filters])
+    if (isMulti) return groupByMulti(filtered, config.xAxis, effectiveYAxes)
+    return groupBy(filtered, config.xAxis, effectiveYAxes[0])
+  }, [geoData, config.xAxis, effectiveYAxes, config.filters, isMulti])
 
   if (isLoading) return <Loading />
   if (isError) return <ErrorMsg />
-  if (!config.xAxis || !config.yAxis) return <Unconfigured />
+  if (!config.xAxis || effectiveYAxes.length === 0) return <Unconfigured />
+
+  const dualAxis = isMulti && (config.dualAxis ?? false)
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+      <BarChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis
           dataKey="name"
@@ -78,12 +89,31 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
           tickLine={false}
           label={{ value: formatLabel(config.xAxis), position: "insideBottom", offset: -12, fontSize: 11 }}
         />
-        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        {/* Left y-axis (always present) */}
+        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        {/* Right y-axis only when dual-axis mode */}
+        {dualAxis && (
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        )}
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
-          formatter={(v) => [typeof v === "number" ? v.toFixed(4) : v, formatLabel(config.yAxis!)]}
+          formatter={(v, name) => [typeof v === "number" ? v.toFixed(4) : v, formatLabel(String(name))]}
         />
-        <Bar dataKey="value" name={formatLabel(config.yAxis)} fill="#4f46e5" radius={[3, 3, 0, 0]} />
+        {isMulti && <Legend wrapperStyle={{ fontSize: 11 }} />}
+        {isMulti ? (
+          effectiveYAxes.map((metric, i) => (
+            <Bar
+              key={metric}
+              yAxisId={dualAxis && i > 0 ? "right" : "left"}
+              dataKey={metric}
+              name={formatLabel(metric)}
+              fill={SERIES_COLORS[i % SERIES_COLORS.length]}
+              radius={[3, 3, 0, 0]}
+            />
+          ))
+        ) : (
+          <Bar yAxisId="left" dataKey="value" name={formatLabel(effectiveYAxes[0])} fill="#4f46e5" radius={[3, 3, 0, 0]} />
+        )}
       </BarChart>
     </ResponsiveContainer>
   )
@@ -102,23 +132,45 @@ function TemporalChart({ config }: { config: ChartConfig }) {
 
   const { data: geojsons, loading } = useMultiTraitGeojson(relevantRecords.map((r) => r.id))
 
+  const effectiveYAxes = useMemo(
+    () => ((config.yAxes?.length ?? 0) > 0 ? config.yAxes : config.yAxis ? [config.yAxis] : []),
+    [config.yAxes, config.yAxis]
+  )
+  const isMultiY = effectiveYAxes.length > 1
+  const dualAxis = isMultiY && (config.dualAxis ?? false)
+
   const { chartData, seriesKeys } = useMemo(() => {
-    if (!config.yAxis) return { chartData: [], seriesKeys: [] as string[] }
-    const rows = buildTemporalSeries(relevantRecords, geojsons, config.yAxis, config.groupBy, config.filters)
+    if (effectiveYAxes.length === 0) return { chartData: [], seriesKeys: [] as string[] }
+
+    if (isMultiY) {
+      // Build one series per metric and merge by date
+      const byDate = new Map<string, Record<string, string | number>>()
+      effectiveYAxes.forEach((metric) => {
+        buildTemporalSeries(relevantRecords, geojsons, metric, null, config.filters).forEach((row) => {
+          const key = String(row.date)
+          if (!byDate.has(key)) byDate.set(key, { date: key })
+          byDate.get(key)![metric] = row[metric] as number
+        })
+      })
+      const rows = [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      return { chartData: rows, seriesKeys: effectiveYAxes }
+    }
+
+    const rows = buildTemporalSeries(relevantRecords, geojsons, effectiveYAxes[0], config.groupBy, config.filters)
     const keys = config.groupBy
       ? [...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => k !== "date")))]
-      : [config.yAxis]
+      : [effectiveYAxes[0]]
     return { chartData: rows, seriesKeys: keys }
-  }, [relevantRecords, geojsons, config.yAxis, config.groupBy])
+  }, [relevantRecords, geojsons, effectiveYAxes, isMultiY, config.groupBy, config.filters])
 
   if (loading) return <Loading />
-  if (!config.pipelineId || !config.yAxis) return <Unconfigured />
+  if (!config.pipelineId || effectiveYAxes.length === 0) return <Unconfigured />
 
   const ChartComponent = config.chartType === "area" ? AreaChart : LineChart
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ChartComponent data={chartData} margin={{ top: 4, right: 8, bottom: 8, left: 0 }}>
+      <ChartComponent data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
         <defs>
           {seriesKeys.map((key, i) => (
             <linearGradient key={key} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -129,13 +181,17 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         </defs>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        {dualAxis && (
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        )}
         <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6 }} />
         {seriesKeys.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
         {seriesKeys.map((key, i) =>
           config.chartType === "area" ? (
             <Area
               key={key}
+              yAxisId={dualAxis && i > 0 ? "right" : "left"}
               type="monotone"
               dataKey={key}
               name={formatLabel(key)}
@@ -146,6 +202,7 @@ function TemporalChart({ config }: { config: ChartConfig }) {
           ) : (
             <Line
               key={key}
+              yAxisId={dualAxis && i > 0 ? "right" : "left"}
               type="monotone"
               dataKey={key}
               name={formatLabel(key)}

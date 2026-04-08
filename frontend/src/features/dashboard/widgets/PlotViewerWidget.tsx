@@ -1,19 +1,29 @@
 /**
- * PlotViewerWidget — search plots within a TraitRecord and pin them
+ * PlotViewerWidget — search plots within one or more TraitRecords and pin them
  * for side-by-side image comparison with trait values.
  *
- * Reuses the same image fetch pattern as QueryTab.
+ * Supports:
+ * - Multi-source: merge plots from multiple records
+ * - Collapsible plot-selection table
+ * - Per-column value filters inline in the table header
  */
 
 import { useState, useMemo, useEffect } from "react"
-import { Loader2, Pin, PinOff, Search, ImageOff, X } from "lucide-react"
+import { Loader2, Pin, PinOff, Search, ImageOff, X, ChevronDown, ChevronUp, ListFilter } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { useTraitRecordGeojson, useImagePlotIds, applyFilters } from "../hooks/useTraitData"
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  useTraitRecordGeojson, useMultiTraitGeojson, useImagePlotIds, applyFilters, formatDashboardValue,
+} from "../hooks/useTraitData"
+import { useTraitRecords } from "../hooks/useTraitData"
 import type { PlotViewerConfig } from "../types"
 
 function apiUrl(path: string): string {
@@ -26,10 +36,8 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/**
- * Fetches the plot image via fetch() with auth headers, then renders via blob URL.
- * This is necessary because <img src=...> cannot send Authorization headers.
- */
+// ── Plot image with auth ──────────────────────────────────────────────────────
+
 function PlotImage({ recordId, plotId }: { recordId: string; plotId: string }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [errored, setErrored] = useState(false)
@@ -69,7 +77,6 @@ function PlotImage({ recordId, plotId }: { recordId: string; plotId: string }) {
       </div>
     )
   }
-
   if (!blobUrl) {
     return (
       <div className="flex items-center justify-center bg-muted rounded w-full aspect-video">
@@ -77,12 +84,70 @@ function PlotImage({ recordId, plotId }: { recordId: string; plotId: string }) {
       </div>
     )
   }
-
   return (
     <div className="w-full aspect-video bg-muted rounded overflow-hidden">
       <img src={blobUrl} alt={plotId} className="w-full h-full object-contain" />
     </div>
   )
+}
+
+// ── Column filter dropdown ────────────────────────────────────────────────────
+
+function ColFilterDropdown({
+  col, uniqueValues, selected, onChange,
+}: {
+  col: string
+  uniqueValues: string[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+}) {
+  const isActive = selected.length > 0
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={`ml-0.5 inline-flex items-center rounded p-0.5 transition-colors hover:bg-muted ${isActive ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
+          title={`Filter ${col.replace(/_/g, " ")}`}
+        >
+          <ListFilter className="w-3 h-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+        <DropdownMenuLabel className="text-xs">{col.replace(/_/g, " ")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {isActive && (
+          <>
+            <DropdownMenuItem className="text-xs" onClick={() => onChange([])}>Clear filter</DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {uniqueValues.map((v) => (
+          <DropdownMenuCheckboxItem
+            key={v}
+            className="text-xs"
+            checked={selected.includes(v)}
+            onCheckedChange={() =>
+              onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
+            }
+            onSelect={(e) => e.preventDefault()}
+          >
+            {v}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// ── Main widget ───────────────────────────────────────────────────────────────
+
+interface PlotEntry {
+  recordId: string
+  plotId: string
+  accession: string
+  properties: Record<string, unknown>
+  hasImage: boolean
+  source?: string
 }
 
 interface PlotViewerWidgetProps {
@@ -91,45 +156,132 @@ interface PlotViewerWidgetProps {
 }
 
 export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetProps) {
-  const { traitRecordId, pinnedPlotIds, filters } = config
+  const { pinnedPlotIds, filters } = config
   const [search, setSearch] = useState("")
+  const [tableCollapsed, setTableCollapsed] = useState(false)
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
 
-  const { data: geoData, isLoading } = useTraitRecordGeojson(traitRecordId)
-  const { data: imagePlotIds } = useImagePlotIds(traitRecordId)
+  const { data: allRecords } = useTraitRecords()
 
-  const allPlots = useMemo(() => {
-    if (!geoData) return []
-    return applyFilters(geoData.geojson.features, filters).map((f) => ({
-      plotId: String(f.properties?.plot_id ?? ""),
-      accession: String(f.properties?.accession ?? ""),
-      properties: f.properties ?? {},
-      hasImage: (imagePlotIds ?? []).includes(String(f.properties?.plot_id ?? "")),
-    }))
-  }, [geoData, imagePlotIds, filters])
+  // Resolve active record IDs
+  const activeIds = useMemo((): string[] => {
+    if ((config.traitRecordIds?.length ?? 0) > 0) return config.traitRecordIds
+    if (config.traitRecordId) return [config.traitRecordId]
+    return []
+  }, [config.traitRecordIds, config.traitRecordId])
 
+  const isMultiSource = activeIds.length > 1
+
+  // Single-source
+  const singleGeo = useTraitRecordGeojson(activeIds.length === 1 ? activeIds[0] : null)
+  const singleImages = useImagePlotIds(activeIds.length === 1 ? activeIds[0] : null)
+
+  // Multi-source
+  const multiGeo = useMultiTraitGeojson(activeIds.length > 1 ? activeIds : [])
+
+  const isLoading = activeIds.length === 1 ? singleGeo.isLoading : multiGeo.loading
+
+  // Merge all plots
+  const { allPlots, metricCols } = useMemo((): { allPlots: PlotEntry[]; metricCols: string[] } => {
+    if (activeIds.length === 0) return { allPlots: [], metricCols: [] }
+
+    if (activeIds.length === 1) {
+      const geoData = singleGeo.data
+      if (!geoData) return { allPlots: [], metricCols: [] }
+      const imagePlotIds = singleImages.data ?? []
+      const plots = applyFilters(geoData.geojson.features, filters).map((f) => ({
+        recordId: activeIds[0],
+        plotId: String(f.properties?.plot_id ?? ""),
+        accession: String(f.properties?.accession ?? ""),
+        properties: f.properties ?? {},
+        hasImage: imagePlotIds.includes(String(f.properties?.plot_id ?? "")),
+      }))
+      return { allPlots: plots, metricCols: geoData.metric_columns.slice(0, 4) }
+    }
+
+    // Multi-source
+    const plots: PlotEntry[] = []
+    const metricSet = new Set<string>()
+    multiGeo.data.forEach((geoData, i) => {
+      if (!geoData) return
+      const recordId = activeIds[i]
+      const record = allRecords?.find((r) => r.id === recordId)
+      const label = record ? `${record.pipeline_name} · ${record.date}` : recordId
+      applyFilters(geoData.geojson.features, filters).forEach((f) => {
+        plots.push({
+          recordId,
+          plotId: String(f.properties?.plot_id ?? ""),
+          accession: String(f.properties?.accession ?? ""),
+          properties: { ...(f.properties ?? {}), _source: label },
+          hasImage: false, // image lookup not supported per-row in multi-source yet
+          source: label,
+        })
+      })
+      geoData.metric_columns.slice(0, 4).forEach((m) => metricSet.add(m))
+    })
+    return { allPlots: plots, metricCols: [...metricSet].slice(0, 4) }
+  }, [activeIds, singleGeo.data, singleImages.data, multiGeo.data, filters, allRecords])
+
+  // Columns shown in the selection table
+  const tableCols: string[] = useMemo(() => {
+    const base = ["plotId", "accession"]
+    if (isMultiSource) base.push("_source")
+    return [...base, ...metricCols]
+  }, [isMultiSource, metricCols])
+
+  // Unique values per column for col filters
+  const uniqueByCol = useMemo(() => {
+    const out: Record<string, string[]> = {}
+    const checkCols = ["accession", "_source", ...metricCols]
+    checkCols.forEach((col) => {
+      const vals = [...new Set(allPlots.map((p) => {
+        if (col === "accession") return p.accession
+        return String(p.properties[col] ?? "")
+      }).filter(Boolean))].sort()
+      if (vals.length > 0 && vals.length <= 200) out[col] = vals
+    })
+    return out
+  }, [allPlots, metricCols])
+
+  // Search + column filter
   const filtered = useMemo(() => {
+    let result = allPlots
     const q = search.toLowerCase().trim()
-    if (!q) return allPlots
-    return allPlots.filter(
-      (p) => p.plotId.toLowerCase().includes(q) || p.accession.toLowerCase().includes(q)
-    )
-  }, [allPlots, search])
+    if (q) {
+      result = result.filter(
+        (p) => p.plotId.toLowerCase().includes(q) || p.accession.toLowerCase().includes(q)
+      )
+    }
+    const activeCF = Object.entries(colFilters).filter(([, vals]) => vals.length > 0)
+    if (activeCF.length > 0) {
+      result = result.filter((p) =>
+        activeCF.every(([col, vals]) => {
+          const v = col === "accession" ? p.accession : String(p.properties[col] ?? "")
+          return vals.includes(v)
+        })
+      )
+    }
+    return result
+  }, [allPlots, search, colFilters])
 
-  const metricCols = geoData?.metric_columns.slice(0, 4) ?? []
+  const pinnedPlots = allPlots.filter((p) => pinnedPlotIds.includes(`${p.recordId}:${p.plotId}`))
 
-  function togglePin(plotId: string) {
+  function pinKey(p: PlotEntry) { return `${p.recordId}:${p.plotId}` }
+
+  function togglePin(p: PlotEntry) {
     if (!onUpdateConfig) return
-    const next = pinnedPlotIds.includes(plotId)
-      ? pinnedPlotIds.filter((id) => id !== plotId)
-      : [...pinnedPlotIds, plotId]
+    const key = pinKey(p)
+    const next = pinnedPlotIds.includes(key)
+      ? pinnedPlotIds.filter((id) => id !== key)
+      : [...pinnedPlotIds, key]
     onUpdateConfig({ pinnedPlotIds: next })
   }
 
-  function clearPinned() {
-    onUpdateConfig?.({ pinnedPlotIds: [] })
-  }
+  function clearPinned() { onUpdateConfig?.({ pinnedPlotIds: [] }) }
 
-  if (!traitRecordId) {
+  const activeColFilterCount = Object.values(colFilters).filter((v) => v.length > 0).length
+
+  if (activeIds.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Configure this widget to select a data source.
@@ -145,69 +297,92 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     )
   }
 
-  const pinnedPlots = allPlots.filter((p) => pinnedPlotIds.includes(p.plotId))
-
   return (
     <div className="flex flex-col gap-3 h-full">
-      {/* Search */}
-      <div className="relative flex-shrink-0">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-        <Input
-          placeholder="Search by plot ID or accession…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-7 h-7 text-xs"
-        />
+      {/* Selection table header */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search by plot ID or accession…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-7 h-7 text-xs"
+          />
+        </div>
+        {activeColFilterCount > 0 && (
+          <button className="text-xs text-primary hover:underline whitespace-nowrap" onClick={() => setColFilters({})}>
+            Clear {activeColFilterCount} filter{activeColFilterCount > 1 ? "s" : ""}
+          </button>
+        )}
+        <button
+          className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setTableCollapsed((v) => !v)}
+          title={tableCollapsed ? "Show plot list" : "Hide plot list"}
+        >
+          {tableCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          <span>{tableCollapsed ? "Show" : "Hide"}</span>
+        </button>
       </div>
 
-      {/* Plot list */}
-      <div className="overflow-auto border rounded-md max-h-48 flex-shrink-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs w-8"></TableHead>
-              <TableHead className="text-xs">Plot ID</TableHead>
-              <TableHead className="text-xs">Accession</TableHead>
-              {metricCols.map((m) => (
-                <TableHead key={m} className="text-xs">
-                  {m.replace(/_/g, " ")}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.slice(0, 50).map((p) => {
-              const isPinned = pinnedPlotIds.includes(p.plotId)
-              return (
-                <TableRow key={p.plotId} className={isPinned ? "bg-primary/5" : ""}>
-                  <TableCell className="py-1">
-                    <button
-                      onClick={() => togglePin(p.plotId)}
-                      className={`p-0.5 rounded transition-colors ${
-                        isPinned
-                          ? "text-primary"
-                          : "text-muted-foreground hover:text-primary"
-                      }`}
-                      title={isPinned ? "Unpin" : "Pin plot"}
-                    >
-                      {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
-                    </button>
-                  </TableCell>
-                  <TableCell className="text-xs py-1 font-mono">{p.plotId}</TableCell>
-                  <TableCell className="text-xs py-1">{p.accession || "—"}</TableCell>
-                  {metricCols.map((m) => (
-                    <TableCell key={m} className="text-xs py-1">
-                      {typeof p.properties[m] === "number"
-                        ? (p.properties[m] as number).toFixed(3)
-                        : "—"}
+      {/* Plot selection table (collapsible) */}
+      {!tableCollapsed && (
+        <div className="overflow-auto border rounded-md max-h-48 flex-shrink-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs w-8" />
+                {tableCols.map((col) => (
+                  <TableHead key={col} className="text-xs whitespace-nowrap">
+                    <span className="flex items-center gap-0.5">
+                      {col === "_source" ? "Source" : col === "plotId" ? "Plot ID" : col.replace(/_/g, " ")}
+                      {uniqueByCol[col] && (
+                        <ColFilterDropdown
+                          col={col}
+                          uniqueValues={uniqueByCol[col]}
+                          selected={colFilters[col] ?? []}
+                          onChange={(vals) => setColFilters((prev) => ({ ...prev, [col]: vals }))}
+                        />
+                      )}
+                    </span>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.slice(0, 50).map((p) => {
+                const key = pinKey(p)
+                const isPinned = pinnedPlotIds.includes(key)
+                return (
+                  <TableRow key={key} className={isPinned ? "bg-primary/5" : ""}>
+                    <TableCell className="py-1">
+                      <button
+                        onClick={() => togglePin(p)}
+                        className={`p-0.5 rounded transition-colors ${isPinned ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
+                        title={isPinned ? "Unpin" : "Pin plot"}
+                      >
+                        {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                      </button>
                     </TableCell>
-                  ))}
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                    <TableCell className="text-xs py-1 font-mono">{p.plotId}</TableCell>
+                    <TableCell className="text-xs py-1">{p.accession || "—"}</TableCell>
+                    {isMultiSource && (
+                      <TableCell className="text-xs py-1 text-muted-foreground">{p.source || "—"}</TableCell>
+                    )}
+                    {metricCols.map((m) => (
+                      <TableCell key={m} className="text-xs py-1">
+                        {typeof p.properties[m] === "number"
+                          ? formatDashboardValue(p.properties[m], m)
+                          : "—"}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {/* Pinned comparison */}
       {pinnedPlots.length > 0 && (
@@ -215,62 +390,55 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium">
               Pinned Plots{" "}
-              <Badge variant="secondary" className="text-[10px]">
-                {pinnedPlots.length}
-              </Badge>
+              <Badge variant="secondary" className="text-[10px]">{pinnedPlots.length}</Badge>
             </span>
             <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearPinned}>
               <X className="w-3 h-3 mr-1" /> Clear
             </Button>
           </div>
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(pinnedPlots.length, 3)}, minmax(0, 1fr))` }}>
-            {pinnedPlots.map((p) => (
-              <div key={p.plotId} className="border rounded-lg p-2 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-medium truncate">{p.plotId}</span>
-                  <button
-                    onClick={() => togglePin(p.plotId)}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-                {p.hasImage ? (
-                  <PlotImage recordId={traitRecordId} plotId={p.plotId} />
-                ) : (
-                  <div className="flex items-center justify-center bg-muted rounded aspect-video">
-                    <ImageOff className="w-4 h-4 text-muted-foreground" />
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: `repeat(${Math.min(pinnedPlots.length, 3)}, minmax(0, 1fr))` }}
+          >
+            {pinnedPlots.map((p) => {
+              const key = pinKey(p)
+              return (
+                <div key={key} className="border rounded-lg p-2 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-medium truncate">{p.plotId}</span>
+                    <button onClick={() => togglePin(p)} className="text-muted-foreground hover:text-destructive">
+                      <X className="w-3 h-3" />
+                    </button>
                   </div>
-                )}
-                {/* Trait values */}
-                <div className="space-y-0.5">
-                  {metricCols.map((m) => (
-                    <div key={m} className="flex justify-between text-[11px]">
-                      <span className="text-muted-foreground truncate">{m.replace(/_/g, " ")}</span>
-                      <span className="font-medium ml-2">
-                        {typeof p.properties[m] === "number"
-                          ? (p.properties[m] as number).toFixed(4)
-                          : "—"}
-                      </span>
+                  {isMultiSource && p.source && (
+                    <p className="text-[10px] text-muted-foreground truncate">{p.source}</p>
+                  )}
+                  {p.hasImage ? (
+                    <PlotImage recordId={p.recordId} plotId={p.plotId} />
+                  ) : (
+                    <div className="flex items-center justify-center bg-muted rounded w-full aspect-video">
+                      <ImageOff className="w-4 h-4 text-muted-foreground" />
                     </div>
-                  ))}
-                  {p.accession && (
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-muted-foreground">Accession</span>
-                      <span className="font-medium ml-2">{p.accession}</span>
+                  )}
+                  {metricCols.length > 0 && (
+                    <div className="space-y-0.5">
+                      {metricCols.map((m) => (
+                        <div key={m} className="flex justify-between text-[10px]">
+                          <span className="text-muted-foreground">{m.replace(/_/g, " ")}</span>
+                          <span className="font-medium">
+                            {typeof p.properties[m] === "number"
+                              ? (p.properties[m] as number).toFixed(3)
+                              : "—"}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
-      )}
-
-      {pinnedPlots.length === 0 && (
-        <p className="text-xs text-muted-foreground text-center py-4">
-          Pin plots above to compare them side-by-side.
-        </p>
       )}
     </div>
   )

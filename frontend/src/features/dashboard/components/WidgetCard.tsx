@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react"
-import { Settings2, Trash2, Maximize2, AlertCircle } from "lucide-react"
+import { Settings2, Trash2, Maximize2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FullscreenModal, useExpandable } from "@/components/Common/ExpandableSection"
 import { WidgetConfigDialog } from "./WidgetConfigDialog"
@@ -19,11 +19,16 @@ import type { DashboardWidget, PlotViewerConfig } from "../types"
 function isUnconfigured(widget: DashboardWidget): boolean {
   if (widget.type === "kpi") return !widget.config.traitRecordId || !widget.config.metric
   if (widget.type === "chart") {
-    if (widget.config.mode === "temporal") return !widget.config.pipelineId || !widget.config.yAxis
-    return !widget.config.traitRecordId || !widget.config.yAxis
+    const hasY = !!widget.config.yAxis || (widget.config.yAxes?.length ?? 0) > 0
+    if (widget.config.mode === "temporal") return !widget.config.pipelineId || !hasY
+    return !widget.config.traitRecordId || !hasY
   }
-  if (widget.type === "table") return !widget.config.traitRecordId
-  if (widget.type === "plot-viewer") return !widget.config.traitRecordId
+  if (widget.type === "table") {
+    return !widget.config.traitRecordId && !(widget.config.traitRecordIds?.length > 0)
+  }
+  if (widget.type === "plot-viewer") {
+    return !widget.config.traitRecordId && !(widget.config.traitRecordIds?.length > 0)
+  }
   return false
 }
 
@@ -31,9 +36,11 @@ interface WidgetCardProps {
   widget: DashboardWidget
   onUpdate: (updated: DashboardWidget) => void
   onRemove: () => void
+  onMoveLeft?: () => void
+  onMoveRight?: () => void
 }
 
-export function WidgetCard({ widget, onUpdate, onRemove }: WidgetCardProps) {
+export function WidgetCard({ widget, onUpdate, onRemove, onMoveLeft, onMoveRight }: WidgetCardProps) {
   const [configOpen, setConfigOpen] = useState(false)
   const { isExpanded, open: openExpand, close: closeExpand } = useExpandable()
 
@@ -80,33 +87,25 @@ export function WidgetCard({ widget, onUpdate, onRemove }: WidgetCardProps) {
 
           {/* Action buttons — dimmed at rest, full opacity on group hover */}
           <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            {onMoveLeft && (
+              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={onMoveLeft} title="Move left">
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {onMoveRight && (
+              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={onMoveRight} title="Move right">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            )}
             {!isKpi && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-6 h-6"
-                onClick={openExpand}
-                title="Fullscreen"
-              >
+              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={openExpand} title="Fullscreen">
                 <Maximize2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-6 h-6"
-              onClick={() => setConfigOpen(true)}
-              title="Configure widget"
-            >
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => setConfigOpen(true)} title="Configure widget">
               <Settings2 className="w-3.5 h-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-6 h-6 hover:text-destructive"
-              onClick={onRemove}
-              title="Remove widget"
-            >
+            <Button variant="ghost" size="icon" className="w-6 h-6 hover:text-destructive" onClick={onRemove} title="Remove widget">
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
           </div>

@@ -54,11 +54,12 @@ interface DashboardCanvasProps {
   isOver: boolean
   onUpdateWidget: (instanceId: string, updated: DashboardWidget) => void
   onRemoveWidget: (instanceId: string) => void
+  onReorderWidget: (instanceId: string, direction: "left" | "right") => void
 }
 
 export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
   function DashboardCanvas(
-    { tab, draggingTemplateId, isOver, onUpdateWidget, onRemoveWidget },
+    { tab, draggingTemplateId, isOver, onUpdateWidget, onRemoveWidget, onReorderWidget },
     ref
   ) {
     const isDragging = draggingTemplateId !== null
@@ -98,7 +99,7 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
             </div>
           ) : (
             <div className="grid grid-cols-12 gap-4">
-              {tab.widgets.map((widget) => (
+              {tab.widgets.map((widget, idx) => (
                 <div
                   key={widget.instanceId}
                   className={`${SPAN_CLASSES[widget.span]} transition-opacity duration-150 ${isDragging ? "opacity-50" : "opacity-100"}`}
@@ -107,6 +108,8 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
                     widget={widget}
                     onUpdate={(updated) => onUpdateWidget(widget.instanceId, updated)}
                     onRemove={() => onRemoveWidget(widget.instanceId)}
+                    onMoveLeft={idx > 0 ? () => onReorderWidget(widget.instanceId, "left") : undefined}
+                    onMoveRight={idx < tab.widgets.length - 1 ? () => onReorderWidget(widget.instanceId, "right") : undefined}
                   />
                 </div>
               ))}

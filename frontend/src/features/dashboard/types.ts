@@ -33,8 +33,16 @@ export interface ChartConfig {
   traitRecordId: string | null
   /** X-axis: categorical field (spatial) or metric (correlation) */
   xAxis: string | null
-  /** Y-axis: metric */
+  /** Y-axis: single metric — kept for backward compat with saved configs */
   yAxis: string | null
+  /** Multi-trait Y-axes — takes precedence over yAxis when non-empty */
+  yAxes: string[]
+  /**
+   * When true and yAxes.length > 1: first trait on left axis, rest on right axis
+   * (use for mixed-scale traits like height + vegetation fraction).
+   * When false: all traits share one scale (use for counts of the same unit).
+   */
+  dualAxis: boolean
   /** Group-by field (e.g. 'accession') — optional, produces multiple series */
   groupBy: string | null
   /** For temporal: which pipeline to pull records from */
@@ -46,7 +54,10 @@ export interface ChartConfig {
 }
 
 export interface TableConfig {
+  /** Single source — kept for backward compat */
   traitRecordId: string | null
+  /** Multi-source record IDs — takes precedence when non-empty */
+  traitRecordIds: string[]
   /** Empty = show all columns */
   columns: string[]
   /** field → selected values; empty array = show all for that field */
@@ -55,7 +66,10 @@ export interface TableConfig {
 }
 
 export interface PlotViewerConfig {
+  /** Single source — kept for backward compat */
   traitRecordId: string | null
+  /** Multi-source record IDs — takes precedence when non-empty */
+  traitRecordIds: string[]
   pinnedPlotIds: string[]
   /** field → selected values; empty array = show all for that field */
   filters: Record<string, string[]>

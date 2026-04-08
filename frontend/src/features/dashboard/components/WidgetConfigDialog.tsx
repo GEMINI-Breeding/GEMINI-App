@@ -63,6 +63,117 @@ function RecordSelector({
   )
 }
 
+/** Multi-select for picking several trait records as sources. */
+function MultiRecordSelector({
+  values, onChange, label = "Data Sources",
+}: {
+  values: string[]
+  onChange: (ids: string[]) => void
+  label?: string
+}) {
+  const { data: records } = useTraitRecords()
+  const [addKey, setAddKey] = useState(0)
+
+  const available = (records ?? []).filter((r) => r.id && !values.includes(r.id))
+
+  function remove(id: string) { onChange(values.filter((v) => v !== id)) }
+  function add(id: string) { onChange([...values, id]); setAddKey((k) => k + 1) }
+
+  const selectedRecords = values.map((id) => (records ?? []).find((r) => r.id === id)).filter(Boolean) as typeof records extends (infer T)[] ? T[] : never[]
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      {selectedRecords.length > 0 && (
+        <div className="space-y-1">
+          {selectedRecords.map((r) => (
+            <div key={r.id} className="flex items-center justify-between gap-1 rounded border px-2 py-1 text-xs bg-muted/40">
+              <span className="truncate">{r.pipeline_name} · {r.date} · v{r.version}{r.ortho_name ? ` (${r.ortho_name})` : ""}</span>
+              <button onClick={() => remove(r.id)} className="flex-shrink-0 text-muted-foreground hover:text-destructive">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {available.length > 0 && (
+        <Select key={addKey} onValueChange={add}>
+          <SelectTrigger className="h-7 text-xs border-dashed">
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Plus className="w-3 h-3" /> Add source…
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {available.filter((r) => r.id).map((r) => (
+              <SelectItem key={r.id} value={r.id}>
+                {r.pipeline_name} · {r.date} · v{r.version}{r.ortho_name ? ` (${r.ortho_name})` : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+}
+
+/** Multi-select for picking several metric columns as Y-axes. */
+function MultiMetricSelector({
+  recordId, values, onChange, label = "Y-Axis Metrics",
+}: {
+  recordId: string | null
+  values: string[]
+  onChange: (metrics: string[]) => void
+  label?: string
+}) {
+  const { data: geoData } = useTraitRecordGeojson(recordId)
+  const cols = geoData?.metric_columns ?? []
+  const [addKey, setAddKey] = useState(0)
+
+  const available = cols.filter((c) => c && !values.includes(c))
+
+  function remove(m: string) { onChange(values.filter((v) => v !== m)) }
+  function add(m: string) { onChange([...values, m]); setAddKey((k) => k + 1) }
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      {values.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {values.map((m, i) => (
+            <div key={m} className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${i === 0 ? "bg-primary/10 border-primary/30" : "bg-muted/40"}`}>
+              {i === 0 && <span className="text-[9px] text-primary font-medium">L</span>}
+              {i === 1 && values.length > 1 && <span className="text-[9px] text-muted-foreground font-medium">R</span>}
+              <span>{m.replace(/_/g, " ")}</span>
+              <button onClick={() => remove(m)} className="text-muted-foreground hover:text-destructive">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {available.length > 0 && (
+        <Select key={addKey} onValueChange={add}>
+          <SelectTrigger className="h-7 text-xs border-dashed">
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Plus className="w-3 h-3" /> Add metric…
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {available.map((c) => (
+              <SelectItem key={c} value={c}>{c.replace(/_/g, " ")}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {values.length > 1 && (
+        <p className="text-[10px] text-muted-foreground">
+          <span className="font-medium text-primary">L</span> = left axis · <span className="font-medium">R</span> = right axis (when dual-axis is on)
+        </p>
+      )}
+    </div>
+  )
+}
+
 function MetricSelect({
   recordId, value, onChange, label = "Metric",
 }: {
@@ -445,7 +556,7 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
             value={config.traitRecordId}
             onChange={(id) => onChange({ ...config, traitRecordId: id })}
           />
-          {config.chartType !== "histogram" && (
+              {config.chartType !== "histogram" && (
             <FieldSelect
               recordId={config.traitRecordId}
               value={config.xAxis}
@@ -453,12 +564,23 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
               label="X-Axis (categorical field)"
             />
           )}
-          <MetricSelect
+          <MultiMetricSelector
             recordId={config.traitRecordId}
-            value={config.yAxis}
-            onChange={(v) => onChange({ ...config, yAxis: v || null })}
-            label="Y-Axis (metric)"
+            values={config.yAxes?.length > 0 ? config.yAxes : (config.yAxis ? [config.yAxis] : [])}
+            onChange={(metrics) => onChange({ ...config, yAxes: metrics, yAxis: metrics[0] ?? null })}
+            label="Y-Axis Metrics"
           />
+          {(config.yAxes?.length ?? 0) > 1 && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div
+                className={`relative w-8 h-4 rounded-full transition-colors ${config.dualAxis ? "bg-primary" : "bg-muted-foreground/30"}`}
+                onClick={() => onChange({ ...config, dualAxis: !config.dualAxis })}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${config.dualAxis ? "translate-x-4" : ""}`} />
+              </div>
+              <span className="text-xs">Dual Y-axis (separate scales)</span>
+            </label>
+          )}
         </>
       )}
 
@@ -471,18 +593,31 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
               onChange({ ...config, pipelineId: id, temporalRecordIds: records })
             }
           />
-          <MetricSelect
+          <MultiMetricSelector
             recordId={config.temporalRecordIds[0] ?? null}
-            value={config.yAxis}
-            onChange={(v) => onChange({ ...config, yAxis: v || null })}
-            label="Metric (Y-axis)"
+            values={config.yAxes?.length > 0 ? config.yAxes : (config.yAxis ? [config.yAxis] : [])}
+            onChange={(metrics) => onChange({ ...config, yAxes: metrics, yAxis: metrics[0] ?? null })}
+            label="Metrics (Y-axis)"
           />
-          <FieldSelect
-            recordId={config.temporalRecordIds[0] ?? null}
-            value={config.groupBy}
-            onChange={(v) => onChange({ ...config, groupBy: v || null })}
-            label="Group By (optional — separate series per value)"
-          />
+          {(config.yAxes?.length ?? 0) > 1 && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div
+                className={`relative w-8 h-4 rounded-full transition-colors ${config.dualAxis ? "bg-primary" : "bg-muted-foreground/30"}`}
+                onClick={() => onChange({ ...config, dualAxis: !config.dualAxis })}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${config.dualAxis ? "translate-x-4" : ""}`} />
+              </div>
+              <span className="text-xs">Dual Y-axis (separate scales)</span>
+            </label>
+          )}
+          {(config.yAxes?.length ?? 0) <= 1 && (
+            <FieldSelect
+              recordId={config.temporalRecordIds[0] ?? null}
+              value={config.groupBy}
+              onChange={(v) => onChange({ ...config, groupBy: v || null })}
+              label="Group By (optional — separate series per value)"
+            />
+          )}
         </>
       )}
 
@@ -519,11 +654,15 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
 }
 
 function TableForm({ config, onChange }: { config: TableConfig; onChange: (c: TableConfig) => void }) {
+  // Resolve effective IDs for single-record filter preview
+  const activeIds = (config.traitRecordIds?.length ?? 0) > 0 ? config.traitRecordIds : (config.traitRecordId ? [config.traitRecordId] : [])
+  const isMulti = activeIds.length > 1
+
   return (
     <div className="space-y-3">
-      <RecordSelector
-        value={config.traitRecordId}
-        onChange={(id) => onChange({ ...config, traitRecordId: id })}
+      <MultiRecordSelector
+        values={activeIds}
+        onChange={(ids) => onChange({ ...config, traitRecordIds: ids, traitRecordId: ids[0] ?? null })}
       />
       <div className="space-y-1.5">
         <Label className="text-xs">Max Rows</Label>
@@ -536,12 +675,16 @@ function TableForm({ config, onChange }: { config: TableConfig; onChange: (c: Ta
           onChange={(e) => onChange({ ...config, maxRows: parseInt(e.target.value) || 100 })}
         />
       </div>
-      <hr />
-      <FiltersSection
-        recordId={config.traitRecordId}
-        filters={config.filters ?? {}}
-        onChange={(f) => onChange({ ...config, filters: f })}
-      />
+      {!isMulti && (
+        <>
+          <hr />
+          <FiltersSection
+            recordId={activeIds[0] ?? null}
+            filters={config.filters ?? {}}
+            onChange={(f) => onChange({ ...config, filters: f })}
+          />
+        </>
+      )}
     </div>
   )
 }
@@ -553,21 +696,28 @@ function PlotViewerForm({
   config: PlotViewerConfig
   onChange: (c: PlotViewerConfig) => void
 }) {
+  const activeIds = (config.traitRecordIds?.length ?? 0) > 0 ? config.traitRecordIds : (config.traitRecordId ? [config.traitRecordId] : [])
+  const isMulti = activeIds.length > 1
+
   return (
     <div className="space-y-3">
-      <RecordSelector
-        value={config.traitRecordId}
-        onChange={(id) => onChange({ ...config, traitRecordId: id, pinnedPlotIds: [] })}
+      <MultiRecordSelector
+        values={activeIds}
+        onChange={(ids) => onChange({ ...config, traitRecordIds: ids, traitRecordId: ids[0] ?? null, pinnedPlotIds: [] })}
       />
       <p className="text-xs text-muted-foreground">
-        After selecting a data source, use the widget to search and pin specific plots.
+        After selecting sources, search and pin plots directly in the widget.
       </p>
-      <hr />
-      <FiltersSection
-        recordId={config.traitRecordId}
-        filters={config.filters ?? {}}
-        onChange={(f) => onChange({ ...config, filters: f })}
-      />
+      {!isMulti && (
+        <>
+          <hr />
+          <FiltersSection
+            recordId={activeIds[0] ?? null}
+            filters={config.filters ?? {}}
+            onChange={(f) => onChange({ ...config, filters: f })}
+          />
+        </>
+      )}
     </div>
   )
 }
