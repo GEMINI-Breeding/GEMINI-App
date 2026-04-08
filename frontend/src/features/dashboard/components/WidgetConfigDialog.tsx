@@ -79,7 +79,7 @@ function MultiRecordSelector({
   function remove(id: string) { onChange(values.filter((v) => v !== id)) }
   function add(id: string) { onChange([...values, id]); setAddKey((k) => k + 1) }
 
-  const selectedRecords = values.map((id) => (records ?? []).find((r) => r.id === id)).filter(Boolean) as typeof records extends (infer T)[] ? T[] : never[]
+  const selectedRecords = values.map((id) => (records ?? []).find((r) => r.id === id)).filter((r): r is NonNullable<typeof r> => !!r)
 
   return (
     <div className="space-y-1.5">
