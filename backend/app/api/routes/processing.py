@@ -2229,6 +2229,114 @@ def get_plot_boundary_version(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Preview helper ────────────────────────────────────────────────────────────
+
+def _tif_preview_jpeg(tif: "Path", max_size: int) -> bytes:
+    """
+    Return a JPEG thumbnail of *tif* at most *max_size* pixels on the longest side.
+
+    Fast path: if the TIF has GDAL overview levels (pyramids), rasterio reads
+    only the appropriate overview instead of the full file — this is 100-1000x
+    faster for large TIFs (e.g. 10 GB → reads a few MB).
+
+    Disk cache: the result is written to a sidecar
+    ``{tif}.preview_{max_size}.jpg`` so subsequent requests are served from
+    disk without any rasterio work at all.
+    """
+    import io
+    import numpy as np
+    import rasterio
+    from rasterio.enums import Resampling
+    from PIL import Image
+    from pathlib import Path as _Path
+
+    cache_path = _Path(str(tif) + f".preview_{max_size}.jpg")
+    if cache_path.exists():
+        return cache_path.read_bytes()
+
+    # Determine whether the TIF has usable overview levels
+    ov_idx: int | None = None
+    with rasterio.open(tif) as src:
+        overviews = src.overviews(1) if src.count > 0 else []
+        if overviews:
+            target_factor = max(src.width, src.height) / max_size
+            # Pick the smallest overview factor that still covers target resolution
+            for i, factor in enumerate(overviews):
+                if factor >= target_factor:
+                    ov_idx = i
+                    break
+            if ov_idx is None:
+                ov_idx = len(overviews) - 1  # coarsest available
+
+    # Read at chosen overview level (or full resolution if none)
+    open_kw: dict = {"overview_level": ov_idx} if ov_idx is not None else {}
+    with rasterio.open(tif, **open_kw) as src:
+        scale = min(max_size / src.width, max_size / src.height, 1.0)
+        out_w = max(1, int(src.width * scale))
+        out_h = max(1, int(src.height * scale))
+        n_bands = min(src.count, 3)
+        data = src.read(
+            list(range(1, n_bands + 1)),
+            out_shape=(n_bands, out_h, out_w),
+            resampling=Resampling.average,
+        )
+
+    img = np.transpose(data, (1, 2, 0))
+    if img.dtype != np.uint8:
+        mn, mx = img.min(), img.max()
+        if mx > mn:
+            img = ((img - mn) / (mx - mn) * 255).astype(np.uint8)
+        else:
+            img = np.zeros_like(img, dtype=np.uint8)
+    if img.shape[2] == 1:
+        img = np.repeat(img, 3, axis=2)
+
+    buf = io.BytesIO()
+    Image.fromarray(img, mode="RGB").save(buf, format="JPEG", quality=85)
+    jpeg_bytes = buf.getvalue()
+
+    try:
+        cache_path.write_bytes(jpeg_bytes)
+        logger.info("preview cached: %s (%d KB)", cache_path.name, len(jpeg_bytes) // 1024)
+    except Exception as exc:
+        logger.warning("could not write preview cache %s: %s", cache_path, exc)
+
+    return jpeg_bytes
+
+
+def build_tif_overviews(tif: "Path", factors: list[int] | None = None) -> None:
+    """
+    Build GDAL overview levels (pyramids) into *tif* in-place using gdaladdo.
+    Call this once after an ortho or stitch TIF is created so that all future
+    preview requests read only the tiny overview instead of the full file.
+
+    Typical time: ~30 s for a 10 GB TIF (one-time cost).
+    """
+    import subprocess
+    from pathlib import Path as _Path
+
+    if factors is None:
+        factors = [2, 4, 8, 16, 32, 64]
+
+    try:
+        result = subprocess.run(
+            ["gdaladdo", "-r", "average", "--config", "COMPRESS_OVERVIEW", "JPEG",
+             str(tif)] + [str(f) for f in factors],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            logger.warning("gdaladdo failed for %s: %s", tif, result.stderr)
+        else:
+            logger.info("overviews built for %s", tif.name)
+        # Invalidate any cached preview so the next request re-reads via overviews
+        for f in _Path(tif).parent.glob(f"{tif.name}.preview_*.jpg"):
+            f.unlink(missing_ok=True)
+    except FileNotFoundError:
+        logger.warning("gdaladdo not found — skipping overview generation for %s", tif)
+    except subprocess.TimeoutExpired:
+        logger.warning("gdaladdo timed out for %s", tif)
+
+
 # ── Mosaic preview (web-safe JPEG for Leaflet ImageOverlay) ──────────────────
 
 @router.get("/pipeline-runs/{id}/mosaic-preview")
@@ -2244,11 +2352,6 @@ def mosaic_preview(
     TIF files are not renderable as <img> in WebKit/Tauri.
     For ground runs, pass stitch_version to preview a specific stitching version.
     """
-    import io
-    import numpy as np
-    import rasterio
-    from rasterio.crs import CRS
-    from rasterio.warp import transform_bounds, calculate_default_transform, reproject, Resampling
     from fastapi.responses import Response
 
     run = _get_run_or_404(session, id)
@@ -2271,40 +2374,8 @@ def mosaic_preview(
         raise HTTPException(404, "Mosaic file not found")
 
     try:
-        with rasterio.open(tif) as src:
-            # Downsample to max_size on the longest side
-            scale = min(max_size / src.width, max_size / src.height, 1.0)
-            out_w = max(1, int(src.width * scale))
-            out_h = max(1, int(src.height * scale))
-
-            # Read RGB bands (first 3)
-            n_bands = min(src.count, 3)
-            data = src.read(
-                list(range(1, n_bands + 1)),
-                out_shape=(n_bands, out_h, out_w),
-                resampling=Resampling.average,
-            )
-
-        # Normalise to uint8
-        img = np.transpose(data, (1, 2, 0))  # (H, W, C)
-        if img.dtype != np.uint8:
-            mn, mx = img.min(), img.max()
-            if mx > mn:
-                img = ((img - mn) / (mx - mn) * 255).astype(np.uint8)
-            else:
-                img = np.zeros_like(img, dtype=np.uint8)
-
-        # If only 1 band, duplicate to RGB
-        if img.shape[2] == 1:
-            img = np.repeat(img, 3, axis=2)
-
-        from PIL import Image
-        pil_img = Image.fromarray(img, mode="RGB")
-        buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG", quality=85)
-        buf.seek(0)
-        return Response(content=buf.read(), media_type="image/jpeg")
-
+        from fastapi.responses import Response
+        return Response(content=_tif_preview_jpeg(tif, max_size), media_type="image/jpeg")
     except Exception as exc:
         logger.exception("mosaic_preview failed: %s", exc)
         raise HTTPException(500, f"Failed to generate preview: {exc}")
@@ -2420,11 +2491,6 @@ def orthomosaic_version_preview(
     Return a specific orthomosaic version as a downscaled JPEG.
     max_size controls the longest-side resolution (default 2000 for low-res, pass 8000 for high-res).
     """
-    import io
-    import numpy as np
-    import rasterio
-    from rasterio.transform import from_bounds
-    from rasterio.enums import Resampling
     from fastapi.responses import Response
 
     run = _get_run_or_404(session, id)
@@ -2446,33 +2512,7 @@ def orthomosaic_version_preview(
         raise HTTPException(404, "TIF file not found on disk")
 
     try:
-        with rasterio.open(tif) as src:
-            scale = min(max_size / src.width, max_size / src.height, 1.0)
-            out_w = max(1, int(src.width * scale))
-            out_h = max(1, int(src.height * scale))
-            n_bands = min(src.count, 3)
-            data = src.read(
-                list(range(1, n_bands + 1)),
-                out_shape=(n_bands, out_h, out_w),
-                resampling=Resampling.average,
-            )
-
-        img = np.transpose(data, (1, 2, 0))
-        if img.dtype != np.uint8:
-            mn, mx = img.min(), img.max()
-            if mx > mn:
-                img = ((img - mn) / (mx - mn) * 255).astype(np.uint8)
-            else:
-                img = np.zeros_like(img, dtype=np.uint8)
-        if img.shape[2] == 1:
-            img = np.repeat(img, 3, axis=2)
-
-        from PIL import Image
-        buf = io.BytesIO()
-        Image.fromarray(img, mode="RGB").save(buf, format="JPEG", quality=88)
-        buf.seek(0)
-        return Response(content=buf.read(), media_type="image/jpeg")
-
+        return Response(content=_tif_preview_jpeg(tif, max_size), media_type="image/jpeg")
     except Exception as exc:
         logger.exception("orthomosaic_version_preview failed: %s", exc)
         raise HTTPException(500, f"Failed to generate preview: {exc}")
