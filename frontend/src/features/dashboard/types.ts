@@ -25,6 +25,8 @@ export interface KpiConfig {
 
 export type ChartMode = "spatial" | "temporal" | "correlation"
 export type ChartType = "bar" | "line" | "area" | "scatter" | "histogram"
+export type ChartAggregation = "avg" | "min" | "max" | "sum" | "median"
+export type ErrorBandType = "std" | "minmax"
 
 export interface ChartConfig {
   mode: ChartMode
@@ -43,6 +45,12 @@ export interface ChartConfig {
    * When false: all traits share one scale (use for counts of the same unit).
    */
   dualAxis: boolean
+  /** Per-metric aggregation for temporal charts (defaults to "avg" if absent) */
+  yAxesAggregation: Record<string, ChartAggregation>
+  /** Show ±std-dev or min/max band around the main line in temporal charts */
+  showErrorBand: boolean
+  /** Whether the band shows ±1 std dev or the full min/max range */
+  errorBandType: ErrorBandType
   /** Group-by field (e.g. 'accession') — optional, produces multiple series */
   groupBy: string | null
   /** For temporal: which pipeline to pull records from */

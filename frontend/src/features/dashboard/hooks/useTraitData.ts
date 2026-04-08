@@ -219,9 +219,39 @@ function normalizeDateForSort(date: string): string {
   return date // fall back to original if unrecognised
 }
 
+function aggregateValues(
+  vals: number[],
+  agg: "avg" | "min" | "max" | "sum" | "median",
+): number {
+  if (vals.length === 0) return 0
+  switch (agg) {
+    case "avg": return vals.reduce((a, b) => a + b, 0) / vals.length
+    case "min": return Math.min(...vals)
+    case "max": return Math.max(...vals)
+    case "sum": return vals.reduce((a, b) => a + b, 0)
+    case "median": {
+      const s = [...vals].sort((a, b) => a - b)
+      return s.length % 2 === 0
+        ? (s[s.length / 2 - 1] + s[s.length / 2]) / 2
+        : s[Math.floor(s.length / 2)]
+    }
+  }
+}
+
+export interface TemporalSeriesOptions {
+  aggregation?: "avg" | "min" | "max" | "sum" | "median"
+  /** When set, adds `{metric}_lo` and `{metric}_range` keys for error band rendering */
+  bandType?: "std" | "minmax"
+}
+
 /**
- * For a temporal series: given (record, geojson) pairs, compute avg of `metric`
- * per date. Optionally split by `groupByField` (one series per group).
+ * For a temporal series: given (record, geojson) pairs, compute an aggregate of
+ * `metric` per date. Optionally split by `groupByField` (one series per group).
+ *
+ * When `options.bandType` is set (and groupByField is null), also emits
+ * `{metric}_lo` (lower bound) and `{metric}_range` (hi − lo) so the chart can
+ * render a stacked-area error band.  The band always shows the full spread
+ * (± std dev or min/max) regardless of the selected aggregation.
  */
 export function buildTemporalSeries(
   records: TraitRecord[],
@@ -229,8 +259,10 @@ export function buildTemporalSeries(
   metric: string,
   groupByField: string | null,
   filters?: Record<string, string[]>,
+  options?: TemporalSeriesOptions,
 ): Array<Record<string, string | number>> {
   const result: Array<Record<string, string | number>> = []
+  const agg = options?.aggregation ?? "avg"
 
   records.forEach((record, i) => {
     const geojson = responses[i]?.geojson
@@ -240,13 +272,29 @@ export function buildTemporalSeries(
     const features = applyFilters(geojson.features, filters)
 
     if (!groupByField) {
-      // single series: overall average
       const vals = features
         .map((f) => f.properties?.[metric] as number)
         .filter((v) => typeof v === "number" && !isNaN(v))
-      row[metric] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+
+      row[metric] = vals.length ? aggregateValues(vals, agg) : 0
+
+      // Error band — always computed from the raw distribution
+      if (options?.bandType && vals.length > 1) {
+        let lo: number, hi: number
+        if (options.bandType === "std") {
+          const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+          const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length)
+          lo = mean - std
+          hi = mean + std
+        } else {
+          lo = Math.min(...vals)
+          hi = Math.max(...vals)
+        }
+        row[`${metric}_lo`] = lo
+        row[`${metric}_range`] = Math.max(0, hi - lo)
+      }
     } else {
-      // multi-series: average per group
+      // multi-series: aggregate per group
       const buckets = new Map<string, number[]>()
       features.forEach((f) => {
         const key = String(f.properties?.[groupByField] ?? "(none)")
@@ -257,7 +305,7 @@ export function buildTemporalSeries(
         }
       })
       buckets.forEach((vals, key) => {
-        row[key] = vals.reduce((a, b) => a + b, 0) / vals.length
+        row[key] = aggregateValues(vals, agg)
       })
     }
 

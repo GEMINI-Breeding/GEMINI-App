@@ -116,13 +116,23 @@ function MultiRecordSelector({
   )
 }
 
-/** Multi-select for picking several metric columns as Y-axes. */
+const AGG_OPTIONS = [
+  { value: "avg", label: "Average" },
+  { value: "min", label: "Minimum" },
+  { value: "max", label: "Maximum" },
+  { value: "sum", label: "Sum" },
+  { value: "median", label: "Median" },
+] as const
+
+/** Multi-select for picking several metric columns as Y-axes, with per-metric aggregation. */
 function MultiMetricSelector({
-  recordId, values, onChange, label = "Y-Axis Metrics",
+  recordId, values, aggregations, onChange, onAggChange, label = "Y-Axis Metrics",
 }: {
   recordId: string | null
   values: string[]
+  aggregations: Record<string, string>
   onChange: (metrics: string[]) => void
+  onAggChange: (metric: string, agg: string) => void
   label?: string
 }) {
   const { data: geoData } = useTraitRecordGeojson(recordId)
@@ -138,14 +148,31 @@ function MultiMetricSelector({
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
       {values.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="space-y-1">
           {values.map((m, i) => (
-            <div key={m} className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${i === 0 ? "bg-primary/10 border-primary/30" : "bg-muted/40"}`}>
-              {i === 0 && <span className="text-[9px] text-primary font-medium">L</span>}
-              {i === 1 && values.length > 1 && <span className="text-[9px] text-muted-foreground font-medium">R</span>}
-              <span>{m.replace(/_/g, " ")}</span>
-              <button onClick={() => remove(m)} className="text-muted-foreground hover:text-destructive">
-                <X className="w-3 h-3" />
+            <div key={m} className="flex items-center gap-1.5">
+              {/* Axis indicator */}
+              <span className={`text-[9px] font-bold w-3 flex-shrink-0 ${i === 0 ? "text-primary" : "text-muted-foreground"}`}>
+                {values.length > 1 ? (i === 0 ? "L" : "R") : ""}
+              </span>
+              {/* Metric name */}
+              <span className="text-xs flex-1 truncate">{m.replace(/_/g, " ")}</span>
+              {/* Aggregation picker */}
+              <Select
+                value={aggregations[m] ?? "avg"}
+                onValueChange={(v) => onAggChange(m, v)}
+              >
+                <SelectTrigger className="h-6 w-24 text-[11px] px-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AGG_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <button onClick={() => remove(m)} className="text-muted-foreground hover:text-destructive flex-shrink-0">
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           ))}
@@ -567,7 +594,9 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
           <MultiMetricSelector
             recordId={config.traitRecordId}
             values={config.yAxes?.length > 0 ? config.yAxes : (config.yAxis ? [config.yAxis] : [])}
+            aggregations={config.yAxesAggregation ?? {}}
             onChange={(metrics) => onChange({ ...config, yAxes: metrics, yAxis: metrics[0] ?? null })}
+            onAggChange={(metric, agg) => onChange({ ...config, yAxesAggregation: { ...(config.yAxesAggregation ?? {}), [metric]: agg as any } })}
             label="Y-Axis Metrics"
           />
           {(config.yAxes?.length ?? 0) > 1 && (
@@ -596,7 +625,9 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
           <MultiMetricSelector
             recordId={config.temporalRecordIds[0] ?? null}
             values={config.yAxes?.length > 0 ? config.yAxes : (config.yAxis ? [config.yAxis] : [])}
+            aggregations={config.yAxesAggregation ?? {}}
             onChange={(metrics) => onChange({ ...config, yAxes: metrics, yAxis: metrics[0] ?? null })}
+            onAggChange={(metric, agg) => onChange({ ...config, yAxesAggregation: { ...(config.yAxesAggregation ?? {}), [metric]: agg as any } })}
             label="Metrics (Y-axis)"
           />
           {(config.yAxes?.length ?? 0) > 1 && (
@@ -617,6 +648,34 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
               onChange={(v) => onChange({ ...config, groupBy: v || null })}
               label="Group By (optional — separate series per value)"
             />
+          )}
+          {/* Error band controls — only shown when not grouped */}
+          {!config.groupBy && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <div
+                  className={`relative w-8 h-4 rounded-full transition-colors ${config.showErrorBand ? "bg-primary" : "bg-muted-foreground/30"}`}
+                  onClick={() => onChange({ ...config, showErrorBand: !config.showErrorBand })}
+                >
+                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${config.showErrorBand ? "translate-x-4" : ""}`} />
+                </div>
+                <span className="text-xs">Show error band</span>
+              </label>
+              {config.showErrorBand && (
+                <Select
+                  value={config.errorBandType ?? "std"}
+                  onValueChange={(v) => onChange({ ...config, errorBandType: v as any })}
+                >
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="std">±1 Std Dev</SelectItem>
+                    <SelectItem value="minmax">Min / Max range</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           )}
         </>
       )}

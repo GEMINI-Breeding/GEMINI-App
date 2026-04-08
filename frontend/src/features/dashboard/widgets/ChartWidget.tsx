@@ -6,14 +6,14 @@
  *   - histogram (distribution of one metric)
  */
 
-import { useMemo } from "react"
+import React, { useMemo } from "react"
 import { Loader2 } from "lucide-react"
 import {
+  ComposedChart,
   BarChart, Bar,
-  LineChart, Line,
-  AreaChart, Area,
   ScatterChart, Scatter, ZAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  Line, Area,
 } from "recharts"
 import {
   useTraitRecordGeojson,
@@ -22,6 +22,7 @@ import {
   groupByMulti,
   buildTemporalSeries,
   applyFilters,
+  formatDashboardValue,
 } from "../hooks/useTraitData"
 import { useTraitRecords } from "../hooks/useTraitData"
 import type { ChartConfig } from "../types"
@@ -138,6 +139,8 @@ function TemporalChart({ config }: { config: ChartConfig }) {
   )
   const isMultiY = effectiveYAxes.length > 1
   const dualAxis = isMultiY && (config.dualAxis ?? false)
+  const showBand = (config.showErrorBand ?? false) && !config.groupBy
+  const bandType = config.errorBandType ?? "std"
 
   const { chartData, seriesKeys } = useMemo(() => {
     if (effectiveYAxes.length === 0) return { chartData: [], seriesKeys: [] as string[] }
@@ -146,31 +149,39 @@ function TemporalChart({ config }: { config: ChartConfig }) {
       // Build one series per metric and merge by date
       const byDate = new Map<string, Record<string, string | number>>()
       effectiveYAxes.forEach((metric) => {
-        buildTemporalSeries(relevantRecords, geojsons, metric, null, config.filters).forEach((row) => {
+        const agg = config.yAxesAggregation?.[metric] ?? "avg"
+        buildTemporalSeries(relevantRecords, geojsons, metric, null, config.filters, {
+          aggregation: agg,
+          bandType: showBand ? bandType : undefined,
+        }).forEach((row) => {
           const key = String(row.date)
           if (!byDate.has(key)) byDate.set(key, { date: key })
-          byDate.get(key)![metric] = row[metric] as number
+          Object.assign(byDate.get(key)!, row)
         })
       })
       const rows = [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
       return { chartData: rows, seriesKeys: effectiveYAxes }
     }
 
-    const rows = buildTemporalSeries(relevantRecords, geojsons, effectiveYAxes[0], config.groupBy, config.filters)
+    const agg = config.yAxesAggregation?.[effectiveYAxes[0]] ?? "avg"
+    const rows = buildTemporalSeries(
+      relevantRecords, geojsons, effectiveYAxes[0], config.groupBy, config.filters,
+      { aggregation: agg, bandType: showBand ? bandType : undefined }
+    )
     const keys = config.groupBy
-      ? [...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => k !== "date")))]
+      ? [...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => k !== "date" && !k.endsWith("_lo") && !k.endsWith("_range"))))]
       : [effectiveYAxes[0]]
     return { chartData: rows, seriesKeys: keys }
-  }, [relevantRecords, geojsons, effectiveYAxes, isMultiY, config.groupBy, config.filters])
+  }, [relevantRecords, geojsons, effectiveYAxes, isMultiY, config.groupBy, config.filters, config.yAxesAggregation, showBand, bandType])
 
   if (loading) return <Loading />
   if (!config.pipelineId || effectiveYAxes.length === 0) return <Unconfigured />
 
-  const ChartComponent = config.chartType === "area" ? AreaChart : LineChart
+  const isArea = config.chartType === "area"
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ChartComponent data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
         <defs>
           {seriesKeys.map((key, i) => (
             <linearGradient key={key} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -185,34 +196,86 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         {dualAxis && (
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
         )}
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6 }} />
+        <Tooltip
+          contentStyle={{ fontSize: 12, borderRadius: 6 }}
+          content={({ active, payload, label }) => {
+            if (!active || !payload?.length) return null
+            const visible = payload.filter(
+              (p) => !String(p.dataKey).endsWith("_lo") && !String(p.dataKey).endsWith("_range")
+            )
+            return (
+              <div style={{ fontSize: 12, background: "var(--background)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px" }}>
+                <p style={{ marginBottom: 4, fontWeight: 500 }}>{label}</p>
+                {visible.map((p) => (
+                  <p key={String(p.dataKey)} style={{ color: p.color, margin: "2px 0" }}>
+                    {formatLabel(String(p.dataKey))}: {formatDashboardValue(p.value as number, String(p.dataKey))}
+                  </p>
+                ))}
+              </div>
+            )
+          }}
+        />
         {seriesKeys.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
-        {seriesKeys.map((key, i) =>
-          config.chartType === "area" ? (
-            <Area
-              key={key}
-              yAxisId={dualAxis && i > 0 ? "right" : "left"}
-              type="monotone"
-              dataKey={key}
-              name={formatLabel(key)}
-              stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-              fill={`url(#grad-${i})`}
-              dot={false}
-            />
-          ) : (
-            <Line
-              key={key}
-              yAxisId={dualAxis && i > 0 ? "right" : "left"}
-              type="monotone"
-              dataKey={key}
-              name={formatLabel(key)}
-              stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-              dot={{ r: 3 }}
-              activeDot={{ r: 5 }}
-            />
+
+        {seriesKeys.map((key, i) => {
+          const color = SERIES_COLORS[i % SERIES_COLORS.length]
+          const axisId = dualAxis && i > 0 ? "right" : "left"
+          return (
+            <React.Fragment key={key}>
+              {/* Error band — stacked area trick: transparent base + colored range on top */}
+              {showBand && (
+                <>
+                  <Area
+                    yAxisId={axisId}
+                    dataKey={`${key}_lo`}
+                    stackId={`band_${i}`}
+                    fill="transparent"
+                    stroke="none"
+                    legendType="none"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    yAxisId={axisId}
+                    dataKey={`${key}_range`}
+                    stackId={`band_${i}`}
+                    fill={color}
+                    fillOpacity={0.15}
+                    stroke="none"
+                    legendType="none"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                </>
+              )}
+              {/* Main series */}
+              {isArea ? (
+                <Area
+                  yAxisId={axisId}
+                  type="monotone"
+                  dataKey={key}
+                  name={formatLabel(key)}
+                  stroke={color}
+                  fill={`url(#grad-${i})`}
+                  dot={false}
+                />
+              ) : (
+                <Line
+                  yAxisId={axisId}
+                  type="monotone"
+                  dataKey={key}
+                  name={formatLabel(key)}
+                  stroke={color}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              )}
+            </React.Fragment>
           )
-        )}
-      </ChartComponent>
+        })}
+      </ComposedChart>
     </ResponsiveContainer>
   )
 }
