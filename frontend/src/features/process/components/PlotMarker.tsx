@@ -573,7 +573,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
         {/* ── GPS map (left, only when shown) ── */}
         {showGps && (
-          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 400 }}>
+          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 500 }}>
             <GpsTrajectoryPanel runId={runId} currentImage={currentImage} />
           </div>
         )}

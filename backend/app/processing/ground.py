@@ -667,6 +667,49 @@ def run_stitching(
     failed_plots: list = []
     succeeded_plots: list = []
 
+    # Resolve Python interpreter and run a one-time pre-flight import check.
+    # The pre-flight is skipped for frozen (PyInstaller) builds: re-invoking the
+    # bundle binary as a subprocess causes SIGSEGV on macOS due to PyInstaller
+    # self-invocation constraints. The actual stitching subprocess uses the same
+    # mechanism, so any real failure will surface there per-plot instead.
+    _agrows_venv_python = agrowstitch_dir / ".venv" / "bin" / "python"
+    if _agrows_venv_python.exists():
+        _preflight_python: str = str(_agrows_venv_python)
+    elif not getattr(sys, "frozen", False):
+        _preflight_python = sys.executable
+    else:
+        _preflight_python = ""  # frozen — skip pre-flight
+
+    if _preflight_python:
+        emit({"event": "progress", "message": f"Pre-flight check using Python: {_preflight_python}"})
+        try:
+            _pf = subprocess.run(
+                [
+                    _preflight_python, "-c",
+                    f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
+                    f"import AgRowStitch; print('AgRowStitch import OK')",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=None,
+                **_WINFLAGS,
+            )
+            _pf_out = (_pf.stdout or "").strip()
+            _pf_err = (_pf.stderr or "").strip()
+            if _pf.returncode != 0:
+                detail = "\n".join(filter(None, [_pf_out, _pf_err])) or "(no output)"
+                raise RuntimeError(
+                    f"AgRowStitch import failed (exit {_pf.returncode}):\n{detail}\n"
+                    f"Ensure all dependencies (torch, cv2, lightglue) are installed in the "
+                    f"AgRowStitch venv or the active Python environment."
+                )
+            emit({"event": "progress", "message": f"[pre-flight] {_pf_out or 'AgRowStitch import OK'}"})
+        except subprocess.TimeoutExpired:
+            emit({"event": "progress", "message": "AgRowStitch pre-flight timed out — proceeding anyway"})
+        except RuntimeError:
+            raise
+
     for i, plot in enumerate(plots):
         if stop_event.is_set():
             return {}
@@ -881,53 +924,6 @@ def run_stitching(
                     f"r = run({tmp_config!r}, {cpu_count}); "
                     f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None",
                 ]
-            emit({"event": "progress", "message": f"Using Python: {_python}"})
-
-            # Pre-flight: verify AgRowStitch can be imported.
-            # This surfaces import-time errors (missing deps, ABI mismatch) with
-            # a readable message instead of a silent SIGSEGV.
-            _preflight_cmd: list[str]
-            if getattr(sys, "frozen", False):
-                _preflight_cmd = [sys.executable]
-                _preflight_env = {
-                    **(_subprocess_env or os.environ),
-                    "GEMI_AGROWSTITCH_CONFIG": "__probe__",  # sentinel → import-only check
-                    "GEMI_AGROWSTITCH_CPU_COUNT": "0",
-                    "GEMI_AGROWSTITCH_DIR": str(agrowstitch_dir),
-                }
-            else:
-                _preflight_cmd = [
-                    _python, "-c",
-                    f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
-                    f"import AgRowStitch; print('AgRowStitch import OK')",
-                ]
-                _preflight_env = _subprocess_env
-            try:
-                _pf = subprocess.run(
-                    _preflight_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    env=_preflight_env,
-                    **_WINFLAGS,
-                )
-                _pf_out = (_pf.stdout or "").strip()
-                _pf_err = (_pf.stderr or "").strip()
-                if _pf.returncode != 0:
-                    detail = "\n".join(filter(None, [_pf_out, _pf_err])) or "(no output)"
-                    raise RuntimeError(
-                        f"AgRowStitch failed import pre-flight check "
-                        f"(exit {_pf.returncode}):\n{detail}"
-                    )
-                if _pf_out:
-                    emit({"event": "progress", "message": f"[pre-flight] {_pf_out}"})
-            except subprocess.TimeoutExpired:
-                emit({"event": "progress", "message": "AgRowStitch pre-flight timed out — proceeding anyway"})
-            except RuntimeError:
-                raise
-            except Exception as _pf_exc:
-                emit({"event": "progress", "message": f"Pre-flight check error (non-fatal): {_pf_exc}"})
-
             proc = subprocess.Popen(
                 _subprocess_cmd,
                 stdout=subprocess.PIPE,

@@ -216,7 +216,7 @@ export function RunTool() {
 
   return (
     <div className="bg-background min-h-screen">
-      <div className="mx-auto max-w-7xl p-8">
+      <div className="mx-auto max-w-[1600px] px-6 py-6">
         {/* Header */}
         <div className="mb-6 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={goBack}>

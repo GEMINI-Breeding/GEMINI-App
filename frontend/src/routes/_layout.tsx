@@ -1,4 +1,6 @@
+import { useCallback } from "react"
 import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router"
+import { toast } from "sonner"
 
 import { Footer } from "@/components/Common/Footer"
 import { ProcessPanel } from "@/components/ProcessPanel"
@@ -8,6 +10,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -16,6 +19,26 @@ export const Route = createFileRoute("/_layout")({
 function Layout() {
   const location = useLocation()
   const isFullHeight = location.pathname === "/"
+
+  const handleUpdateAvailable = useCallback((version: string, downloadUrl: string) => {
+    toast.info(`Update available: ${version}`, {
+      description: "A new version of GEMI is ready to download.",
+      duration: Infinity,
+      action: {
+        label: "Download",
+        onClick: () => {
+          // Store dismissed so we don't re-show for this version
+          localStorage.setItem("gemi_dismissed_version", version)
+          window.open(downloadUrl, "_blank")
+        },
+      },
+      onDismiss: () => {
+        localStorage.setItem("gemi_dismissed_version", version)
+      },
+    })
+  }, [])
+
+  useUpdateChecker({ onUpdateAvailable: handleUpdateAvailable })
 
   return (
     <SidebarProvider>

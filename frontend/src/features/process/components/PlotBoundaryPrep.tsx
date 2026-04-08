@@ -1202,7 +1202,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         center: bounds.getCenter(),
         zoom: 17,
         minZoom: 10,
-        maxZoom: 22,
+        maxZoom: 25,
         boxZoom: false,
       });
       mapRef.current = map;
@@ -1213,7 +1213,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           attribution:
             "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
           maxNativeZoom: 19,
-          maxZoom: 22,
+          maxZoom: 25,
           opacity: 0.6,
         }
       ).addTo(map);
@@ -1965,11 +1965,12 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
       {/* Map with floating grid settings panel */}
       {/* isolation:isolate contains Leaflet's internal z-indices so dialogs render above */}
+      {/* isolation:isolate contains Leaflet's internal z-indices so dialogs render above */}
       <div className="relative" style={{ isolation: "isolate" }}>
         <div
           ref={mapContainerRef}
           className="w-full overflow-hidden rounded-lg border"
-          style={{ height: 600 }}
+          style={{ height: "calc(100vh - 280px)", minHeight: 500 }}
         />
         {hasBoundary && (
           <GridSettingsPanel

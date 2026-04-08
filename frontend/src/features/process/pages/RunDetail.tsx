@@ -427,10 +427,12 @@ function ProgressLog({ events }: { events: ProgressEvent[] }) {
             }`}
           >
             {e.event === "log"
-              ? e.message
+              ? (e.message ?? "")
               : e.event === "progress"
-                ? `▶ ${e.message}`
-                : `[${e.event}] ${e.message ?? e.step ?? JSON.stringify(e)}`}
+                ? `▶ ${e.message ?? ""}`
+                : e.message
+                  ? `[${e.event}] ${e.message}`
+                  : `[${e.event}]${e.step ? ` ${e.step}` : ""}`}
           </div>
         ))}
       </div>
@@ -1875,9 +1877,14 @@ function StepRow({
 }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
 
-  // Only show progress events relevant to this step
-  const stepEvents = progressEvents.filter(
-    (e) => !e.step || e.step === step.key
+  // Only show progress events relevant to this step.
+  // Interactive steps (inference, plot_boundary_prep) run independently and have
+  // their own SSE event stream — global events (no step tag) from other steps must
+  // not bleed into their log. Sequential steps include global events because those
+  // events were necessarily emitted during that step's execution window.
+  const isInteractiveStep = step.kind === "interactive" || step.kind === "optional";
+  const stepEvents = progressEvents.filter((e) =>
+    isInteractiveStep ? e.step === step.key : !e.step || e.step === step.key
   );
 
   const iconEl = (() => {

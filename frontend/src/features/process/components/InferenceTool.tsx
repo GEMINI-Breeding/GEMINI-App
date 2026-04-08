@@ -383,7 +383,7 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     ? `${base}/api/v1/files/serve?path=${encodeURIComponent(image.path)}`
     : `/api/v1/files/serve?path=${encodeURIComponent(image.path)}`
 
-  const containerHeight = fullscreen ? "calc(100vh - 160px)" : 480
+  const containerHeight = fullscreen ? "calc(100vh - 160px)" : 640
 
   return (
     <div className="space-y-1">

@@ -788,13 +788,20 @@ function TableTab({ records }: { records: TraitRecord[] }) {
     [records]
   );
 
-  const wsFilteredRecords = useMemo(
-    () =>
+  const wsFilteredRecords = useMemo(() => {
+    const filtered =
       wsFilter === "__all__"
         ? records
-        : records.filter((r) => r.workspace_name === wsFilter),
-    [records, wsFilter]
-  );
+        : records.filter((r) => r.workspace_name === wsFilter);
+    return [...filtered].sort((a, b) => {
+      // Primary: pipeline_type (aerial before ground)
+      if (a.pipeline_type !== b.pipeline_type) {
+        return a.pipeline_type === "aerial" ? -1 : 1;
+      }
+      // Secondary: date descending (most recent first)
+      return b.date.localeCompare(a.date);
+    });
+  }, [records, wsFilter]);
 
   const table = useReactTable({
     data: wsFilteredRecords,
