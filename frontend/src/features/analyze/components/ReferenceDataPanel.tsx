@@ -24,6 +24,7 @@ export interface ReferenceDataPanelProps {
 interface RefMatch {
   dataset_id: string
   dataset_name: string
+  dataset_date: string
   traits: Record<string, number>
 }
 
@@ -99,7 +100,7 @@ export function ReferenceDataPanel({
       {matches.map((match) => (
         <div key={match.dataset_id}>
           <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wide mb-1">
-            {match.dataset_name}
+            {match.dataset_name}{match.dataset_date ? ` (${match.dataset_date})` : ""}
           </p>
           <div className="space-y-0.5">
             {Object.entries(match.traits).map(([trait, value]) => (

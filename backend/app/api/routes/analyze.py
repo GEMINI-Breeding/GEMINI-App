@@ -896,11 +896,15 @@ def get_master_table(
             identity_map[key][pid] = rec
 
     # ── Collect all trait column names per pipeline ───────────────────────────
+    # Exclude identity-level fields that are already shown as dedicated columns.
+    _IDENTITY_FIELDS = {"experiment", "location", "population", "date", "plot_id", "accession", "col", "row"}
+
     pipeline_traits: dict[str, set[str]] = defaultdict(set)
     for pipeline_records in identity_map.values():
         for pid, rec in pipeline_records.items():
             for trait_name in (rec.traits or {}).keys():
-                pipeline_traits[pid].add(trait_name)
+                if trait_name.lower() not in _IDENTITY_FIELDS:
+                    pipeline_traits[pid].add(trait_name)
 
     # Build ordered pipeline column defs
     column_defs: list[dict[str, str]] = []
@@ -933,15 +937,17 @@ def get_master_table(
             for col in ds.trait_columns or []:
                 ref_traits[ds.id].add(col)
 
-    # Build reference column defs
+    # Build reference column defs — key includes dataset id to avoid collisions
+    # when multiple datasets share the same name (e.g. same trial, different dates).
     ref_column_defs: list[dict[str, str]] = []
     for ds in ref_datasets:
         for trait in sorted(ref_traits.get(ds.id, [])):
-            col_key = f"{ds.name}·{trait}"
+            col_key = f"ref:{ds.id}:{trait}"
             ref_column_defs.append({
                 "key": col_key,
                 "group": "reference",
                 "dataset_id": str(ds.id),
+                "dataset_date": ds.date or "",
                 "label": trait,
             })
 
@@ -970,6 +976,7 @@ def get_master_table(
             "experiment": exp,
             "location": loc,
             "population": pop,
+            "date": rep_rec.date or "",
             "plot_id": plot_id,
             "accession": rep_rec.accession,
             "col": rep_rec.col,
@@ -999,7 +1006,7 @@ def get_master_table(
                 rp = ref_plot_by_colrow[ds.id].get((rep_rec.col, rep_rec.row))
             if rp and rp.traits:
                 for trait, value in rp.traits.items():
-                    row[f"{ds.name}·{trait}"] = value
+                    row[f"ref:{ds.id}:{trait}"] = value
 
         rows.append(row)
 
@@ -1012,6 +1019,7 @@ def get_master_table(
                 "experiment": ds.experiment,
                 "location": ds.location,
                 "population": ds.population,
+                "date": ds.date or "",
                 "trait_columns": ds.trait_columns or [],
             }
             for ds in ref_datasets

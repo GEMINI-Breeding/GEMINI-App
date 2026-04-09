@@ -393,6 +393,7 @@ def match_plot(
             results.append({
                 "dataset_id": str(dataset.id),
                 "dataset_name": dataset.name,
+                "dataset_date": dataset.date or "",
                 "traits": ref_plot.traits,
             })
 

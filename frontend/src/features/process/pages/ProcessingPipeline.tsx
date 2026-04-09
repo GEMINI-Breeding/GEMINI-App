@@ -54,7 +54,6 @@ interface RoboflowModel {
   roboflow_api_key: string;
   roboflow_model_id: string;
   task_type: "detection" | "segmentation";
-  target_gsd_cm: number | null;
 }
 
 const EMPTY_MODEL = (): RoboflowModel => ({
@@ -62,7 +61,6 @@ const EMPTY_MODEL = (): RoboflowModel => ({
   roboflow_api_key: "",
   roboflow_model_id: "",
   task_type: "detection",
-  target_gsd_cm: null,
 });
 
 type Step = 1 | 2 | 3;
@@ -206,7 +204,6 @@ export function ProcessingPipeline() {
         roboflow_api_key: m.roboflow_api_key ?? (m as any).api_key ?? "",
         roboflow_model_id: m.roboflow_model_id ?? (m as any).model_id ?? "",
         task_type: m.task_type,
-        target_gsd_cm: (m as any).target_gsd_cm ?? null,
       })));
     } else if (rf?.api_key) {
       setRoboflowModels([{
@@ -214,7 +211,6 @@ export function ProcessingPipeline() {
         roboflow_api_key: rf.api_key ?? "",
         roboflow_model_id: rf.model_id ?? "",
         task_type: (rf.task_type as "detection" | "segmentation") ?? "detection",
-        target_gsd_cm: null,
       }]);
     }
     setInferenceMode((cfg.inference_mode as "cloud" | "local") ?? "cloud");
@@ -811,104 +807,81 @@ export function ProcessingPipeline() {
                 </p>
 
                 <div className="space-y-3">
-                  {/* Column headers */}
-                  <div className="grid grid-cols-[1fr_1fr_1fr_auto_6rem_auto] gap-2">
-                    <Label className="text-muted-foreground text-xs">
-                      Name
-                    </Label>
-                    <Label className="text-muted-foreground text-xs">
-                      API Key
-                    </Label>
-                    <Label className="text-muted-foreground text-xs">
-                      Model ID
-                    </Label>
-                    <Label className="text-muted-foreground text-xs">
-                      Task
-                    </Label>
-                    <Label className="text-muted-foreground text-xs">
-                      Train GSD (cm/px)
-                    </Label>
-                    <span />
-                  </div>
-
                   {roboflowModels.map((model, idx) => (
                     <div
                       key={idx}
-                      className="grid grid-cols-[1fr_1fr_1fr_auto_6rem_auto] items-center gap-2"
+                      className="grid grid-cols-[1fr_1fr_1fr_auto_auto] items-end gap-2"
                     >
-                      <Input
-                        placeholder="e.g. Wheat Detection"
-                        value={model.label}
-                        onChange={(e) =>
-                          setRoboflowModels((prev) =>
-                            prev.map((m, i) =>
-                              i === idx ? { ...m, label: e.target.value } : m
+                      <div className="space-y-1">
+                        {idx === 0 && <Label className="text-muted-foreground text-xs">Name</Label>}
+                        <Input
+                          placeholder="e.g. Wheat Detection"
+                          value={model.label}
+                          onChange={(e) =>
+                            setRoboflowModels((prev) =>
+                              prev.map((m, i) =>
+                                i === idx ? { ...m, label: e.target.value } : m
+                              )
                             )
-                          )
-                        }
-                      />
-                      <Input
-                        type="password"
-                        placeholder="rf_xxxxxxxxxxxx"
-                        value={model.roboflow_api_key}
-                        onChange={(e) =>
-                          setRoboflowModels((prev) =>
-                            prev.map((m, i) =>
-                              i === idx ? { ...m, roboflow_api_key: e.target.value } : m
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        {idx === 0 && <Label className="text-muted-foreground text-xs">API Key</Label>}
+                        <Input
+                          type="password"
+                          placeholder="rf_xxxxxxxxxxxx"
+                          value={model.roboflow_api_key}
+                          onChange={(e) =>
+                            setRoboflowModels((prev) =>
+                              prev.map((m, i) =>
+                                i === idx ? { ...m, roboflow_api_key: e.target.value } : m
+                              )
                             )
-                          )
-                        }
-                      />
-                      <Input
-                        placeholder="my-project/3"
-                        value={model.roboflow_model_id}
-                        onChange={(e) =>
-                          setRoboflowModels((prev) =>
-                            prev.map((m, i) =>
-                              i === idx ? { ...m, roboflow_model_id: e.target.value } : m
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        {idx === 0 && <Label className="text-muted-foreground text-xs">Model ID</Label>}
+                        <Input
+                          placeholder="my-project/3"
+                          value={model.roboflow_model_id}
+                          onChange={(e) =>
+                            setRoboflowModels((prev) =>
+                              prev.map((m, i) =>
+                                i === idx ? { ...m, roboflow_model_id: e.target.value } : m
+                              )
                             )
-                          )
-                        }
-                      />
-                      <Select
-                        value={model.task_type}
-                        onValueChange={(v: "detection" | "segmentation") =>
-                          setRoboflowModels((prev) =>
-                            prev.map((m, i) =>
-                              i === idx ? { ...m, task_type: v } : m
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        {idx === 0 && <Label className="text-muted-foreground text-xs">Task</Label>}
+                        <Select
+                          value={model.task_type}
+                          onValueChange={(v: "detection" | "segmentation") =>
+                            setRoboflowModels((prev) =>
+                              prev.map((m, i) =>
+                                i === idx ? { ...m, task_type: v } : m
+                              )
                             )
-                          )
-                        }
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="detection">Detection</SelectItem>
-                          <SelectItem value="segmentation">
-                            Segmentation
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        placeholder="e.g. 0.5"
-                        min={0.01}
-                        step={0.01}
-                        value={model.target_gsd_cm ?? ""}
-                        onChange={(e) =>
-                          setRoboflowModels((prev) =>
-                            prev.map((m, i) =>
-                              i === idx
-                                ? { ...m, target_gsd_cm: e.target.value ? parseFloat(e.target.value) : null }
-                                : m
-                            )
-                          )
-                        }
-                      />
+                          }
+                        >
+                          <SelectTrigger className="w-36">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="detection">Detection</SelectItem>
+                            <SelectItem value="segmentation">
+                              Segmentation
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="mb-0.5"
                         onClick={() =>
                           setRoboflowModels((prev) =>
                             prev.filter((_, i) => i !== idx)

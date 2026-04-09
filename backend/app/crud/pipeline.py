@@ -11,6 +11,7 @@ from app.models.pipeline import (
     PipelineRunUpdate,
     PipelineUpdate,
 )
+from app.models.plot_record import PlotRecord
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,12 @@ def delete_pipeline(*, session: Session, id: uuid.UUID) -> None:
     pipeline = session.get(Pipeline, id)
     if not pipeline:
         raise ValueError("Pipeline not found")
+    # PlotRecord has no FK to Pipeline, so manually clean up orphaned rows.
+    orphans = session.exec(
+        select(PlotRecord).where(PlotRecord.pipeline_id == str(id))
+    ).all()
+    for rec in orphans:
+        session.delete(rec)
     session.delete(pipeline)
     session.commit()
 
@@ -106,5 +113,11 @@ def delete_pipeline_run(*, session: Session, id: uuid.UUID) -> None:
     run = session.get(PipelineRun, id)
     if not run:
         raise ValueError("PipelineRun not found")
+    # PlotRecord has no FK to PipelineRun, so manually clean up orphaned rows.
+    orphans = session.exec(
+        select(PlotRecord).where(PlotRecord.run_id == id)
+    ).all()
+    for rec in orphans:
+        session.delete(rec)
     session.delete(run)
     session.commit()

@@ -378,6 +378,7 @@ function AddReferenceDataDialog({
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["workspace-ref-data", workspaceId] })
+      queryClient.invalidateQueries({ queryKey: ["ref-match", workspaceId] })
       const report = data.match_report
       if (report && report.unmatched > 0) {
         showSuccessToast(
@@ -514,6 +515,7 @@ function WorkspaceReferenceDataSection({ workspaceId }: { workspaceId: string })
       ReferenceDataService.removeDatasetFromWorkspace({ workspaceId, datasetId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workspace-ref-data", workspaceId] })
+      queryClient.invalidateQueries({ queryKey: ["ref-match", workspaceId] })
       setConfirmRemove(null)
     },
     onError: () => showErrorToast("Failed to remove dataset"),
@@ -688,8 +690,11 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
 
   const deletePipelineMutation = useMutation({
     mutationFn: () => PipelinesService.delete({ id: pipeline.id }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["pipelines", workspaceId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipelines", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["trait-records"] });
+      queryClient.invalidateQueries({ queryKey: ["master-table"] });
+    },
     onError: () => showErrorToast("Failed to delete pipeline"),
   });
 
@@ -697,6 +702,8 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
     mutationFn: (runId: string) => PipelinesService.deleteRun({ id: runId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["runs", pipeline.id] });
+      queryClient.invalidateQueries({ queryKey: ["trait-records"] });
+      queryClient.invalidateQueries({ queryKey: ["master-table"] });
       setConfirmDeleteRun(null);
     },
     onError: () => showErrorToast("Failed to delete run"),

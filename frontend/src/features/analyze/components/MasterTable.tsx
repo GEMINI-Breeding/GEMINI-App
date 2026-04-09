@@ -15,6 +15,13 @@ import { useQuery } from "@tanstack/react-query"
 import { AnalyzeService } from "@/client"
 import { ReferenceDataPanel } from "./ReferenceDataPanel"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import {
+  useExpandable,
+  ExpandButton,
+  FullscreenModal,
+} from "@/components/Common/ExpandableSection"
 import {
   Select,
   SelectContent,
@@ -23,6 +30,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -30,6 +42,8 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import {
+  CalendarDays,
+  ChevronDown,
   Download,
   Eye,
   FlaskConical,
@@ -82,6 +96,7 @@ interface RefDatasetMeta {
   experiment: string
   location: string
   population: string
+  date: string
   trait_columns: string[]
 }
 
@@ -90,6 +105,7 @@ interface ColumnDef {
   group: "pipeline" | "reference"
   pipeline_id?: string
   dataset_id?: string
+  dataset_date?: string
   label: string
 }
 
@@ -103,6 +119,7 @@ interface MasterRow {
   experiment: string
   location: string
   population: string
+  date: string
   plot_id: string
   accession: string | null
   col: string | null
@@ -149,16 +166,16 @@ function PlotImageCell({
   }, [recordId, plotId])
 
   return (
-    <div className="flex flex-col rounded-lg border overflow-hidden flex-1 min-w-0">
+    <div className="flex flex-col rounded-lg border overflow-hidden flex-1 min-w-0 min-h-0">
       <div
-        className="px-2 py-1 text-xs font-medium text-white flex-shrink-0"
+        className="px-2 py-1 text-xs font-medium text-white shrink-0"
         style={{ background: pipelineColor }}
       >
         {pipelineName}
       </div>
-      <div className="flex items-center justify-center bg-muted/30" style={{ height: 280 }}>
+      <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/30">
         {blobUrl ? (
-          <img src={blobUrl} alt={`plot ${plotId}`} className="max-h-full max-w-full object-contain" />
+          <img src={blobUrl} alt={`plot ${plotId}`} className="w-full h-full object-contain" />
         ) : error ? (
           <div className="flex flex-col items-center gap-1 text-muted-foreground p-4">
             <ImageOff className="w-6 h-6" />
@@ -172,7 +189,7 @@ function PlotImageCell({
   )
 }
 
-// ── Plot dialog (reuses same dialog pattern as Pipeline Runs) ─────────────────
+// ── Plot dialog ───────────────────────────────────────────────────────────────
 
 function MasterPlotDialog({
   row,
@@ -190,6 +207,7 @@ function MasterPlotDialog({
   onDownload: () => void
 }) {
   const [showRef, setShowRef] = useState(false)
+  const exp = useExpandable()
 
   const contributing = row.pipeline_ids
     .map((pid) => {
@@ -219,97 +237,195 @@ function MasterPlotDialog({
     pipelineColor: pipelines.find((p) => p.id === c.pipeline_id)?.color,
   }))
 
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-3xl [&>button:last-child]:hidden">
-        <DialogHeader>
-          <DialogTitle asChild>
-            <div className="flex items-center gap-2 pr-1">
-              <span className="text-sm font-semibold flex-1">
-                Plot {row.plot_id}
-                {row.accession && (
-                  <span className="font-normal text-muted-foreground ml-2 text-xs">· {row.accession}</span>
-                )}
+  const title = `Plot ${row.plot_id}${row.accession ? ` · ${row.accession}` : ""}`
+
+  const headerActions = (
+    <>
+      {refProps && (
+        <button
+          type="button"
+          className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${
+            showRef
+              ? "bg-orange-500 text-white border-orange-500"
+              : "text-orange-500 border-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950"
+          }`}
+          onClick={() => setShowRef((v) => !v)}
+        >
+          <FlaskConical className="w-3 h-3" />
+          REF
+        </button>
+      )}
+      <button
+        type="button"
+        title="Download row CSV"
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        onClick={onDownload}
+      >
+        <Download className="w-3.5 h-3.5" />
+      </button>
+    </>
+  )
+
+  const plotContent = (
+    <div className="flex gap-4 flex-1 min-h-0">
+      {/* Pipeline images */}
+      <div className={`flex gap-3 flex-1 min-w-0 min-h-0 ${contributing.length === 1 ? "justify-center" : ""}`}>
+        {contributing.map(({ pid, meta, rec }) => (
+          <PlotImageCell
+            key={pid}
+            recordId={rec.trait_record_id}
+            plotId={row.plot_id}
+            pipelineName={meta.name}
+            pipelineColor={meta.color}
+          />
+        ))}
+      </div>
+
+      {/* Traits panel */}
+      <div className="w-48 shrink-0 border-l pl-4 overflow-y-auto">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Traits</p>
+        <div className="space-y-1">
+          {traitEntries.map((t, i) => (
+            <div key={i} className="flex justify-between items-baseline gap-2">
+              <span
+                className="text-[11px] truncate"
+                style={{ color: t.color ?? t.pipelineColor ?? undefined }}
+              >
+                {t.label}
               </span>
-              {refProps && (
-                <button
-                  type="button"
-                  className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${
-                    showRef
-                      ? "bg-orange-500 text-white border-orange-500"
-                      : "text-orange-500 border-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950"
-                  }`}
-                  onClick={() => setShowRef((v) => !v)}
-                >
-                  <FlaskConical className="w-3 h-3" />
-                  REF
-                </button>
-              )}
-              <button
-                type="button"
-                title="Download row CSV"
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                onClick={onDownload}
-              >
-                <Download className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                title="Close"
-                className="h-7 w-7 flex items-center justify-center rounded-sm opacity-70 hover:opacity-100 transition-opacity"
-                onClick={onClose}
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <span className="text-[11px] font-mono tabular-nums shrink-0">
+                {fmt(t.value)}
+              </span>
             </div>
-          </DialogTitle>
-        </DialogHeader>
+          ))}
+        </div>
 
-        <div className="flex gap-4 min-h-0">
-          {/* Pipeline images */}
-          <div className={`flex gap-3 flex-1 min-w-0 ${contributing.length === 1 ? "justify-center" : ""}`}>
-            {contributing.map(({ pid, meta, rec }) => (
-              <PlotImageCell
-                key={pid}
-                recordId={rec.trait_record_id}
-                plotId={row.plot_id}
-                pipelineName={meta.name}
-                pipelineColor={meta.color}
-              />
-            ))}
+        {showRef && refProps && (
+          <div className="border-t mt-3 pt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-500 mb-2">
+              Reference Data
+            </p>
+            <ReferenceDataPanel {...refProps} />
           </div>
+        )}
+      </div>
+    </div>
+  )
 
-          {/* Traits panel */}
-          <div className="w-48 shrink-0 border-l pl-4 overflow-y-auto" style={{ maxHeight: 380 }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Traits</p>
-            <div className="space-y-1">
-              {traitEntries.map((t, i) => (
-                <div key={i} className="flex justify-between items-baseline gap-2">
-                  <span
-                    className="text-[11px] truncate"
-                    style={{ color: t.color ?? t.pipelineColor ?? undefined }}
-                  >
-                    {t.label}
-                  </span>
-                  <span className="text-[11px] font-mono tabular-nums shrink-0">
-                    {fmt(t.value)}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {showRef && refProps && (
-              <div className="border-t mt-3 pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-500 mb-2">
-                  Reference Data
-                </p>
-                <ReferenceDataPanel {...refProps} />
-              </div>
-            )}
+  const dialogHeader = (
+    <DialogHeader className="shrink-0">
+      <DialogTitle asChild>
+        <div className="flex items-center gap-2 pr-1">
+          <span className="text-sm font-semibold flex-1">{title}</span>
+          {headerActions}
+          <div className="flex items-center gap-0.5 border-l pl-2 ml-1">
+            <ExpandButton onClick={exp.open} title="Expand to fullscreen" />
+            <button
+              type="button"
+              title="Close"
+              className="h-7 w-7 flex items-center justify-center rounded-sm opacity-70 hover:opacity-100 transition-opacity"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </DialogTitle>
+    </DialogHeader>
+  )
+
+  return (
+    <>
+      <Dialog open={!exp.isExpanded} onOpenChange={(o) => { if (!o) onClose() }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col [&>button:last-child]:hidden">
+          {dialogHeader}
+          {plotContent}
+        </DialogContent>
+      </Dialog>
+
+      <FullscreenModal
+        open={exp.isExpanded}
+        onClose={() => { exp.close(); onClose() }}
+        title={title}
+        headerExtra={<div className="flex items-center gap-2">{headerActions}</div>}
+      >
+        <div className="flex flex-col h-full p-6">
+          {plotContent}
+        </div>
+      </FullscreenModal>
+    </>
+  )
+}
+
+// ── Date multi-select ─────────────────────────────────────────────────────────
+
+function DateMultiSelect({
+  dates,
+  selected,
+  onChange,
+}: {
+  dates: string[]
+  selected: Set<string>
+  onChange: (next: Set<string>) => void
+}) {
+  const allSelected = selected.size === 0 || selected.size === dates.length
+
+  function toggle(date: string) {
+    const next = new Set(selected)
+    if (next.has(date)) {
+      next.delete(date)
+      // If nothing left, reset to "all"
+      if (next.size === 0) { onChange(new Set()); return }
+    } else {
+      next.add(date)
+    }
+    onChange(next)
+  }
+
+  function toggleAll() {
+    onChange(new Set())
+  }
+
+  const label = allSelected
+    ? "All dates"
+    : selected.size === 1
+      ? [...selected][0]
+      : `${selected.size} dates`
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 min-w-[120px] justify-between">
+          <span className="flex items-center gap-1.5">
+            <CalendarDays className="w-3 h-3 shrink-0" />
+            {label}
+          </span>
+          <ChevronDown className="w-3 h-3 shrink-0 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="p-1 min-w-[160px]">
+        {/* All toggle */}
+        <label className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-muted/50 text-xs">
+          <Checkbox
+            checked={allSelected}
+            onCheckedChange={toggleAll}
+            className="h-3.5 w-3.5"
+          />
+          <span className="font-medium">All dates</span>
+        </label>
+        <div className="my-1 border-t" />
+        {dates.map((d) => (
+          <label key={d} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-muted/50 text-xs">
+            <Checkbox
+              checked={allSelected || selected.has(d)}
+              onCheckedChange={() => toggle(d)}
+              className="h-3.5 w-3.5"
+            />
+            <span>{d || "(no date)"}</span>
+          </label>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -349,6 +465,22 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
 
   const tableData = data as MasterTableData | undefined
 
+  // ── Date multi-select ─────────────────────────────────────────────────────
+  // Collect unique dates from reference datasets (sorted)
+  const availableDates = useMemo(() => {
+    const dates = new Set<string>()
+    for (const ds of tableData?.reference_datasets ?? []) {
+      dates.add(ds.date ?? "")
+    }
+    return [...dates].sort()
+  }, [tableData])
+
+  // selectedDates: empty Set means "all selected"
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set())
+
+  // Reset date selection when workspace changes
+  useEffect(() => { setSelectedDates(new Set()) }, [selectedWorkspaceId])
+
   // ── Viewer state ──────────────────────────────────────────────────────────
   const [viewRow, setViewRow] = useState<MasterRow | null>(null)
 
@@ -366,11 +498,17 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
 
   const visibleColumns: ColumnDef[] = useMemo(() => {
     if (!tableData) return []
+    const allDatesSelected = selectedDates.size === 0
     return tableData.columns.filter((c) => {
-      const gid = c.group === "reference" ? "reference" : `pipeline:${c.pipeline_id}`
-      return !hiddenGroups.has(gid)
+      if (c.group === "pipeline") {
+        return !hiddenGroups.has(`pipeline:${c.pipeline_id}`)
+      }
+      // reference column: filter by hidden group AND selected dates
+      if (hiddenGroups.has("reference")) return false
+      if (!allDatesSelected && !selectedDates.has(c.dataset_date ?? "")) return false
+      return true
     })
-  }, [tableData, hiddenGroups])
+  }, [tableData, hiddenGroups, selectedDates])
 
   const pipelineColorMap = useMemo(() => {
     const m = new Map<string, string>()
@@ -378,9 +516,39 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
     return m
   }, [tableData])
 
-  const selectedWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId)
+  // dataset_id → RefDatasetMeta for quick lookup
+  const refDatasetMap = useMemo(() => {
+    const m = new Map<string, RefDatasetMeta>()
+    for (const ds of tableData?.reference_datasets ?? []) m.set(ds.id, ds)
+    return m
+  }, [tableData])
 
+  const selectedWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId)
   const refContextBase = selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : null
+
+  // ── Column filters ────────────────────────────────────────────────────────
+  const IDENTITY_KEYS = ["experiment", "location", "population", "date", "plot_id", "accession", "col", "row"] as const
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+
+  function setFilter(key: string, value: string) {
+    setColFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const filteredRows = useMemo(() => {
+    if (!tableData) return []
+    return tableData.rows.filter((row) => {
+      for (const key of IDENTITY_KEYS) {
+        const f = colFilters[key]
+        if (!f) continue
+        const cell = String(row[key] ?? "").toLowerCase()
+        if (!cell.includes(f.toLowerCase())) return false
+      }
+      return true
+    })
+  }, [tableData, colFilters])
+
+  // Reset filters when workspace changes
+  useEffect(() => { setColFilters({}) }, [selectedWorkspaceId])
 
   // ── CSV helpers ───────────────────────────────────────────────────────────
   function rowToCsvLine(row: MasterRow, cols: string[]): string {
@@ -392,22 +560,40 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
     }).join(",")
   }
 
+  const IDENTITY_CSV_COLS = ["experiment", "location", "population", "date", "plot_id", "accession", "col", "row"]
+
   function handleDownloadAll() {
     if (!tableData) return
-    const identityCols = ["experiment", "location", "population", "plot_id", "accession", "col", "row"]
     const traitKeys = tableData.columns.map((c) => c.key)
-    const cols = [...identityCols, ...traitKeys]
-    const lines = [cols.join(","), ...tableData.rows.map((r) => rowToCsvLine(r, cols))]
+    const cols = [...IDENTITY_CSV_COLS, ...traitKeys]
+    const lines = [cols.join(","), ...filteredRows.map((r) => rowToCsvLine(r, cols))]
     downloadCsvContent(lines.join("\n"), `master_table_${selectedWorkspace?.name ?? ""}.csv`)
   }
 
   function handleDownloadRow(row: MasterRow) {
-    const identityCols = ["experiment", "location", "population", "plot_id", "accession", "col", "row"]
     const traitKeys = (tableData?.columns ?? []).map((c) => c.key)
-    const cols = [...identityCols, ...traitKeys]
+    const cols = [...IDENTITY_CSV_COLS, ...traitKeys]
     const lines = [cols.join(","), rowToCsvLine(row, cols)]
     downloadCsvContent(lines.join("\n"), `plot_${row.plot_id}.csv`)
   }
+
+  // Group ref columns by dataset for the group header row
+  const refGroupHeaders = useMemo(() => {
+    const groups: { datasetId: string; label: string; count: number }[] = []
+    let current: typeof groups[0] | null = null
+    for (const c of visibleColumns) {
+      if (c.group !== "reference") { current = null; continue }
+      const ds = refDatasetMap.get(c.dataset_id ?? "")
+      const label = ds ? (ds.date ? `${ds.name} (${ds.date})` : ds.name) : (c.dataset_id ?? "REF")
+      if (current && current.datasetId === c.dataset_id) {
+        current.count++
+      } else {
+        current = { datasetId: c.dataset_id ?? "", label, count: 1 }
+        groups.push(current)
+      }
+    }
+    return groups
+  }, [visibleColumns, refDatasetMap])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -419,7 +605,7 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
     )
   }
 
-  const totalCols = 7 + 1 + visibleColumns.length // identity + actions + traits
+  const totalCols = 8 + 1 + visibleColumns.length // identity (8) + actions + traits
 
   return (
     <div className="space-y-3">
@@ -435,6 +621,14 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
             ))}
           </SelectContent>
         </Select>
+
+        {availableDates.length > 0 && (
+          <DateMultiSelect
+            dates={availableDates}
+            selected={selectedDates}
+            onChange={setSelectedDates}
+          />
+        )}
 
         {tableData?.pipelines.map((p) => {
           const gid = `pipeline:${p.id}`
@@ -471,6 +665,32 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
         </div>
       </div>
 
+      {/* Column filters */}
+      {tableData && !isLoading && (
+        <div className="flex flex-wrap items-center gap-2">
+          {(["experiment", "location", "population", "date", "plot_id", "accession", "col", "row"] as const).map((key) => (
+            <Input
+              key={key}
+              className="h-7 text-xs w-24"
+              placeholder={key.replace("_", " ").toUpperCase()}
+              value={colFilters[key] ?? ""}
+              onChange={(e) => setFilter(key, e.target.value)}
+            />
+          ))}
+          {Object.values(colFilters).some((v) => v) && (
+            <button
+              className="text-primary text-xs hover:underline"
+              onClick={() => setColFilters({})}
+            >
+              Clear
+            </button>
+          )}
+          <span className="text-muted-foreground text-xs ml-auto">
+            {filteredRows.length}{filteredRows.length !== tableData.rows.length ? ` / ${tableData.rows.length}` : ""} plots
+          </span>
+        </div>
+      )}
+
       {/* Loading / error */}
       {isLoading && (
         <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
@@ -491,7 +711,7 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
             <thead className="sticky top-0 bg-background z-10 shadow-[0_1px_0_0_hsl(var(--border))]">
               {/* Group header row */}
               <tr className="border-b bg-muted/50">
-                <th className="px-3 py-1 text-left font-medium text-muted-foreground" colSpan={7}>
+                <th className="px-3 py-1 text-left font-medium text-muted-foreground" colSpan={8}>
                   Plot Identity
                 </th>
                 {tableData.pipelines
@@ -510,20 +730,21 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
                       </th>
                     )
                   })}
-                {!hiddenGroups.has("reference") && visibleColumns.some((c) => c.group === "reference") && (
+                {refGroupHeaders.map((g) => (
                   <th
-                    colSpan={visibleColumns.filter((c) => c.group === "reference").length}
-                    className="px-2 py-1 text-center font-semibold text-orange-500 border-l"
+                    key={g.datasetId}
+                    colSpan={g.count}
+                    className="px-2 py-1 text-center font-semibold text-orange-500 border-l whitespace-nowrap"
                   >
-                    REF
+                    {g.label}
                   </th>
-                )}
+                ))}
                 <th className="px-2 py-1" /> {/* actions */}
               </tr>
 
               {/* Column label row */}
               <tr className="border-b">
-                {["Experiment", "Location", "Population", "Plot ID", "Accession", "Col", "Row"].map((h) => (
+                {(["Experiment", "Location", "Population", "Date", "Plot ID", "Accession", "Col", "Row"] as const).map((h) => (
                   <th key={h} className="px-3 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                     {h}
                   </th>
@@ -539,21 +760,23 @@ export function MasterTableTab({ records }: MasterTableTabProps) {
                 ))}
                 <th className="px-2 py-1.5 text-right text-muted-foreground">View</th>
               </tr>
+
             </thead>
             <tbody>
-              {tableData.rows.length === 0 ? (
+              {filteredRows.length === 0 ? (
                 <tr>
                   <td colSpan={totalCols} className="px-3 py-6 text-center text-muted-foreground">
-                    No plots found for this workspace.
+                    {tableData.rows.length === 0 ? "No plots found for this workspace." : "No plots match the current filters."}
                   </td>
                 </tr>
               ) : (
-                tableData.rows.map((row, i) => {
+                filteredRows.map((row, i) => {
                   return (
                     <tr key={i} className="border-b transition-colors hover:bg-muted/20">
                       <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{row.experiment || "—"}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{row.location || "—"}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{row.population || "—"}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{row.date || "—"}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap font-mono font-medium">{row.plot_id}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap">{row.accession || "—"}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap">{row.col || "—"}</td>
