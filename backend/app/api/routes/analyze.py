@@ -867,6 +867,18 @@ def get_master_table(
             return "#10B981"  # green
         return "#8B5CF6"      # violet fallback
 
+    # Fetch live pipeline names — PlotRecord.pipeline_name is written at creation
+    # and won't reflect renames, so prefer the current name from the Pipeline table.
+    pipeline_ids = {rec.pipeline_id for rec in records}
+    live_pipeline_names: dict[str, str] = {}
+    for pid_str in pipeline_ids:
+        try:
+            p = session.get(Pipeline, uuid.UUID(pid_str))
+            if p:
+                live_pipeline_names[pid_str] = p.name
+        except Exception:
+            pass
+
     pipeline_meta: dict[str, dict] = {}
 
     for rec in records:
@@ -874,7 +886,7 @@ def get_master_table(
         if pid not in pipeline_meta:
             pipeline_meta[pid] = {
                 "id": pid,
-                "name": rec.pipeline_name,
+                "name": live_pipeline_names.get(pid, rec.pipeline_name),
                 "type": rec.pipeline_type,
                 "color": _pipeline_color(rec.pipeline_type),
             }
