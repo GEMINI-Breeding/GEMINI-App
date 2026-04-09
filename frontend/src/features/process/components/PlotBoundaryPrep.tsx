@@ -1288,8 +1288,10 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         setHasBoundary(true);
       }
 
-      // Load existing plot grid if present — mark as loaded so recompute is suppressed
-      if (orthoInfo.existing_geojson) {
+      // Load existing plot grid if present — only when a population boundary also exists.
+      // If there is no pop boundary (new run reusing a canonical plot file), the user must
+      // draw a population boundary first before the grid is shown.
+      if (orthoInfo.existing_geojson && orthoInfo.existing_pop_boundary) {
         setPreviewGeoJson(orthoInfo.existing_geojson);
         setGridGenerated(true);
         if (orthoInfo.existing_grid_settings) {
