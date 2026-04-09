@@ -78,6 +78,7 @@ export interface ModelConfig {
   roboflow_api_key: string
   roboflow_model_id: string
   task_type: string
+  target_gsd_cm?: number | null
 }
 
 export interface InferenceRunConfig {

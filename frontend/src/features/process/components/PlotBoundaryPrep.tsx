@@ -694,6 +694,7 @@ function GridSettingsPanel({
   canRedo,
   onUndo,
   onRedo,
+  onClearAll,
 }: {
   options: GridOptions;
   onChange: (opts: GridOptions) => void;
@@ -717,8 +718,10 @@ function GridSettingsPanel({
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  onClearAll?: () => void;
 }) {
   const [minimized, setMinimized] = useState(false);
+  const [dangerOpen, setDangerOpen] = useState(false);
 
   function field(label: string, key: keyof GridOptions, step = 0.1) {
     return (
@@ -931,6 +934,38 @@ function GridSettingsPanel({
               {featureCount} plots
               {selectedCount > 0 && ` · ${selectedCount} selected`}
             </p>
+          )}
+
+          {/* Danger zone — collapsible */}
+          {onClearAll && featureCount > 0 && (
+            <div className="border-t pt-2">
+              <button
+                onClick={() => setDangerOpen((v) => !v)}
+                className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground"
+              >
+                <span>Danger zone</span>
+                {dangerOpen ? (
+                  <ChevronUp className="h-3 w-3" />
+                ) : (
+                  <ChevronDown className="h-3 w-3" />
+                )}
+              </button>
+              {dangerOpen && (
+                <div className="mt-1.5">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-7 w-full text-xs"
+                    onClick={onClearAll}
+                  >
+                    Clear All Plots
+                  </Button>
+                  <p className="mt-1 text-center text-[10px] text-muted-foreground">
+                    Removes all plots — draw a new boundary to start fresh.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1789,6 +1824,18 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     }
   }
 
+  function handleClearAll() {
+    setPreviewGeoJson(null);
+    setSelectedIndexes([]);
+    setGridGenerated(false);
+    // Reset undo history
+    historyRef.current = [];
+    historyIndexRef.current = -1;
+    setCanUndo(false);
+    setCanRedo(false);
+    isDirtyRef.current = true;
+  }
+
   function handleModeChange(mode: InteractionMode) {
     // Clicking the active mode button deactivates it → back to view (normal panning)
     setInteractionMode((prev) => (prev === mode ? "view" : mode));
@@ -2001,6 +2048,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             canRedo={canRedo}
             onUndo={undo}
             onRedo={redo}
+            onClearAll={handleClearAll}
           />
         )}
         {!hasBoundary && (

@@ -54,6 +54,7 @@ interface RoboflowModel {
   roboflow_api_key: string;
   roboflow_model_id: string;
   task_type: "detection" | "segmentation";
+  target_gsd_cm: number | null;
 }
 
 const EMPTY_MODEL = (): RoboflowModel => ({
@@ -61,6 +62,7 @@ const EMPTY_MODEL = (): RoboflowModel => ({
   roboflow_api_key: "",
   roboflow_model_id: "",
   task_type: "detection",
+  target_gsd_cm: null,
 });
 
 type Step = 1 | 2 | 3;
@@ -204,6 +206,7 @@ export function ProcessingPipeline() {
         roboflow_api_key: m.roboflow_api_key ?? (m as any).api_key ?? "",
         roboflow_model_id: m.roboflow_model_id ?? (m as any).model_id ?? "",
         task_type: m.task_type,
+        target_gsd_cm: (m as any).target_gsd_cm ?? null,
       })));
     } else if (rf?.api_key) {
       setRoboflowModels([{
@@ -808,7 +811,7 @@ export function ProcessingPipeline() {
 
                 <div className="space-y-3">
                   {/* Column headers */}
-                  <div className="grid grid-cols-[1fr_1fr_1fr_auto_auto] gap-2">
+                  <div className="grid grid-cols-[1fr_1fr_1fr_auto_6rem_auto] gap-2">
                     <Label className="text-muted-foreground text-xs">
                       Name
                     </Label>
@@ -821,13 +824,16 @@ export function ProcessingPipeline() {
                     <Label className="text-muted-foreground text-xs">
                       Task
                     </Label>
+                    <Label className="text-muted-foreground text-xs">
+                      Train GSD (cm/px)
+                    </Label>
                     <span />
                   </div>
 
                   {roboflowModels.map((model, idx) => (
                     <div
                       key={idx}
-                      className="grid grid-cols-[1fr_1fr_1fr_auto_auto] items-center gap-2"
+                      className="grid grid-cols-[1fr_1fr_1fr_auto_6rem_auto] items-center gap-2"
                     >
                       <Input
                         placeholder="e.g. Wheat Detection"
@@ -883,6 +889,22 @@ export function ProcessingPipeline() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 0.5"
+                        min={0.01}
+                        step={0.01}
+                        value={model.target_gsd_cm ?? ""}
+                        onChange={(e) =>
+                          setRoboflowModels((prev) =>
+                            prev.map((m, i) =>
+                              i === idx
+                                ? { ...m, target_gsd_cm: e.target.value ? parseFloat(e.target.value) : null }
+                                : m
+                            )
+                          )
+                        }
+                      />
                       <Button
                         variant="ghost"
                         size="icon"

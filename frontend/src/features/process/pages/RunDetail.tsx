@@ -806,6 +806,7 @@ function StitchPanel({
   const [downloadDialog, setDownloadDialog] = useState<{
     stitch: StitchVersion;
     selectedAssocVersion: number | null;
+    cropPlots: boolean;
   } | null>(null);
 
   // Plot marking versions (for displaying marker label in the stitch table)
@@ -925,21 +926,21 @@ function StitchPanel({
       .sort((a, b) => a.version - b.version);
     const defaultAssoc =
       matching.length > 0 ? matching[matching.length - 1].version : null;
-    setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc });
+    setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc, cropPlots: false });
   }
 
   async function confirmDownload() {
     if (!downloadDialog) return;
-    const { stitch, selectedAssocVersion } = downloadDialog;
+    const { stitch, selectedAssocVersion, cropPlots } = downloadDialog;
     setDownloadDialog(null);
     setDownloadingVersion(stitch.version);
     const label = stitch.name
       ? `${stitch.name}_v${stitch.version}`
       : `v${stitch.version}`;
-    const assocParam =
-      selectedAssocVersion != null
-        ? `?association_version=${selectedAssocVersion}`
-        : "";
+    const params = new URLSearchParams();
+    if (selectedAssocVersion != null) params.set("association_version", String(selectedAssocVersion));
+    if (cropPlots) params.set("crop_plots", "true");
+    const assocParam = params.size > 0 ? `?${params}` : "";
     const pid = addProcess({
       type: "processing",
       title: `Downloading stitched plots ${label}…`,
@@ -1288,6 +1289,21 @@ function StitchPanel({
                 </div>
               );
             })()}
+          </div>
+          <div className="px-0 pb-1">
+            <label className="flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                checked={downloadDialog?.cropPlots ?? false}
+                onChange={(e) =>
+                  setDownloadDialog((d) => d ? { ...d, cropPlots: e.target.checked } : d)
+                }
+              />
+              Crop black borders from plots
+            </label>
+            <p className="text-xs text-muted-foreground mt-0.5 ml-5">
+              Trims empty edges from each stitched image before download.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDownloadDialog(null)}>

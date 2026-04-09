@@ -14,6 +14,8 @@
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Flag,
   FlagOff,
   Check,
@@ -261,6 +263,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showGps, setShowGps] = useState(false)
+  const [dangerOpen, setDangerOpen] = useState(false)
   const [directionWarningOpen, setDirectionWarningOpen] = useState(false)
   const [pendingSaveAction, setPendingSaveAction] = useState<"save" | "saveAs">("save")
   const [showGpsTranslatedBanner, setShowGpsTranslatedBanner] = useState(false)
@@ -370,6 +373,12 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
       return updated
     })
   }, [plotPage])
+
+  const clearAllPlots = useCallback(() => {
+    setPlotsDirty([makePlots(1)[0]].map((p) => ({ ...p })))
+    setPlotPage(0)
+    setDangerOpen(false)
+  }, [setPlotsDirty])
 
   const deletePlot = useCallback(() => {
     setPlotsDirty((prev) => {
@@ -923,6 +932,32 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
             >
               {saveAsMutation.isPending ? "Saving…" : "Save As"}
             </Button>
+          </div>
+
+          {/* Danger zone — collapsible, below Back/Save/Save As */}
+          <div className="border rounded-md px-3 py-2 space-y-1.5">
+            <button
+              onClick={() => setDangerOpen((v) => !v)}
+              className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground"
+            >
+              <span>Danger zone</span>
+              {dangerOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+            {dangerOpen && (
+              <div className="space-y-1.5 pt-0.5">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-7 w-full text-xs"
+                  onClick={clearAllPlots}
+                >
+                  Clear All Plots
+                </Button>
+                <p className="text-center text-[10px] text-muted-foreground">
+                  Resets to 1 empty plot so you can start fresh.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Direction warning dialog */}

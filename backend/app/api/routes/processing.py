@@ -3439,6 +3439,7 @@ def download_stitching_images(
     id: uuid.UUID,
     version: int,
     association_version: int | None = None,
+    crop_plots: bool = False,
 ) -> StreamingResponse:
     """
     Download all stitch plot images for a given version as a ZIP.
@@ -3521,6 +3522,24 @@ def download_stitching_images(
                     return candidate
         return stem
 
+    def _autocrop_png(png_path: Path) -> bytes:
+        """Trim black/empty border rows and columns from a stitched plot image."""
+        import numpy as np
+        from PIL import Image as _PILImage
+        img = _PILImage.open(png_path).convert("RGB")
+        arr = np.array(img)
+        # Non-black pixel mask (sum of RGB > threshold)
+        mask = arr.sum(axis=2) > 15
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        if rows.any() and cols.any():
+            rmin, rmax = int(np.where(rows)[0][0]), int(np.where(rows)[0][-1])
+            cmin, cmax = int(np.where(cols)[0][0]), int(np.where(cols)[0][-1])
+            img = img.crop((cmin, rmin, cmax + 1, rmax + 1))
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        return out.getvalue()
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for png in pngs:
@@ -3534,7 +3553,10 @@ def download_stitching_images(
                 dest_name = f"plot-{plot_label}_row-{row_val}_col-{col_val}_accession-{accession}.png"
             else:
                 dest_name = f"plot_{idx}.png"
-            zf.write(png, dest_name)
+            if crop_plots:
+                zf.writestr(dest_name, _autocrop_png(png))
+            else:
+                zf.write(png, dest_name)
 
     buf.seek(0)
     return StreamingResponse(
