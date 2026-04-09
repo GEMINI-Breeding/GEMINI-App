@@ -1979,7 +1979,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             Click the <strong>polygon icon</strong> (⬠) in the{" "}
             <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
             <strong>Double-click</strong> to finish. You can edit or redraw it at
-            any time using the toolbar.
+            any time, use the <strong>eye icon</strong> (bottom-right panel) to hide
+            the plot grid first so the population boundary is easier to edit.
           </li>
           <li>
             Adjust plot dimensions in the <strong>Plot Settings</strong> panel
