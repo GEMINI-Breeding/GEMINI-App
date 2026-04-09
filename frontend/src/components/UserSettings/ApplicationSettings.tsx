@@ -4,7 +4,8 @@ import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Settings, Server } from "lucide-react"
+import { NavSidebar } from "@/components/Common/NavSidebar"
 
 async function getToken(): Promise<string> {
   return typeof OpenAPI.TOKEN === "function"
@@ -255,20 +256,30 @@ function DockerSettings() {
   )
 }
 
+const SETTINGS_NAV_GROUPS = [
+  { items: [
+    { id: "general", label: "General", icon: Settings },
+    { id: "docker",  label: "Docker",  icon: Server  },
+  ]},
+] as const
+
+type SettingsSection = "general" | "docker"
+
 const ApplicationSettings = () => {
+  const [active, setActive] = useState<SettingsSection>("general")
+
   return (
-    <Tabs defaultValue="general">
-      <TabsList className="mb-4">
-        <TabsTrigger value="general">General</TabsTrigger>
-        <TabsTrigger value="docker">Docker</TabsTrigger>
-      </TabsList>
-      <TabsContent value="general">
-        <GeneralSettings />
-      </TabsContent>
-      <TabsContent value="docker">
-        <DockerSettings />
-      </TabsContent>
-    </Tabs>
+    <div className="flex flex-1 min-h-0">
+      <NavSidebar
+        groups={SETTINGS_NAV_GROUPS}
+        activeId={active}
+        onSelect={(id) => setActive(id as SettingsSection)}
+      />
+      <div className="flex-1 overflow-auto px-6 py-6">
+        {active === "general" && <GeneralSettings />}
+        {active === "docker"  && <DockerSettings />}
+      </div>
+    </div>
   )
 }
 

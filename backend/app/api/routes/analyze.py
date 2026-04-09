@@ -68,11 +68,13 @@ def _read_tif_bounds(tif: Path) -> list[list[float]] | None:
 def _numeric_columns(features: list[dict]) -> list[str]:
     """Return sorted list of numeric property keys found across all features."""
     cols: set[str] = set()
-    skip = {"plot_id", "plot", "accession"}
+    # Identity/positional fields — never treated as metrics regardless of their type.
+    # Checked case-insensitively because GeoJSON sources vary ("Col", "column", etc.).
+    skip = {"plot_id", "plot", "accession", "col", "row", "column", "tier", "bed"}
     for f in features:
         props = f.get("properties") or {}
         for k, v in props.items():
-            if k in skip:
+            if k.lower() in skip:
                 continue
             if isinstance(v, (int, float)) and v is not True and v is not False:
                 cols.add(k)

@@ -865,7 +865,7 @@ function GridSettingsPanel({
             <Button
               size="sm"
               variant={interactionMode === "select" ? "default" : "outline"}
-              className="h-7 text-xs"
+              className="h-7 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
               onClick={() => onModeChange("select")}
             >
               <MousePointer className="mr-1 h-3 w-3" />
@@ -874,7 +874,7 @@ function GridSettingsPanel({
             <Button
               size="sm"
               variant={interactionMode === "move" ? "default" : "outline"}
-              className="h-7 text-xs"
+              className="h-7 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
               onClick={() => onModeChange("move")}
             >
               <Move className="mr-1 h-3 w-3" />
@@ -1695,6 +1695,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     const THRESHOLD = 5; // px before rubber-band kicks in
 
     function onMouseDown(e: L.LeafletMouseEvent) {
+      e.originalEvent?.preventDefault(); // prevent browser text/element selection during drag
       startLatLng = e.latlng;
       startContainerPt = m.latLngToContainerPoint(e.latlng);
       isDragging = false;
@@ -2020,7 +2021,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         <div
           ref={mapContainerRef}
           className="w-full overflow-hidden rounded-lg border"
-          style={{ height: "calc(100vh - 280px)", minHeight: 500 }}
+          style={{ height: "calc(100vh - 280px)", minHeight: 500, userSelect: "none", outline: "none" }}
         />
         {hasBoundary && (
           <GridSettingsPanel

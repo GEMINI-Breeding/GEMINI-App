@@ -1,13 +1,9 @@
 /**
  * AnalyzeDashboard — top-level Analyze page.
  *
- * Three tabs:
- *  - Table:  workspace-dropdown-filtered table of TraitRecords (Pipeline as
- *            first column) with expandable per-plot rows, text filters for
- *            COL/PLOT/ACCESSION/LOCATION/CROP/REP, per-row View + Download with
- *            progress indicator, COL/ROW deduplication and column ordering.
- *  - Query:  query plots by field values with autocomplete; results shown
- *            side-by-side with images + statistics.
+ * Three sections (NavSidebar navigation):
+ *  - Table:  workspace-dropdown-filtered table of TraitRecords.
+ *  - Query:  query plots by field values with autocomplete.
  *  - Map:    satellite → ortho image overlay → trait polygons.
  */
 
@@ -83,8 +79,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MasterTableTab } from "../components/MasterTable";
+import { NavSidebar } from "@/components/Common/NavSidebar";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -745,38 +741,6 @@ const traitRecordColumns: ColumnDef<TraitRecord>[] = [
   { id: "plot_count", enableColumnFilter: false },
 ];
 
-function TableTabWithToggle({ records }: { records: TraitRecord[] }) {
-  const [showMaster, setShowMaster] = useState(false);
-  return (
-    <div className="space-y-4">
-      <div className="inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground">
-        <button
-          onClick={() => setShowMaster(false)}
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-            !showMaster
-              ? "bg-background text-foreground shadow-sm"
-              : "hover:text-foreground"
-          }`}
-        >
-          <Table2 className="h-3.5 w-3.5" />
-          Pipeline Runs
-        </button>
-        <button
-          onClick={() => setShowMaster(true)}
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-            showMaster
-              ? "bg-background text-foreground shadow-sm"
-              : "hover:text-foreground"
-          }`}
-        >
-          <LayoutGrid className="h-3.5 w-3.5" />
-          Master Table
-        </button>
-      </div>
-      {showMaster ? <MasterTableTab records={records} /> : <TableTab records={records} />}
-    </div>
-  );
-}
 
 function TableTab({ records }: { records: TraitRecord[] }) {
   const [wsFilter, setWsFilter] = useState("__all__");
@@ -2026,9 +1990,36 @@ function MapTab({ records }: { records: TraitRecord[] }) {
   );
 }
 
+// ── Nav groups ────────────────────────────────────────────────────────────────
+
+const ANALYZE_NAV_GROUPS = [
+  {
+    label: "Table",
+    items: [
+      { id: "pipeline-runs", label: "Pipeline Runs", icon: Table2      },
+      { id: "master-table",  label: "Master Table",  icon: LayoutGrid  },
+    ],
+  },
+  {
+    items: [
+      { id: "query", label: "Query", icon: Search  },
+      { id: "map",   label: "Map",   icon: MapIcon },
+    ],
+  },
+] as const
+
+type AnalyzeSection = "pipeline-runs" | "master-table" | "query" | "map"
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function AnalyzeDashboard() {
+  const [activeSection, setActiveSection] = useState<AnalyzeSection>("pipeline-runs");
+  const [mapMounted, setMapMounted] = useState(false);
+
+  useEffect(() => {
+    if (activeSection === "map") setMapMounted(true);
+  }, [activeSection]);
+
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["trait-records"],
     queryFn: analyzeApi.listTraitRecords,
@@ -2059,46 +2050,51 @@ export function AnalyzeDashboard() {
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-5 pb-3">
+      <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b">
         <h1 className="text-xl font-semibold">Analyze</h1>
+        <p className="text-muted-foreground text-sm">View your processed data</p>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="table" className="flex min-h-0 flex-1 flex-col px-6">
-        <TabsList className="mb-4 flex-shrink-0 self-start">
-          <TabsTrigger value="table" className="gap-1.5">
-            <Table2 className="h-3.5 w-3.5" />
-            Table
-          </TabsTrigger>
-          <TabsTrigger value="query" className="gap-1.5">
-            <Search className="h-3.5 w-3.5" />
-            Query
-          </TabsTrigger>
-          <TabsTrigger value="map" className="gap-1.5">
-            <MapIcon className="h-3.5 w-3.5" />
-            Map
-          </TabsTrigger>
-        </TabsList>
+      <div className="flex flex-1 min-h-0">
+        <NavSidebar
+          groups={ANALYZE_NAV_GROUPS}
+          activeId={activeSection}
+          onSelect={(id) => setActiveSection(id as AnalyzeSection)}
+        />
 
-        <TabsContent value="table" className="mt-0 flex-1 overflow-auto pb-6">
-          <TableTabWithToggle records={records} />
-        </TabsContent>
-
-        <TabsContent value="query" className="mt-0 flex-1 overflow-auto pb-6">
-          <QueryTab records={records} />
-        </TabsContent>
-
-        <TabsContent
-          value="map"
-          className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden"
-          style={{ display: undefined }}
-        >
-          <div className="h-full overflow-hidden rounded-lg border">
-            <MapTab records={records} />
+        {/* Pipeline Runs */}
+        {activeSection === "pipeline-runs" && (
+          <div className="flex-1 overflow-auto px-6 py-6">
+            <TableTab records={records} />
           </div>
-        </TabsContent>
+        )}
 
-      </Tabs>
+        {/* Master Table */}
+        {activeSection === "master-table" && (
+          <div className="flex-1 overflow-auto px-6 py-6">
+            <MasterTableTab records={records} />
+          </div>
+        )}
+
+        {/* Query */}
+        {activeSection === "query" && (
+          <div className="flex-1 overflow-auto px-6 py-6">
+            <QueryTab records={records} />
+          </div>
+        )}
+
+        {/* Map — lazy-mount on first visit, then keep alive via display:none */}
+        {mapMounted && (
+          <div
+            className="flex-1 min-h-0"
+            style={{ display: activeSection === "map" ? undefined : "none" }}
+          >
+            <div className="h-full overflow-hidden">
+              <MapTab records={records} />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

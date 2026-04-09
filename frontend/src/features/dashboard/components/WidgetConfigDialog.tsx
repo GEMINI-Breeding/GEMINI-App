@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { useTraitRecords, useTraitRecordGeojson } from "../hooks/useTraitData"
+import { useTraitRecords, useTraitRecordGeojson, useMultiTraitGeojson } from "../hooks/useTraitData"
 import { deduplicateKeys } from "@/features/analyze/utils/traitAliases"
 import type {
   DashboardWidget, KpiConfig, ChartConfig, TableConfig, PlotViewerConfig,
@@ -126,16 +126,20 @@ const AGG_OPTIONS = [
 
 /** Multi-select for picking several metric columns as Y-axes, with per-metric aggregation. */
 function MultiMetricSelector({
-  recordId, values, aggregations, onChange, onAggChange, label = "Y-Axis Metrics",
+  recordId, fallbackRecordIds, values, aggregations, onChange, onAggChange, label = "Y-Axis Metrics",
 }: {
   recordId: string | null
+  fallbackRecordIds?: string[]
   values: string[]
   aggregations: Record<string, string>
   onChange: (metrics: string[]) => void
   onAggChange: (metric: string, agg: string) => void
   label?: string
 }) {
-  const { data: geoData } = useTraitRecordGeojson(recordId)
+  const { data: primaryData, isLoading, isError } = useTraitRecordGeojson(recordId)
+  // If the primary record 404s, fall back to the first successful record in the pipeline
+  const { firstValid } = useMultiTraitGeojson(isError && fallbackRecordIds?.length ? fallbackRecordIds : [])
+  const geoData = primaryData ?? firstValid
   const cols = geoData?.metric_columns ?? []
   const [addKey, setAddKey] = useState(0)
 
@@ -147,6 +151,8 @@ function MultiMetricSelector({
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
+      {isLoading && !geoData && <p className="text-xs text-muted-foreground">Loading metrics…</p>}
+      {isError && !geoData && <p className="text-xs text-destructive">Could not load metrics — re-run extraction</p>}
       {values.length > 0 && (
         <div className="space-y-1">
           {values.map((m, i) => (
@@ -209,25 +215,29 @@ function MetricSelect({
   onChange: (v: string) => void
   label?: string
 }) {
-  const { data: geoData } = useTraitRecordGeojson(recordId)
+  const { data: geoData, isLoading, isError } = useTraitRecordGeojson(recordId)
   const cols = geoData?.metric_columns ?? []
 
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
-      <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
-        <SelectTrigger className="h-8 text-xs">
-          <SelectValue placeholder="Select metric…" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">— None —</SelectItem>
-          {cols.filter((c) => c).map((c) => (
-            <SelectItem key={c} value={c}>
-              {c.replace(/_/g, " ")}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {isLoading && <p className="text-xs text-muted-foreground">Loading metrics…</p>}
+      {isError && <p className="text-xs text-destructive">Could not load metrics — re-run extraction</p>}
+      {!isLoading && !isError && (
+        <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Select metric…" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— None —</SelectItem>
+            {cols.filter((c) => c).map((c) => (
+              <SelectItem key={c} value={c}>
+                {c.replace(/_/g, " ")}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   )
 }
@@ -241,7 +251,7 @@ function FieldSelect({
   label: string
   includeMetrics?: boolean
 }) {
-  const { data: geoData } = useTraitRecordGeojson(recordId)
+  const { data: geoData, isLoading, isError } = useTraitRecordGeojson(recordId)
 
   const fields = useMemo(() => {
     if (!geoData) return []
@@ -255,6 +265,9 @@ function FieldSelect({
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
+      {isLoading && <p className="text-xs text-muted-foreground">Loading fields…</p>}
+      {isError && <p className="text-xs text-destructive">Could not load fields — re-run extraction</p>}
+      {!isLoading && !isError && (
       <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
         <SelectTrigger className="h-8 text-xs">
           <SelectValue placeholder="Select field…" />
@@ -268,6 +281,7 @@ function FieldSelect({
           ))}
         </SelectContent>
       </Select>
+      )}
     </div>
   )
 }
@@ -360,8 +374,11 @@ function FiltersSection({
         const na = Number(a), nb = Number(b)
         return isNaN(na) || isNaN(nb) ? a.localeCompare(b) : na - nb
       })
-      // Only offer fields with a manageable number of unique values
-      if (unique.length > 0 && unique.length <= 200) vbf[k] = unique
+      // Identity fields (plot_id, accession, col, row, etc.) allow up to 2000 values;
+      // all other categorical fields are capped at 200 to keep the UI manageable.
+      const IDENTITY_FIELDS = new Set(["plot_id", "plot", "accession", "col", "row", "column"])
+      const limit = IDENTITY_FIELDS.has(k) ? 2000 : 200
+      if (unique.length > 0 && unique.length <= limit) vbf[k] = unique
     }
     return { catFields: Object.keys(vbf), valuesByField: vbf }
   }, [geoData])
@@ -624,6 +641,7 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
           />
           <MultiMetricSelector
             recordId={config.temporalRecordIds[0] ?? null}
+            fallbackRecordIds={config.temporalRecordIds}
             values={config.yAxes?.length > 0 ? config.yAxes : (config.yAxis ? [config.yAxis] : [])}
             aggregations={config.yAxesAggregation ?? {}}
             onChange={(metrics) => onChange({ ...config, yAxes: metrics, yAxis: metrics[0] ?? null })}

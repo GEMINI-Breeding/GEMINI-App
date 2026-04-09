@@ -18,7 +18,10 @@ export const Route = createFileRoute("/_layout")({
 
 function Layout() {
   const location = useLocation()
-  const isFullHeight = location.pathname === "/"
+  const FULL_HEIGHT_PREFIXES = ["/files", "/analyze", "/settings", "/process"]
+  const isFullHeight =
+    location.pathname === "/" ||
+    FULL_HEIGHT_PREFIXES.some((p) => location.pathname.startsWith(p))
 
   const handleUpdateAvailable = useCallback((version: string, downloadUrl: string) => {
     toast.info(`Update available: ${version}`, {

@@ -18,13 +18,24 @@ export const ROW_KEY_SET = new Set(["row", "tier"]);
 export const POSITION_KEY_SET = new Set([...COL_KEY_SET, ...ROW_KEY_SET]);
 
 /**
- * Deduplicate column keys case-insensitively (keep first occurrence).
- * Prevents showing "col" and "column" as two separate columns.
+ * Deduplicate column keys:
+ * - case-insensitively (keeps first occurrence of "Col"/"col"/"COL")
+ * - alias-aware: all COL_KEY_SET members ("col", "column", "bed") are treated
+ *   as the same column, and all ROW_KEY_SET members ("row", "tier") likewise.
+ *   The first alias encountered wins.
  */
 export function deduplicateKeys(keys: string[]): string[] {
   const seen = new Set<string>();
+  const aliasGroupSeen = new Set<string>(); // "col" | "row" — one per alias group
+
   return keys.filter((k) => {
     const lower = k.toLowerCase();
+    // Collapse alias groups first
+    const group = COL_KEY_SET.has(lower) ? "col" : ROW_KEY_SET.has(lower) ? "row" : null;
+    if (group) {
+      if (aliasGroupSeen.has(group)) return false;
+      aliasGroupSeen.add(group);
+    }
     if (seen.has(lower)) return false;
     seen.add(lower);
     return true;

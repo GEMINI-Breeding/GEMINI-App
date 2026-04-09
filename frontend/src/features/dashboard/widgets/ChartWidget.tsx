@@ -176,10 +176,27 @@ function TemporalChart({ config }: { config: ChartConfig }) {
 
   if (loading) return <Loading />
   if (!config.pipelineId || effectiveYAxes.length === 0) return <Unconfigured />
+  const failedCount = geojsons.filter((g) => g === null).length
+  const hasPartialData = failedCount > 0 && chartData.length > 0
+
+  if (failedCount > 0 && chartData.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
+        <p className="text-sm text-muted-foreground">No data available</p>
+        <p className="text-xs text-destructive">{failedCount} extraction{failedCount > 1 ? "s" : ""} could not be loaded — re-run trait extraction</p>
+      </div>
+    )
+  }
 
   const isArea = config.chartType === "area"
 
   return (
+    <div className="flex flex-col h-full">
+      {hasPartialData && (
+        <p className="text-[10px] text-destructive px-2 pt-1 flex-shrink-0">
+          {failedCount} date{failedCount > 1 ? "s" : ""} missing — re-run extraction to complete the series
+        </p>
+      )}
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
         <defs>
@@ -277,6 +294,7 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         })}
       </ComposedChart>
     </ResponsiveContainer>
+    </div>
   )
 }
 

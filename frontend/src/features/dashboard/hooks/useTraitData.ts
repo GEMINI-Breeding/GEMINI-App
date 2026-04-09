@@ -27,8 +27,9 @@ export function useTraitRecordGeojson(recordId: string | null) {
     queryFn: () => analyzeApi.getTraitRecordGeojson(recordId!),
     enabled: !!recordId,
     staleTime: 5 * 60_000,
-    // Re-fetch geojson when window regains focus (picks up any re-processed data)
     refetchOnWindowFocus: true,
+    // Don't retry 404s — the file is missing on disk, retrying won't help
+    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -40,14 +41,17 @@ export function useMultiTraitGeojson(recordIds: string[]) {
       queryKey: ["trait-record-geojson", id],
       queryFn: () => analyzeApi.getTraitRecordGeojson(id),
       staleTime: 5 * 60_000,
+      retry: (failureCount: number, error: any) => error?.status !== 404 && failureCount < 2,
     })),
   })
 
   const loading = results.some((r) => r.isLoading)
   const error = results.find((r) => r.isError)?.error ?? null
   const data: (TraitsResponse | null)[] = results.map((r) => r.data ?? null)
+  // First record with data — used as fallback for column discovery
+  const firstValid = data.find((d) => d !== null) ?? null
 
-  return { data, loading, error }
+  return { data, loading, error, firstValid }
 }
 
 // ── Plot IDs with images for a record ─────────────────────────────────────────
