@@ -214,6 +214,7 @@ export function ProcessingPipeline() {
         roboflow_api_key: rf.api_key ?? "",
         roboflow_model_id: rf.model_id ?? "",
         task_type: (rf.task_type as "detection" | "segmentation") ?? "detection",
+        target_gsd_cm: null,
       }]);
     }
     setInferenceMode((cfg.inference_mode as "cloud" | "local") ?? "cloud");
