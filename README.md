@@ -46,6 +46,8 @@ npm install
 ### Building for Production
 See [`docs/BUILDING.md`](./docs/BUILDING.md) for platform-specific build instructions (Linux, macOS, Windows).
 
+> **Note on Windows:** **Docker Desktop** is required for certain data processing features in the application. Ensure it is running when performing these tasks.
+
 ---
 
 ## 🔍 Pipeline Overview
