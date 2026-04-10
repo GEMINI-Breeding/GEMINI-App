@@ -287,6 +287,13 @@ jobs:
           npm cache clean --force 2>$null
           Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
+      # ── macOS DMG tooling ─────────────────────────────────────────────────────
+      # Tauri's bundle_dmg.sh requires `create-dmg` which is not pre-installed
+      # on GitHub Actions macOS runners.
+      - name: Install create-dmg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
       # ── Build Tauri app ───────────────────────────────────────────────────────
       # Windows uses --no-bundle to skip NSIS (which has a ~2 GB data-block
       # mmap limit that CUDA torch DLLs exceed). Inno Setup runs next instead.

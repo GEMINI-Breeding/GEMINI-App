@@ -26,7 +26,7 @@ For more information about the project and our research, visit: [https://project
 ## ⚙️ Installation & Setup
 
 ### Development Environment
-For active development on the Tauri/React/FastAPI stack, please refer to the **[Developer Guide](https://gemini-breeding.github.io/start_guide/developer_guide.md)** in our official documentation.
+For active development on the Tauri/React/FastAPI stack, please refer to the **[Developer Guide](https://gemini-breeding.github.io/start_guide/developer_guide/)** in our official documentation.
 
 **Quick start:**
 ```
