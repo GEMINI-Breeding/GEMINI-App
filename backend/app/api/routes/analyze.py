@@ -893,7 +893,8 @@ def get_master_table(
 
     # ── Group records by plot identity ────────────────────────────────────────
     # identity key → { pipeline_id → most-recent PlotRecord }
-    PlotKey = tuple  # (experiment, location, population, plot_id)
+    # Date is included so pipelines from different dates are never merged.
+    PlotKey = tuple  # (experiment, location, population, date, plot_id)
 
     identity_map: dict[tuple, dict[str, Any]] = defaultdict(dict)
 
@@ -902,6 +903,7 @@ def get_master_table(
             rec.experiment or "",
             rec.location or "",
             rec.population or "",
+            rec.date or "",
             rec.plot_id or "",
         )
         pid = rec.pipeline_id
@@ -983,14 +985,14 @@ def get_master_table(
     # ── Build rows ────────────────────────────────────────────────────────────
     rows: list[dict[str, Any]] = []
 
-    for (exp, loc, pop, plot_id), pipeline_records in sorted(identity_map.items()):
+    for (exp, loc, pop, date, plot_id), pipeline_records in sorted(identity_map.items()):
         rep_rec = next(iter(pipeline_records.values()))
 
         row: dict[str, Any] = {
             "experiment": exp,
             "location": loc,
             "population": pop,
-            "date": rep_rec.date or "",
+            "date": date,
             "plot_id": plot_id,
             "accession": rep_rec.accession,
             "col": rep_rec.col,

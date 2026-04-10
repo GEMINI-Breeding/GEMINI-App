@@ -9,9 +9,10 @@
  * Uses the EXPAND UTILITY from "@/components/Common/ExpandableSection".
  */
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Loader2, Tag, FlaskConical } from "lucide-react"
+import { Eye, EyeOff, Pin, PinOff, Download, Scan, X, Tag, FlaskConical, ChevronLeft, ChevronRight } from "lucide-react"
+import { PlotImage, type Prediction } from "@/components/Common/PlotImage"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -26,17 +27,6 @@ import { analyzeApi } from "../api"
 import { ReferenceDataPanel } from "./ReferenceDataPanel"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Prediction {
-  image: string
-  class: string
-  confidence: number
-  x: number
-  y: number
-  width: number
-  height: number
-  points?: Array<{ x: number; y: number }>
-}
 
 interface InferenceImage {
   name: string
@@ -62,6 +52,7 @@ interface QueryTabProps {
   metricColumns: string[]
   runId: string
   refContext?: RefContext
+  isGroundPipeline?: boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,152 +62,10 @@ function apiUrl(path: string): string {
   return base ? `${base}${path}` : path
 }
 
-function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
-  return { Authorization: `Bearer ${token}` }
-}
-
-const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
-]
-
-function classColour(cls: string): string {
-  let hash = 0
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
-  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
-}
-
 function fmt(v: unknown): string {
   if (v == null) return ""
   if (typeof v === "number") return isNaN(v) ? "" : v.toFixed(3)
   return String(v)
-}
-
-// ── Plot image viewer with optional detection overlay ─────────────────────────
-
-interface PlotImageViewerProps {
-  recordId: string
-  plotId: string
-  predictions: Prediction[]
-  showDetections: boolean
-  showLabels: boolean
-}
-
-function PlotImageViewer({ recordId, plotId, predictions, showDetections, showLabels }: PlotImageViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-
-  useEffect(() => {
-    setBlobUrl(null)
-    setError(false)
-    setDims(null)
-    let revoked = false
-    let objectUrl: string | null = null
-    fetch(apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`), {
-      headers: authHeaders(),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status}`)
-        return res.blob()
-      })
-      .then((blob) => {
-        if (!revoked) {
-          objectUrl = URL.createObjectURL(blob)
-          setBlobUrl(objectUrl)
-        }
-      })
-      .catch(() => setError(true))
-    return () => {
-      revoked = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [recordId, plotId])
-
-  // Draw detection overlay on canvas after image loads
-  useEffect(() => {
-    const canvas = canvasRef.current
-    const img = imgRef.current
-    if (!canvas || !img || !dims || !showDetections) {
-      if (canvas) {
-        const ctx = canvas.getContext("2d")
-        ctx?.clearRect(0, 0, canvas.width, canvas.height)
-      }
-      return
-    }
-
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    const { width: cw, height: ch } = canvas.getBoundingClientRect()
-    canvas.width = cw
-    canvas.height = ch
-
-    const scaleX = cw / dims.w
-    const scaleY = ch / dims.h
-
-    ctx.clearRect(0, 0, cw, ch)
-
-    for (const pred of predictions) {
-      const color = classColour(pred.class)
-      const x = (pred.x - pred.width / 2) * scaleX
-      const y = (pred.y - pred.height / 2) * scaleY
-      const w = pred.width * scaleX
-      const h = pred.height * scaleY
-
-      ctx.strokeStyle = color
-      ctx.lineWidth = 2
-      ctx.strokeRect(x, y, w, h)
-
-      if (!showLabels) continue
-      const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`
-      ctx.font = "11px monospace"
-      const tw = ctx.measureText(label).width
-      ctx.fillStyle = color
-      ctx.fillRect(x, y - 16, tw + 6, 16)
-      ctx.fillStyle = "#fff"
-      ctx.fillText(label, x + 3, y - 3)
-    }
-  }, [dims, predictions, showDetections, showLabels])
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-        Image not available
-      </div>
-    )
-  }
-
-  if (!blobUrl) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  return (
-    <div className="relative w-full h-full">
-      <img
-        ref={imgRef}
-        src={blobUrl}
-        alt={`Plot ${plotId}`}
-        className="w-full h-full object-contain"
-        onLoad={(e) => {
-          const el = e.currentTarget
-          setDims({ w: el.naturalWidth, h: el.naturalHeight })
-        }}
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        style={{ pointerEvents: "none" }}
-      />
-    </div>
-  )
 }
 
 // ── Pinned plot card ───────────────────────────────────────────────────────────
@@ -235,6 +84,8 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [showRef, setShowRef] = useState(false)
+  const [activeClass, setActiveClass] = useState<string | null>(null)
+  const uniqueClasses = useMemo(() => [...new Set(predictions.map((p) => p.class))].sort(), [predictions])
 
   const refProps = refContext ? {
     workspaceId: refContext.workspaceId,
@@ -277,6 +128,13 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
                   <Tag className={`w-3.5 h-3.5 ${showLabels ? "" : "opacity-40"}`} />
                 </button>
               )}
+              {showDetections && uniqueClasses.length > 1 && (
+                <div className="flex items-center gap-0.5 border rounded text-[10px]">
+                  <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-0.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                  <span className="px-0.5 min-w-[40px] text-center truncate">{activeClass ?? "All"}</span>
+                  <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-0.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                </div>
+              )}
             </>
           )}
           {refContext && (
@@ -308,13 +166,14 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
         </div>
       </div>
       {/* Image */}
-      <div className="h-48 bg-muted/10">
-        <PlotImageViewer
+      <div className="h-56 bg-muted/10">
+        <PlotImage
           recordId={recordId}
           plotId={row.plotId}
-          predictions={showDetections ? predictions : []}
+          predictions={predictions}
           showDetections={showDetections}
           showLabels={showLabels}
+          activeClass={activeClass}
         />
       </div>
       {/* Reference data panel */}
@@ -329,13 +188,14 @@ function PinnedCard({ row, recordId, predictions, hasDetections, onUnpin, onDown
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function QueryTab({ geojson, metricColumns, runId, refContext }: QueryTabProps) {
+export function QueryTab({ geojson, metricColumns, runId, refContext, isGroundPipeline = false }: QueryTabProps) {
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
   const [viewPlotId, setViewPlotId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const comparisonExp = useExpandable()
   const [viewShowDetections, setViewShowDetections] = useState(false)
   const [viewShowLabels, setViewShowLabels] = useState(true)
+  const [viewActiveClass, setViewActiveClass] = useState<string | null>(null)
   const [viewShowRef, setViewShowRef] = useState(false)
   /** plotId of the row whose inline REF sub-row is expanded */
   const [refExpandedId, setRefExpandedId] = useState<string | null>(null)
@@ -409,6 +269,7 @@ export function QueryTab({ geojson, metricColumns, runId, refContext }: QueryTab
   const viewRow = allRows.find((r) => r.plotId === viewPlotId) ?? null
   const viewPredictions = viewPlotId ? (predsByPlot[viewPlotId] ?? []) : []
   const viewHasDetections = viewPlotId ? (viewPlotId in predsByPlot) : false
+  const viewUniqueClasses = useMemo(() => [...new Set(viewPredictions.map((p) => p.class))].sort(), [viewPredictions])
 
   function togglePin(plotId: string) {
     setPinnedIds((prev) => {
@@ -616,15 +477,24 @@ export function QueryTab({ geojson, metricColumns, runId, refContext }: QueryTab
                   {viewShowDetections ? "Hide detections" : "Show detections"}
                 </button>
                 {viewShowDetections && (
-                  <button
-                    type="button"
-                    title={viewShowLabels ? "Hide labels" : "Show labels"}
-                    className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${viewShowLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
-                    onClick={() => setViewShowLabels((v) => !v)}
-                  >
-                    <Tag className={`w-3 h-3 ${viewShowLabels ? "" : "opacity-40"}`} />
-                    {viewShowLabels ? "Hide labels" : "Show labels"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      title={viewShowLabels ? "Hide labels" : "Show labels"}
+                      className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${viewShowLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                      onClick={() => setViewShowLabels((v) => !v)}
+                    >
+                      <Tag className={`w-3 h-3 ${viewShowLabels ? "" : "opacity-40"}`} />
+                      {viewShowLabels ? "Hide labels" : "Show labels"}
+                    </button>
+                    {viewUniqueClasses.length > 1 && (
+                      <div className="flex items-center gap-0.5 border rounded text-xs">
+                        <button onClick={() => setViewActiveClass((c) => { const i = viewUniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : viewUniqueClasses[i - 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                        <span className="px-1 min-w-[56px] text-center truncate">{viewActiveClass ?? "All"}</span>
+                        <button onClick={() => setViewActiveClass((c) => { const i = viewUniqueClasses.indexOf(c ?? ""); return i >= viewUniqueClasses.length - 1 ? null : viewUniqueClasses[i + 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -662,13 +532,15 @@ export function QueryTab({ geojson, metricColumns, runId, refContext }: QueryTab
           </div>
           <div className="flex rounded-lg border overflow-hidden" style={{ height: 420 }}>
             <div className={viewShowRef && refContext ? "flex-1 min-w-0" : "w-full"}>
-              <PlotImageViewer
+              <PlotImage
                 key={viewPlotId}
-                recordId={recordId}
+                recordId={recordId ?? ""}
                 plotId={viewPlotId}
-                predictions={viewShowDetections ? viewPredictions : []}
+                rotate={isGroundPipeline}
+                predictions={viewPredictions}
                 showDetections={viewShowDetections}
                 showLabels={viewShowLabels}
+                activeClass={viewActiveClass}
               />
             </div>
             {viewShowRef && refContext && viewRow && (

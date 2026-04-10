@@ -5,7 +5,9 @@ Global resource (upload / list / delete):
   POST   /reference-data/upload
   GET    /reference-data/
   GET    /reference-data/{dataset_id}
-  GET    /reference-data/{dataset_id}/plots
+  GET    /reference-data/{dataset_id}/plots          (paginated)
+  GET    /reference-data/{dataset_id}/plots-all      (unpaginated, up to 10 000)
+  GET    /reference-data/{dataset_id}/aggregate      (SQL aggregate for dashboard widgets)
   DELETE /reference-data/{dataset_id}
 
 Workspace association:
@@ -199,6 +201,89 @@ def list_plots(
         data=[ReferencePlotPublic.model_validate(p) for p in plots],
         count=len(plots),
     )
+
+
+@router.get("/{dataset_id}/plots-all")
+def list_plots_all(
+    session: SessionDep,
+    current_user: CurrentUser,
+    dataset_id: uuid.UUID,
+) -> Any:
+    """Return all plots for a dataset (up to 10 000) without pagination.
+    Used by the dashboard multi-source hooks that need the full distribution.
+    """
+    dataset = session.get(ReferenceDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Reference dataset not found")
+    plots = session.exec(
+        select(ReferencePlot)
+        .where(ReferencePlot.dataset_id == dataset_id)
+        .limit(10_000)
+    ).all()
+    return {
+        "data": [ReferencePlotPublic.model_validate(p) for p in plots],
+        "count": len(plots),
+    }
+
+
+@router.get("/{dataset_id}/aggregate")
+def aggregate_dataset(
+    session: SessionDep,
+    current_user: CurrentUser,
+    dataset_id: uuid.UUID,
+    metric: str = Query(..., description="Trait column to aggregate"),
+    aggregation: str = Query("avg", description="avg | min | max"),
+) -> dict[str, Any]:
+    """Aggregate a single reference trait across all plots in a dataset.
+    Used by dashboard widgets to compute a single representative value.
+    """
+    import math
+    import statistics
+
+    dataset = session.get(ReferenceDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Reference dataset not found")
+    if metric not in (dataset.trait_columns or []):
+        raise HTTPException(status_code=404, detail=f"Metric '{metric}' not found in dataset")
+
+    plots = session.exec(
+        select(ReferencePlot).where(ReferencePlot.dataset_id == dataset_id)
+    ).all()
+
+    values: list[float] = []
+    for p in plots:
+        if not p.traits or metric not in p.traits:
+            continue
+        raw = p.traits[metric]
+        if raw is None:
+            continue
+        try:
+            f = float(raw)
+            if not math.isnan(f):
+                values.append(f)
+        except (TypeError, ValueError):
+            continue
+
+    if not values:
+        return {"dataset_id": str(dataset_id), "metric": metric, "aggregation": aggregation, "value": None, "count": 0}
+
+    agg = aggregation.lower()
+    if agg == "avg":
+        result = statistics.mean(values)
+    elif agg == "min":
+        result = min(values)
+    elif agg == "max":
+        result = max(values)
+    else:
+        result = statistics.mean(values)
+
+    return {
+        "dataset_id": str(dataset_id),
+        "metric": metric,
+        "aggregation": agg,
+        "value": result,
+        "count": len(values),
+    }
 
 
 @router.delete("/{dataset_id}")

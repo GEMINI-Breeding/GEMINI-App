@@ -8,8 +8,10 @@
  * - Per-column value filters inline in the table header
  */
 
-import { useState, useMemo, useEffect } from "react"
-import { Loader2, Pin, PinOff, Search, ImageOff, X, ChevronDown, ChevronUp, ListFilter } from "lucide-react"
+import { useState, useMemo } from "react"
+import { useQueries } from "@tanstack/react-query"
+import { Loader2, Pin, PinOff, Search, ImageOff, X, ChevronDown, ChevronUp, ListFilter, ScanSearch, ChevronLeft, ChevronRight, Tag } from "lucide-react"
+import { PlotImage, type Prediction, authHeaders } from "@/components/Common/PlotImage"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -29,66 +31,6 @@ import type { PlotViewerConfig } from "../types"
 function apiUrl(path: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
   return base ? `${base}${path}` : path
-}
-
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem("access_token") || ""
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
-// ── Plot image with auth ──────────────────────────────────────────────────────
-
-function PlotImage({ recordId, plotId }: { recordId: string; plotId: string }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [errored, setErrored] = useState(false)
-
-  useEffect(() => {
-    setBlobUrl(null)
-    setErrored(false)
-    let revoked = false
-    let objectUrl: string | null = null
-
-    fetch(
-      apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${encodeURIComponent(plotId)}`),
-      { headers: authHeaders() }
-    )
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status}`)
-        return res.blob()
-      })
-      .then((blob) => {
-        if (!revoked) {
-          objectUrl = URL.createObjectURL(blob)
-          setBlobUrl(objectUrl)
-        }
-      })
-      .catch(() => { if (!revoked) setErrored(true) })
-
-    return () => {
-      revoked = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [recordId, plotId])
-
-  if (errored) {
-    return (
-      <div className="flex items-center justify-center bg-muted rounded w-full aspect-video">
-        <ImageOff className="w-5 h-5 text-muted-foreground" />
-      </div>
-    )
-  }
-  if (!blobUrl) {
-    return (
-      <div className="flex items-center justify-center bg-muted rounded w-full aspect-video">
-        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-  return (
-    <div className="w-full aspect-video bg-muted rounded overflow-hidden">
-      <img src={blobUrl} alt={plotId} className="w-full h-full object-contain" />
-    </div>
-  )
 }
 
 // ── Column filter dropdown ────────────────────────────────────────────────────
@@ -160,6 +102,9 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
   const [search, setSearch] = useState("")
   const [tableCollapsed, setTableCollapsed] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
+  const [showDetections, setShowDetections] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
+  const [activeClass, setActiveClass] = useState<string | null>(null)
 
   const { data: allRecords } = useTraitRecords()
 
@@ -169,6 +114,50 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     if (config.traitRecordId) return [config.traitRecordId]
     return []
   }, [config.traitRecordIds, config.traitRecordId])
+
+  // Batch-fetch inference results for all active records (for detection overlay)
+  const activeRunIds = useMemo(() => {
+    if (!allRecords) return [] as string[]
+    const ids = new Set<string>()
+    activeIds.forEach((rid) => {
+      const rec = allRecords.find((r) => r.id === rid)
+      if (rec?.run_id) ids.add(rec.run_id)
+    })
+    return [...ids]
+  }, [allRecords, activeIds])
+
+  const inferenceResults = useQueries({
+    queries: activeRunIds.map((runId) => ({
+      queryKey: ["inference-results", runId],
+      queryFn: () =>
+        fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), { headers: authHeaders() })
+          .then((r) => r.ok ? r.json() : null),
+      staleTime: 60_000,
+    })),
+  })
+
+  const predsByPlot = useMemo<Record<string, Prediction[]>>(() => {
+    const map: Record<string, Prediction[]> = {}
+    inferenceResults.forEach((res) => {
+      const data = res.data
+      if (!data?.available) return
+      const images: Array<{ name: string; plot?: string }> = data.images ?? []
+      const predictions: Prediction[] = data.predictions ?? []
+      for (const img of images) {
+        if (!img.plot) continue
+        const preds = predictions.filter((p) => p.image === img.name)
+        if (preds.length > 0) map[img.plot] = preds
+      }
+    })
+    return map
+  }, [inferenceResults])
+
+  const inferenceAvailable = Object.keys(predsByPlot).length > 0
+
+  const uniqueClasses = useMemo(() => {
+    const all = Object.values(predsByPlot).flat().map((p) => p.class)
+    return [...new Set(all)].sort()
+  }, [predsByPlot])
 
   const isMultiSource = activeIds.length > 1
 
@@ -189,13 +178,17 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
       const geoData = singleGeo.data
       if (!geoData) return { allPlots: [], metricCols: [] }
       const imagePlotIds = singleImages.data ?? []
-      const plots = applyFilters(geoData.geojson.features, filters).map((f) => ({
-        recordId: activeIds[0],
-        plotId: String(f.properties?.plot_id ?? ""),
-        accession: String(f.properties?.accession ?? ""),
-        properties: f.properties ?? {},
-        hasImage: imagePlotIds.includes(String(f.properties?.plot_id ?? "")),
-      }))
+      const plots = applyFilters(geoData.geojson.features, filters).map((f) => {
+        const p = f.properties ?? {}
+        const plotId = String(p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "")
+        return {
+          recordId: activeIds[0],
+          plotId,
+          accession: String(p.accession ?? p.Accession ?? p.genotype ?? ""),
+          properties: p,
+          hasImage: imagePlotIds.includes(plotId),
+        }
+      })
       return { allPlots: plots, metricCols: geoData.metric_columns.slice(0, 4) }
     }
 
@@ -208,12 +201,14 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
       const record = allRecords?.find((r) => r.id === recordId)
       const label = record ? `${record.pipeline_name} · ${record.date}` : recordId
       applyFilters(geoData.geojson.features, filters).forEach((f) => {
+        const p = f.properties ?? {}
+        const plotId = String(p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "")
         plots.push({
           recordId,
-          plotId: String(f.properties?.plot_id ?? ""),
-          accession: String(f.properties?.accession ?? ""),
-          properties: { ...(f.properties ?? {}), _source: label },
-          hasImage: false, // image lookup not supported per-row in multi-source yet
+          plotId,
+          accession: String(p.accession ?? p.Accession ?? p.genotype ?? ""),
+          properties: { ...p, _source: label },
+          hasImage: false,
           source: label,
         })
       })
@@ -392,9 +387,53 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
               Pinned Plots{" "}
               <Badge variant="secondary" className="text-[10px]">{pinnedPlots.length}</Badge>
             </span>
-            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearPinned}>
-              <X className="w-3 h-3 mr-1" /> Clear
-            </Button>
+            <div className="flex items-center gap-1">
+              {inferenceAvailable && (
+                <>
+                  <button
+                    onClick={() => setShowDetections((v) => !v)}
+                    title={showDetections ? "Hide detections" : "Show detections"}
+                    className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                  >
+                    <ScanSearch className="w-3 h-3" />
+                    {showDetections ? "Hide" : "Detections"}
+                  </button>
+                  {showDetections && (
+                    <button
+                      onClick={() => setShowLabels((v) => !v)}
+                      className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+                    >
+                      <Tag className="w-3 h-3" />
+                      Labels
+                    </button>
+                  )}
+                  {showDetections && uniqueClasses.length > 1 && (
+                    <div className="flex items-center gap-0.5 border rounded text-xs">
+                      <button
+                        onClick={() => setActiveClass((c) => {
+                          const i = uniqueClasses.indexOf(c ?? "")
+                          return i <= 0 ? null : uniqueClasses[i - 1]
+                        })}
+                        className="px-1 py-0.5 hover:bg-muted transition-colors"
+                      ><ChevronLeft className="w-3 h-3" /></button>
+                      <span className="px-1 min-w-[56px] text-center truncate">
+                        {activeClass ?? "All"}
+                      </span>
+                      <button
+                        onClick={() => setActiveClass((c) => {
+                          const i = uniqueClasses.indexOf(c ?? "")
+                          return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1]
+                        })}
+                        className="px-1 py-0.5 hover:bg-muted transition-colors"
+                      ><ChevronRight className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                </>
+              )}
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearPinned}>
+                <X className="w-3 h-3 mr-1" /> Clear
+              </Button>
+            </div>
           </div>
           <div
             className="grid gap-3"
@@ -414,9 +453,19 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                     <p className="text-[10px] text-muted-foreground truncate">{p.source}</p>
                   )}
                   {p.hasImage ? (
-                    <PlotImage recordId={p.recordId} plotId={p.plotId} />
+                    <div className="w-full" style={{ height: 220 }}>
+                      <PlotImage
+                        recordId={p.recordId}
+                        plotId={p.plotId}
+                        rotate={allRecords?.find((r) => r.id === p.recordId)?.pipeline_type === "ground"}
+                        predictions={predsByPlot[p.plotId] ?? []}
+                        showDetections={showDetections}
+                        showLabels={showLabels}
+                        activeClass={activeClass}
+                      />
+                    </div>
                   ) : (
-                    <div className="flex items-center justify-center bg-muted rounded w-full aspect-video">
+                    <div className="flex items-center justify-center bg-muted rounded w-full" style={{ height: 220 }}>
                       <ImageOff className="w-4 h-4 text-muted-foreground" />
                     </div>
                   )}

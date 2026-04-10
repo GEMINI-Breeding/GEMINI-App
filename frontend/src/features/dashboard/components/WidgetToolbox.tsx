@@ -40,7 +40,7 @@ export const WIDGET_TEMPLATES: WidgetTemplate[] = [
     iconName: "BarChart3",
     defaultSpan: "md",
     category: "Charts",
-    defaultConfig: { mode: "spatial", chartType: "bar", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {} },
+    defaultConfig: { mode: "spatial", chartType: "bar", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {}, sources: [] },
   },
   {
     templateId: "line-chart",
@@ -50,7 +50,7 @@ export const WIDGET_TEMPLATES: WidgetTemplate[] = [
     iconName: "TrendingUp",
     defaultSpan: "lg",
     category: "Charts",
-    defaultConfig: { mode: "temporal", chartType: "line", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {} },
+    defaultConfig: { mode: "temporal", chartType: "line", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {}, sources: [] },
   },
   {
     templateId: "area-chart",
@@ -60,7 +60,7 @@ export const WIDGET_TEMPLATES: WidgetTemplate[] = [
     iconName: "Activity",
     defaultSpan: "lg",
     category: "Charts",
-    defaultConfig: { mode: "temporal", chartType: "area", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {} },
+    defaultConfig: { mode: "temporal", chartType: "area", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {}, sources: [] },
   },
   {
     templateId: "scatter",
@@ -70,7 +70,7 @@ export const WIDGET_TEMPLATES: WidgetTemplate[] = [
     iconName: "ScatterChart",
     defaultSpan: "md",
     category: "Charts",
-    defaultConfig: { mode: "correlation", chartType: "scatter", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {} },
+    defaultConfig: { mode: "correlation", chartType: "scatter", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, yAxesAggregation: {}, showErrorBand: false, errorBandType: "std", groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {}, sources: [] },
   },
   {
     templateId: "histogram",
@@ -80,7 +80,7 @@ export const WIDGET_TEMPLATES: WidgetTemplate[] = [
     iconName: "BarChart3",
     defaultSpan: "md",
     category: "Charts",
-    defaultConfig: { mode: "spatial", chartType: "histogram", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {} },
+    defaultConfig: { mode: "spatial", chartType: "histogram", traitRecordId: null, xAxis: null, yAxis: null, yAxes: [], dualAxis: false, groupBy: null, pipelineId: null, temporalRecordIds: [], filters: {}, sources: [] },
   },
   {
     templateId: "table",

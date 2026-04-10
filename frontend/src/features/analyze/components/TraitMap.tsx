@@ -15,7 +15,8 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo, useEffect, useRef } from "react"
-import { X, Download, Loader2, ZoomIn, Tag, FlaskConical } from "lucide-react"
+import { X, Download, Loader2, Scan, Tag, FlaskConical, ChevronLeft, ChevronRight } from "lucide-react"
+import { PlotImage, type Prediction } from "@/components/Common/PlotImage"
 import { useExpandable, ExpandButton, FullscreenModal } from "@/components/Common/ExpandableSection"
 import { useQuery } from "@tanstack/react-query"
 import { buildColorScale } from "../utils/colorScale"
@@ -51,14 +52,6 @@ interface OrthoInfo {
   bounds: [[number, number], [number, number]] | null // [[s,w],[n,e]]
   /** Preferred: downscaled JPEG preview (much faster than the full TIF) */
   preview_url?: string | null
-}
-
-interface Prediction {
-  image: string
-  class: string
-  confidence: number
-  x: number; y: number; width: number; height: number
-  points?: Array<{ x: number; y: number }>
 }
 
 interface TraitMapProps {
@@ -291,17 +284,6 @@ export function TraitMap({
 
 // ── Plot image panel ────────────────────────────────────────────────────────────
 
-const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
-]
-
-function classColour(cls: string): string {
-  let hash = 0
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
-  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
-}
-
 function PlotImagePanel({
   recordId,
   plotId,
@@ -325,87 +307,14 @@ function PlotImagePanel({
   onClose: () => void
   refContext?: ReferenceDataPanelProps
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [showRef, setShowRef] = useState(false)
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const [activeClass, setActiveClass] = useState<string | null>(null)
   const hasDetections = predictions.length > 0
+  const uniqueClasses = useMemo(() => [...new Set(predictions.map((p) => p.class))].sort(), [predictions])
   const exp = useExpandable()
-
-  // Draw detection overlay — accounts for object-contain letterboxing
-  function drawCanvas() {
-    const canvas = canvasRef.current
-    const img = imgRef.current
-    if (!canvas || !img || !dims) {
-      canvasRef.current?.getContext("2d")?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0)
-      return
-    }
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    const rect = img.getBoundingClientRect()
-    const elemW = rect.width, elemH = rect.height
-    canvas.width = elemW; canvas.height = elemH
-    ctx.clearRect(0, 0, elemW, elemH)
-    if (!showDetections || predictions.length === 0) return
-    const imgAspect = dims.w / dims.h
-    const elemAspect = elemW / elemH
-    let scale: number, offsetX: number, offsetY: number
-    if (imgAspect > elemAspect) {
-      scale = elemW / dims.w; offsetX = 0; offsetY = (elemH - dims.h * scale) / 2
-    } else {
-      scale = elemH / dims.h; offsetX = (elemW - dims.w * scale) / 2; offsetY = 0
-    }
-    for (const p of predictions) {
-      const color = classColour(p.class)
-      const x = (p.x - p.width / 2) * scale + offsetX
-      const y = (p.y - p.height / 2) * scale + offsetY
-      const w = p.width * scale, h = p.height * scale
-      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h)
-      if (showLabels) {
-        const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
-        ctx.font = "11px monospace"
-        const tw = ctx.measureText(label).width
-        ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
-        ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
-      }
-    }
-  }
-
-  useEffect(() => {
-    const id = requestAnimationFrame(() => drawCanvas())
-    return () => cancelAnimationFrame(id)
-  }, [dims, predictions, showDetections, showLabels, exp.isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    setBlobUrl(null)
-    setError(false)
-    setDims(null)
-    const endpoint = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
-    const token = localStorage.getItem("access_token") || ""
-    let revoked = false
-    let objectUrl: string | null = null
-    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status}`)
-        return res.blob()
-      })
-      .then((blob) => {
-        if (!revoked) {
-          objectUrl = URL.createObjectURL(blob)
-          setBlobUrl(objectUrl)
-        }
-      })
-      .catch(() => setError(true))
-    return () => {
-      revoked = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [recordId, plotId])
 
   async function handleDownload() {
     setDownloading(true)
@@ -431,30 +340,6 @@ function PlotImagePanel({
   )
 
   const accession = lookupProperty(properties, "accession")
-
-  function PanelImage({ maxH }: { maxH: string }) {
-    return error ? (
-      <p className="text-xs text-muted-foreground text-center py-4 px-3">Image not available</p>
-    ) : !blobUrl ? (
-      <div className="flex items-center justify-center py-6">
-        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-      </div>
-    ) : (
-      <div className="relative">
-        <img
-          ref={imgRef}
-          src={blobUrl}
-          alt={`Plot ${plotId}`}
-          className={`w-full object-contain ${maxH}`}
-          onLoad={(e) => {
-            setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-            drawCanvas()
-          }}
-        />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }} />
-      </div>
-    )
-  }
 
   function PanelInfo() {
     return (
@@ -506,23 +391,22 @@ function PlotImagePanel({
           )}
           {hasDetections && (
             <>
-              <button
-                type="button"
-                onClick={() => setShowDetections((v) => !v)}
-                title={showDetections ? "Hide detections" : "Show detections"}
-                className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                <ZoomIn className="w-4 h-4" />
+              <button type="button" onClick={() => setShowDetections((v) => !v)} title={showDetections ? "Hide detections" : "Show detections"} className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                <Scan className="w-4 h-4" />
               </button>
               {showDetections && (
-                <button
-                  type="button"
-                  onClick={() => setShowLabels((v) => !v)}
-                  title={showLabels ? "Hide labels" : "Show labels"}
-                  className={`transition-colors ${showLabels ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Tag className={`w-4 h-4 ${showLabels ? "" : "opacity-40"}`} />
-                </button>
+                <>
+                  <button type="button" onClick={() => setShowLabels((v) => !v)} title={showLabels ? "Hide labels" : "Show labels"} className={`transition-colors ${showLabels ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                    <Tag className={`w-4 h-4 ${showLabels ? "" : "opacity-40"}`} />
+                  </button>
+                  {uniqueClasses.length > 1 && (
+                    <div className="flex items-center gap-0.5 border rounded text-xs">
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-1 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                      <span className="px-1 min-w-[44px] text-center truncate">{activeClass ?? "All"}</span>
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-1 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -539,7 +423,7 @@ function PlotImagePanel({
           <ExpandButton onClick={exp.open} title="Expand plot" className="h-7 w-7" />
           <button
             onClick={handleDownload}
-            disabled={downloading || error || !blobUrl}
+            disabled={downloading}
             title="Download plot image"
             className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
           >
@@ -560,7 +444,16 @@ function PlotImagePanel({
           <ReferenceDataPanel {...refContext} />
         </div>
       )}
-      <PanelImage maxH="max-h-64" />
+      <div className="w-full" style={{ height: 260 }}>
+        <PlotImage
+          recordId={recordId}
+          plotId={plotId}
+          predictions={predictions}
+          showDetections={showDetections}
+          showLabels={showLabels}
+          activeClass={activeClass}
+        />
+      </div>
     </div>
 
     <FullscreenModal open={exp.isExpanded} onClose={exp.close} title={`Plot ${plotId}`}
@@ -578,22 +471,50 @@ function PlotImagePanel({
             </select>
           )}
           {hasDetections && (
-            <button
-              type="button"
-              onClick={() => setShowDetections((v) => !v)}
-              className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
-            >
-              <ZoomIn className="h-3 w-3" />
-              {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowDetections((v) => !v)}
+                className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
+              >
+                <Scan className="h-3 w-3" />
+                {showDetections ? "Hide detections" : "Show detections"}
+              </button>
+              {showDetections && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowLabels((v) => !v)}
+                    className={`text-xs flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
+                  >
+                    <Tag className={`h-3 w-3 ${showLabels ? "" : "opacity-40"}`} />
+                    {showLabels ? "Hide labels" : "Show labels"}
+                  </button>
+                  {uniqueClasses.length > 1 && (
+                    <div className="flex items-center gap-0.5 border rounded text-xs">
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                      <span className="px-1 min-w-[56px] text-center truncate">{activeClass ?? "All"}</span>
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       }
     >
-      <div className="flex flex-col items-center justify-center h-full p-4">
-        <div className="max-w-3xl w-full space-y-3">
-          <PanelInfo />
-          <PanelImage maxH="max-h-[70vh]" />
+      <div className="flex flex-col h-full">
+        <PanelInfo />
+        <div className="flex-1 min-h-0 mt-3">
+          <PlotImage
+            recordId={recordId}
+            plotId={plotId}
+            predictions={predictions}
+            showDetections={showDetections}
+            showLabels={showLabels}
+            activeClass={activeClass}
+          />
         </div>
       </div>
     </FullscreenModal>

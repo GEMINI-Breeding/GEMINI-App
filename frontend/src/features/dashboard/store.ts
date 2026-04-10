@@ -17,10 +17,37 @@ function defaultState(): DashboardState {
   }
 }
 
+/** Inject missing fields added in later versions so old configs keep working. */
+function migrateWidget(w: DashboardWidget): DashboardWidget {
+  if (w.type === "chart") {
+    return {
+      ...w,
+      config: {
+        ...w.config,
+        // Inject missing fields added in later schema versions
+        sources: (w.config as any).sources ?? [],
+        barLayout: (w.config as any).barLayout ?? "grouped",
+        groupByField: (w.config as any).groupByField ?? null,
+      },
+    }
+  }
+  return w
+}
+
+function migrateState(raw: DashboardState): DashboardState {
+  return {
+    ...raw,
+    tabs: raw.tabs.map((tab) => ({
+      ...tab,
+      widgets: tab.widgets.map(migrateWidget),
+    })),
+  }
+}
+
 function load(): DashboardState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as DashboardState
+    if (raw) return migrateState(JSON.parse(raw) as DashboardState)
   } catch {
     // corrupted — reset
   }

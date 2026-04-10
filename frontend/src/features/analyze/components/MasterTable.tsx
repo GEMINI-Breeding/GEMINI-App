@@ -11,7 +11,7 @@
  */
 
 import { useState, useMemo, useEffect } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueries } from "@tanstack/react-query"
 import { AnalyzeService } from "@/client"
 import { ReferenceDataPanel } from "./ReferenceDataPanel"
 import { Button } from "@/components/ui/button"
@@ -44,13 +44,17 @@ import { Badge } from "@/components/ui/badge"
 import {
   CalendarDays,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   FlaskConical,
   Loader2,
-  ImageOff,
+  ScanSearch,
+  Tag,
   X,
 } from "lucide-react"
+import { PlotImage, type Prediction as CellPrediction } from "@/components/Common/PlotImage"
 import type { TraitRecord } from "../api"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -139,51 +143,29 @@ interface MasterTableData {
 // ── Per-pipeline plot image cell ──────────────────────────────────────────────
 
 function PlotImageCell({
-  recordId,
-  plotId,
-  pipelineName,
-  pipelineColor,
+  recordId, plotId, pipelineName, pipelineColor,
+  rotate = false,
+  predictions = [], showDetections = false, showLabels = false, activeClass = null,
 }: {
-  recordId: string
-  plotId: string
-  pipelineName: string
-  pipelineColor: string
+  recordId: string; plotId: string; pipelineName: string; pipelineColor: string
+  rotate?: boolean; predictions?: CellPrediction[]; showDetections?: boolean
+  showLabels?: boolean; activeClass?: string | null
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    setBlobUrl(null)
-    setError(false)
-    let revoke: string | null = null
-    fetch(apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`), {
-      headers: authHeaders(),
-    })
-      .then((res) => { if (!res.ok) throw new Error(); return res.blob() })
-      .then((blob) => { const url = URL.createObjectURL(blob); revoke = url; setBlobUrl(url) })
-      .catch(() => setError(true))
-    return () => { if (revoke) URL.revokeObjectURL(revoke) }
-  }, [recordId, plotId])
-
   return (
     <div className="flex flex-col rounded-lg border overflow-hidden flex-1 min-w-0 min-h-0">
-      <div
-        className="px-2 py-1 text-xs font-medium text-white shrink-0"
-        style={{ background: pipelineColor }}
-      >
+      <div className="px-2 py-1 text-xs font-medium text-white shrink-0" style={{ background: pipelineColor }}>
         {pipelineName}
       </div>
-      <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/30">
-        {blobUrl ? (
-          <img src={blobUrl} alt={`plot ${plotId}`} className="w-full h-full object-contain" />
-        ) : error ? (
-          <div className="flex flex-col items-center gap-1 text-muted-foreground p-4">
-            <ImageOff className="w-6 h-6" />
-            <span className="text-xs">No image</span>
-          </div>
-        ) : (
-          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-        )}
+      <div className="flex-1 min-h-0">
+        <PlotImage
+          recordId={recordId}
+          plotId={plotId}
+          rotate={rotate}
+          predictions={predictions}
+          showDetections={showDetections}
+          showLabels={showLabels}
+          activeClass={activeClass}
+        />
       </div>
     </div>
   )
@@ -207,7 +189,48 @@ function MasterPlotDialog({
   onDownload: () => void
 }) {
   const [showRef, setShowRef] = useState(false)
+  const [showDetections, setShowDetections] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
+  const [activeClass, setActiveClass] = useState<string | null>(null)
   const exp = useExpandable()
+
+  // Fetch inference results for all contributing pipelines
+  const runIds = useMemo(
+    () => [...new Set(row.pipeline_ids.map((pid) => row.__records__[pid]?.run_id).filter(Boolean) as string[])],
+    [row]
+  )
+  const inferenceQueries = useQueries({
+    queries: runIds.map((runId) => ({
+      queryKey: ["inference-results", runId],
+      queryFn: () =>
+        fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), { headers: authHeaders() })
+          .then((r) => r.ok ? r.json() : null),
+      staleTime: 60_000,
+    })),
+  })
+  // predsByRunByPlot: runId → plotId → predictions (keeps per-pipeline predictions separate)
+  const predsByRunByPlot = useMemo<Record<string, Record<string, CellPrediction[]>>>(() => {
+    const map: Record<string, Record<string, CellPrediction[]>> = {}
+    runIds.forEach((runId, i) => {
+      const data = inferenceQueries[i]?.data
+      if (!data?.available) return
+      const images: Array<{ name: string; plot?: string }> = data.images ?? []
+      const preds: CellPrediction[] = data.predictions ?? []
+      map[runId] = {}
+      for (const img of images) {
+        if (!img.plot) continue
+        const ps = preds.filter((p) => p.image === img.name)
+        if (ps.length > 0) map[runId][img.plot] = ps
+      }
+    })
+    return map
+  }, [inferenceQueries, runIds])
+  const inferenceAvailable = Object.values(predsByRunByPlot).some((byPlot) => Object.keys(byPlot).length > 0)
+
+  const uniqueClasses = useMemo(() => {
+    const all = Object.values(predsByRunByPlot).flatMap((byPlot) => Object.values(byPlot).flat().map((p) => p.class))
+    return [...new Set(all)].sort()
+  }, [predsByRunByPlot])
 
   const contributing = row.pipeline_ids
     .map((pid) => {
@@ -255,6 +278,44 @@ function MasterPlotDialog({
           REF
         </button>
       )}
+      {inferenceAvailable && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDetections((v) => !v)}
+            className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${
+              showDetections
+                ? "bg-primary text-primary-foreground border-primary"
+                : "text-muted-foreground border-input hover:text-foreground"
+            }`}
+          >
+            <ScanSearch className="w-3 h-3" />
+            {showDetections ? "Hide" : "Detections"}
+          </button>
+          {showDetections && (
+            <button
+              onClick={() => setShowLabels((v) => !v)}
+              className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+            >
+              <Tag className="w-3 h-3" />
+              Labels
+            </button>
+          )}
+          {showDetections && uniqueClasses.length > 1 && (
+            <div className="flex items-center gap-0.5 border rounded text-xs">
+              <button
+                onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })}
+                className="px-1 py-0.5 hover:bg-muted"
+              ><ChevronLeft className="w-3 h-3" /></button>
+              <span className="px-1 min-w-[56px] text-center truncate">{activeClass ?? "All"}</span>
+              <button
+                onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })}
+                className="px-1 py-0.5 hover:bg-muted"
+              ><ChevronRight className="w-3 h-3" /></button>
+            </div>
+          )}
+        </>
+      )}
       <button
         type="button"
         title="Download row CSV"
@@ -267,7 +328,7 @@ function MasterPlotDialog({
   )
 
   const plotContent = (
-    <div className="flex gap-4 flex-1 min-h-0">
+    <div className="flex gap-4 flex-1 min-h-[300px]">
       {/* Pipeline images */}
       <div className={`flex gap-3 flex-1 min-w-0 min-h-0 ${contributing.length === 1 ? "justify-center" : ""}`}>
         {contributing.map(({ pid, meta, rec }) => (
@@ -277,6 +338,11 @@ function MasterPlotDialog({
             plotId={row.plot_id}
             pipelineName={meta.name}
             pipelineColor={meta.color}
+            rotate={meta.type === "ground"}
+            predictions={predsByRunByPlot[rec.run_id]?.[row.plot_id] ?? []}
+            showDetections={showDetections}
+            showLabels={showLabels}
+            activeClass={activeClass}
           />
         ))}
       </div>

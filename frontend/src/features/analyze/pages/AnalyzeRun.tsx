@@ -243,6 +243,7 @@ export function AnalyzeRun() {
                   geojson={geojson}
                   runId={runId}
                   recordId={recordId}
+                  isGroundPipeline={runMeta?.pipeline_type === "ground"}
                   refContext={runMeta ? {
                     workspaceId: runMeta.workspace_id,
                     experiment: runMeta.experiment,
@@ -280,6 +281,7 @@ export function AnalyzeRun() {
               geojson={geojson}
               metricColumns={metricColumns}
               runId={runId}
+              isGroundPipeline={runMeta?.pipeline_type === "ground"}
               refContext={runMeta ? {
                 workspaceId: runMeta.workspace_id,
                 experiment: runMeta.experiment,

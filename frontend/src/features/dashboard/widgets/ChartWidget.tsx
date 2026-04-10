@@ -10,10 +10,10 @@ import React, { useMemo } from "react"
 import { Loader2 } from "lucide-react"
 import {
   ComposedChart,
-  BarChart, Bar,
+  BarChart, Bar, Cell as BarCell,
   ScatterChart, Scatter, ZAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  Line, Area,
+  Line, Area, ReferenceLine,
 } from "recharts"
 import {
   useTraitRecordGeojson,
@@ -25,7 +25,9 @@ import {
   formatDashboardValue,
 } from "../hooks/useTraitData"
 import { useTraitRecords } from "../hooks/useTraitData"
+import { useMultiSourceData } from "../hooks/useMultiSourceData"
 import type { ChartConfig } from "../types"
+import { sourceKey } from "../types"
 
 // 10-color palette for multi-series charts
 const SERIES_COLORS = [
@@ -413,6 +415,252 @@ function Unconfigured() {
   )
 }
 
+// ── Multi-source chart ────────────────────────────────────────────────────────
+
+function MultiSourceChart({ config }: { config: ChartConfig }) {
+  const sources = config.sources ?? []
+  const groupByField = config.groupByField ?? null
+  const barLayout = config.barLayout ?? "grouped"
+  const { series, loading, anyError, temporalData, categoricalData, groupedTemporalData } =
+    useMultiSourceData(sources, groupByField)
+
+  const hasTemporal = series.some((s) => !s.isBaseline && s.points.length > 0)
+  const isArea = config.chartType === "area"
+  const isBar = config.chartType === "bar"
+  const dualAxis = sources.some((s) => s.yAxis === "right")
+
+  if (loading) return <Loading />
+  if (sources.length === 0) return <Unconfigured />
+
+  if (anyError && series.every((s) => s.aggregateValue === null && s.points.length === 0)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
+        <p className="text-sm text-muted-foreground">Could not load data</p>
+        <p className="text-xs text-destructive">One or more sources failed — check that extractions completed successfully</p>
+      </div>
+    )
+  }
+
+  const nonBaselineSeries = series.filter((s) => !s.isBaseline)
+  const baselineSeries = series.filter((s) => s.isBaseline)
+
+  // ── Case 1: categorical X-axis (groupByField set + categorical data ready) ──
+
+  if (groupByField && categoricalData.length > 0) {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={categoricalData} margin={{ top: nonBaselineSeries.length > 1 ? 28 : 4, right: 8, bottom: 8, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+          <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <Tooltip
+            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            formatter={(v: any, name: any) => {
+              const s = nonBaselineSeries.find((s) => s.key === String(name))
+              return [formatDashboardValue(v), s?.label ?? String(name)]
+            }}
+          />
+          {nonBaselineSeries.length > 1 && (
+            <Legend
+              verticalAlign="top"
+              formatter={(name) => nonBaselineSeries.find((s) => s.key === name)?.label ?? name}
+              wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+            />
+          )}
+          {nonBaselineSeries.map((s) => (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              name={s.key}
+              fill={s.color}
+              stackId={barLayout === "stacked" ? "stack" : undefined}
+              radius={barLayout === "grouped" ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            />
+          ))}
+          {baselineSeries.filter((s) => s.aggregateValue !== null).map((s) => (
+            <ReferenceLine key={s.key} y={s.aggregateValue!} stroke={s.color}
+              strokeDasharray="6 3" strokeWidth={1.5}
+              label={{ value: s.label, position: "insideTopRight", fontSize: 10, fill: s.color }}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  // ── Case 2: temporal with group split (groupByField set + grouped temporal data) ──
+
+  if (groupByField && groupedTemporalData.data.length > 0) {
+    const { data: gtData, subKeys } = groupedTemporalData
+    return (
+      <div className="flex flex-col h-full">
+        {anyError && (
+          <p className="text-[10px] text-destructive px-2 pt-1 flex-shrink-0">
+            Some sources could not be loaded — data may be incomplete
+          </p>
+        )}
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={gtData} margin={{ top: 28, right: 8, bottom: 8, left: 0 }}>
+            <defs>
+              {subKeys.map((sk, i) => (
+                <linearGradient key={sk} id={`grad-gt-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={SERIES_COLORS[i % SERIES_COLORS.length]} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={SERIES_COLORS[i % SERIES_COLORS.length]} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+            <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6 }}
+              formatter={(v: any, name: any) => {
+                const parts = String(name).split("__")
+                return [formatDashboardValue(v), parts[parts.length - 1] ?? String(name)]
+              }}
+            />
+            <Legend
+              verticalAlign="top"
+              wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+              formatter={(name) => { const parts = String(name).split("__"); return parts[parts.length - 1] ?? name }}
+            />
+            {subKeys.map((sk, i) => {
+              const color = SERIES_COLORS[i % SERIES_COLORS.length]
+              if (isArea) {
+                return <Area key={sk} yAxisId="left" type="monotone" dataKey={sk} name={sk}
+                  stroke={color} fill={`url(#grad-gt-${i})`} strokeWidth={2}
+                  dot={false} activeDot={{ r: 4 }} connectNulls={false} />
+              }
+              return <Line key={sk} yAxisId="left" type="monotone" dataKey={sk} name={sk}
+                stroke={color} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
+            })}
+            {baselineSeries.filter((s) => s.aggregateValue !== null).map((s) => (
+              <ReferenceLine key={s.key} yAxisId="left" y={s.aggregateValue!} stroke={s.color}
+                strokeDasharray="6 3" strokeWidth={1.5}
+                label={{ value: s.label, position: "insideTopRight", fontSize: 10, fill: s.color }}
+              />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  // ── Case 3: aggregate bar (each source = one bar, side by side) ───────────
+
+  if (isBar || !hasTemporal) {
+    // When there are no non-baseline series (reference-only chart), show reference values as bars
+    const effectiveSeries = nonBaselineSeries.length > 0 ? nonBaselineSeries : series
+    const barData = effectiveSeries.map((s) => ({
+      name: s.label,
+      value: s.aggregateValue ?? 0,
+      _key: s.key,
+      _color: s.color,
+    }))
+    // Extend Y-axis to include reference line values (which may be outside bar range)
+    const refLineValues = nonBaselineSeries.length > 0
+      ? baselineSeries.filter((s) => s.aggregateValue !== null).map((s) => s.aggregateValue as number)
+      : []
+    const barMax = barData.reduce((m, d) => Math.max(m, d.value), 0)
+    const yDomainMax = refLineValues.length > 0
+      ? Math.ceil(Math.max(barMax, ...refLineValues) * 1.1)
+      : undefined
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={barData} margin={{ top: 4, right: 8, bottom: 8, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+          <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            domain={yDomainMax !== undefined ? [0, yDomainMax] : undefined} />
+          <Tooltip
+            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            formatter={(v: any) => [formatDashboardValue(v), ""]}
+          />
+          <Bar dataKey="value" radius={[3, 3, 0, 0]}>
+            {barData.map((d) => (
+              <BarCell key={d._key} fill={d._color} />
+            ))}
+          </Bar>
+          {nonBaselineSeries.length > 0 && baselineSeries.filter((s) => s.aggregateValue !== null).map((s) => (
+            <ReferenceLine key={s.key} y={s.aggregateValue!} stroke={s.color}
+              strokeDasharray="6 3" strokeWidth={1.5}
+              label={{ value: s.label, position: "insideTopRight", fontSize: 10, fill: s.color }}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  // ── Case 4: temporal mode (lines/areas, no groupBy) ───────────────────────
+
+  return (
+    <div className="flex flex-col h-full">
+      {anyError && (
+        <p className="text-[10px] text-destructive px-2 pt-1 flex-shrink-0">
+          Some sources could not be loaded — data may be incomplete
+        </p>
+      )}
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={temporalData} margin={{ top: 28, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
+          <defs>
+            {nonBaselineSeries.map((s) => (
+              <linearGradient key={s.key} id={`grad-ms-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={s.color} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={s.color} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+          <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          {dualAxis && (
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          )}
+          <Tooltip
+            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            formatter={(value: any, name: any) => {
+              const s = series.find((s) => s.key === String(name))
+              return [formatDashboardValue(value), s?.label ?? String(name)]
+            }}
+          />
+          <Legend
+            verticalAlign="top"
+            formatter={(name) => series.find((s) => s.key === name)?.label ?? name}
+            wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+          />
+
+          {nonBaselineSeries.map((s) => {
+            const src = sources.find((src) => sourceKey(src) === s.key)
+            const axisId = src?.yAxis === "right" ? "right" : "left"
+            if (isArea) {
+              return (
+                <Area key={s.key} yAxisId={axisId} type="monotone" dataKey={s.key} name={s.key}
+                  stroke={s.color} fill={`url(#grad-ms-${s.key})`} strokeWidth={2}
+                  dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
+              )
+            }
+            return (
+              <Line key={s.key} yAxisId={axisId} type="monotone" dataKey={s.key} name={s.key}
+                stroke={s.color} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
+            )
+          })}
+
+          {baselineSeries.filter((s) => s.aggregateValue !== null).map((s) => {
+            const src = sources.find((src) => sourceKey(src) === s.key)
+            const axisId = src?.yAxis === "right" ? "right" : "left"
+            return (
+              <ReferenceLine key={s.key} yAxisId={axisId} y={s.aggregateValue!}
+                stroke={s.color} strokeDasharray="6 3" strokeWidth={1.5}
+                label={{ value: s.label, position: "insideTopRight", fontSize: 10, fill: s.color }}
+              />
+            )
+          })}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 interface ChartWidgetProps {
@@ -420,6 +668,8 @@ interface ChartWidgetProps {
 }
 
 export function ChartWidget({ config }: ChartWidgetProps) {
+  if ((config.sources?.length ?? 0) > 0 || config.mode === "multi-source")
+    return <MultiSourceChart config={config} />
   if (config.mode === "temporal") return <TemporalChart config={config} />
   if (config.mode === "correlation") return <CorrelationScatter config={config} />
   if (config.chartType === "histogram") return <HistogramChart config={config} />

@@ -7,7 +7,7 @@
  */
 
 import { useState, useMemo } from "react"
-import { Plus, X } from "lucide-react"
+import { Plus, X, ChevronUp, SlidersHorizontal } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -18,6 +18,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { useTraitRecords, useTraitRecordGeojson, useMultiTraitGeojson } from "../hooks/useTraitData"
+import { useReferenceDatasets, useReferencePlots } from "../hooks/useReferenceData"
+import type { DataSource } from "../types"
 import { deduplicateKeys } from "@/features/analyze/utils/traitAliases"
 import type {
   DashboardWidget, KpiConfig, ChartConfig, TableConfig, PlotViewerConfig,
@@ -537,6 +539,548 @@ function KpiForm({ config, onChange }: { config: KpiConfig; onChange: (c: KpiCon
   )
 }
 
+// ── Multi-source components ───────────────────────────────────────────────────
+
+const AGG_OPTS: { value: string; label: string }[] = [
+  { value: "avg", label: "Avg" },
+  { value: "min", label: "Min" },
+  { value: "max", label: "Max" },
+  { value: "sum", label: "Sum" },
+  { value: "median", label: "Median" },
+]
+
+function ReferenceDatasetSelector({
+  value, onChange,
+}: {
+  value: string | null
+  onChange: (id: string) => void
+}) {
+  const { data: datasets = [], isLoading, isError, error } = useReferenceDatasets()
+  return (
+    <div className="space-y-1.5">
+      {isLoading && <p className="text-xs text-muted-foreground">Loading datasets…</p>}
+      {isError && (
+        <p className="text-xs text-destructive">
+          Could not load datasets — {(error as any)?.message ?? "check server connection"}
+        </p>
+      )}
+      {!isLoading && !isError && datasets.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          No reference datasets found. Upload one in the Files tab first.
+        </p>
+      )}
+      {!isLoading && !isError && datasets.length > 0 && (
+        <Select value={value || "__none__"} onValueChange={(v) => v !== "__none__" && onChange(v)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Select dataset…" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— None —</SelectItem>
+            {datasets.map((d) => (
+              <SelectItem key={d.id} value={d.id}>
+                {d.name}{d.date ? ` (${d.date})` : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+}
+
+function ReferenceMetricSelect({
+  datasetId, value, onChange,
+}: {
+  datasetId: string | null
+  value: string | null
+  onChange: (v: string) => void
+}) {
+  const { data: datasets = [] } = useReferenceDatasets()
+  const cols = datasets.find((d) => d.id === datasetId)?.trait_columns ?? []
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Metric</Label>
+      <Select value={value || "__none__"} onValueChange={(v) => v !== "__none__" && onChange(v)}>
+        <SelectTrigger className="h-8 text-xs">
+          <SelectValue placeholder="Select metric…" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">— None —</SelectItem>
+          {cols.map((c) => (
+            <SelectItem key={c} value={c}>{c.replace(/_/g, " ")}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+type AddSourceStep = "type" | "pipeline-run" | "pipeline-avg" | "reference"
+
+function AddSourcePanel({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (srcs: DataSource[]) => void
+  onCancel: () => void
+}) {
+  const [step, setStep] = useState<AddSourceStep>("type")
+  // pipeline-run state
+  const [prRecordId, setPrRecordId] = useState<string | null>(null)
+  const [prMetrics, setPrMetrics] = useState<string[]>([])
+  const [prAggs, setPrAggs] = useState<Record<string, string>>({})
+  const [prLabel, setPrLabel] = useState("")
+  // pipeline-avg state
+  const [paId, setPaId] = useState<string | null>(null)
+  const [paPipelineRecordIds, setPaPipelineRecordIds] = useState<string[]>([])
+  const [paMetrics, setPaMetrics] = useState<string[]>([])
+  const [paAggs, setPaAggs] = useState<Record<string, string>>({})
+  const [paLabel, setPaLabel] = useState("")
+  // reference state
+  const [refDatasetId, setRefDatasetId] = useState<string | null>(null)
+  const [refMetric, setRefMetric] = useState<string | null>(null)
+  const [refAgg, setRefAgg] = useState("avg")
+  const [refLabel, setRefLabel] = useState("")
+
+  const newId = () => crypto.randomUUID()
+
+  if (step === "type") {
+    return (
+      <div className="rounded-md border border-dashed p-3 space-y-2 bg-muted/30">
+        <p className="text-xs font-medium">Add a data source</p>
+        <div className="grid grid-cols-1 gap-1.5">
+          {([
+            { key: "pipeline-run", label: "Pipeline Run", desc: "Single extraction date" },
+            { key: "pipeline-avg", label: "Pipeline Average", desc: "All dates for a pipeline" },
+            { key: "reference",    label: "Reference Dataset", desc: "Uploaded field design / reference traits" },
+          ] as const).map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setStep(opt.key)}
+              className="text-left rounded px-2.5 py-2 text-xs border hover:bg-muted transition-colors"
+            >
+              <span className="font-medium">{opt.label}</span>
+              <span className="text-muted-foreground ml-1.5">{opt.desc}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={onCancel} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+      </div>
+    )
+  }
+
+  if (step === "pipeline-run") {
+    const canAdd = !!prRecordId && prMetrics.length > 0
+    return (
+      <div className="rounded-md border border-dashed p-3 space-y-2 bg-muted/30">
+        <p className="text-xs font-medium">Pipeline Run</p>
+        <RecordSelector value={prRecordId} onChange={setPrRecordId} />
+        <MultiMetricSelector
+          recordId={prRecordId}
+          values={prMetrics}
+          aggregations={prAggs}
+          onChange={setPrMetrics}
+          onAggChange={(m, a) => setPrAggs((prev) => ({ ...prev, [m]: a }))}
+          label="Metrics (one source per metric)"
+        />
+        <div className="space-y-1.5">
+          <Label className="text-xs">Label prefix (optional)</Label>
+          <input
+            className="w-full h-7 rounded border bg-background px-2 text-xs"
+            placeholder="e.g. Apr Run"
+            value={prLabel}
+            onChange={(e) => setPrLabel(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" className="h-7 text-xs" disabled={!canAdd} onClick={() => {
+            onAdd(prMetrics.map((m) => ({ id: newId(), type: "pipeline-run" as const, recordId: prRecordId!, metric: m, aggregation: (prAggs[m] ?? "avg") as any, label: prLabel ? `${prLabel} · ${m}` : undefined })))
+          }}>Add {prMetrics.length > 1 ? `${prMetrics.length} sources` : "source"}</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setStep("type")}>Back</Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (step === "pipeline-avg") {
+    const canAdd = !!paId && paMetrics.length > 0
+    return (
+      <div className="rounded-md border border-dashed p-3 space-y-2 bg-muted/30">
+        <p className="text-xs font-medium">Pipeline Average (all runs)</p>
+        <PipelineSelect
+          value={paId}
+          onChange={(id, records) => { setPaId(id); setPaPipelineRecordIds(records) }}
+        />
+        <MultiMetricSelector
+          recordId={paPipelineRecordIds[0] ?? null}
+          fallbackRecordIds={paPipelineRecordIds}
+          values={paMetrics}
+          aggregations={paAggs}
+          onChange={setPaMetrics}
+          onAggChange={(m, a) => setPaAggs((prev) => ({ ...prev, [m]: a }))}
+          label="Metrics (one source per metric)"
+        />
+        <div className="space-y-1.5">
+          <Label className="text-xs">Label prefix (optional)</Label>
+          <input
+            className="w-full h-7 rounded border bg-background px-2 text-xs"
+            placeholder="e.g. Aerial (avg)"
+            value={paLabel}
+            onChange={(e) => setPaLabel(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" className="h-7 text-xs" disabled={!canAdd} onClick={() => {
+            onAdd(paMetrics.map((m) => ({ id: newId(), type: "pipeline-avg" as const, pipelineId: paId!, metric: m, aggregation: (paAggs[m] ?? "avg") as any, label: paLabel ? `${paLabel} · ${m}` : undefined })))
+          }}>Add {paMetrics.length > 1 ? `${paMetrics.length} sources` : "source"}</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setStep("type")}>Back</Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (step === "reference") {
+    const canAdd = !!refDatasetId && !!refMetric
+    return (
+      <div className="rounded-md border border-dashed p-3 space-y-2 bg-muted/30">
+        <p className="text-xs font-medium">Reference Dataset</p>
+        <ReferenceDatasetSelector value={refDatasetId} onChange={setRefDatasetId} />
+        <ReferenceMetricSelect datasetId={refDatasetId} value={refMetric} onChange={setRefMetric} />
+        <div className="space-y-1.5">
+          <Label className="text-xs">Aggregation</Label>
+          <Select value={refAgg} onValueChange={setRefAgg}>
+            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {AGG_OPTS.slice(0, 3).map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Label (optional)</Label>
+          <input
+            className="w-full h-7 rounded border bg-background px-2 text-xs"
+            placeholder="e.g. Reference LAI"
+            value={refLabel}
+            onChange={(e) => setRefLabel(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" className="h-7 text-xs" disabled={!canAdd} onClick={() => {
+            onAdd([{ id: newId(), type: "reference", datasetId: refDatasetId!, metric: refMetric!, aggregation: refAgg as any, label: refLabel || undefined }])
+          }}>Add</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setStep("type")}>Back</Button>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
+
+/**
+ * GroupBy field selector for multi-source mode.
+ * Derives available categorical fields from the first pipeline source's GeoJSON.
+ */
+function MultiSourceGroupBySelector({
+  sources, value, onChange,
+}: {
+  sources: DataSource[]
+  value: string | null
+  onChange: (v: string | null) => void
+}) {
+  // Find the first pipeline-run or pipeline-avg source to load fields from
+  const firstPipelineSource = sources.find((s) => s.type === "pipeline-run" || s.type === "pipeline-avg")
+  const { data: allRecords = [] } = useTraitRecords()
+
+  const recordId = useMemo(() => {
+    if (!firstPipelineSource) return null
+    if (firstPipelineSource.type === "pipeline-run") return firstPipelineSource.recordId
+    return allRecords.find((r) => r.pipeline_id === (firstPipelineSource as any).pipelineId)?.id ?? null
+  }, [firstPipelineSource, allRecords])
+
+  const { data: geoData } = useTraitRecordGeojson(recordId)
+
+  const fields = useMemo(() => {
+    if (!geoData) return [] as string[]
+    const metrics = new Set(geoData.metric_columns)
+    return deduplicateKeys(
+      geoData.geojson.features.flatMap((f) => Object.keys(f.properties ?? {}))
+    ).filter((k) => !metrics.has(k))
+  }, [geoData])
+
+  if (!firstPipelineSource || fields.length === 0) return null
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Group By Field (optional)</Label>
+      <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? null : v)}>
+        <SelectTrigger className="h-8 text-xs">
+          <SelectValue placeholder="No grouping — use date axis" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">None — use date / aggregate axis</SelectItem>
+          {fields.map((f) => (
+            <SelectItem key={f} value={f}>{f.replace(/_/g, " ")}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {value && (
+        <p className="text-[10px] text-muted-foreground">
+          X-axis will show unique values of <strong>{value}</strong>. For temporal sources, each value becomes its own line.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Filter panel for a reference dataset source.
+ * Shows unique values for accession / col / row derived from the dataset's plots.
+ */
+function ReferenceFiltersSection({
+  datasetId,
+  filters,
+  onChange,
+}: {
+  datasetId: string
+  filters: Record<string, string[]>
+  onChange: (f: Record<string, string[]>) => void
+}) {
+  const { data: plots = [], isLoading } = useReferencePlots(datasetId)
+
+  const uniqueByField = useMemo(() => {
+    const out: Record<string, string[]> = {}
+    const fields = ["accession", "col", "row", "plot_id"] as const
+    fields.forEach((f) => {
+      const vals = [...new Set(plots.map((p) => String(p[f] ?? "")).filter(Boolean))].sort()
+      if (vals.length > 0 && vals.length <= 300) out[f] = vals
+    })
+    return out
+  }, [plots])
+
+  if (isLoading) return <p className="text-[10px] text-muted-foreground">Loading filter options…</p>
+  if (Object.keys(uniqueByField).length === 0) return <p className="text-[10px] text-muted-foreground">No filterable fields found.</p>
+
+  return (
+    <div className="space-y-2">
+      {Object.entries(uniqueByField).map(([field, vals]) => {
+        const selected = filters[field] ?? []
+        return (
+          <div key={field} className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium text-muted-foreground capitalize">{field.replace(/_/g, " ")}</span>
+              {selected.length > 0 && (
+                <button className="text-[10px] text-muted-foreground hover:text-foreground"
+                  onClick={() => onChange({ ...filters, [field]: [] })}>Clear</button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {vals.map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    const next = selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]
+                    onChange({ ...filters, [field]: next })
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
+                    selected.includes(v)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SourceList({
+  sources,
+  onChange,
+}: {
+  sources: DataSource[]
+  onChange: (sources: DataSource[]) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [expandedFilters, setExpandedFilters] = useState<Set<string>>(new Set())
+  const { data: allRecords = [] } = useTraitRecords()
+
+  function remove(id: string) {
+    onChange(sources.filter((s) => s.id !== id))
+  }
+
+  function updateLabel(id: string, label: string) {
+    onChange(sources.map((s) => s.id === id ? { ...s, label: label || undefined } : s))
+  }
+
+  function updateYAxis(id: string, yAxis: "left" | "right") {
+    onChange(sources.map((s) => s.id === id ? { ...s, yAxis } : s))
+  }
+
+  function updateSourceFilters(id: string, filters: Record<string, string[]>) {
+    onChange(sources.map((s) => s.id === id ? { ...s, filters } : s))
+  }
+
+  function toggleFilters(id: string) {
+    setExpandedFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function handleAdd(srcs: DataSource[]) {
+    onChange([...sources, ...srcs])
+    setAdding(false)
+  }
+
+  // Resolve a recordId for the FiltersSection given a source
+  function sourceRecordId(src: DataSource): string | null {
+    if (src.type === "pipeline-run") return src.recordId
+    if (src.type === "pipeline-avg") {
+      return allRecords.find((r) => r.pipeline_id === src.pipelineId)?.id ?? null
+    }
+    return null
+  }
+
+  const sourceTypeLabel = (src: DataSource) => {
+    if (src.type === "pipeline-run") return "Run"
+    if (src.type === "pipeline-avg") return "Avg"
+    return "Ref"
+  }
+
+  const defaultLabelHint = (src: DataSource) => {
+    if (src.type === "reference") return (src as any).datasetId?.slice(0, 6) + "… · " + src.metric
+    if (src.type === "pipeline-run") return (src as any).recordId?.slice(0, 6) + "… · " + src.metric
+    return (src as any).pipelineId?.slice(0, 6) + "… · " + src.metric
+  }
+
+  const activeFiltersCount = (src: DataSource) =>
+    Object.values(src.filters ?? {}).filter((v) => v.length > 0).length
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs">Data Sources</Label>
+
+      {sources.length === 0 && !adding && (
+        <p className="text-xs text-muted-foreground">No sources added yet — add at least one to render the chart.</p>
+      )}
+
+      {sources.map((src, i) => {
+        const filterCount = activeFiltersCount(src)
+        const filtersExpanded = expandedFilters.has(src.id)
+        const recordIdForFilter = sourceRecordId(src)
+
+        return (
+          <div key={src.id} className="rounded-md border bg-card">
+            {/* Header row */}
+            <div className="flex items-center gap-1.5 p-2.5">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
+                src.type === "reference"
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                  : "bg-primary/10 text-primary"
+              }`}>
+                {sourceTypeLabel(src)}
+              </span>
+              <span className="text-xs flex-1 truncate text-muted-foreground min-w-0">
+                {src.label || defaultLabelHint(src)}
+              </span>
+              <span className={`text-[9px] font-bold flex-shrink-0 ${i === 0 ? "text-primary" : "text-muted-foreground"}`}>
+                {sources.length > 1 ? (i === 0 ? "L" : "R") : ""}
+              </span>
+              {/* Filter toggle (pipeline sources + reference sources) */}
+              {(recordIdForFilter || src.type === "reference") && (
+                <button
+                  onClick={() => toggleFilters(src.id)}
+                  title="Toggle filters"
+                  className={`flex-shrink-0 transition-colors ${filterCount > 0 ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  {filterCount > 0 && <span className="text-[9px] ml-0.5">{filterCount}</span>}
+                </button>
+              )}
+              <button onClick={() => remove(src.id)} className="text-muted-foreground hover:text-destructive flex-shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Label + Y-axis row */}
+            <div className="grid grid-cols-2 gap-1.5 px-2.5 pb-2.5">
+              <div className="space-y-1">
+                <Label className="text-[10px]">Label</Label>
+                <input
+                  className="w-full h-6 rounded border bg-background px-1.5 text-xs"
+                  placeholder="Auto"
+                  value={src.label ?? ""}
+                  onChange={(e) => updateLabel(src.id, e.target.value)}
+                />
+              </div>
+              {sources.length > 1 && (
+                <div className="space-y-1">
+                  <Label className="text-[10px]">Y-axis</Label>
+                  <Select value={src.yAxis ?? "left"} onValueChange={(v) => updateYAxis(src.id, v as "left" | "right")}>
+                    <SelectTrigger className="h-6 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left" className="text-xs">Left</SelectItem>
+                      <SelectItem value="right" className="text-xs">Right</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Collapsible filter section */}
+            {filtersExpanded && (recordIdForFilter || src.type === "reference") && (
+              <div className="border-t px-2.5 pb-2.5 pt-2 space-y-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filters</span>
+                  <button onClick={() => toggleFilters(src.id)} className="text-muted-foreground hover:text-foreground">
+                    <ChevronUp className="w-3 h-3" />
+                  </button>
+                </div>
+                {src.type === "reference" ? (
+                  <ReferenceFiltersSection
+                    datasetId={(src as any).datasetId}
+                    filters={src.filters ?? {}}
+                    onChange={(f) => updateSourceFilters(src.id, f)}
+                  />
+                ) : recordIdForFilter ? (
+                  <FiltersSection
+                    recordId={recordIdForFilter}
+                    filters={src.filters ?? {}}
+                    onChange={(f) => updateSourceFilters(src.id, f)}
+                  />
+                ) : null}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {adding
+        ? <AddSourcePanel onAdd={handleAdd} onCancel={() => setAdding(false)} />
+        : (
+          <button
+            onClick={() => setAdding(true)}
+            className="w-full flex items-center justify-center gap-1.5 h-8 rounded border border-dashed text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add source
+          </button>
+        )
+      }
+    </div>
+  )
+}
+
+// ── Chart form ────────────────────────────────────────────────────────────────
+
 function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: ChartConfig) => void }) {
   // For temporal mode, derive categorical fields from the first record in the pipeline
   const filterRecordId = config.mode === "temporal"
@@ -559,6 +1103,7 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
             <SelectItem value="spatial">Spatial — compare by category (single run)</SelectItem>
             <SelectItem value="temporal">Temporal — track change over dates</SelectItem>
             <SelectItem value="correlation">Correlation — metric vs metric</SelectItem>
+            <SelectItem value="multi-source">Multi-source — compare across pipelines &amp; reference data</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -589,9 +1134,55 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
             {config.mode === "correlation" && (
               <SelectItem value="scatter">Scatter Plot</SelectItem>
             )}
+            {config.mode === "multi-source" && (
+              <>
+                <SelectItem value="line">Line Chart</SelectItem>
+                <SelectItem value="area">Area Chart</SelectItem>
+                <SelectItem value="bar">Bar Chart</SelectItem>
+              </>
+            )}
           </SelectContent>
         </Select>
       </div>
+
+      {/* Multi-source fields */}
+      {config.mode === "multi-source" && (
+        <>
+          <SourceList
+            sources={config.sources ?? []}
+            onChange={(sources) => onChange({ ...config, sources })}
+          />
+
+          {/* Group-by field selector */}
+          <MultiSourceGroupBySelector
+            sources={config.sources ?? []}
+            value={config.groupByField ?? null}
+            onChange={(v) => onChange({ ...config, groupByField: v })}
+          />
+
+          {/* Bar layout toggle — only relevant for bar chart + categorical groupBy */}
+          {config.chartType === "bar" && (config.groupByField || (config.sources ?? []).length > 1) && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bar Layout</Label>
+              <div className="flex gap-2">
+                {(["grouped", "stacked"] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => onChange({ ...config, barLayout: opt })}
+                    className={`flex-1 h-7 rounded border text-xs transition-colors ${
+                      (config.barLayout ?? "grouped") === opt
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    {opt === "grouped" ? "Side by side" : "Stacked"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Spatial fields */}
       {config.mode === "spatial" && (
@@ -720,12 +1311,16 @@ function ChartForm({ config, onChange }: { config: ChartConfig; onChange: (c: Ch
         </>
       )}
 
-      <hr />
-      <FiltersSection
-        recordId={filterRecordId}
-        filters={config.filters ?? {}}
-        onChange={(f) => onChange({ ...config, filters: f })}
-      />
+      {config.mode !== "multi-source" && (
+        <>
+          <hr />
+          <FiltersSection
+            recordId={filterRecordId}
+            filters={config.filters ?? {}}
+            onChange={(f) => onChange({ ...config, filters: f })}
+          />
+        </>
+      )}
     </div>
   )
 }

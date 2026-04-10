@@ -1,5 +1,55 @@
 /** All TypeScript types for the Dashboard feature. */
 
+// ── Shared aggregation type (used by both ChartConfig and DataSource) ─────────
+
+export type ChartAggregation = "avg" | "min" | "max" | "sum" | "median"
+
+// ── Multi-source data abstraction ─────────────────────────────────────────────
+
+/**
+ * One series in a multi-source chart widget.
+ * `id` is a stable UUID generated at add-time (never changes on reorder).
+ */
+export type PipelineRunSource = {
+  id: string
+  type: "pipeline-run"
+  recordId: string
+  metric: string
+  aggregation: ChartAggregation
+  label?: string
+  yAxis?: "left" | "right"
+  filters?: Record<string, string[]>
+}
+
+export type PipelineAvgSource = {
+  id: string
+  type: "pipeline-avg"
+  pipelineId: string
+  metric: string
+  aggregation: ChartAggregation
+  label?: string
+  yAxis?: "left" | "right"
+  filters?: Record<string, string[]>
+}
+
+export type ReferenceSource = {
+  id: string
+  type: "reference"
+  datasetId: string
+  metric: string
+  aggregation: ChartAggregation
+  label?: string
+  yAxis?: "left" | "right"
+  filters?: Record<string, string[]>
+}
+
+export type DataSource = PipelineRunSource | PipelineAvgSource | ReferenceSource
+
+/** Stable recharts dataKey for a source — uses the source's own stable id. */
+export function sourceKey(src: DataSource): string {
+  return `src_${src.id.slice(0, 8)}_${src.metric.replace(/[^a-z0-9]/gi, "_")}`
+}
+
 // ── Span ──────────────────────────────────────────────────────────────────────
 
 export type WidgetSpan = "sm" | "md" | "lg" | "full"
@@ -23,9 +73,8 @@ export interface KpiConfig {
   filters: Record<string, string[]>
 }
 
-export type ChartMode = "spatial" | "temporal" | "correlation"
+export type ChartMode = "spatial" | "temporal" | "correlation" | "multi-source"
 export type ChartType = "bar" | "line" | "area" | "scatter" | "histogram"
-export type ChartAggregation = "avg" | "min" | "max" | "sum" | "median"
 export type ErrorBandType = "std" | "minmax"
 
 export interface ChartConfig {
@@ -59,6 +108,25 @@ export interface ChartConfig {
   temporalRecordIds: string[]
   /** field → selected values; empty array = show all for that field */
   filters: Record<string, string[]>
+  /**
+   * Multi-source series (Phase 2+).
+   * When non-empty, takes full precedence over all legacy fields above.
+   * Each source produces one recharts series (Line / Bar / Area).
+   * Empty array = classic single-source mode (backward compatible).
+   */
+  sources: DataSource[]
+  /**
+   * Multi-source bar layout: "grouped" = side-by-side, "stacked" = stacked.
+   * Only applies when mode === "multi-source" and chartType === "bar".
+   */
+  barLayout?: "grouped" | "stacked"
+  /**
+   * When set, groups data by this field instead of using dates on the X-axis.
+   * E.g. "accession", "plot_id", "col" — produces one X-tick per unique value.
+   * For temporal sources (pipeline-avg), splits each source into one sub-series
+   * per group value so you see e.g. one line per accession over time.
+   */
+  groupByField?: string | null
 }
 
 export interface TableConfig {

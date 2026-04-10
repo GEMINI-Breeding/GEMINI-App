@@ -1,5 +1,6 @@
-import { useMemo, useState, useEffect, useRef } from "react"
-import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Loader2, Tag, FlaskConical } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ArrowUpDown, Download, Eye, EyeOff, Scan, X, Tag, FlaskConical, ChevronLeft, ChevronRight } from "lucide-react"
+import { PlotImage, type Prediction } from "@/components/Common/PlotImage"
 import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,6 +27,7 @@ interface TraitsTableProps {
     location: string
     population: string
   }
+  isGroundPipeline?: boolean
 }
 
 function apiUrl(path: string): string {
@@ -69,100 +71,9 @@ function formatHeader(col: string): string {
   return col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// ── Inline plot image viewer with detection overlay ───────────────────────────
-
-const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
-]
-
-function classColour(cls: string): string {
-  let hash = 0
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
-  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
-}
-
-interface Prediction {
-  image: string
-  class: string
-  confidence: number
-  x: number; y: number; width: number; height: number
-  points?: Array<{ x: number; y: number }>
-}
-
-interface PlotViewerProps {
-  recordId: string
-  plotId: string
-  predictions: Prediction[]
-  showDetections: boolean
-  showLabels: boolean
-}
-
-function PlotViewer({ recordId, plotId, predictions, showDetections, showLabels }: PlotViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-
-  useEffect(() => {
-    setBlobUrl(null); setError(false); setDims(null)
-    let revoked = false; let objectUrl: string | null = null
-    fetch(apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`), { headers: authHeaders() })
-      .then((r) => { if (!r.ok) throw new Error(); return r.blob() })
-      .then((blob) => { if (!revoked) { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl) } })
-      .catch(() => setError(true))
-    return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [recordId, plotId])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    if (!dims || !showDetections || predictions.length === 0) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      return
-    }
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width; canvas.height = rect.height
-    ctx.clearRect(0, 0, rect.width, rect.height)
-    const sx = rect.width / dims.w, sy = rect.height / dims.h
-    for (const p of predictions) {
-      const color = classColour(p.class)
-      const x = (p.x - p.width / 2) * sx, y = (p.y - p.height / 2) * sy
-      const w = p.width * sx, h = p.height * sy
-      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h)
-      if (showLabels) {
-        const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
-        ctx.font = "11px monospace"
-        const tw = ctx.measureText(label).width
-        ctx.fillStyle = color; ctx.fillRect(x, y - 16, tw + 6, 16)
-        ctx.fillStyle = "#fff"; ctx.fillText(label, x + 3, y - 3)
-      }
-    }
-  }, [dims, predictions, showDetections, showLabels])
-
-  if (error) return <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Image not available</div>
-  if (!blobUrl) return <div className="flex items-center justify-center h-full"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-
-  return (
-    <div className="relative w-full h-full">
-      <img
-        ref={imgRef}
-        src={blobUrl}
-        alt={`Plot ${plotId}`}
-        className="w-full h-full object-contain"
-        onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-      />
-      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }} />
-    </div>
-  )
-}
-
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTableProps) {
+export function TraitsTable({ geojson, runId, recordId, refContext, isGroundPipeline = false }: TraitsTableProps) {
   const [search, setSearch] = useState("")
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortAsc, setSortAsc] = useState(true)
@@ -171,6 +82,7 @@ export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTabl
   const [showDetections, setShowDetections] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [showRefData, setShowRefData] = useState(false)
+  const [activeClass, setActiveClass] = useState<string | null>(null)
 
   const refProps = refContext && viewPlotId && viewRow ? {
     workspaceId: refContext.workspaceId,
@@ -211,6 +123,11 @@ export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTabl
     }
     return map
   }, [inferenceData])
+
+  const uniqueClasses = useMemo(() => {
+    const all = Object.values(predsByPlot).flat().map((p) => p.class)
+    return [...new Set(all)].sort()
+  }, [predsByPlot])
 
   const rows: Record<string, unknown>[] = useMemo(
     () => geojson.features.map((f) => f.properties ?? {}),
@@ -381,6 +298,13 @@ export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTabl
                       {showLabels ? "Hide labels" : "Show labels"}
                     </button>
                   )}
+                  {showDetections && uniqueClasses.length > 1 && (
+                    <div className="flex items-center gap-0.5 border rounded text-xs">
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                      <span className="px-1 min-w-[56px] text-center truncate">{activeClass ?? "All"}</span>
+                      <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                    </div>
+                  )}
                 </>
               )}
               {refContext && (
@@ -412,14 +336,16 @@ export function TraitsTable({ geojson, runId, recordId, refContext }: TraitsTabl
             </div>
           </div>
           <div className="flex" style={{ height: 360 }}>
-            <div className={showRefData && refProps ? "flex-1 min-w-0" : "w-full"}>
-              <PlotViewer
+            <div className={showRefData && refProps ? "flex-1 min-w-0 min-h-0" : "w-full min-h-0"}>
+              <PlotImage
                 key={viewPlotId}
                 recordId={recordId}
                 plotId={viewPlotId}
+                rotate={isGroundPipeline}
                 predictions={viewPredictions}
                 showDetections={showDetections}
                 showLabels={showLabels}
+                activeClass={activeClass}
               />
             </div>
             {showRefData && refProps && (

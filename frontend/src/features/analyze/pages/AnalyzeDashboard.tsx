@@ -7,7 +7,8 @@
  *  - Map:    satellite → ortho image overlay → trait polygons.
  */
 
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { PlotImage, type Prediction as SharedPrediction } from "@/components/Common/PlotImage";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import {
   type ColumnDef,
@@ -21,14 +22,16 @@ import { ColumnFilter } from "@/features/files/components/ColumnFilter";
 import {
   BarChart2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Download,
   Eye,
   EyeOff,
-  ImageOff,
   Loader2,
   Pin,
   PinOff,
+  Scan,
+  Tag,
   X as XIcon,
   Map as MapIcon,
   PanelLeftClose,
@@ -155,35 +158,7 @@ function getPlotId(
 // matchesTextFilter, PLOT_FILTER_FIELDS, PlotFilterKey — all imported from
 // ../utils/traitAliases
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Prediction {
-  image: string
-  class: string
-  confidence: number
-  x: number
-  y: number
-  width: number
-  height: number
-  points?: Array<{ x: number; y: number }>
-}
-
-const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
-]
-
-function classColour(cls: string): string {
-  let hash = 0
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
-  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const c = hex.replace("#", "")
-  const num = parseInt(c.length === 3 ? c.split("").map((ch) => ch + ch).join("") : c, 16)
-  return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`
-}
+// ── Types (re-exported from shared for local use) ─────────────────────────────
 
 // ── Version badge ──────────────────────────────────────────────────────────────
 
@@ -215,6 +190,7 @@ function PlotViewDialog({
   properties,
   metricColumns,
   runId,
+  isGroundPipeline = false,
   onClose,
 }: {
   recordId: string;
@@ -222,15 +198,15 @@ function PlotViewDialog({
   properties: Record<string, unknown>;
   metricColumns: string[];
   runId?: string;
+  isGroundPipeline?: boolean;
   onClose: () => void;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  const [showDetections, setShowDetections] = useState(true);
+  const [showDetections, setShowDetections] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
+  const [activeClass, setActiveClass] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+
+  const exp = useExpandable();
 
   // Fetch inference results (re-runs when model changes)
   const { data: inferenceData } = useQuery({
@@ -250,238 +226,133 @@ function PlotViewDialog({
 
   const availableModels: string[] = inferenceData?.models ?? [];
 
-  // Build predictions for this specific plot from inference data
-  const predictions = useMemo<Prediction[]>(() => {
+  const predictions = useMemo<SharedPrediction[]>(() => {
     if (!inferenceData?.available) return [];
     const imgList: Array<{ name: string; plot?: string }> = inferenceData.images ?? [];
-    const preds: Prediction[] = inferenceData.predictions ?? [];
+    const preds: SharedPrediction[] = inferenceData.predictions ?? [];
     const imgToPlot = new Map(imgList.map((im) => [im.name, String(im.plot ?? "")]));
     return preds.filter((p) => imgToPlot.get(p.image) === plotId);
   }, [inferenceData, plotId]);
 
-  useEffect(() => {
-    setBlobUrl(null);
-    setError(false);
-    setDims(null);
-    const endpoint = apiUrl(
-      `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
-    );
-    const token = localStorage.getItem("access_token") || "";
-    let revoke: string | null = null;
-    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error();
-        return res.blob();
-      })
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        revoke = url;
-        setBlobUrl(url);
-      })
-      .catch(() => setError(true));
-    return () => {
-      if (revoke) URL.revokeObjectURL(revoke);
-    };
-  }, [recordId, plotId]);
-
-  const exp = useExpandable();
-
-  // Draw detection boxes on canvas — accounts for object-contain letterboxing
-  function drawCanvas(canvas: HTMLCanvasElement) {
-    const img = imgRef.current;
-    if (!img || !dims) { canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height); return; }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const rect = img.getBoundingClientRect();
-    const elemW = rect.width;
-    const elemH = rect.height;
-    canvas.width = elemW;
-    canvas.height = elemH;
-    ctx.clearRect(0, 0, elemW, elemH);
-    if (!showDetections || !predictions?.length) return;
-    // Compute actual rendered image bounds inside element (object-contain)
-    const imgAspect = dims.w / dims.h;
-    const elemAspect = elemW / elemH;
-    let scale: number, offsetX: number, offsetY: number;
-    if (imgAspect > elemAspect) {
-      scale = elemW / dims.w;
-      offsetX = 0;
-      offsetY = (elemH - dims.h * scale) / 2;
-    } else {
-      scale = elemH / dims.h;
-      offsetX = (elemW - dims.w * scale) / 2;
-      offsetY = 0;
-    }
-    for (const pred of predictions) {
-      const color = classColour(pred.class);
-      const hasPoints = (pred.points?.length ?? 0) >= 3;
-      if (hasPoints && pred.points) {
-        ctx.beginPath();
-        pred.points.forEach((pt, idx) => {
-          const px = pt.x * scale + offsetX;
-          const py = pt.y * scale + offsetY;
-          if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        });
-        ctx.closePath();
-        ctx.fillStyle = hexToRgba(color, 0.25);
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = color;
-        ctx.stroke();
-      } else {
-        const x = (pred.x - pred.width / 2) * scale + offsetX;
-        const y = (pred.y - pred.height / 2) * scale + offsetY;
-        const w = pred.width * scale;
-        const h = pred.height * scale;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
-        const label = `${pred.class} ${(pred.confidence * 100).toFixed(0)}%`;
-        ctx.font = "11px monospace";
-        const tw = ctx.measureText(label).width;
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y - 16, tw + 6, 16);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(label, x + 3, y - 3);
-      }
-    }
-  }
-
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      drawCanvas(canvas);
-    });
-    return () => cancelAnimationFrame(id);
-  }, [dims, predictions, showDetections, exp.isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const hasDetections = (predictions?.length ?? 0) > 0;
-
+  const uniqueClasses = useMemo(() => [...new Set(predictions.map((p) => p.class))].sort(), [predictions]);
+  const hasDetections = predictions.length > 0;
   const accession = lookupProperty(properties, "accession");
 
-  function PlotContent({ maxImgClass }: { maxImgClass: string }) {
-    return (
-      <div className="space-y-3">
-        {/* Image */}
-        <div className="bg-muted/30 rounded-lg overflow-hidden">
-          {error ? (
-            <p className="text-xs text-muted-foreground py-4 text-center">Image not available</p>
-          ) : !blobUrl ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-          ) : (
-            <div className="relative">
-              <img
-                ref={imgRef}
-                src={blobUrl}
-                alt={`Plot ${plotId}`}
-                className={`w-full object-contain ${maxImgClass}`}
-                onLoad={() => {
-                  const el = imgRef.current;
-                  if (el) setDims({ w: el.naturalWidth, h: el.naturalHeight });
-                  if (canvasRef.current) drawCanvas(canvasRef.current);
-                }}
-              />
-              {hasDetections && (
-                <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }} />
+  const detectionControls = (
+    <>
+      {availableModels.length > 1 && (
+        <select
+          className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
+          value={selectedModel ?? inferenceData?.active_model ?? ""}
+          onChange={(e) => setSelectedModel(e.target.value)}
+        >
+          {availableModels.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      )}
+      {hasDetections && (
+        <>
+          <button
+            onClick={() => setShowDetections((v) => !v)}
+            className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+          >
+            <Scan className="w-3 h-3" />
+            {showDetections ? "Hide detections" : "Show detections"}
+          </button>
+          {showDetections && (
+            <>
+              <button
+                onClick={() => setShowLabels((v) => !v)}
+                className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
+              >
+                <Tag className={`w-3 h-3 ${showLabels ? "" : "opacity-40"}`} />
+                Labels
+              </button>
+              {uniqueClasses.length > 1 && (
+                <div className="flex items-center gap-0.5 border rounded text-xs">
+                  <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                  <span className="px-1 min-w-[56px] text-center truncate">{activeClass ?? "All"}</span>
+                  <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-1.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                </div>
               )}
-            </div>
+            </>
           )}
-        </div>
-        {/* Stats */}
-        {accession != null && (
-          <p className="text-xs text-muted-foreground">Accession: {String(accession)}</p>
-        )}
-        <div className="space-y-1">
-          {metricColumns.map((col) => {
-            const v = properties[col];
-            if (typeof v !== "number") return null;
-            return (
-              <div key={col} className="flex justify-between text-xs">
-                <span className="text-muted-foreground">{col.replace(/_/g, " ")}</span>
-                <span className="font-mono">{v.toFixed(3)}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
+        </>
+      )}
+    </>
+  );
+
+  const statsContent = (
+    <div className="space-y-1 mt-2 shrink-0">
+      {accession != null && (
+        <p className="text-xs text-muted-foreground">Accession: {String(accession)}</p>
+      )}
+      {metricColumns.map((col) => {
+        const v = properties[col];
+        if (typeof v !== "number") return null;
+        return (
+          <div key={col} className="flex justify-between text-xs">
+            <span className="text-muted-foreground">{col.replace(/_/g, " ")}</span>
+            <span className="font-mono">{v.toFixed(3)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <>
       <Dialog open={!exp.isExpanded} onOpenChange={(o) => !o && onClose()}>
-        {/* Hide the auto-generated shadcn close button; we render our own below */}
-        <DialogContent className="max-w-lg [&>button:last-child]:hidden">
-          <DialogHeader>
+        <DialogContent className="max-w-lg flex flex-col [&>button:last-child]:hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle asChild>
-              <div className="flex items-center gap-2 pr-1">
+              <div className="flex items-center gap-2 pr-1 flex-wrap">
                 <span className="text-sm font-semibold flex-1">Plot {plotId}</span>
-                {availableModels.length > 1 && (
-                  <select
-                    className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
-                    value={selectedModel ?? inferenceData?.active_model ?? ""}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                  >
-                    {availableModels.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                )}
-                {hasDetections && (
-                  <button
-                    onClick={() => setShowDetections((v) => !v)}
-                    className={`text-xs px-2 py-0.5 rounded border transition-colors whitespace-nowrap ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
-                    title={showDetections ? "Hide detections" : "Show detections"}
-                  >
-                    {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
-                  </button>
-                )}
+                {detectionControls}
                 <div className="flex items-center gap-0.5 border-l pl-2 ml-1">
                   <ExpandButton onClick={exp.open} title="Expand to fullscreen" />
-                  <button
-                    onClick={onClose}
-                    className="h-7 w-7 flex items-center justify-center rounded-sm opacity-70 hover:opacity-100 transition-opacity"
-                    title="Close"
-                  >
+                  <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-sm opacity-70 hover:opacity-100 transition-opacity" title="Close">
                     <XIcon className="h-4 w-4" />
                   </button>
                 </div>
               </div>
             </DialogTitle>
           </DialogHeader>
-          <PlotContent maxImgClass="max-h-72" />
+          <div style={{ height: 320 }}>
+            <PlotImage
+              recordId={recordId}
+              plotId={plotId}
+              rotate={isGroundPipeline}
+              predictions={predictions}
+              showDetections={showDetections}
+              showLabels={showLabels}
+              activeClass={activeClass}
+            />
+          </div>
+          {statsContent}
         </DialogContent>
       </Dialog>
-      <FullscreenModal open={exp.isExpanded} onClose={() => { exp.close(); onClose(); }} title={`Plot ${plotId}`}
-        headerExtra={
-          <div className="flex items-center gap-2">
-            {availableModels.length > 1 && (
-              <select
-                className="border-input bg-background rounded border px-1.5 py-0.5 text-xs"
-                value={selectedModel ?? inferenceData?.active_model ?? ""}
-                onChange={(e) => setSelectedModel(e.target.value)}
-              >
-                {availableModels.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            )}
-            {hasDetections && (
-              <button
-                onClick={() => setShowDetections((v) => !v)}
-                className={`text-xs px-2 py-0.5 rounded border transition-colors ${showDetections ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground"}`}
-              >
-                {predictions.length} detection{predictions.length !== 1 ? "s" : ""}
-              </button>
-            )}
-          </div>
-        }
+
+      <FullscreenModal
+        open={exp.isExpanded}
+        onClose={() => { exp.close(); onClose(); }}
+        title={`Plot ${plotId}`}
+        headerExtra={<div className="flex items-center gap-2">{detectionControls}</div>}
       >
-        <div className="flex flex-col items-center justify-center h-full p-4">
-          <div className="max-w-3xl w-full">
-            <PlotContent maxImgClass="max-h-[70vh]" />
+        <div className="flex flex-col h-full p-4 gap-3">
+          <div className="flex-1 min-h-0">
+            <PlotImage
+              recordId={recordId}
+              plotId={plotId}
+              rotate={isGroundPipeline}
+              predictions={predictions}
+              showDetections={showDetections}
+              showLabels={showLabels}
+              activeClass={activeClass}
+            />
           </div>
+          {statsContent}
         </div>
       </FullscreenModal>
     </>
@@ -500,7 +371,7 @@ interface KeptPlot {
   recordLabel: string;
 }
 
-function ExpandedPlotTable({ recordId, runId }: { recordId: string; runId?: string }) {
+function ExpandedPlotTable({ recordId, runId, isGroundPipeline = false }: { recordId: string; runId?: string; isGroundPipeline?: boolean }) {
   const [textFilters, setTextFilters] = useState<Record<PlotFilterKey, string>>(
     { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
   );
@@ -714,6 +585,7 @@ function ExpandedPlotTable({ recordId, runId }: { recordId: string; runId?: stri
           properties={viewingPlot.properties}
           metricColumns={numCols}
           runId={runId}
+          isGroundPipeline={isGroundPipeline}
           onClose={() => setViewingPlot(null)}
         />
       )}
@@ -913,7 +785,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                   {expandedId === r.id && (
                     <TableRow key={`${r.id}-expanded`}>
                       <TableCell colSpan={7} className="p-0">
-                        <ExpandedPlotTable recordId={r.id} runId={r.run_id} />
+                        <ExpandedPlotTable recordId={r.id} runId={r.run_id} isGroundPipeline={r.pipeline_type === "ground"} />
                       </TableCell>
                     </TableRow>
                   )}
@@ -937,6 +809,7 @@ function PlotImageCard({
   onKeep,
   isKept,
   runId,
+  isGroundPipeline = false,
 }: {
   recordId: string;
   plotId: string;
@@ -945,35 +818,39 @@ function PlotImageCard({
   onKeep?: () => void;
   isKept?: boolean;
   runId?: string;
+  isGroundPipeline?: boolean;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [error, setError] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [showDetections, setShowDetections] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
+  const [activeClass, setActiveClass] = useState<string | null>(null);
 
-  useEffect(() => {
-    setBlobUrl(null);
-    setError(false);
-    const endpoint = apiUrl(
-      `/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`
-    );
-    const token = localStorage.getItem("access_token") || "";
-    let revoke: string | null = null;
-    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error();
-        return res.blob();
-      })
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        revoke = url;
-        setBlobUrl(url);
-      })
-      .catch(() => setError(true));
-    return () => {
-      if (revoke) URL.revokeObjectURL(revoke);
-    };
-  }, [recordId, plotId]);
+  // Fetch inference results to power detection overlay on the card
+  const { data: inferenceData } = useQuery({
+    queryKey: ["inference-plot-dialog", runId],
+    queryFn: async () => {
+      const token = localStorage.getItem("access_token") || "";
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!runId,
+    staleTime: 60_000,
+  });
+
+  const predictions = useMemo<SharedPrediction[]>(() => {
+    if (!inferenceData?.available) return [];
+    const imgList: Array<{ name: string; plot?: string }> = inferenceData.images ?? [];
+    const preds: SharedPrediction[] = inferenceData.predictions ?? [];
+    const imgToPlot = new Map(imgList.map((im) => [im.name, String(im.plot ?? "")]));
+    return preds.filter((p) => imgToPlot.get(p.image) === plotId);
+  }, [inferenceData, plotId]);
+
+  const uniqueClasses = useMemo(() => [...new Set(predictions.map((p) => p.class))].sort(), [predictions]);
+  const hasDetections = predictions.length > 0;
 
   async function handleDownload() {
     setDownloading(true);
@@ -984,27 +861,12 @@ function PlotImageCard({
   const accession = lookupProperty(properties, "accession");
   const statRows = metricColumns.filter((col) => typeof properties[col] === "number");
 
-  function CardImage({ maxH }: { maxH: string }) {
-    return error ? (
-      <div className="flex flex-col items-center gap-1 py-5 px-3 text-center">
-        <ImageOff className="h-6 w-6 text-muted-foreground/50" />
-        <p className="text-xs text-muted-foreground">No image available</p>
-      </div>
-    ) : !blobUrl ? (
-      <div className="flex items-center justify-center py-6">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    ) : (
-      <img src={blobUrl} alt={`Plot ${plotId}`} className={`w-full object-contain ${maxH}`} />
-    );
-  }
-
   return (
     <>
-      <div className="border rounded-lg overflow-hidden bg-background shadow-sm">
+      <div className="border rounded-lg overflow-hidden bg-background shadow-sm flex flex-col">
         {/* Header */}
-        <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
-          <div className="min-w-0">
+        <div className="px-3 py-2 border-b bg-muted/30 flex items-center gap-2 flex-wrap">
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold truncate">Plot {plotId}</p>
             {accession != null && (
               <p className="text-xs text-muted-foreground truncate">
@@ -1012,7 +874,36 @@ function PlotImageCard({
               </p>
             )}
           </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {hasDetections && (
+              <>
+                <button
+                  type="button"
+                  title={showDetections ? "Hide detections" : "Show detections"}
+                  className={`transition-colors ${showDetections ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setShowDetections((v) => !v)}
+                >
+                  <Scan className="w-3.5 h-3.5" />
+                </button>
+                {showDetections && (
+                  <button
+                    type="button"
+                    title={showLabels ? "Hide labels" : "Show labels"}
+                    className={`transition-colors ${showLabels ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setShowLabels((v) => !v)}
+                  >
+                    <Tag className={`w-3.5 h-3.5 ${showLabels ? "" : "opacity-40"}`} />
+                  </button>
+                )}
+                {showDetections && uniqueClasses.length > 1 && (
+                  <div className="flex items-center gap-0.5 border rounded text-[10px]">
+                    <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i <= 0 ? null : uniqueClasses[i - 1] })} className="px-0.5 py-0.5 hover:bg-muted"><ChevronLeft className="w-3 h-3" /></button>
+                    <span className="px-0.5 min-w-[40px] text-center truncate">{activeClass ?? "All"}</span>
+                    <button onClick={() => setActiveClass((c) => { const i = uniqueClasses.indexOf(c ?? ""); return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1] })} className="px-0.5 py-0.5 hover:bg-muted"><ChevronRight className="w-3 h-3" /></button>
+                  </div>
+                )}
+              </>
+            )}
             {onKeep && (
               <Button
                 variant="ghost"
@@ -1025,7 +916,7 @@ function PlotImageCard({
                 {isKept ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
               </Button>
             )}
-            <ExpandButton onClick={() => setDialogOpen(true)} title="View plot &amp; detections" />
+            <ExpandButton onClick={() => setDialogOpen(true)} title="View fullscreen" />
             <Button
               variant="ghost"
               size="icon"
@@ -1043,25 +934,28 @@ function PlotImageCard({
           </div>
         </div>
 
-        {/* Image */}
-        <div className="bg-muted/20" style={{ minHeight: 120 }}>
-          <CardImage maxH="max-h-48" />
+        {/* Image via shared PlotImage */}
+        <div className="flex-1" style={{ height: 192 }}>
+          <PlotImage
+            recordId={recordId}
+            plotId={plotId}
+            rotate={isGroundPipeline}
+            predictions={predictions}
+            showDetections={showDetections}
+            showLabels={showLabels}
+            activeClass={activeClass}
+          />
         </div>
 
         {/* Stats */}
         {statRows.length > 0 && (
-          <div className="px-3 py-2 space-y-0.5">
+          <div className="px-3 py-2 space-y-0.5 border-t">
             {statRows.map((col) => (
               <div key={col} className="flex justify-between gap-2 text-xs">
                 <span className="text-muted-foreground truncate">{col.replace(/_/g, " ")}</span>
                 <span className="font-mono flex-shrink-0">{(properties[col] as number).toFixed(3)}</span>
               </div>
             ))}
-          </div>
-        )}
-        {statRows.length === 0 && error && (
-          <div className="px-3 py-2 border-t">
-            <p className="text-[10px] text-muted-foreground/60 italic">No trait data</p>
           </div>
         )}
       </div>
@@ -1073,6 +967,7 @@ function PlotImageCard({
           properties={properties}
           metricColumns={metricColumns}
           runId={runId}
+          isGroundPipeline={isGroundPipeline}
           onClose={() => setDialogOpen(false)}
         />
       )}
