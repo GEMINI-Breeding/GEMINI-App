@@ -25,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  RefreshCw,
   Eye,
   EyeOff,
   Loader2,
@@ -1915,7 +1916,7 @@ export function AnalyzeDashboard() {
     if (activeSection === "map") setMapMounted(true);
   }, [activeSection]);
 
-  const { data: records = [], isLoading } = useQuery({
+  const { data: records = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ["trait-records"],
     queryFn: analyzeApi.listTraitRecords,
     staleTime: 30_000,
@@ -1945,9 +1946,19 @@ export function AnalyzeDashboard() {
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b">
-        <h1 className="text-xl font-semibold">Analyze</h1>
-        <p className="text-muted-foreground text-sm">View your processed data</p>
+      <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Analyze</h1>
+          <p className="text-muted-foreground text-sm">View your processed data</p>
+        </div>
+        <button
+          type="button"
+          title="Refresh"
+          onClick={() => refetch()}
+          className="mt-1 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
       <div className="flex flex-1 min-h-0">
