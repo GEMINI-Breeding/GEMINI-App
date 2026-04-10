@@ -668,17 +668,28 @@ def run_stitching(
     succeeded_plots: list = []
 
     # Resolve Python interpreter and run a one-time pre-flight import check.
-    # The pre-flight is skipped for frozen (PyInstaller) builds: re-invoking the
-    # bundle binary as a subprocess causes SIGSEGV on macOS due to PyInstaller
-    # self-invocation constraints. The actual stitching subprocess uses the same
-    # mechanism, so any real failure will surface there per-plot instead.
+    # The pre-flight is skipped for:
+    #   - Frozen (PyInstaller) builds: re-invoking the bundle binary as a subprocess
+    #     causes SIGSEGV on macOS due to PyInstaller self-invocation constraints.
+    #   - Desktop (Tauri) builds: macOS GUI app context restricts Obj-C framework
+    #     initialisation in child processes (cv2/torch), also causing SIGSEGV.
+    # In both cases any real failure surfaces per-plot instead.
+    _is_desktop = os.environ.get("ENVIRONMENT") == "desktop"
     _agrows_venv_python = agrowstitch_dir / ".venv" / "bin" / "python"
-    if _agrows_venv_python.exists():
+    if _agrows_venv_python.exists() and not _is_desktop:
         _preflight_python: str = str(_agrows_venv_python)
-    elif not getattr(sys, "frozen", False):
+    elif not getattr(sys, "frozen", False) and not _is_desktop:
         _preflight_python = sys.executable
     else:
-        _preflight_python = ""  # frozen — skip pre-flight
+        _preflight_python = ""  # frozen or desktop — skip pre-flight
+
+    # Environment additions that prevent macOS fork-safety crashes in subprocesses
+    # launched by a GUI app (Tauri). OBJC_DISABLE_INITIALIZE_FORK_SAFETY tells
+    # the Obj-C runtime not to enforce single-initialiser checks across fork().
+    _subprocess_base_env: dict = {
+        **os.environ,
+        "OBJC_DISABLE_INITIALIZE_FORK_SAFETY": "YES",
+    }
 
     if _preflight_python:
         emit({"event": "progress", "message": f"Pre-flight check using Python: {_preflight_python}"})
@@ -692,7 +703,7 @@ def run_stitching(
                 capture_output=True,
                 text=True,
                 timeout=60,
-                env=None,
+                env=_subprocess_base_env,
                 **_WINFLAGS,
             )
             _pf_out = (_pf.stdout or "").strip()
@@ -890,7 +901,7 @@ def run_stitching(
             if _agrows_venv_python.exists():
                 # Dedicated AgRowStitch venv takes priority (dev override).
                 _python = str(_agrows_venv_python)
-                _subprocess_env = None
+                _subprocess_env = _subprocess_base_env
                 _subprocess_cmd = [
                     _python, "-c",
                     f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
@@ -905,7 +916,7 @@ def run_stitching(
                 # of starting the server.
                 _meipass = getattr(sys, "_MEIPASS", "")
                 _subprocess_env = {
-                    **os.environ,
+                    **_subprocess_base_env,
                     "GEMI_AGROWSTITCH_CONFIG": tmp_config,
                     "GEMI_AGROWSTITCH_CPU_COUNT": str(cpu_count),
                     "GEMI_AGROWSTITCH_DIR": str(agrowstitch_dir),
@@ -916,7 +927,7 @@ def run_stitching(
                 _python = sys.executable
             else:
                 _python = sys.executable
-                _subprocess_env = None
+                _subprocess_env = _subprocess_base_env
                 _subprocess_cmd = [
                     _python, "-c",
                     f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "

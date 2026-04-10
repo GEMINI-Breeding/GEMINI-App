@@ -17,12 +17,12 @@ function RootComponent() {
     <>
       <HeadContent />
       <Outlet />
-      {import.meta.env.DEV && (
+      {/* {import.meta.env.DEV && (
         <>
           <TanStackRouterDevtools position="bottom-left" />
           <ReactQueryDevtools buttonPosition="bottom-left" />
         </>
-      )}
+      )} */}
     </>
   )
 }
