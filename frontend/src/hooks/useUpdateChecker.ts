@@ -16,14 +16,16 @@
 
 import { useEffect } from "react"
 
-const CURRENT_VERSION = "0.0.2"
+const CURRENT_VERSION = "0.0.3"
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const LS_KEY = "gemi_last_update_check"
 const LS_DISMISSED_KEY = "gemi_dismissed_version"
 
+const RELEASES_PAGE = "https://github.com/GEMINI-Breeding/GEMINI-App/releases"
+
 const UPDATE_CHECK_URL =
   (import.meta.env.VITE_UPDATE_CHECK_URL as string | undefined) ??
-  "https://api.github.com/repos/eranario/GEMINI-App/releases/latest"
+  "https://api.github.com/repos/GEMINI-Breeding/GEMINI-App/releases/latest"
 
 /** Parse "vX.Y.Z" or "X.Y.Z" into [major, minor, patch]. */
 function parseVersion(tag: string): [number, number, number] {
@@ -63,7 +65,9 @@ export function useUpdateChecker({ onUpdateAvailable }: UseUpdateCheckerOptions)
 
         const data = await res.json()
         const remoteTag: string = data.tag_name ?? ""
-        const downloadUrl: string = data.html_url ?? UPDATE_CHECK_URL
+        // Always send users to the releases page so they can pick the right
+        // installer for their platform (macOS .dmg, Windows .exe, Linux .deb).
+        const downloadUrl: string = RELEASES_PAGE
 
         if (!remoteTag) return
 

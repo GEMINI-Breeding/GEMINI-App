@@ -70,7 +70,7 @@ GEMINI-App/
 │   │   │   ├── analyze/       # Analyze tab (map view, table view)
 │   │   │   ├── files/         # Upload Data, Manage Data
 │   │   │   ├── process/       # Workspaces, pipelines, run detail
-│   │   │   └── home/          # Landing / dashboard
+│   │   │   └── dashboard/     # Home page — widget-based dashboard builder
 │   │   ├── hooks/             # Shared React hooks
 │   │   ├── routes/            # TanStack Router file-based routes
 │   │   │   ├── __root.tsx     # Root layout (providers)
@@ -789,6 +789,7 @@ Open an issue at `https://github.com/GEMINI-Breeding/GEMINI-App/issues` with:
 | Background thread crashes silently | Used request-scoped `SessionDep` in thread | Use `get_background_session()` instead |
 | Outputs missing after step completes | Path stored as absolute, not relative | Use `paths.rel(path)` before storing in `run.outputs` |
 | `uv sync` succeeds but import fails | Vendor submodule not installed | Run vendor `uv pip install` steps from the setup section |
+| `AgRowStitch import failed (exit -11): (no output)` in desktop app | macOS GUI app context (Tauri/Cocoa) strips Obj-C fork-safety, causing cv2/torch to SIGSEGV in subprocesses | Fixed in `ground.py`: pre-flight is skipped when `ENVIRONMENT=desktop`; `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` is set on all stitching subprocesses |
 | CI bundle cache not invalidating | Changed a Python file outside `app/` | Add the path to the `hashFiles` glob in the cache step |
 | API calls work in dev but fail silently in the packaged Tauri app | `import.meta.env.VITE_API_URL` is a build-time variable — it's empty in production | Use `OpenAPI.BASE` for the backend URL in any raw `fetch()` call; it is set at runtime from `window.__GEMI_BACKEND_URL__` |
 | Installer size unchanged after adding a large package | PyInstaller bundle cache hit — old bundle reused | Change any cache key input (e.g. add a comment to `build.yml`) to force a miss; see [CI Caches](#ci-caches) |

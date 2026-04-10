@@ -10,6 +10,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { openUrl } from "@/lib/platform"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 
 export const Route = createFileRoute("/_layout")({
@@ -24,15 +25,14 @@ function Layout() {
     FULL_HEIGHT_PREFIXES.some((p) => location.pathname.startsWith(p))
 
   const handleUpdateAvailable = useCallback((version: string, downloadUrl: string) => {
-    toast.info(`Update available: ${version}`, {
-      description: "A new version of GEMI is ready to download.",
+    toast.info(`GEMI ${version} is available`, {
+      description: "Download the latest release from GitHub for your platform (macOS, Windows, Linux).",
       duration: Infinity,
       action: {
         label: "Download",
         onClick: () => {
-          // Store dismissed so we don't re-show for this version
           localStorage.setItem("gemi_dismissed_version", version)
-          window.open(downloadUrl, "_blank")
+          openUrl(downloadUrl)
         },
       },
       onDismiss: () => {

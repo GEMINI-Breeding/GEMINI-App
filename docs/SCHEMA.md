@@ -17,6 +17,9 @@ This document describes every persistent data store: the SQLite database tables 
    - [PlotRecord](#plotrecord)
    - [FileUpload](#fileupload)
    - [AppSetting](#appsetting)
+   - [ReferenceDataset](#referencedataset)
+   - [ReferencePlot](#referenceplot)
+   - [WorkspaceReferenceDataset](#workspacereferencedataset)
 2. [Filesystem Layout](#filesystem-layout)
    - [Raw](#raw)
    - [Intermediate](#intermediate)
@@ -270,6 +273,68 @@ Key/value store for user-configured application settings.
 | `data_root` | Root directory for all data storage | `~/GEMI-Data` |
 
 > **Do not** call `get_setting("data_root")` directly in route handlers. Always use `RunPaths.from_db()` — it reads `data_root` internally.
+
+---
+
+---
+
+### ReferenceDataset
+
+**File:** `backend/app/models/reference_data.py`
+
+Represents one upload of hand-measured field data (e.g. "LAI Hand Measurements Apr 2024").
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID (PK) | |
+| `name` | str | Required. User-assigned during upload. |
+| `experiment` | str | From upload metadata |
+| `location` | str | From upload metadata |
+| `population` | str | From upload metadata |
+| `date` | str \| None | Metadata only — not used for plot matching |
+| `column_mapping` | JSON | Maps file column → canonical trait name |
+| `plot_count` | int | Row count after import |
+| `trait_columns` | JSON list[str] | Trait column names present in this dataset |
+| `created_at` | datetime | Auto |
+
+**Relationships:** `plots` (list[ReferencePlot]), workspace links via `WorkspaceReferenceDataset`
+
+---
+
+### ReferencePlot
+
+**File:** `backend/app/models/reference_data.py`
+
+One row of a `ReferenceDataset` — one plot's hand-measured values.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID (PK) | |
+| `dataset_id` | UUID (FK → ReferenceDataset, CASCADE delete) | |
+| `plot_id` | str \| None | From column mapping |
+| `col` | str \| None | Optional |
+| `row` | str \| None | Optional |
+| `accession` | str \| None | Optional |
+| `traits` | JSON dict[str, float] | `{ trait_name: value }` |
+
+**Matching:** Reference plots are matched to `PlotRecord`s at query time by `(experiment, location, population, plot_id)` — never stored as a FK. `date` is **not** part of reference matching.
+
+**Index on:** `(dataset_id, plot_id)`
+
+---
+
+### WorkspaceReferenceDataset
+
+**File:** `backend/app/models/reference_data.py`
+
+Join table associating uploaded reference datasets with workspaces.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `workspace_id` | UUID (FK → Workspace) | Composite PK |
+| `dataset_id` | UUID (FK → ReferenceDataset) | Composite PK |
+
+A dataset can be associated with multiple workspaces. Deleting the dataset removes all workspace links.
 
 ---
 

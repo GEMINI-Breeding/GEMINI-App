@@ -116,6 +116,10 @@ These issues have been hit and fixed. Do not reintroduce them.
 
 **`tauri dev` fails with `resource path 'binaries/gemi-backend' doesn't exist`** — In dev mode the backend runs separately via `start-backend.sh`, but Tauri still checks the resource path. A `placeholder.txt` is committed in `frontend/src-tauri/binaries/gemi-backend/` to satisfy this check. If it's missing, run `git pull`.
 
+**`AgRowStitch import failed (exit -11): (no output)` in the packaged desktop app** — macOS GUI app context (Tauri/Cocoa) restricts Obj-C framework initialisation in child processes, causing cv2 and torch to SIGSEGV before producing any output. Fixed in `ground.py`:
+- Pre-flight import check is skipped when `ENVIRONMENT=desktop` (set by the Tauri sidecar launcher), same as for frozen PyInstaller builds.
+- `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` is added to the environment of all stitching subprocesses to prevent the crash when the pre-flight is not skipped or for the per-plot subprocesses.
+
 ---
 
 ## Frontend Patterns

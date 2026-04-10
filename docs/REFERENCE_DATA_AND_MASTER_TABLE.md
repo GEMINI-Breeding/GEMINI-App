@@ -41,7 +41,8 @@ This document describes the design and implementation plan for two related featu
 | **Reference Data** | Hand-measured field data uploaded by the user. No plot boundaries — tied to plots by identity. |
 | **ReferenceDataset** | A named upload (e.g. "LAI Hand Measurements Apr 2024"). One workspace can have many associated. |
 | **ReferencePlot** | One row of a ReferenceDataset — one plot's reference measurements. |
-| **Plot identity** | The tuple `(experiment, location, population, plot_id)` used to match across pipelines and reference data. `date` is metadata only. |
+| **Plot identity (reference matching)** | The tuple `(experiment, location, population, plot_id)` used to match reference data to pipeline plots. `date` is **not** part of reference matching. |
+| **Plot identity (master table grouping)** | The tuple `(experiment, location, population, date, plot_id)` used to group rows in the master table. `date` is included so that runs from different survey dates are never merged even when other identity fields match. |
 | **Master Table** | A workspace-level table where each row is a unique plot identity, with trait columns from all pipelines and reference datasets merged. |
 
 ---
@@ -282,7 +283,7 @@ If any reference plots are unmatched after associating a dataset with a workspac
 
 ### Merge Logic
 
-The master table produces one row per unique **plot identity** `(experiment, location, population, plot_id)` across all `PlotRecord`s in the workspace.
+The master table produces one row per unique **plot identity** `(experiment, location, population, date, plot_id)` across all `PlotRecord`s in the workspace. `date` is included in the key so that pipelines run on different survey dates are never merged — even when all other identity fields match.
 
 **When a plot appears in multiple runs of the same pipeline**, use the most recent run by `PipelineRun.date` or `created_at`. (Future: user-selectable per pipeline.)
 
@@ -400,20 +401,20 @@ Opened from the Master Table row eye icon. Shows all plot images for a given plo
 
 ## Implementation Task List
 
-### Phase 1 — Reference Data: Backend Models & Parsing
+### Phase 1 — Reference Data: Backend Models & Parsing ✅
 
-- [ ] **1.1** Create `backend/app/models/reference_data.py` with `ReferenceDataset`, `ReferencePlot`, and `WorkspaceReferenceDataset` SQLModel tables
-- [ ] **1.2** Register models in `backend/app/core/db.py` so `create_all()` picks them up
-- [ ] **1.3** Write CSV/Excel parser utility (`openpyxl` for xlsx; stdlib `csv` for csv); validate required column mappings
-- [ ] **1.4** Write plot match validation: query `PlotRecord` by `(experiment, location, population)` across the workspace and identify unmatched reference rows
-- [ ] **1.5** Confirm `openpyxl` present or add via `uv add openpyxl`
+- [x] **1.1** Create `backend/app/models/reference_data.py` with `ReferenceDataset`, `ReferencePlot`, and `WorkspaceReferenceDataset` SQLModel tables
+- [x] **1.2** Register models in `backend/app/core/db.py` so `create_all()` picks them up
+- [x] **1.3** Write CSV/Excel parser utility (`openpyxl` for xlsx; stdlib `csv` for csv); validate required column mappings — see `backend/app/processing/reference_data_utils.py`
+- [x] **1.4** Write plot match validation: query `PlotRecord` by `(experiment, location, population)` across the workspace and identify unmatched reference rows
+- [x] **1.5** `openpyxl` added via `uv add openpyxl`
 
-### Phase 2 — Reference Data: API Endpoints
+### Phase 2 — Reference Data: API Endpoints ✅
 
-- [ ] **2.1** Implement upload endpoint: `POST /api/v1/reference-data/upload` (parse file, insert rows, return match summary)
-- [ ] **2.2** Implement management endpoints: list, get, delete `ReferenceDataset`
-- [ ] **2.3** Implement workspace association endpoints: list, add, remove under `/workspaces/{id}/reference-data/`
-- [ ] **2.4** Implement plot match endpoint: `GET /workspaces/{id}/reference-data/match?experiment=&location=&population=&plot_id=`
+- [x] **2.1** Implement upload endpoint: `POST /api/v1/reference-data/upload` (parse file, insert rows, return match summary)
+- [x] **2.2** Implement management endpoints: list, get, delete `ReferenceDataset`; also `parse-headers`, `plots`, `plots-all`, `aggregate`
+- [x] **2.3** Implement workspace association endpoints: list, add, remove under `/workspaces/{id}/reference-data/`
+- [x] **2.4** Implement plot match endpoint: `GET /workspaces/{id}/reference-data/match?experiment=&location=&population=&plot_id=`
 
 ### Phase 3 — Reference Data: Upload Tab
 
@@ -446,29 +447,29 @@ Opened from the Master Table row eye icon. Shows all plot images for a given plo
 - [ ] **7.1** On Analyze tab open, check for any workspace-associated datasets with unmatched rows
 - [ ] **7.2** Show dismissible warning bar with "View unmatched rows" modal
 
-### Phase 8 — Master Table: Backend
+### Phase 8 — Master Table: Backend ✅
 
-- [ ] **8.1** Implement `GET /api/v1/workspaces/{workspace_id}/master-table`
-- [ ] **8.2** Query `PlotRecord` grouped by `(experiment, location, population, plot_id)`; pivot trait dicts by pipeline; use most recent run per pipeline per plot
-- [ ] **8.3** Merge matched reference traits into response rows; include `group` + `pipeline_id`/`dataset_id` per column descriptor
-- [ ] **8.4** Include pipeline metadata (id, name, type, color) and reference dataset metadata in response
+- [x] **8.1** Implement `GET /api/v1/workspaces/{workspace_id}/master-table` — see `backend/app/api/routes/analyze.py`
+- [x] **8.2** Query `PlotRecord` grouped by `(experiment, location, population, date, plot_id)`; pivot trait dicts by pipeline; use most recent run per pipeline per plot. Note: `date` is included in the grouping key so different survey dates are never merged.
+- [x] **8.3** Merge matched reference traits into response rows; include `group` + `pipeline_id`/`dataset_id` per column descriptor
+- [x] **8.4** Include pipeline metadata (id, name, type, color) and reference dataset metadata in response
 
-### Phase 9 — Master Table: Frontend
+### Phase 9 — Master Table: Frontend ✅
 
-- [ ] **9.1** Build `MasterTable` component (React Table, same pattern as existing analyze tables)
-- [ ] **9.2** Render Pipelines column with colored pipeline tags
-- [ ] **9.3** Color trait column headers by pipeline color (text or top border)
-- [ ] **9.4** Render reference column group with orange "REF" group label; standard header text
-- [ ] **9.5** Column visibility toggle (pipeline groups + reference group)
-- [ ] **9.6** CSV export with prefixed column names
-- [ ] **9.7** Eye icon per row → open Merged Plot Viewer
+- [x] **9.1** `MasterTable` component built — `frontend/src/features/analyze/components/MasterTable.tsx`
+- [x] **9.2** Pipeline tags rendered per row
+- [x] **9.3** Trait column headers colored by pipeline
+- [x] **9.4** Reference column group with orange "REF" group label
+- [x] **9.5** Column visibility toggle (pipeline groups + reference group)
+- [x] **9.6** CSV export with prefixed column names
+- [x] **9.7** Eye icon per row → opens expanded plot viewer with per-pipeline images
 
-### Phase 10 — Merged Plot Viewer
+### Phase 10 — Merged Plot Viewer ✅
 
-- [ ] **10.1** Build `MergedPlotViewer` component: grid, max 3 images per row, wraps
-- [ ] **10.2** Per-cell: pipeline name + color + type badge, plot image, detection overlay toggle, per-pipeline traits
-- [ ] **10.3** Full-width reference panel at bottom; orange text values
-- [ ] **10.4** Wire to Master Table eye icon
+- [x] **10.1** Merged plot viewer built into `MasterTable` as `PlotImageCell` + expanded dialog
+- [x] **10.2** Per-cell: pipeline name + type badge, plot image (`PlotImage` component), detection overlay toggle with full controls (Scan, label toggle, class cycler), per-pipeline traits
+- [x] **10.3** Reference panel at bottom; orange text values
+- [x] **10.4** Wired to Master Table eye icon
 
 ---
 

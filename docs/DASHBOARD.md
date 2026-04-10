@@ -41,6 +41,9 @@ frontend/src/features/dashboard/
 ├── types.ts                         # All TypeScript types
 ├── store.ts                         # localStorage persistence hook
 ├── hooks/
+│   ├── useDrag.ts                  # Native HTML5 drag-and-drop state
+│   ├── useMultiSourceData.ts       # Multi-pipeline / multi-record data fetching
+│   ├── useReferenceData.ts         # Reference dataset fetching for widgets
 │   └── useTraitData.ts             # React Query wrappers for trait data
 ├── widgets/
 │   ├── KpiWidget.tsx               # Single-stat highlight card
@@ -49,10 +52,11 @@ frontend/src/features/dashboard/
 │   └── PlotViewerWidget.tsx        # Pinned plot image viewer
 └── components/
     ├── DashboardBuilder.tsx         # Top-level layout (sidebar + canvas)
+    ├── DashboardCanvas.tsx          # Drop zone + 12-col grid renderer
+    ├── DragGhost.tsx                # Custom drag preview element
     ├── WidgetCard.tsx               # Widget frame (header, resize, delete)
     ├── WidgetConfigDialog.tsx       # Per-widget settings dialog
-    ├── WidgetToolbox.tsx            # Left sidebar with draggable templates
-    └── DashboardCanvas.tsx          # Drop zone + 12-col grid renderer
+    └── WidgetToolbox.tsx            # Left sidebar with draggable templates
 ```
 
 ---
@@ -201,8 +205,8 @@ The Dashboard reads data already in the database. There is **no re-processing**.
 
 To pick up new pipeline extractions:
 - React Query automatically refetches `listTraitRecords` every 30 seconds (stale time)
-- Users can also click **Sync** (⟳ button in header) to force a refetch
-- This calls `queryClient.invalidateQueries({ queryKey: ['trait-records'] })`
+- Users can also click the **Refresh** button (↺ icon in the Analyze section header) to force a refetch
+- This calls `refetch()` on the runs query and spins the icon while `isFetching` is true
 
 The geojson for each TraitRecord is cached for 5 minutes by React Query. Large datasets (>5,000 plots) may take a moment to load on first access.
 
@@ -272,4 +276,4 @@ The Dashboard deliberately reuses existing Analyze infrastructure:
 | Fullscreen expand | `useExpandable()`, `FullscreenModal` from `ExpandableSection.tsx` |
 | Chart rendering | Recharts (already installed, used in `TraitHistogram`) |
 | UI components | All shadcn/ui components |
-| Auth headers | Same `localStorage('access_token')` pattern |
+| Authenticated image loading | `plotImageUrl()` + `authHeaders()` from `PlotImage.tsx` |
