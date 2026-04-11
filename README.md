@@ -6,7 +6,7 @@
 
 ## 🔗 Overview
 
-**GxExMINI** is a high-throughput phenotyping platform designed to accelerate the development of nutritious, stress-resistant staple crops. The platform includes:
+**GxExMINI** (GEMI for short) is a high-throughput phenotyping platform designed to accelerate the development of nutritious, stress-resistant staple crops. The platform includes:
 
 - **Desktop Application:** Built with [Tauri v2](https://tauri.app) (Rust), React 18, and a FastAPI/SQLite backend.
 - **Automated Processing Pipelines:** Support for both aerial and ground-based data.
