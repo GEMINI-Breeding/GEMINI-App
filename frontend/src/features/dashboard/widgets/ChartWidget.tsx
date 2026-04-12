@@ -81,9 +81,12 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
 
   const dualAxis = isMulti && (config.dualAxis ?? false)
 
+  const leftLabel = dualAxis ? formatLabel(effectiveYAxes[0]) : undefined
+  const rightLabel = dualAxis ? effectiveYAxes.slice(1).map(formatLabel).join(", ") : undefined
+
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: 0 }}>
+      <BarChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: dualAxis ? 16 : 0 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis
           dataKey="name"
@@ -93,10 +96,14 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
           label={{ value: formatLabel(config.xAxis), position: "insideBottom", offset: -12, fontSize: 11 }}
         />
         {/* Left y-axis (always present) */}
-        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+          label={leftLabel ? { value: leftLabel, angle: -90, position: "insideLeft", fontSize: 10, offset: 10 } : undefined}
+        />
         {/* Right y-axis only when dual-axis mode */}
         {dualAxis && (
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            label={rightLabel ? { value: rightLabel, angle: 90, position: "insideRight", fontSize: 10, offset: 10 } : undefined}
+          />
         )}
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
@@ -191,6 +198,8 @@ function TemporalChart({ config }: { config: ChartConfig }) {
   }
 
   const isArea = config.chartType === "area"
+  const temporalLeftLabel = dualAxis ? formatLabel(effectiveYAxes[0]) : undefined
+  const temporalRightLabel = dualAxis ? effectiveYAxes.slice(1).map(formatLabel).join(", ") : undefined
 
   return (
     <div className="flex flex-col h-full">
@@ -200,7 +209,7 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         </p>
       )}
     <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: dualAxis ? 16 : 0 }}>
         <defs>
           {seriesKeys.map((key, i) => (
             <linearGradient key={key} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -211,9 +220,13 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         </defs>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+          label={temporalLeftLabel ? { value: temporalLeftLabel, angle: -90, position: "insideLeft", fontSize: 10, offset: 10 } : undefined}
+        />
         {dualAxis && (
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            label={temporalRightLabel ? { value: temporalRightLabel, angle: 90, position: "insideRight", fontSize: 10, offset: 10 } : undefined}
+          />
         )}
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
@@ -601,7 +614,7 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
         </p>
       )}
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={temporalData} margin={{ top: 28, right: dualAxis ? 48 : 8, bottom: 8, left: 0 }}>
+        <ComposedChart data={temporalData} margin={{ top: 28, right: dualAxis ? 48 : 8, bottom: 8, left: dualAxis ? 16 : 0 }}>
           <defs>
             {nonBaselineSeries.map((s) => (
               <linearGradient key={s.key} id={`grad-ms-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -612,9 +625,19 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
           <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-          <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            label={dualAxis ? {
+              value: nonBaselineSeries.filter((s) => sources.find((src) => sourceKey(src) === s.key)?.yAxis !== "right").map((s) => s.label).join(", "),
+              angle: -90, position: "insideLeft", fontSize: 10, offset: 10,
+            } : undefined}
+          />
           {dualAxis && (
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+              label={{
+                value: nonBaselineSeries.filter((s) => sources.find((src) => sourceKey(src) === s.key)?.yAxis === "right").map((s) => s.label).join(", "),
+                angle: 90, position: "insideRight", fontSize: 10, offset: 10,
+              }}
+            />
           )}
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 6 }}

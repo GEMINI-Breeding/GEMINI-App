@@ -30,6 +30,7 @@ export function DataTypes({ onChange }: DataTypesProps) {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
+          data-onboarding="files-data-type-selector"
           className={`${dropdownWidth} justify-between`}
         >
           {selectedFileType ?? "Select File Type"}

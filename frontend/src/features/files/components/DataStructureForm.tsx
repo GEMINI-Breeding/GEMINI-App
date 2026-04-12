@@ -63,7 +63,7 @@ export function DataStructureForm({
   };
 
   return (
-    <div className="border-border bg-card rounded-lg border p-6">
+    <div data-onboarding="files-data-structure-form" className="border-border bg-card rounded-lg border p-6">
       <div className="mb-4 flex items-center gap-2">
         <FolderTree className="text-card-foreground h-5 w-5" />
         <h2 className="text-foreground">Data Structure</h2>

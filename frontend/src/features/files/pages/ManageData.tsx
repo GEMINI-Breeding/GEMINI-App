@@ -140,6 +140,7 @@ function RefreshButton() {
       variant="outline"
       loading={mutation.isPending}
       onClick={() => mutation.mutate()}
+      data-onboarding="files-manage-refresh"
     >
       <RefreshCw className="h-4 w-4" />
       Refresh
@@ -166,7 +167,7 @@ export function ManageData() {
           value={selectedDataType ?? "__all__"}
           onValueChange={(v) => setSelectedDataType(v === "__all__" ? null : v)}
         >
-          <SelectTrigger className="w-48">
+          <SelectTrigger data-onboarding="files-manage-type-filter" className="w-48">
             <SelectValue placeholder="All data types" />
           </SelectTrigger>
           <SelectContent>

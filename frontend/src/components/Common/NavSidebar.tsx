@@ -84,6 +84,7 @@ export function NavSidebar({ groups, activeId, onSelect }: NavSidebarProps) {
                   <button
                     key={item.id}
                     onClick={() => onSelect(item.id)}
+                    data-onboarding={`files-tab-${item.id}`}
                     className={`w-full flex items-center gap-2 rounded-md select-none transition-colors
                       ${collapsed ? "justify-center p-1.5" : "px-2 py-1.5"}
                       ${isActive
