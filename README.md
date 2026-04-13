@@ -50,6 +50,23 @@ See [`docs/BUILDING.md`](./docs/BUILDING.md) for platform-specific build instruc
 
 ---
 
+## 📦 Key Dependencies
+
+GEMI integrates several open-source tools and packages as core components of its processing pipelines:
+
+### [OpenDroneMap (ODM)](https://opendronemap.org/)
+Used in the **aerial pipeline** for photogrammetric reconstruction — processing drone imagery into georeferenced orthomosaics and digital elevation models (DEMs). GEMI orchestrates ODM as a sidecar process and consumes its outputs for downstream trait extraction.
+
+### [AgRowStitch](https://github.com/GEMINI-Breeding/AgRowStitch)
+Used in the **ground pipeline** for stitching rover-captured (Amiga) row images into plot-level mosaics. AgRowStitch is bundled as a vendored submodule (`backend/vendor/AgRowStitch`) and run as a subprocess during the stitching step.
+
+> Uyehara, I. K. et al. *AgRowStitch: A High-fidelity Image Stitching Pipeline for Ground-based Agricultural Images* arXiv, 2025. [arxiv.org/pdf/2503.21990](https://arxiv.org/pdf/2503.21990)
+
+### [farm-ng Amiga SDK](https://github.com/farm-ng/farm-ng-amiga)
+Used for decoding and extracting data from **farm-ng Amiga** ground rover logs (`.bin` files). The SDK provides the tools needed to parse platform telemetry and camera data recorded during field operations.
+
+---
+
 ## 🔍 Pipeline Overview
 
 ![Sensing Pipeline](assets/sensing_pipeline.png)
