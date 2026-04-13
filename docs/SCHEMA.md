@@ -2,7 +2,25 @@
 
 This document describes every persistent data store: the SQLite database tables and the filesystem layout (`Raw/`, `Intermediate/`, `Processed/`).
 
-**When to update this doc:** any time you add or rename a database model, add a new file path to `RunPaths`, or change where a data type is uploaded.
+## Design Philosophy & Architectural Patterns
+
+GEMINI-App follows a "Local-First, High-Performance" philosophy designed for field researchers. Key patterns include:
+
+- **Single-User Desktop Model:** The application assumes a single superuser per local installation. Authentication is simplified to bypass complex JWT/OAuth flows, focusing instead on local SQLite security and filesystem permissions.
+- **Extreme Denormalization for Analytics:** The `PlotRecord` table is intentionally denormalized. It duplicates metadata from `PipelineRun`, `Pipeline`, and `Workspace` (e.g., experiment name, location, date). This allows the "Analyze" tab to perform lightning-fast cross-experiment queries and filtering using standard SQL without expensive joins across thousands of plot records.
+- **Filesystem as the Primary Store:** The SQLite database acts as a "Searchable Index" for the filesystem. Large binary data (TIFs, PNGs, point clouds) never enters the database. Instead, `RunPaths` handles deterministic path resolution, and the database stores relative paths to maintain portability across different `data_root` locations.
+- **Immutability and Versioning:** Processing steps (like stitching or trait extraction) do not overwrite previous results. They create new versioned directories (e.g., `AgRowStitch_v2/`). The database tracks the "latest" version but preserves the history of previous runs for provenance.
+
+## Data Integrity & Validation
+
+- **Soft vs. Hard Deletes:** The application primarily uses `CASCADE` deletes for parent-child relationships (e.g., deleting a Workspace deletes its Pipelines). However, filesystem data is **never** automatically deleted by the database engine to prevent accidental data loss of large raw datasets.
+- **JSON Schema Validation:** Many columns (`config`, `steps_completed`, `outputs`) use SQLite's JSON1 extension. While SQLModel provides Python-side validation via Pydantic, the database stores these as strings. Developers should use the `SA_JSON` type to ensure correct serialization.
+- **Unique Constraints:** Critical unique constraints are enforced on `User.email` and the composite `(trait_record_id, plot_id)` in `PlotRecord` to prevent duplicate trait data for the same plot in a single extraction run.
+
+## Common Query Patterns
+
+- **The "Analyze" Join:** To get a unified view of plots, the frontend typically queries `PlotRecord` filtered by `workspace_id`. Because `PlotRecord` is denormalized, no join with `PipelineRun` is needed for basic metadata (date, experiment, sensor), which significantly speeds up the Map and Table views.
+- **Reference Matching:** Matching hand-measured data to pipeline results happens via a "Identity Tuple" match: `(experiment, location, population, plot_id)`. This is performed in Python during the `GET /master-table` request rather than a complex SQL join, allowing for fuzzy matching or alternate plot naming conventions if needed in the future.
 
 ---
 

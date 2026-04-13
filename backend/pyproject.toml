@@ -36,6 +36,7 @@ dependencies = [
     "scikit-learn>=1.6.0",
     "setuptools>=70.0.0",  # provides distutils for Python 3.12+ (needed by PyInstaller)
     "openpyxl>=3.1.5",
+    "psutil>=6.0.0",
 ]
 
 [tool.uv]
