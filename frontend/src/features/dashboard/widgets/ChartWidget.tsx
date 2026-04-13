@@ -37,6 +37,24 @@ const SERIES_COLORS = [
 
 const BIN_COUNT = 10
 
+const AGG_DISPLAY: Record<string, string> = {
+  avg: "avg", min: "min", max: "max", sum: "sum", median: "median",
+}
+
+/** Format a metric key + aggregation into a readable axis label. */
+function metricLabel(metric: string, agg?: string): string {
+  const base = formatLabel(metric)
+  return agg ? `${base} (${AGG_DISPLAY[agg] ?? agg})` : base
+}
+
+const Y_LABEL_PROPS = (value: string) => ({
+  value,
+  angle: -90 as const,
+  position: "insideLeft" as const,
+  fontSize: 10,
+  offset: 10,
+})
+
 function buildHistogram(values: number[]): { label: string; count: number }[] {
   if (values.length === 0) return []
   const min = Math.min(...values)
@@ -81,12 +99,17 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
 
   const dualAxis = isMulti && (config.dualAxis ?? false)
 
-  const leftLabel = dualAxis ? formatLabel(effectiveYAxes[0]) : undefined
-  const rightLabel = dualAxis ? effectiveYAxes.slice(1).map(formatLabel).join(", ") : undefined
+  // Spatial groupBy always averages — reflect that in axis labels
+  const leftYLabel = dualAxis
+    ? metricLabel(effectiveYAxes[0], "avg")
+    : metricLabel(effectiveYAxes[0], "avg")
+  const rightLabel = dualAxis
+    ? effectiveYAxes.slice(1).map((m) => metricLabel(m, "avg")).join(", ")
+    : undefined
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: dualAxis ? 16 : 0 }}>
+      <BarChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: 16 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis
           dataKey="name"
@@ -97,7 +120,7 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
         />
         {/* Left y-axis (always present) */}
         <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
-          label={leftLabel ? { value: leftLabel, angle: -90, position: "insideLeft", fontSize: 10, offset: 10 } : undefined}
+          label={Y_LABEL_PROPS(leftYLabel)}
         />
         {/* Right y-axis only when dual-axis mode */}
         {dualAxis && (
@@ -135,10 +158,8 @@ function TemporalChart({ config }: { config: ChartConfig }) {
   const { data: records } = useTraitRecords()
   const relevantRecords = useMemo(() => {
     if (!records || !config.pipelineId) return []
-    const ids = config.temporalRecordIds
-    if (ids.length > 0) return records.filter((r) => ids.includes(r.id))
     return records.filter((r) => r.pipeline_id === config.pipelineId)
-  }, [records, config.pipelineId, config.temporalRecordIds])
+  }, [records, config.pipelineId])
 
   const { data: geojsons, loading } = useMultiTraitGeojson(relevantRecords.map((r) => r.id))
 
@@ -198,8 +219,15 @@ function TemporalChart({ config }: { config: ChartConfig }) {
   }
 
   const isArea = config.chartType === "area"
-  const temporalLeftLabel = dualAxis ? formatLabel(effectiveYAxes[0]) : undefined
-  const temporalRightLabel = dualAxis ? effectiveYAxes.slice(1).map(formatLabel).join(", ") : undefined
+
+  // Build Y axis labels with aggregation context
+  const agg0 = config.yAxesAggregation?.[effectiveYAxes[0]] ?? "avg"
+  const temporalLeftLabel = dualAxis
+    ? metricLabel(effectiveYAxes[0], agg0)
+    : metricLabel(effectiveYAxes[0], agg0)
+  const temporalRightLabel = dualAxis
+    ? effectiveYAxes.slice(1).map((m) => metricLabel(m, config.yAxesAggregation?.[m] ?? "avg")).join(", ")
+    : undefined
 
   return (
     <div className="flex flex-col h-full">
@@ -209,7 +237,7 @@ function TemporalChart({ config }: { config: ChartConfig }) {
         </p>
       )}
     <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 8, left: dualAxis ? 16 : 0 }}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: dualAxis ? 48 : 8, bottom: 24, left: 16 }}>
         <defs>
           {seriesKeys.map((key, i) => (
             <linearGradient key={key} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -219,9 +247,11 @@ function TemporalChart({ config }: { config: ChartConfig }) {
           ))}
         </defs>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
-        <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+          label={{ value: "Date", position: "insideBottom", offset: -12, fontSize: 11 }}
+        />
         <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
-          label={temporalLeftLabel ? { value: temporalLeftLabel, angle: -90, position: "insideLeft", fontSize: 10, offset: 10 } : undefined}
+          label={Y_LABEL_PROPS(temporalLeftLabel)}
         />
         {dualAxis && (
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
@@ -335,7 +365,7 @@ function CorrelationScatter({ config }: { config: ChartConfig }) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ScatterChart margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+      <ScatterChart margin={{ top: 4, right: 8, bottom: 24, left: 16 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
         <XAxis
           type="number"
@@ -353,6 +383,7 @@ function CorrelationScatter({ config }: { config: ChartConfig }) {
           tick={{ fontSize: 11 }}
           axisLine={false}
           tickLine={false}
+          label={Y_LABEL_PROPS(formatLabel(config.yAxis))}
         />
         <ZAxis range={[20, 20]} />
         <Tooltip
@@ -385,7 +416,7 @@ function HistogramChart({ config }: { config: ChartConfig }) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={histData} margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+      <BarChart data={histData} margin={{ top: 4, right: 8, bottom: 24, left: 16 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
         <XAxis
           dataKey="label"
@@ -394,7 +425,9 @@ function HistogramChart({ config }: { config: ChartConfig }) {
           tickLine={false}
           label={{ value: formatLabel(config.yAxis), position: "insideBottom", offset: -12, fontSize: 11 }}
         />
-        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+          label={Y_LABEL_PROPS("Count")}
+        />
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
           formatter={(v) => [v, "Count"]}
@@ -457,15 +490,26 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
   const nonBaselineSeries = series.filter((s) => !s.isBaseline)
   const baselineSeries = series.filter((s) => s.isBaseline)
 
+  // Derive a Y axis label from the first non-baseline source (metric + aggregation)
+  const firstSrc = sources.find((src) => nonBaselineSeries.some((s) => s.key === sourceKey(src)))
+    ?? sources[0]
+  const msYLabel = firstSrc && "metric" in firstSrc
+    ? metricLabel(firstSrc.metric, firstSrc.aggregation)
+    : undefined
+
   // ── Case 1: categorical X-axis (groupByField set + categorical data ready) ──
 
   if (groupByField && categoricalData.length > 0) {
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={categoricalData} margin={{ top: nonBaselineSeries.length > 1 ? 28 : 4, right: 8, bottom: 8, left: 0 }}>
+        <BarChart data={categoricalData} margin={{ top: nonBaselineSeries.length > 1 ? 28 : 4, right: 8, bottom: 24, left: 16 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
-          <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+            label={{ value: formatLabel(groupByField), position: "insideBottom", offset: -12, fontSize: 11 }}
+          />
+          <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
+          />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 6 }}
             formatter={(v: any, name: any) => {
@@ -513,7 +557,7 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
           </p>
         )}
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={gtData} margin={{ top: 28, right: 8, bottom: 8, left: 0 }}>
+          <ComposedChart data={gtData} margin={{ top: 28, right: 8, bottom: 24, left: 16 }}>
             <defs>
               {subKeys.map((sk, i) => (
                 <linearGradient key={sk} id={`grad-gt-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -523,8 +567,12 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
               ))}
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
-            <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+            <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+              label={{ value: "Date", position: "insideBottom", offset: -12, fontSize: 11 }}
+            />
+            <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+              label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
+            />
             <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6 }}
               formatter={(v: any, name: any) => {
                 const parts = String(name).split("__")
@@ -579,11 +627,13 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
       : undefined
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={barData} margin={{ top: 4, right: 8, bottom: 8, left: 0 }}>
+        <BarChart data={barData} margin={{ top: 4, right: 8, bottom: 8, left: 16 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
           <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
-            domain={yDomainMax !== undefined ? [0, yDomainMax] : undefined} />
+            domain={yDomainMax !== undefined ? [0, yDomainMax] : undefined}
+            label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
+          />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 6 }}
             formatter={(v: any) => [formatDashboardValue(v), ""]}
@@ -614,7 +664,7 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
         </p>
       )}
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={temporalData} margin={{ top: 28, right: dualAxis ? 48 : 8, bottom: 8, left: dualAxis ? 16 : 0 }}>
+        <ComposedChart data={temporalData} margin={{ top: 28, right: dualAxis ? 48 : 8, bottom: 24, left: 16 }}>
           <defs>
             {nonBaselineSeries.map((s) => (
               <linearGradient key={s.key} id={`grad-ms-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -624,12 +674,14 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
             ))}
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
-          <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+          <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
+            label={{ value: "Date", position: "insideBottom", offset: -12, fontSize: 11 }}
+          />
           <YAxis yAxisId="left" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
-            label={dualAxis ? {
-              value: nonBaselineSeries.filter((s) => sources.find((src) => sourceKey(src) === s.key)?.yAxis !== "right").map((s) => s.label).join(", "),
-              angle: -90, position: "insideLeft", fontSize: 10, offset: 10,
-            } : undefined}
+            label={dualAxis
+              ? Y_LABEL_PROPS(nonBaselineSeries.filter((s) => sources.find((src) => sourceKey(src) === s.key)?.yAxis !== "right").map((s) => s.label).join(", "))
+              : msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined
+            }
           />
           {dualAxis && (
             <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false}
