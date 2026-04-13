@@ -741,7 +741,7 @@ function GridSettingsPanel({
   }
 
   return (
-    <div className="bg-background/95 absolute bottom-4 right-4 z-[1000] w-60 rounded-lg border shadow-lg">
+    <div className="bg-background/95 absolute bottom-4 right-4 z-[1000] w-60 rounded-lg border shadow-lg" data-onboarding="pbp-settings-panel">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-3 py-1.5">
         <p className="text-xs font-semibold">Plot Settings</p>
@@ -751,6 +751,7 @@ function GridSettingsPanel({
               onClick={onUndo}
               disabled={!canUndo}
               title="Undo (Ctrl+Z)"
+              data-onboarding="pbp-undo"
               className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
             >
               <Undo2 className="h-3.5 w-3.5" />
@@ -761,6 +762,7 @@ function GridSettingsPanel({
               onClick={onRedo}
               disabled={!canRedo}
               title="Redo (Ctrl+Y)"
+              data-onboarding="pbp-redo"
               className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
             >
               <Redo2 className="h-3.5 w-3.5" />
@@ -770,6 +772,7 @@ function GridSettingsPanel({
             <button
               onClick={onToggleGrid}
               title={gridVisible ? "Hide grid" : "Show grid"}
+              data-onboarding="pbp-toggle-grid"
               className="rounded p-0.5 text-muted-foreground hover:text-foreground"
             >
               {gridVisible ? (
@@ -795,7 +798,7 @@ function GridSettingsPanel({
       {!minimized && (
         <div className="space-y-2 p-3">
           {!hideGridInputs && (
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5" data-onboarding="pbp-grid-inputs">
               {field("Width (m)", "width")}
               {field("Length (m)", "length")}
               {field("Rows", "rows", 1)}
@@ -804,7 +807,7 @@ function GridSettingsPanel({
               {field("H. Spacing", "horizontalSpacing")}
             </div>
           )}
-          <div>
+          <div data-onboarding="pbp-angle">
             <Label className="text-xs text-muted-foreground">Angle (°)</Label>
             <div className="mt-0.5 flex items-center gap-1.5">
               <input
@@ -861,7 +864,7 @@ function GridSettingsPanel({
           )} */}
 
           {/* Mode buttons */}
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5" data-onboarding="pbp-mode-buttons">
             <Button
               size="sm"
               variant={interactionMode === "select" ? "default" : "outline"}
@@ -884,7 +887,7 @@ function GridSettingsPanel({
 
           {/* Select all / clear / delete — shown in select mode when plots exist */}
           {interactionMode === "select" && featureCount > 0 && (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5" data-onboarding="pbp-select-tools">
               <div className="grid grid-cols-2 gap-1.5">
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onSelectAll}>
                   All
@@ -913,7 +916,7 @@ function GridSettingsPanel({
           )}
 
           {onGenerateGrid && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5" data-onboarding="pbp-generate-grid">
               <Button
                 size="sm"
                 className="h-7 flex-1 text-xs"
@@ -955,6 +958,7 @@ function GridSettingsPanel({
                   <Button
                     size="sm"
                     variant="destructive"
+                    data-onboarding="pbp-clear-all"
                     className="h-7 w-full text-xs"
                     onClick={onClearAll}
                   >
@@ -1946,7 +1950,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
   return (
     <div className="space-y-3">
       {/* Field design status banner */}
-      <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+      <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm" data-onboarding="pbp-field-design">
         {fdInfo?.available ? (
           <span className="text-green-700">
             Field design loaded — {fdInfo.row_count} rows × {fdInfo.col_count}{" "}
@@ -1970,7 +1974,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
         </div>
       </div>
 
-      <details className="bg-muted/40 rounded-md border text-sm">
+      <details className="bg-muted/40 rounded-md border text-sm" data-onboarding="pbp-instructions">
         <summary className="flex cursor-pointer select-none list-none items-center justify-between px-4 py-2.5 font-medium">
           Instructions
           <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform [[open]_&]:rotate-180" />
@@ -2020,6 +2024,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
       <div className="relative" style={{ isolation: "isolate" }}>
         <div
           ref={mapContainerRef}
+          data-onboarding="pbp-map"
           className="w-full overflow-hidden rounded-lg border"
           style={{ height: "calc(100vh - 280px)", minHeight: 500, userSelect: "none", outline: "none" }}
         />
@@ -2062,7 +2067,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
           </div>
         )}
         {/* Bottom-left: stacked version selectors */}
-        <div className="absolute bottom-4 left-4 z-[1000] flex flex-col gap-1">
+        <div className="absolute bottom-4 left-4 z-[1000] flex flex-col gap-1" data-onboarding="pbp-version-selectors">
           {/* Stitch version selector (ground only) */}
           {pipelineType === "ground" && orthoInfo.stitch_versions && orthoInfo.stitch_versions.length > 0 && (
             <select
@@ -2116,12 +2121,12 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
 
       {/* Footer */}
       <div className="flex gap-2">
-        <Button variant="outline" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
+        <Button variant="outline" data-onboarding="pbp-cancel" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
           Cancel
         </Button>
         {previewGeoJson && (
           <>
-            <Button variant="secondary" className="bg-secondary/60 hover:bg-secondary/80" onClick={() => handleSave(false)} disabled={isSaving}>
+            <Button variant="secondary" data-onboarding="pbp-save" className="bg-secondary/60 hover:bg-secondary/80" onClick={() => handleSave(false)} disabled={isSaving}>
               {isSaving && !pendingSaveAs ? (
                 <>
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -2132,6 +2137,7 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
               )}
             </Button>
             <Button
+              data-onboarding="pbp-save-as"
               onClick={openSaveAsDialog}
               disabled={isSaving}
             >

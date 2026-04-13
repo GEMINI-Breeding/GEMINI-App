@@ -749,7 +749,7 @@ function PipelineCard({ pipeline, workspaceId }: PipelineCardProps) {
               >
                 Settings
               </Button>
-              <Button size="sm" onClick={() => setNewRunOpen(true)}>
+              <Button size="sm" data-onboarding="process-new-run" onClick={() => setNewRunOpen(true)}>
                 <Plus className="mr-1 h-4 w-4" />
                 New Run
               </Button>
@@ -990,7 +990,7 @@ export function WorkspaceDetail() {
           <p className="text-muted-foreground mb-4 text-sm">
             Choose the type of sensing data you want to process
           </p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-onboarding="process-pipeline-cards">
             <Card
               className="hover:border-primary cursor-pointer transition-colors"
               onClick={() =>

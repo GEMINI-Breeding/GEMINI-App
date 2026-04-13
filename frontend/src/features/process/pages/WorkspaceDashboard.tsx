@@ -263,7 +263,7 @@ export function WorkspaceDashboard() {
             </Button>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
-                <Button>
+                <Button data-onboarding="process-new-workspace">
                   <Plus className="mr-2 h-4 w-4" />
                   New Workspace
                 </Button>

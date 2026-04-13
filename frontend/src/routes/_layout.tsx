@@ -32,10 +32,10 @@ function Layout() {
   const [tourStep, setTourStep] = useState<number>(0)
 
   const startTour = useCallback(() => {
-    const section = getTourSection(location.pathname)
+    const section = getTourSection(location.pathname, (location.search as any)?.step)
     setTourSteps(section.steps)
     setTourStep(0)
-  }, [location.pathname])
+  }, [location.pathname, location.search])
   const closeTour = useCallback(() => setTourSteps(null), [])
   const nextTourStep = useCallback(() =>
     setTourStep((s) => (tourSteps !== null && s < tourSteps.length - 1 ? s + 1 : s)), [tourSteps])

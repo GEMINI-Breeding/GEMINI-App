@@ -539,7 +539,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     <>
     <div className="space-y-3">
       {/* Keyboard hint bar */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/40 rounded px-3 py-1.5">
+      <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/40 rounded px-3 py-1.5" data-onboarding="pm-keyboard-hints">
         <span>
           <kbd className="bg-background border rounded px-1">←</kbd>
           <kbd className="bg-background border rounded px-1 ml-1">→</kbd> navigate ·{" "}
@@ -550,6 +550,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">S</kbd> save
         </span>
         <button
+          data-onboarding="pm-gps-toggle"
           onClick={() => setShowGps((v) => !v)}
           className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
             showGps ? "bg-primary text-primary-foreground" : "hover:bg-muted"
@@ -582,7 +583,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
         {/* ── GPS map (left, only when shown) ── */}
         {showGps && (
-          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 500 }}>
+          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 500 }} data-onboarding="pm-gps-map">
             <GpsTrajectoryPanel runId={runId} currentImage={currentImage} />
           </div>
         )}
@@ -590,7 +591,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         {/* ── Image viewer ── */}
         <div className="space-y-2">
           {/* Image */}
-          <div className="relative rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center">
+          <div className="relative rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center" data-onboarding="pm-image-viewer">
             {imgSrc ? (
               <img
                 src={imgSrc}
@@ -619,7 +620,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           </div>
 
           {/* Image navigation */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-onboarding="pm-nav-images">
             <Button variant="outline" size="icon" onClick={prev} disabled={currentIdx === 0}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
@@ -661,7 +662,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           </div>
 
           {/* Mark buttons */}
-          <div className="flex gap-2">
+          <div className="flex gap-2" data-onboarding="pm-mark-buttons">
             <Button
               className="flex-1"
               variant={activePlot?.start_image === currentImage ? "default" : "outline"}
@@ -688,7 +689,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         <div className="space-y-3">
 
           {/* Plot navigation + add/delete */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-onboarding="pm-plot-nav">
             <Label className="text-xs text-muted-foreground whitespace-nowrap">Plot</Label>
             <Input
               type="number"
@@ -726,7 +727,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           </div>
 
           {/* Plot pager */}
-          <Card className="border-primary/40">
+          <Card className="border-primary/40" data-onboarding="pm-plot-pager">
             <CardContent className="px-3 py-3 space-y-3">
               {/* Page header: ← Plot X / N → */}
               <div className="flex items-center justify-between gap-1">
@@ -768,7 +769,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               {/* Start/End */}
               {activePlot && (
                 <>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5" data-onboarding="pm-plot-start-end">
                     <div className="flex items-center gap-1">
                       <Label className="text-xs text-muted-foreground w-8 shrink-0">Start</Label>
                       {activePlot.start_image && (
@@ -817,7 +818,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
                     </div>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1" data-onboarding="pm-direction">
                     <Label className="text-xs text-muted-foreground">Direction</Label>
                     <Select
                       value={activePlot.direction || "__none__"}
@@ -842,7 +843,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               )}
 
               {/* Dot progress strip */}
-              <div className="flex flex-wrap gap-1 pt-1">
+              <div className="flex flex-wrap gap-1 pt-1" data-onboarding="pm-dot-strip">
                 {plots.map((p, i) => (
                   <button
                     key={p.plot_id}
@@ -871,7 +872,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
 
           {/* Version selector */}
           {versionList.length > 0 && (
-            <div className="flex items-center gap-1.5 pt-1 w-72">
+            <div data-onboarding="pm-version-selector" className="flex items-center gap-1.5 pt-1 w-72">
               <Layers className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
               <select
                 value={activeVersion ?? ""}
@@ -899,10 +900,11 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           )}
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
+            <Button data-onboarding="pm-back" variant="outline" className="flex-1" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
               Back
             </Button>
             <Button
+              data-onboarding="pm-save"
               variant="secondary"
               className="shrink-0 bg-secondary/60 hover:bg-secondary/80"
               disabled={!canSave || saveMutation.isPending}
@@ -919,6 +921,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               {saveMutation.isPending ? "Saving…" : "Save"}
             </Button>
             <Button
+              data-onboarding="pm-save-as"
               disabled={!canSave || saveAsMutation.isPending}
               onClick={() => {
                 const missingDir = plots.some((p) => !p.direction);
@@ -946,6 +949,7 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
             {dangerOpen && (
               <div className="space-y-1.5 pt-0.5">
                 <Button
+                  data-onboarding="pm-clear-all"
                   size="sm"
                   variant="destructive"
                   className="h-7 w-full text-xs"

@@ -85,7 +85,7 @@ interface HelpSidebarProps {
 export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
   const location = useLocation()
   const section = getSectionForPath(location.pathname)
-  const tourLabel = getTourSection(location.pathname).label
+  const tourLabel = getTourSection(location.pathname, (location.search as any)?.step).label
 
   if (!open) return null
 
