@@ -510,6 +510,101 @@ function ConfirmDeleteDialog({
   );
 }
 
+// ── Plot images dialog (aerial trait extraction) ──────────────────────────────
+
+function PlotImagesDialog({
+  open,
+  onClose,
+  record,
+}: {
+  open: boolean;
+  onClose: () => void;
+  record: TraitRecord | null;
+}) {
+  const [pageIndex, setPageIndex] = useState(0);
+
+  const { data: plotIds = [], isLoading } = useQuery<string[]>({
+    queryKey: ["image-plot-ids", record?.id],
+    queryFn: async () => {
+      const res = await fetch(
+        apiUrl(`/api/v1/analyze/trait-records/${record!.id}/image-plot-ids`)
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.plot_ids ?? [];
+    },
+    enabled: open && record !== null,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (open) setPageIndex(0);
+  }, [open, record?.id]);
+
+  if (!open || !record) return null;
+
+  const plotId = plotIds[pageIndex];
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="p-3" style={{ maxWidth: "95vw", width: "95vw" }}>
+        <DialogHeader className="px-1">
+          <DialogTitle className="text-sm">
+            v{record.version} — Plot Images
+            {plotIds.length > 0 ? ` (${plotIds.length} plots)` : ""}
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex h-64 items-center justify-center">
+            <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+          </div>
+        ) : plotIds.length === 0 ? (
+          <div className="text-muted-foreground flex h-64 items-center justify-center text-sm">
+            No plot images found for this extraction.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="text-muted-foreground flex items-center justify-between text-xs">
+              <span className="font-mono">Plot {plotId}</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={pageIndex === 0}
+                  onClick={() => setPageIndex((p) => p - 1)}
+                >
+                  <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+                </Button>
+                <span className="w-16 text-center">
+                  {pageIndex + 1} / {plotIds.length}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={pageIndex === plotIds.length - 1}
+                  onClick={() => setPageIndex((p) => p + 1)}
+                >
+                  <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+                </Button>
+              </div>
+            </div>
+            <ZoomableImage
+              key={plotId}
+              src={apiUrl(
+                `/api/v1/analyze/trait-records/${record.id}/plot-image/${plotId}`
+              )}
+              alt={`Plot ${plotId}`}
+              maxHeight="calc(90vh - 100px)"
+            />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Trait records panel (shown under Initial Trait Extraction) ────────────────
 
 function TraitRecordsPanel({
@@ -522,6 +617,13 @@ function TraitRecordsPanel({
   isDeleting: boolean;
 }) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [viewingRecord, setViewingRecord] = useState<TraitRecord | null>(null);
+  const [traitDownloadDialog, setTraitDownloadDialog] = useState<{
+    record: TraitRecord;
+    squareSize: 512 | 640 | null;
+  } | null>(null);
+  const [downloadingTraitId, setDownloadingTraitId] = useState<string | null>(null);
+  const { addProcess, updateProcess } = useProcess();
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["trait-records-run", runId],
@@ -603,21 +705,122 @@ function TraitRecordsPanel({
                   {inferenceCountByTraitVersion[r.version] ?? 0}
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-red-500 hover:text-red-600"
-                    disabled={isDeleting}
-                    onClick={() => setConfirmId(r.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="View plot images"
+                      onClick={() => setViewingRecord(r)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="Download plot images"
+                      disabled={downloadingTraitId === r.id}
+                      onClick={() => setTraitDownloadDialog({ record: r, squareSize: null })}
+                    >
+                      {downloadingTraitId === r.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Download className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-red-500 hover:text-red-600"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmId(r.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      <PlotImagesDialog
+        open={viewingRecord !== null}
+        onClose={() => setViewingRecord(null)}
+        record={viewingRecord}
+      />
+
+      {/* Download dialog */}
+      <Dialog
+        open={traitDownloadDialog !== null}
+        onOpenChange={(o) => !o && setTraitDownloadDialog(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Download Plot Images — v{traitDownloadDialog?.record.version}
+            </DialogTitle>
+            <DialogDescription>
+              Downloads cropped plot images from this trait extraction run.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-2">
+            <Label className="text-xs">Square Crop for Model Training</Label>
+            <div className="space-y-1">
+              {([null, 512, 640] as const).map((size) => (
+                <label key={String(size)} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="traitSquareSize"
+                    checked={traitDownloadDialog?.squareSize === size}
+                    onChange={() => setTraitDownloadDialog((d) => d ? { ...d, squareSize: size } : d)}
+                  />
+                  {size === null ? "None (original size)" : `${size}×${size} px`}
+                </label>
+              ))}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Autocrop black borders, center-crop to a square, then resize. Useful for Roboflow training datasets.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTraitDownloadDialog(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!traitDownloadDialog) return;
+              const { record, squareSize } = traitDownloadDialog;
+              setTraitDownloadDialog(null);
+              setDownloadingTraitId(record.id);
+              const params = new URLSearchParams();
+              if (record.ortho_version != null) params.set("ortho_version", String(record.ortho_version));
+              if (squareSize != null) params.set("square_size", String(squareSize));
+              const paramStr = params.size > 0 ? `?${params}` : "";
+              const pid = addProcess({
+                type: "processing",
+                title: `Downloading plot images v${record.version}…`,
+                status: "running",
+                items: [],
+                progress: 30,
+              });
+              try {
+                const saved = await tauriDownload(
+                  `/api/v1/pipeline-runs/${runId}/download-crops${paramStr}`,
+                  `plots_v${record.version}.zip`,
+                  "GET",
+                  [{ name: "ZIP Archive", extensions: ["zip"] }]
+                );
+                updateProcess(pid, saved
+                  ? { status: "completed", progress: 100, message: "Download complete" }
+                  : { status: "completed", progress: 100, message: "Cancelled" }
+                );
+              } catch {
+                updateProcess(pid, { status: "error", message: "Download failed" });
+              } finally {
+                setDownloadingTraitId(null);
+              }
+            }}>Download</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         open={confirmId !== null}
@@ -806,7 +1009,7 @@ function StitchPanel({
   const [downloadDialog, setDownloadDialog] = useState<{
     stitch: StitchVersion;
     selectedAssocVersion: number | null;
-    cropPlots: boolean;
+    squareSize: 512 | 640 | null;
   } | null>(null);
 
   // Plot marking versions (for displaying marker label in the stitch table)
@@ -926,12 +1129,12 @@ function StitchPanel({
       .sort((a, b) => a.version - b.version);
     const defaultAssoc =
       matching.length > 0 ? matching[matching.length - 1].version : null;
-    setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc, cropPlots: false });
+    setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc, squareSize: null });
   }
 
   async function confirmDownload() {
     if (!downloadDialog) return;
-    const { stitch, selectedAssocVersion, cropPlots } = downloadDialog;
+    const { stitch, selectedAssocVersion, squareSize } = downloadDialog;
     setDownloadDialog(null);
     setDownloadingVersion(stitch.version);
     const label = stitch.name
@@ -939,7 +1142,7 @@ function StitchPanel({
       : `v${stitch.version}`;
     const params = new URLSearchParams();
     if (selectedAssocVersion != null) params.set("association_version", String(selectedAssocVersion));
-    if (cropPlots) params.set("crop_plots", "true");
+    if (squareSize != null) params.set("square_size", String(squareSize));
     const assocParam = params.size > 0 ? `?${params}` : "";
     const pid = addProcess({
       type: "processing",
@@ -1290,19 +1493,23 @@ function StitchPanel({
               );
             })()}
           </div>
-          <div className="px-0 pb-1">
-            <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={downloadDialog?.cropPlots ?? false}
-                onChange={(e) =>
-                  setDownloadDialog((d) => d ? { ...d, cropPlots: e.target.checked } : d)
-                }
-              />
-              Crop black borders from plots
-            </label>
-            <p className="text-xs text-muted-foreground mt-0.5 ml-5">
-              Trims empty edges from each stitched image before download.
+          <div className="space-y-1.5">
+            <Label className="text-xs">Square Crop for Model Training</Label>
+            <div className="space-y-1">
+              {([null, 512, 640] as const).map((size) => (
+                <label key={String(size)} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="squareSize"
+                    checked={downloadDialog?.squareSize === size}
+                    onChange={() => setDownloadDialog((d) => d ? { ...d, squareSize: size } : d)}
+                  />
+                  {size === null ? "None (original size)" : `${size}×${size} px`}
+                </label>
+              ))}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Autocrop black borders, center-crop to a square, then resize. Useful for Roboflow training datasets.
             </p>
           </div>
           <DialogFooter>
@@ -1765,6 +1972,14 @@ function AssociationVersionsPanel({
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<
     number | null
   >(null);
+  const [viewPlots, setViewPlots] = useState<StitchPlot[]>([]);
+  const [viewPlotsLabel, setViewPlotsLabel] = useState("");
+  const [assocDownloadDialog, setAssocDownloadDialog] = useState<{
+    assoc: AssociationVersion;
+    squareSize: 512 | 640 | null;
+  } | null>(null);
+  const [downloadingAssocVersion, setDownloadingAssocVersion] = useState<number | null>(null);
+  const { addProcess, updateProcess } = useProcess();
 
   const { data: versions = [], isLoading } = useQuery<AssociationVersion[]>({
     queryKey: ["associations", runId],
@@ -1803,6 +2018,60 @@ function AssociationVersionsPanel({
     return entry?.name ? `${entry.name} (v${bv})` : `v${bv}`;
   }
 
+  async function confirmAssocDownload() {
+    if (!assocDownloadDialog) return;
+    const { assoc, squareSize } = assocDownloadDialog;
+    setAssocDownloadDialog(null);
+    setDownloadingAssocVersion(assoc.version);
+    const params = new URLSearchParams();
+    if (assoc.version != null) params.set("association_version", String(assoc.version));
+    if (squareSize != null) params.set("square_size", String(squareSize));
+    const stitchVer = assoc.stitch_version ?? 1;
+    const paramStr = params.size > 0 ? `?${params}` : "";
+    const pid = addProcess({
+      type: "processing",
+      title: `Downloading plots (Association v${assoc.version})…`,
+      status: "running",
+      items: [],
+      progress: 30,
+    });
+    try {
+      const saved = await tauriDownload(
+        `/api/v1/pipeline-runs/${runId}/stitchings/${stitchVer}/download${paramStr}`,
+        `stitching_assoc_v${assoc.version}.zip`,
+        "GET",
+        [{ name: "ZIP Archive", extensions: ["zip"] }]
+      );
+      updateProcess(pid, saved
+        ? { status: "completed", progress: 100, message: "Download complete" }
+        : { status: "completed", progress: 100, message: "Cancelled" }
+      );
+    } catch {
+      updateProcess(pid, { status: "error", message: "Download failed" });
+    } finally {
+      setDownloadingAssocVersion(null);
+    }
+  }
+
+  async function viewAssocImages(v: AssociationVersion) {
+    if (v.stitch_version === null) return;
+    const res = await fetch(
+      apiUrl(
+        `/api/v1/pipeline-runs/${runId}/stitch-outputs?version=${v.stitch_version}`
+      )
+    );
+    const data = res.ok ? await res.json() : { plots: [] };
+    const ts = Date.now();
+    const plots = (data.plots ?? []).map((p: StitchPlot) => ({
+      ...p,
+      url: `${p.url}&_ts=${ts}`,
+    }));
+    setViewPlots(plots);
+    setViewPlotsLabel(
+      `Association v${v.version} — Stitch ${stitchLabel(v.stitch_version)}`
+    );
+  }
+
   return (
     <>
       <div className="mt-3 overflow-hidden rounded-lg border">
@@ -1836,22 +2105,93 @@ function AssociationVersionsPanel({
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive hover:text-destructive h-6 w-6"
-                    title="Delete"
-                    disabled={isDeleting}
-                    onClick={() => setConfirmDeleteVersion(v.version)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="View plot images"
+                      disabled={v.stitch_version === null}
+                      onClick={() => viewAssocImages(v)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="Download plot images"
+                      disabled={v.stitch_version === null || downloadingAssocVersion === v.version}
+                      onClick={() => setAssocDownloadDialog({ assoc: v, squareSize: null })}
+                    >
+                      {downloadingAssocVersion === v.version
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Download className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive h-6 w-6"
+                      title="Delete"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmDeleteVersion(v.version)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      <StitchImagesDialog
+        open={viewPlots.length > 0}
+        onClose={() => setViewPlots([])}
+        plots={viewPlots}
+        versionLabel={viewPlotsLabel}
+      />
+
+      {/* Download dialog */}
+      <Dialog
+        open={assocDownloadDialog !== null}
+        onOpenChange={(o) => !o && setAssocDownloadDialog(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Download Plots — Association v{assocDownloadDialog?.assoc.version}
+            </DialogTitle>
+            <DialogDescription>
+              Downloads stitched images named using this association's plot metadata.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-2">
+            <Label className="text-xs">Square Crop for Model Training</Label>
+            <div className="space-y-1">
+              {([null, 512, 640] as const).map((size) => (
+                <label key={String(size)} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="assocSquareSize"
+                    checked={assocDownloadDialog?.squareSize === size}
+                    onChange={() => setAssocDownloadDialog((d) => d ? { ...d, squareSize: size } : d)}
+                  />
+                  {size === null ? "None (original size)" : `${size}×${size} px`}
+                </label>
+              ))}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Autocrop black borders, center-crop to a square, then resize. Useful for Roboflow training datasets.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssocDownloadDialog(null)}>Cancel</Button>
+            <Button onClick={confirmAssocDownload}>Download</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         open={confirmDeleteVersion !== null}

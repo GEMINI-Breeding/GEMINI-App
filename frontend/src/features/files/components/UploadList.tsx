@@ -130,7 +130,7 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
 
   return (
     <>
-    <div className="space-y-6">
+    <div data-onboarding="files-upload-zone" className="space-y-6">
       {label && (
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}

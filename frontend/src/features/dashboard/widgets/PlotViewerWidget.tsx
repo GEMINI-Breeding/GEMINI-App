@@ -10,7 +10,7 @@
 
 import { useState, useMemo } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Loader2, Pin, PinOff, Search, ImageOff, X, ChevronDown, ChevronUp, ListFilter, ScanSearch, ChevronLeft, ChevronRight, Tag } from "lucide-react"
+import { Loader2, Pin, PinOff, Search, X, ChevronDown, ChevronUp, ListFilter, ScanSearch, ChevronLeft, ChevronRight, Tag } from "lucide-react"
 import { PlotImage, type Prediction, authHeaders } from "@/components/Common/PlotImage"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -23,7 +23,7 @@ import {
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  useTraitRecordGeojson, useMultiTraitGeojson, useImagePlotIds, applyFilters, formatDashboardValue,
+  useTraitRecordGeojson, useMultiTraitGeojson, applyFilters, formatDashboardValue,
 } from "../hooks/useTraitData"
 import { useTraitRecords } from "../hooks/useTraitData"
 import type { PlotViewerConfig } from "../types"
@@ -88,7 +88,6 @@ interface PlotEntry {
   plotId: string
   accession: string
   properties: Record<string, unknown>
-  hasImage: boolean
   source?: string
 }
 
@@ -163,7 +162,6 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
 
   // Single-source
   const singleGeo = useTraitRecordGeojson(activeIds.length === 1 ? activeIds[0] : null)
-  const singleImages = useImagePlotIds(activeIds.length === 1 ? activeIds[0] : null)
 
   // Multi-source
   const multiGeo = useMultiTraitGeojson(activeIds.length > 1 ? activeIds : [])
@@ -177,7 +175,6 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     if (activeIds.length === 1) {
       const geoData = singleGeo.data
       if (!geoData) return { allPlots: [], metricCols: [] }
-      const imagePlotIds = singleImages.data ?? []
       const plots = applyFilters(geoData.geojson.features, filters).map((f) => {
         const p = f.properties ?? {}
         const plotId = String(p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "")
@@ -186,7 +183,6 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           plotId,
           accession: String(p.accession ?? p.Accession ?? p.genotype ?? ""),
           properties: p,
-          hasImage: imagePlotIds.includes(plotId),
         }
       })
       return { allPlots: plots, metricCols: geoData.metric_columns.slice(0, 4) }
@@ -208,14 +204,13 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           plotId,
           accession: String(p.accession ?? p.Accession ?? p.genotype ?? ""),
           properties: { ...p, _source: label },
-          hasImage: false,
           source: label,
         })
       })
       geoData.metric_columns.slice(0, 4).forEach((m) => metricSet.add(m))
     })
     return { allPlots: plots, metricCols: [...metricSet].slice(0, 4) }
-  }, [activeIds, singleGeo.data, singleImages.data, multiGeo.data, filters, allRecords])
+  }, [activeIds, singleGeo.data, multiGeo.data, filters, allRecords])
 
   // Columns shown in the selection table
   const tableCols: string[] = useMemo(() => {
@@ -452,23 +447,17 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                   {isMultiSource && p.source && (
                     <p className="text-[10px] text-muted-foreground truncate">{p.source}</p>
                   )}
-                  {p.hasImage ? (
-                    <div className="w-full" style={{ height: 220 }}>
-                      <PlotImage
-                        recordId={p.recordId}
-                        plotId={p.plotId}
-                        rotate={allRecords?.find((r) => r.id === p.recordId)?.pipeline_type === "ground"}
-                        predictions={predsByPlot[p.plotId] ?? []}
-                        showDetections={showDetections}
-                        showLabels={showLabels}
-                        activeClass={activeClass}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center bg-muted rounded w-full" style={{ height: 220 }}>
-                      <ImageOff className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                  )}
+                  <div className="w-full" style={{ height: 220 }}>
+                    <PlotImage
+                      recordId={p.recordId}
+                      plotId={p.plotId}
+                      rotate={allRecords?.find((r) => r.id === p.recordId)?.pipeline_type === "ground"}
+                      predictions={predsByPlot[p.plotId] ?? []}
+                      showDetections={showDetections}
+                      showLabels={showLabels}
+                      activeClass={activeClass}
+                    />
+                  </div>
                   {metricCols.length > 0 && (
                     <div className="space-y-0.5">
                       {metricCols.map((m) => (

@@ -773,15 +773,16 @@ export function GcpPicker({
       <div className="flex items-center gap-2">
         <Button
           size="sm"
+          data-onboarding="gcp-save"
           disabled={!canSave || saveMutation.isPending}
           onClick={() => saveMutation.mutate()}
         >
           {saveMutation.isPending ? "Saving…" : "Save GCPs"}
         </Button>
-        <Button variant="outline" size="sm" onClick={onSaved}>
+        <Button variant="outline" size="sm" data-onboarding="gcp-done" onClick={onSaved}>
           Done
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setReplaceMode(true)}>
+        <Button variant="ghost" size="sm" data-onboarding="gcp-replace-file" onClick={() => setReplaceMode(true)}>
           Replace GCP file
         </Button>
 
@@ -791,7 +792,7 @@ export function GcpPicker({
           GCP:
         </span>
         <Select value={activeLabel ?? ""} onValueChange={handleGcpChange}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-44" data-onboarding="gcp-select">
             <SelectValue placeholder="Select…" />
           </SelectTrigger>
           <SelectContent>
@@ -822,6 +823,7 @@ export function GcpPicker({
           </SelectContent>
         </Select>
         {/* Navigate between marked images for the active GCP */}
+        <div className="flex items-center gap-1" data-onboarding="gcp-nav-marks">
         <Button
           variant="ghost"
           size="icon"
@@ -845,9 +847,11 @@ export function GcpPicker({
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
+        </div>
 
         <div className="flex-1" />
 
+        <div className="flex items-center gap-1" data-onboarding="gcp-nav-images">
         <Button
           variant="ghost"
           size="icon"
@@ -907,6 +911,7 @@ export function GcpPicker({
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
+        </div>
       </div>
 
       {/* ── Filter toggle + info banner ── */}
@@ -944,6 +949,7 @@ export function GcpPicker({
           </span>
           <button
             type="button"
+            data-onboarding="gcp-filter"
             onClick={() => setFilterByGcp((v) => !v)}
             className={`flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors ${
               filterByGcp
@@ -1003,6 +1009,7 @@ export function GcpPicker({
       {/* ── Image viewer ── */}
       <div
         ref={containerRef}
+        data-onboarding="gcp-viewer"
         className="relative w-full overflow-hidden rounded-lg bg-black select-none"
         style={{
           aspectRatio: "16/9",
@@ -1083,7 +1090,7 @@ export function GcpPicker({
             </div>
 
             {/* Zoom controls — always visible top-right */}
-            <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1" data-onboarding="gcp-zoom">
               <button
                 className="flex h-7 w-7 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-40"
                 onMouseDown={(e) => e.stopPropagation()}
@@ -1143,7 +1150,7 @@ export function GcpPicker({
             <p className="text-muted-foreground mb-1 text-xs italic">No GPS on this image</p>
           ) : null}
           {/* Extra bottom padding to make room for GCP number labels */}
-          <div className="relative" style={{ paddingBottom: "1.25rem" }}>
+          <div className="relative" style={{ paddingBottom: "1.25rem" }} data-onboarding="gcp-slider">
             <input
               type="range"
               min={0}
@@ -1229,6 +1236,7 @@ export function GcpPicker({
             <Button
               variant="destructive"
               size="sm"
+              data-onboarding="gcp-clear"
               onClick={() => setConfirmClear(true)}
             >
               Clear all GCPs

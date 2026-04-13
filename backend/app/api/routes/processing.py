@@ -3439,7 +3439,7 @@ def download_stitching_images(
     id: uuid.UUID,
     version: int,
     association_version: int | None = None,
-    crop_plots: bool = False,
+    square_size: int | None = None,
 ) -> StreamingResponse:
     """
     Download all stitch plot images for a given version as a ZIP.
@@ -3522,13 +3522,13 @@ def download_stitching_images(
                     return candidate
         return stem
 
-    def _autocrop_png(png_path: Path) -> bytes:
-        """Trim black/empty border rows and columns from a stitched plot image."""
+    def _square_crop_png(png_path: Path, size: int) -> bytes:
+        """Autocrop black borders, center-crop to a square, then resize to target size."""
         import numpy as np
         from PIL import Image as _PILImage
         img = _PILImage.open(png_path).convert("RGB")
         arr = np.array(img)
-        # Non-black pixel mask (sum of RGB > threshold)
+        # Remove black/empty border rows and columns
         mask = arr.sum(axis=2) > 15
         rows = np.any(mask, axis=1)
         cols = np.any(mask, axis=0)
@@ -3536,6 +3536,14 @@ def download_stitching_images(
             rmin, rmax = int(np.where(rows)[0][0]), int(np.where(rows)[0][-1])
             cmin, cmax = int(np.where(cols)[0][0]), int(np.where(cols)[0][-1])
             img = img.crop((cmin, rmin, cmax + 1, rmax + 1))
+        # Center-crop to a square using the shorter dimension
+        w, h = img.size
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        img = img.crop((left, top, left + side, top + side))
+        # Resize to target square size
+        img = img.resize((size, size), _PILImage.LANCZOS)
         out = io.BytesIO()
         img.save(out, format="PNG")
         return out.getvalue()
@@ -3553,8 +3561,8 @@ def download_stitching_images(
                 dest_name = f"plot-{plot_label}_row-{row_val}_col-{col_val}_accession-{accession}.png"
             else:
                 dest_name = f"plot_{idx}.png"
-            if crop_plots:
-                zf.writestr(dest_name, _autocrop_png(png))
+            if square_size:
+                zf.writestr(dest_name, _square_crop_png(png, square_size))
             else:
                 zf.write(png, dest_name)
 
@@ -3889,6 +3897,7 @@ def download_crops(
     current_user: CurrentUser,
     id: uuid.UUID,
     ortho_version: int | None = None,
+    square_size: int | None = None,
 ) -> StreamingResponse:
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
@@ -3914,11 +3923,35 @@ def download_crops(
         else []
     )
 
+    def _square_crop_bytes(data: bytes, size: int) -> bytes:
+        """Autocrop black borders from image bytes, center-crop to square, resize to target size."""
+        import numpy as np
+        from PIL import Image as _PILImage
+        img = _PILImage.open(io.BytesIO(data)).convert("RGB")
+        arr = np.array(img)
+        mask = arr.sum(axis=2) > 15
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        if rows.any() and cols.any():
+            rmin, rmax = int(np.where(rows)[0][0]), int(np.where(rows)[0][-1])
+            cmin, cmax = int(np.where(cols)[0][0]), int(np.where(cols)[0][-1])
+            img = img.crop((cmin, rmin, cmax + 1, rmax + 1))
+        w, h = img.size
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
+        img = img.resize((size, size), _PILImage.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        return out.getvalue()
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         if images_on_disk:
-            for img in images_on_disk:
-                zf.write(img, img.name)
+            for img_path in images_on_disk:
+                if square_size:
+                    zf.writestr(img_path.with_suffix(".png").name, _square_crop_bytes(img_path.read_bytes(), square_size))
+                else:
+                    zf.write(img_path, img_path.name)
         elif pipeline and pipeline.type == "aerial":
             # No pre-cropped images — crop on-demand from the orthomosaic
             from app.processing.aerial import crop_plots_to_stream
@@ -3947,7 +3980,10 @@ def download_crops(
                 raise HTTPException(status_code=404, detail="No plots could be cropped from the orthomosaic.")
 
             for filename, data in plot_images:
-                zf.writestr(filename, data)
+                if square_size:
+                    zf.writestr(filename, _square_crop_bytes(data, square_size))
+                else:
+                    zf.writestr(filename, data)
         else:
             raise HTTPException(status_code=404, detail="No crop images found for this run.")
 
