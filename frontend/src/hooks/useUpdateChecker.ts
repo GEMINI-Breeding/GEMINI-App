@@ -16,7 +16,7 @@
 
 import { useEffect } from "react"
 
-const CURRENT_VERSION = "0.0.4"
+export const CURRENT_VERSION = "0.0.4"
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const LS_KEY = "gemi_last_update_check"
 const LS_DISMISSED_KEY = "gemi_dismissed_version"
@@ -43,6 +43,37 @@ function isNewer(local: string, remote: string): boolean {
   return rPat > lPat
 }
 
+export type CheckUpdateResult =
+  | { status: "update_available"; version: string; downloadUrl: string }
+  | { status: "up_to_date"; version: string }
+  | { status: "error"; message: string }
+
+/**
+ * Fetch the latest release and compare it against CURRENT_VERSION.
+ * Always hits the network — bypasses the 24 h gate and the dismissed gate.
+ * Use this for on-demand manual checks (e.g. a "Check for updates" button).
+ */
+export async function checkForUpdates(): Promise<CheckUpdateResult> {
+  try {
+    const res = await fetch(UPDATE_CHECK_URL, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return { status: "error", message: `GitHub API returned ${res.status}` }
+
+    const data = await res.json()
+    const remoteTag: string = data.tag_name ?? ""
+    if (!remoteTag) return { status: "error", message: "No release tag found" }
+
+    if (isNewer(CURRENT_VERSION, remoteTag)) {
+      return { status: "update_available", version: remoteTag, downloadUrl: RELEASES_PAGE }
+    }
+    return { status: "up_to_date", version: remoteTag }
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : "Network error" }
+  }
+}
+
 interface UseUpdateCheckerOptions {
   onUpdateAvailable: (version: string, downloadUrl: string) => void
 }
@@ -56,31 +87,14 @@ export function useUpdateChecker({ onUpdateAvailable }: UseUpdateCheckerOptions)
 
       localStorage.setItem(LS_KEY, String(now))
 
-      try {
-        const res = await fetch(UPDATE_CHECK_URL, {
-          headers: { Accept: "application/vnd.github+json" },
-          signal: AbortSignal.timeout(10_000),
-        })
-        if (!res.ok) return
+      const result = await checkForUpdates()
+      if (result.status !== "update_available") return
 
-        const data = await res.json()
-        const remoteTag: string = data.tag_name ?? ""
-        // Always send users to the releases page so they can pick the right
-        // installer for their platform (macOS .dmg, Windows .exe, Linux .deb).
-        const downloadUrl: string = RELEASES_PAGE
+      // Skip if user already dismissed this version
+      const dismissed = localStorage.getItem(LS_DISMISSED_KEY)
+      if (dismissed === result.version) return
 
-        if (!remoteTag) return
-
-        // Skip if user already dismissed this version
-        const dismissed = localStorage.getItem(LS_DISMISSED_KEY)
-        if (dismissed === remoteTag) return
-
-        if (isNewer(CURRENT_VERSION, remoteTag)) {
-          onUpdateAvailable(remoteTag, downloadUrl)
-        }
-      } catch {
-        // Network errors are non-fatal — silently skip
-      }
+      onUpdateAvailable(result.version, result.downloadUrl)
     }
 
     check()
