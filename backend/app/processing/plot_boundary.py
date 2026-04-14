@@ -332,6 +332,10 @@ def run_associate_boundaries(
     crops_dir = paths.cropped_images_dir
     crops_dir.mkdir(parents=True, exist_ok=True)
     for assoc in associations:
+        # Skip unmatched TIFs — no boundary polygon contained their centroid,
+        # so we have no plot metadata and must not create a misleadingly-labelled file.
+        if not assoc.get("matched"):
+            continue
         tif_name = assoc.get("plot_tif", "")
         stem = Path(tif_name).stem  # e.g. "georeferenced_plot_3_utm"
         # Find matching PNG in stitch_dir

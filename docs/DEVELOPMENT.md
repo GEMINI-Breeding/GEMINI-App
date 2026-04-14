@@ -269,14 +269,14 @@ Password: adminpassword
 │  │  • TanStack Router — file-based routing            │  │
 │  │  • TanStack Query — all server state               │  │
 │  │  • Auto-generated client calls FastAPI over HTTP   │  │
-│  └────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────┘  │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐  │
 │  │  FastAPI (Python)                                  │  │
 │  │  • SQLite via SQLModel                             │  │
 │  │  • Long-running steps run in daemon threads        │  │
 │  │  • Progress streamed to frontend via SSE           │  │
-│  └────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────┘
 ```
 
