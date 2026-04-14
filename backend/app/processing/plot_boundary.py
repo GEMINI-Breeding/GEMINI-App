@@ -352,12 +352,31 @@ def run_associate_boundaries(
         if dest_png.exists() or dest_png.is_symlink():
             dest_png.unlink()
         try:
-            dest_png.symlink_to(src_png.resolve())
-        except (OSError, NotImplementedError):
-            try:
-                shutil.copy2(src_png, dest_png)
-            except Exception as exc:
-                logger.warning("Could not link/copy %s → %s: %s", src_png.name, dest_png.name, exc)
+            shutil.copy2(src_png, dest_png)
+        except Exception as exc:
+            logger.warning("Could not copy %s → %s: %s", src_png.name, dest_png.name, exc)
+
+    # Build TIF footprint polygons (plot_boundaries.geojson) so inference can display
+    # the correct ground boundaries on the map without requiring a manual UI save.
+    # This replaces the aerial Plot-Boundary-WGS84.geojson that would otherwise be
+    # used as fallback in the inference step.
+    from app.processing.geo_utils import build_plot_boundaries_geojson as _build_boundaries
+
+    all_plot_ids: list[str] = []
+    for _assoc in associations:
+        _tif_name = _assoc.get("plot_tif", "")
+        _stem = Path(_tif_name).stem  # e.g. "georeferenced_plot_3_utm"
+        _parts = _stem.split("_")
+        for _pi, _pp in enumerate(_parts):
+            if _pp == "plot" and _pi + 1 < len(_parts) and _parts[_pi + 1].isdigit():
+                all_plot_ids.append(_parts[_pi + 1])
+                break
+
+    if all_plot_ids:
+        _boundary_geojson = _build_boundaries(stitch_dir, all_plot_ids, paths.plot_borders)
+        if _boundary_geojson:
+            outputs["plot_boundaries_geojson"] = paths.rel(_boundary_geojson)
+            logger.info("Built TIF footprint boundaries → %s", _boundary_geojson.name)
 
     matched = sum(1 for a in associations if a.get("matched"))
     now = datetime.now(timezone.utc).isoformat()

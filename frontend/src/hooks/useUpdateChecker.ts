@@ -16,7 +16,7 @@
 
 import { useEffect } from "react"
 
-const CURRENT_VERSION = "0.0.3"
+const CURRENT_VERSION = "0.0.4"
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const LS_KEY = "gemi_last_update_check"
 const LS_DISMISSED_KEY = "gemi_dismissed_version"

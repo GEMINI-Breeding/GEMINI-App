@@ -868,11 +868,14 @@ def run_trait_extraction(
                 tier = _prop(orig_row, "Tier", "tier", "row")
                 label = _prop(orig_row, "Label", "label", "accession", "Accession")
 
-                # Save cropped image to both canonical dir (backward compat) and versioned dir
-                bgr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
+                # Save cropped image to both canonical dir (backward compat) and versioned dir.
+                # Use Pillow instead of cv2.imwrite — OpenCV silently returns False on Windows
+                # when codec DLLs are missing or paths exceed MAX_PATH.
+                from PIL import Image as _PILImage
+                _pil_img = _PILImage.fromarray(rgb_arr)
                 crop_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
-                cv2.imwrite(str(crop_path), bgr)
-                cv2.imwrite(str(_versioned_crops_dir / f"plot_{plot_id}.png"), bgr)
+                _pil_img.save(str(crop_path))
+                _pil_img.save(str(_versioned_crops_dir / f"plot_{plot_id}.png"))
 
                 record: dict[str, Any] = {
                     "plot_id": plot_id,
