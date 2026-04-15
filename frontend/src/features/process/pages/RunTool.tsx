@@ -244,6 +244,7 @@ export function RunTool() {
             runId={runId}
             onSaved={onSaved}
             onCancel={goBack}
+            onSkip={onSaved}
           />
         )}
 

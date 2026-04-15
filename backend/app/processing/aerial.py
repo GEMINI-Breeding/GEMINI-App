@@ -107,6 +107,60 @@ def save_gcp_selection(
     }
 
 
+def skip_gcp_selection(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+) -> dict[str, str]:
+    """
+    Skip GCP selection — generate geo.txt from image GPS in msgs_synced.csv
+    and write an empty gcp_list.txt (header only).  ODM will fall back to
+    GPS-only georeferencing; orthomosaic accuracy may be reduced.
+    """
+    import csv as _csv
+
+    paths = _get_paths(session, run_id)
+    paths.intermediate_run.mkdir(parents=True, exist_ok=True)
+
+    # Read image GPS from msgs_synced.csv (produced by data_sync step)
+    image_gps: list[dict[str, Any]] = []
+    if paths.msgs_synced.exists():
+        try:
+            with open(paths.msgs_synced, newline="") as fh:
+                reader = _csv.DictReader(fh)
+                for row in reader:
+                    try:
+                        basename = Path(row["image_path"]).name
+                        lat = float(row.get("lat") or 0)
+                        lon = float(row.get("lon") or 0)
+                        alt = float(row.get("alt") or 0)
+                        image_gps.append({"image": basename, "lat": lat, "lon": lon, "alt": alt})
+                    except (KeyError, ValueError):
+                        continue
+        except Exception as exc:
+            logger.warning("Could not read msgs_synced.csv for skip: %s", exc)
+
+    # Write empty gcp_list.txt (header only — ODM accepts this as "no GCPs")
+    with open(paths.gcp_list, "w") as f:
+        f.write("EPSG:4326\n")
+
+    # Write geo.txt with image positions so ODM can still georeference the output
+    with open(paths.geo_txt, "w") as f:
+        f.write("EPSG:4326\n")
+        for img in image_gps:
+            f.write(f"{img['image']} {img['lon']} {img['lat']} {img['alt']}\n")
+
+    logger.info(
+        "Skipped GCP selection for run %s — wrote geo.txt with %d images",
+        run_id,
+        len(image_gps),
+    )
+    return {
+        "gcp_selection": paths.rel(paths.gcp_list),
+        "geo_txt": paths.rel(paths.geo_txt),
+    }
+
+
 # ── Step 2: Orthomosaic Generation (ODM via Docker) ───────────────────────────
 
 _ODM_PROGRESS_STAGES = [
