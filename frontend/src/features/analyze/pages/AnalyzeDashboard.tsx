@@ -7,7 +7,7 @@
  *  - Map:    satellite → ortho image overlay → trait polygons.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { PlotImage, type Prediction as SharedPrediction } from "@/components/Common/PlotImage";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import {
@@ -374,7 +374,7 @@ interface KeptPlot {
 
 function ExpandedPlotTable({ recordId, runId, isGroundPipeline = false }: { recordId: string; runId?: string; isGroundPipeline?: boolean }) {
   const [textFilters, setTextFilters] = useState<Record<PlotFilterKey, string>>(
-    { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
+    { col: "", row: "", plot: "", accession: "", location: "", crop: "", rep: "" }
   );
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [viewingPlot, setViewingPlot] = useState<{
@@ -465,12 +465,7 @@ function ExpandedPlotTable({ recordId, runId, isGroundPipeline = false }: { reco
           <button
             onClick={() =>
               setTextFilters({
-                col: "",
-                plot: "",
-                accession: "",
-                location: "",
-                crop: "",
-                rep: "",
+                col: "", row: "", plot: "", accession: "", location: "", crop: "", rep: "",
               })
             }
             className="text-primary text-xs hover:underline"
@@ -728,9 +723,9 @@ function TableTab({ records }: { records: TraitRecord[] }) {
               </TableRow>
             ) : (
               filtered.map((r) => (
-                <>
+                <React.Fragment key={r.id}>
                   <TableRow
-                    key={r.id}
+                    className="hover:bg-muted/40 cursor-pointer"
                     className="hover:bg-muted/40 cursor-pointer"
                     onClick={() => toggleExpanded(r.id)}
                   >
@@ -784,13 +779,13 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                     </TableCell>
                   </TableRow>
                   {expandedId === r.id && (
-                    <TableRow key={`${r.id}-expanded`}>
+                    <TableRow>
                       <TableCell colSpan={7} className="p-0">
                         <ExpandedPlotTable recordId={r.id} runId={r.run_id} isGroundPipeline={r.pipeline_type === "ground"} />
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </React.Fragment>
               ))
             )}
           </TableBody>
