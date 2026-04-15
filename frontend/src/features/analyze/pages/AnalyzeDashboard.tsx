@@ -726,7 +726,6 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                 <React.Fragment key={r.id}>
                   <TableRow
                     className="hover:bg-muted/40 cursor-pointer"
-                    className="hover:bg-muted/40 cursor-pointer"
                     onClick={() => toggleExpanded(r.id)}
                   >
                     <TableCell className="px-3">
@@ -1167,11 +1166,11 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
   // Build unique values per field for autocomplete
   const uniqueFieldValues = useMemo<Record<PlotFilterKey, string[]>>(() => {
     const empty: Record<PlotFilterKey, string[]> = {
-      col: [], plot: [], accession: [], location: [], crop: [], rep: [],
+      col: [], row: [], plot: [], accession: [], location: [], crop: [], rep: [],
     };
     if (!geojsonData?.geojson?.features) return empty;
     const sets: Record<PlotFilterKey, Set<string>> = {
-      col: new Set(), plot: new Set(), accession: new Set(),
+      col: new Set(), row: new Set(), plot: new Set(), accession: new Set(),
       location: new Set(), crop: new Set(), rep: new Set(),
     };
     for (const f of geojsonData.geojson.features) {
