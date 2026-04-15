@@ -95,6 +95,7 @@ interface GcpPickerProps {
   runId: string;
   onSaved: () => void;
   onCancel: () => void;
+  onSkip?: () => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -128,9 +129,10 @@ interface CsvUploadPanelProps {
   onLoaded: () => void;
   hasExisting?: boolean;
   onCancel?: () => void;
+  onSkip?: () => void;
 }
 
-function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel }: CsvUploadPanelProps) {
+function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel, onSkip }: CsvUploadPanelProps) {
   const { showErrorToast } = useCustomToast();
   const [csvText, setCsvText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -143,6 +145,19 @@ function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel }: CsvUploadPan
       }),
     onSuccess: onLoaded,
     onError: () => showErrorToast("Failed to save GCP locations"),
+  });
+
+  const skipMutation = useMutation({
+    mutationFn: () =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-selection/skip`), {
+        method: "POST",
+        credentials: "include",
+      }).then((r) => {
+        if (!r.ok) throw new Error("Skip failed");
+        return r.json();
+      }),
+    onSuccess: () => onSkip?.(),
+    onError: () => showErrorToast("Failed to skip GCP selection"),
   });
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,6 +227,18 @@ function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel }: CsvUploadPan
           {saveMutation.isPending ? "Saving…" : hasExisting ? "Replace GCP Locations" : "Load GCP Locations"}
         </Button>
       </div>
+      {onSkip && (
+        <div className="border-t pt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={skipMutation.isPending}
+            onClick={() => skipMutation.mutate()}
+          >
+            {skipMutation.isPending ? "Skipping…" : "Skip GCP Selection"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -260,6 +287,7 @@ export function GcpPicker({
   runId,
   onSaved,
   onCancel: _onCancel,
+  onSkip,
 }: GcpPickerProps) {
   const { showErrorToast, showSuccessToast } = useCustomToast();
   const queryClient = useQueryClient();
@@ -709,6 +737,22 @@ export function GcpPicker({
     onError: () => showErrorToast("Failed to save GCP selection"),
   });
 
+  const skipMutation = useMutation({
+    mutationFn: () =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-selection/skip`), {
+        method: "POST",
+        credentials: "include",
+      }).then((r) => {
+        if (!r.ok) throw new Error("Skip failed");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      onSkip?.();
+    },
+    onError: () => showErrorToast("Failed to skip GCP selection"),
+  });
+
   // ── Early returns ─────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -726,6 +770,7 @@ export function GcpPicker({
         hasExisting={data?.has_gcp_locations && replaceMode}
         onLoaded={() => { setReplaceMode(false); refetch(); }}
         onCancel={replaceMode ? () => setReplaceMode(false) : undefined}
+        onSkip={!replaceMode ? onSkip : undefined}
       />
     );
   }
@@ -1242,6 +1287,20 @@ export function GcpPicker({
               Clear all GCPs
             </Button>
           )}
+        </div>
+      )}
+
+      {/* ── Skip GCP Selection ── */}
+      {onSkip && (
+        <div className="border-t pt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={skipMutation.isPending}
+            onClick={() => skipMutation.mutate()}
+          >
+            {skipMutation.isPending ? "Skipping…" : "Skip GCP Selection"}
+          </Button>
         </div>
       )}
     </div>

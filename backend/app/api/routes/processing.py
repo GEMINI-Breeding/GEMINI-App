@@ -1285,6 +1285,42 @@ def save_gcp_selection(
     return {"status": "saved", "outputs": outputs}
 
 
+@router.post("/pipeline-runs/{id}/gcp-selection/skip")
+def skip_gcp_selection(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Skip GCP selection — generate geo.txt from msgs_synced.csv image GPS and
+    write an empty gcp_list.txt so ODM can proceed without ground control points.
+    """
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    if not pipeline or pipeline.type != "aerial":
+        raise HTTPException(status_code=400, detail="Not an aerial pipeline")
+
+    from app.processing.aerial import skip_gcp_selection as _skip
+
+    outputs = _skip(session=session, run_id=id)
+
+    existing_outputs = dict(run.outputs or {})
+    existing_outputs.update(outputs)
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps["gcp_selection"] = True
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(
+            steps_completed=existing_steps,
+            outputs=existing_outputs,
+        ),
+    )
+    return {"status": "skipped", "outputs": outputs}
+
+
 # ── Aerial: GCP candidates (images near GCP coordinates) ─────────────────────
 
 def _parse_gcp_csv(csv_path: Path) -> list[dict[str, Any]]:
