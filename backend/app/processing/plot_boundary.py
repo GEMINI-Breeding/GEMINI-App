@@ -356,27 +356,63 @@ def run_associate_boundaries(
         except Exception as exc:
             logger.warning("Could not copy %s → %s: %s", src_png.name, dest_png.name, exc)
 
-    # Build TIF footprint polygons (plot_boundaries.geojson) so inference can display
-    # the correct ground boundaries on the map without requiring a manual UI save.
-    # This replaces the aerial Plot-Boundary-WGS84.geojson that would otherwise be
-    # used as fallback in the inference step.
+    # Build TIF footprint polygons (plot_boundaries.geojson) keyed by association labels.
+    # Only matched TIFs are included.  Features get:
+    #   plot_id   = association label (e.g. "101")  ← used as primary plot identifier
+    #   tif_index = TIF sequential index (e.g. "3") ← used for image file lookup
+    #   row, col, accession, … from the association CSV row
     from app.processing.geo_utils import build_plot_boundaries_geojson as _build_boundaries
 
-    all_plot_ids: list[str] = []
+    # Build tif_index → assoc row map (only matched)
+    _tif_to_assoc: dict[str, dict] = {}
+    _all_plot_ids: list[str] = []
     for _assoc in associations:
         _tif_name = _assoc.get("plot_tif", "")
-        _stem = Path(_tif_name).stem  # e.g. "georeferenced_plot_3_utm"
+        _stem = Path(_tif_name).stem
         _parts = _stem.split("_")
         for _pi, _pp in enumerate(_parts):
             if _pp == "plot" and _pi + 1 < len(_parts) and _parts[_pi + 1].isdigit():
-                all_plot_ids.append(_parts[_pi + 1])
+                _tid = _parts[_pi + 1]
+                _all_plot_ids.append(_tid)
+                if _assoc.get("matched"):
+                    _tif_to_assoc[_tid] = _assoc
                 break
 
-    if all_plot_ids:
-        _boundary_geojson = _build_boundaries(stitch_dir, all_plot_ids, paths.plot_borders)
+    if _all_plot_ids:
+        _boundary_geojson = _build_boundaries(stitch_dir, _all_plot_ids, paths.plot_borders)
         if _boundary_geojson:
+            # Enrich features: use association label as plot_id, add row/col/accession,
+            # remove unmatched TIFs so only plots with known boundaries appear in results.
+            with open(_boundary_geojson) as _f:
+                _bc = json.load(_f)
+
+            _enriched: list[dict] = []
+            for _feat in _bc.get("features", []):
+                _tid = str(_feat.get("properties", {}).get("plot_id", ""))
+                _assoc_row = _tif_to_assoc.get(_tid)
+                if not _assoc_row:
+                    continue  # unmatched — exclude from results
+                _label = _assoc_row.get("Plot") or _assoc_row.get("plot") or _tid
+                _props: dict = {
+                    "plot_id":   _label,   # association label is the public identifier
+                    "tif_index": _tid,     # kept for image file lookup in serve endpoint
+                }
+                # Carry over all association fields except internal ones
+                for _k, _v in _assoc_row.items():
+                    if _k not in ("plot_tif", "matched", "plot_id", "tif_index"):
+                        _props[_k] = _v
+                _feat["properties"] = _props
+                _enriched.append(_feat)
+
+            _bc["features"] = _enriched
+            with open(_boundary_geojson, "w") as _f:
+                json.dump(_bc, _f)
+
             outputs["plot_boundaries_geojson"] = paths.rel(_boundary_geojson)
-            logger.info("Built TIF footprint boundaries → %s", _boundary_geojson.name)
+            logger.info(
+                "Built boundary GeoJSON: %d matched features → %s",
+                len(_enriched), _boundary_geojson.name,
+            )
 
     matched = sum(1 for a in associations if a.get("matched"))
     now = datetime.now(timezone.utc).isoformat()

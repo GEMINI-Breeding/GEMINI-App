@@ -827,6 +827,8 @@ function PlotImageCard({
   const [showLabels, setShowLabels] = useState(true);
   const [activeClass, setActiveClass] = useState<string | null>(null);
 
+  console.debug(`[PlotImageCard] render — recordId=${recordId} plotId=${plotId} isGround=${isGroundPipeline} runId=${runId}`)
+
   // Fetch inference results to power detection overlay on the card
   const { data: inferenceData } = useQuery({
     queryKey: ["inference-plot-dialog", runId],
@@ -1106,7 +1108,7 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
     () => records[0]?.id ?? null
   );
   const [filters, setFilters] = useState<Record<PlotFilterKey, string>>(
-    { col: "", plot: "", accession: "", location: "", crop: "", rep: "" }
+    { col: "", row: "", plot: "", accession: "", location: "", crop: "", rep: "" }
   );
   const [results, setResults] = useState<GeoJSON.Feature[] | null>(null);
   const [hasQueried, setHasQueried] = useState(false);
@@ -1549,6 +1551,7 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
               {results.slice(0, 24).map((f, i) => {
                 const plotId = getPlotId(f.properties ?? {}, i);
                 const keepKey = `${selectedId}:${plotId}`;
+                if (i === 0) console.debug("[QueryTab] first card — recordId:", selectedId, "plotId:", plotId, "props:", f.properties);
                 return (
                   <PlotImageCard
                     key={`${plotId}-${i}`}
@@ -1557,6 +1560,7 @@ function QueryTab({ records }: { records: TraitRecord[] }) {
                     properties={f.properties ?? {}}
                     metricColumns={metricCols}
                     runId={records.find((r) => r.id === selectedId)?.run_id}
+                    isGroundPipeline={records.find((r) => r.id === selectedId)?.pipeline_type === "ground"}
                     onKeep={() => toggleKeep(plotId, f.properties ?? {})}
                     isKept={keptPlots.some((p) => `${p.recordId}:${p.plotId}` === keepKey)}
                   />

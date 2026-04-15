@@ -1553,6 +1553,16 @@ def run_inference(
                 emit({"event": "log", "message": f"[{label}] Stopped after {i}/{len(plot_images)} plots."})
                 return {}
 
+            plot_idx = _get_plot_idx(img)
+            assoc = assoc_by_idx.get(plot_idx, {})
+
+            # Skip unmatched TIFs — no boundary polygon was found for this plot,
+            # so we have no plot metadata and results would be misleadingly labelled.
+            if not assoc or assoc.get("matched", "").lower() in ("false", "0", ""):
+                global_done += 1
+                emit({"event": "log", "message": f"[{label}] ({i + 1}/{len(plot_images)}) {img.name} → skipped (no boundary match)"})
+                continue
+
             def _warn(msg: str, _lbl: str = label) -> None:
                 emit({"event": "log", "message": f"  ⚠ [{_lbl}] {msg}"})
 
@@ -1572,8 +1582,6 @@ def run_inference(
                 "total": global_total,
                 "done": global_done,
             })
-            plot_idx = _get_plot_idx(img)
-            assoc = assoc_by_idx.get(plot_idx, {})
             plot_label = assoc.get("plot") or assoc.get("Plot") or plot_idx
             accession = assoc.get("accession") or assoc.get("Accession") or ""
             row_val = assoc.get("row") or assoc.get("Row") or ""

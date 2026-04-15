@@ -189,15 +189,26 @@ def get_traits(
 
         geojson = json.loads(geo_path.read_text())
 
-        # Aggregate inference counts per plot image → join on plot_id
+        # Aggregate inference counts per plot → join on plot_id (association label).
+        # inference output is stored as a list of {label, csv_path, …} entries.
         inference_out = outputs.get("inference")
         if inference_out:
+            # Normalise: str (legacy) → {Results: path}, dict (old) → as-is,
+            # list (new)  → {entry["label"]: entry["csv_path"]}
             if isinstance(inference_out, str):
                 model_paths: dict[str, str] = {"Results": inference_out}
+            elif isinstance(inference_out, list):
+                model_paths = {
+                    e["label"]: e["csv_path"]
+                    for e in inference_out
+                    if isinstance(e, dict) and e.get("csv_path")
+                }
             else:
                 model_paths = dict(inference_out)
 
-            # Build {plot_id: {class_label: count}} mapping
+            # Build {plot_label: {col_key: count}} mapping.
+            # Prefer the explicit plot_label column (association label, e.g. "101");
+            # fall back to extracting from the image filename (TIF index, e.g. "3").
             plot_counts: dict[str, dict[str, int]] = {}
             for label, rel_path in model_paths.items():
                 csv_path = paths.abs(rel_path)
@@ -205,11 +216,8 @@ def get_traits(
                     continue
                 with open(csv_path, newline="") as f:
                     for row in _csv.DictReader(f):
-                        img_name = row.get("image", "")
-                        # Image names match stitched plot filenames which encode plot_id
-                        # e.g. full_res_mosaic_temp_plot_3.png → plot_id "3"
-                        plot_id = _extract_plot_id(img_name)
-                        if plot_id is None:
+                        plot_id = row.get("plot_label") or _extract_plot_id(row.get("image", ""))
+                        if not plot_id:
                             continue
                         cls = row.get("class", label)
                         col_key = f"{label}_{cls}_count" if len(model_paths) > 1 else f"{cls}_count"
@@ -441,9 +449,29 @@ def get_trait_record_plot_image(
             img_path = matches[0]
 
     # For ground pipelines, images live in the AgRowStitch_v{N}/ directory, not cropped_images/.
-    # Try all stitch version dirs if the aerial crop_dir didn't have it.
+    # plot_id may be the association label (e.g. "101"); the actual file uses the TIF
+    # sequential index (e.g. "3").  Resolve via the enriched plot_boundaries.geojson
+    # which stores tif_index alongside plot_id, then fall back to glob patterns.
     if not img_path.exists() and pipeline and pipeline.type == "ground":
         _outputs = run.outputs or {}
+
+        # Try to resolve association label → TIF index via plot_boundaries.geojson
+        _tif_index: str | None = None
+        _geo_rel = _outputs.get("plot_boundaries_geojson")
+        if _geo_rel:
+            _geo_path = paths.abs(_geo_rel)
+            if _geo_path.exists():
+                try:
+                    import json as _json
+                    _bc = _json.loads(_geo_path.read_text())
+                    for _feat in _bc.get("features", []):
+                        _props = _feat.get("properties") or {}
+                        if str(_props.get("plot_id", "")) == plot_id:
+                            _tif_index = str(_props.get("tif_index", "")) or None
+                            break
+                except Exception:
+                    pass
+
         # Gather all stitch versions to search (most recent first)
         _stitch_versions: list[int] = []
         _stitchings = _outputs.get("stitchings") or []
@@ -456,19 +484,24 @@ def get_trait_record_plot_image(
             _stitch_versions.insert(0, int(_cur_v))
         if not _stitch_versions:
             _stitch_versions = [1]
+
         for _v in _stitch_versions:
             _stitch_dir = paths.agrowstitch_dir(_v)
             if not _stitch_dir.exists():
                 continue
-            # Primary pattern used by ground stitching
-            _candidate = _stitch_dir / f"full_res_mosaic_temp_plot_{plot_id}.png"
-            if _candidate.exists():
-                img_path = _candidate
-                break
-            # Fallback: any PNG containing the plot_id
-            _matches = sorted(_stitch_dir.glob(f"*_{plot_id}.png"))
-            if _matches:
-                img_path = _matches[0]
+            # Try resolved TIF index first (association label → index mapping)
+            for _pid in ([_tif_index, plot_id] if _tif_index and _tif_index != plot_id else [plot_id]):
+                if not _pid:
+                    continue
+                _candidate = _stitch_dir / f"full_res_mosaic_temp_plot_{_pid}.png"
+                if _candidate.exists():
+                    img_path = _candidate
+                    break
+                _matches = sorted(_stitch_dir.glob(f"*_{_pid}.png"))
+                if _matches:
+                    img_path = _matches[0]
+                    break
+            if img_path.exists():
                 break
 
     if not img_path.exists():

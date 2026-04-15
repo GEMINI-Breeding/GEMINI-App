@@ -112,12 +112,24 @@ export function PlotImage({
   useEffect(() => {
     setBlobUrl(null); setErrored(false); setDims(null)
     let revoked = false; let objectUrl: string | null = null
-    fetch(plotImageUrl(recordId, plotId), { headers: authHeaders() })
-      .then((res) => { if (!res.ok) throw new Error(); return res.blob() })
+    const url = plotImageUrl(recordId, plotId)
+    console.debug(`[PlotImage] fetching recordId=${recordId} plotId=${plotId} → ${url}`)
+    fetch(url, { headers: authHeaders() })
+      .then((res) => {
+        if (!res.ok) {
+          console.warn(`[PlotImage] HTTP ${res.status} for plotId=${plotId} recordId=${recordId} url=${url}`)
+          throw new Error(`HTTP ${res.status}`)
+        }
+        console.debug(`[PlotImage] OK ${res.status} for plotId=${plotId}`)
+        return res.blob()
+      })
       .then((blob) => {
         if (!revoked) { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl) }
       })
-      .catch(() => { if (!revoked) setErrored(true) })
+      .catch((err) => {
+        console.error(`[PlotImage] error for plotId=${plotId} recordId=${recordId}:`, err)
+        if (!revoked) setErrored(true)
+      })
     return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [recordId, plotId])
 

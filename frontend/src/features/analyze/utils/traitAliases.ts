@@ -107,6 +107,7 @@ export function lookupProperty(
 
 export const PLOT_FILTER_FIELDS = [
   "col",
+  "row",
   "plot",
   "accession",
   "location",
