@@ -932,7 +932,7 @@ function PlotImageCard({
         </div>
 
         {/* Image via shared PlotImage */}
-        <div className="flex-1" style={{ height: 192 }}>
+        <div style={{ height: 192 }}>
           <PlotImage
             recordId={recordId}
             plotId={plotId}
