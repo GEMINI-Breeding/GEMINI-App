@@ -440,11 +440,14 @@ def get_trait_record_plot_image(
 
     crop_dir = paths.cropped_images_dir
     img_path = crop_dir / f"plot_{plot_id}.png"
+    logger.debug("[plot-image] record=%s plot=%s crop_dir=%s img_path=%s exists=%s",
+                 record_id, plot_id, crop_dir, img_path, img_path.exists())
 
     # If exact match not found, search for any file whose stem ends with the plot_id
     # (handles edge cases like "plot_1_1.png" for plot id "1_1")
     if not img_path.exists() and crop_dir.exists():
         matches = list(crop_dir.glob(f"*{plot_id}*.png"))
+        logger.debug("[plot-image] crop_dir glob *%s* → %s", plot_id, [str(m) for m in matches])
         if matches:
             img_path = matches[0]
 
@@ -453,13 +456,17 @@ def get_trait_record_plot_image(
     # sequential index (e.g. "3").  Resolve via the enriched plot_boundaries.geojson
     # which stores tif_index alongside plot_id, then fall back to glob patterns.
     if not img_path.exists() and pipeline and pipeline.type == "ground":
+        logger.debug("[plot-image] ground fallback: crop_dir_exists=%s pipeline_type=%s",
+                     crop_dir.exists(), pipeline.type if pipeline else None)
         _outputs = run.outputs or {}
 
         # Try to resolve association label → TIF index via plot_boundaries.geojson
         _tif_index: str | None = None
         _geo_rel = _outputs.get("plot_boundaries_geojson")
+        logger.debug("[plot-image] ground: geo_rel=%s outputs_keys=%s", _geo_rel, list(_outputs.keys()))
         if _geo_rel:
             _geo_path = paths.abs(_geo_rel)
+            logger.debug("[plot-image] ground: geo_path=%s exists=%s", _geo_path, _geo_path.exists())
             if _geo_path.exists():
                 try:
                     import json as _json
@@ -469,8 +476,9 @@ def get_trait_record_plot_image(
                         if str(_props.get("plot_id", "")) == plot_id:
                             _tif_index = str(_props.get("tif_index", "")) or None
                             break
-                except Exception:
-                    pass
+                    logger.debug("[plot-image] ground: resolved tif_index=%s for plot_id=%s", _tif_index, plot_id)
+                except Exception as _exc:
+                    logger.warning("[plot-image] ground: failed to read geo_path: %s", _exc)
 
         # Gather all stitch versions to search (most recent first)
         _stitch_versions: list[int] = []
@@ -484,9 +492,11 @@ def get_trait_record_plot_image(
             _stitch_versions.insert(0, int(_cur_v))
         if not _stitch_versions:
             _stitch_versions = [1]
+        logger.debug("[plot-image] ground: stitch_versions=%s", _stitch_versions)
 
         for _v in _stitch_versions:
             _stitch_dir = paths.agrowstitch_dir(_v)
+            logger.debug("[plot-image] ground: stitch_dir=%s exists=%s", _stitch_dir, _stitch_dir.exists())
             if not _stitch_dir.exists():
                 continue
             # Try resolved TIF index first (association label → index mapping)
@@ -494,10 +504,12 @@ def get_trait_record_plot_image(
                 if not _pid:
                     continue
                 _candidate = _stitch_dir / f"full_res_mosaic_temp_plot_{_pid}.png"
+                logger.debug("[plot-image] ground: candidate=%s exists=%s", _candidate, _candidate.exists())
                 if _candidate.exists():
                     img_path = _candidate
                     break
                 _matches = sorted(_stitch_dir.glob(f"*_{_pid}.png"))
+                logger.debug("[plot-image] ground: glob *_%s.png → %s", _pid, [str(m) for m in _matches])
                 if _matches:
                     img_path = _matches[0]
                     break
@@ -505,6 +517,7 @@ def get_trait_record_plot_image(
                 break
 
     if not img_path.exists():
+        logger.warning("[plot-image] NOT FOUND: record=%s plot=%s final_path=%s", record_id, plot_id, img_path)
         raise HTTPException(status_code=404, detail=f"Plot image not found for plot {plot_id}. Re-run trait extraction to regenerate.")
 
     return FileResponse(str(img_path), media_type="image/png")
