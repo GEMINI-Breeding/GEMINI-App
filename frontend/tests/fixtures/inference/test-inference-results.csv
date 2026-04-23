@@ -1,0 +1,6 @@
+plot,image_name,class,confidence,x1,y1,x2,y2
+1,plot_001.png,Plant,0.95,100,150,200,300
+1,plot_001.png,Plant,0.87,300,150,400,300
+2,plot_002.png,Plant,0.92,120,160,220,310
+2,plot_002.png,Flower,0.78,150,200,180,230
+3,plot_003.png,Plant,0.88,110,140,210,290

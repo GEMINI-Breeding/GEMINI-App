@@ -4,6 +4,7 @@ import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
 import { dataTypes } from "@/config/dataTypes";
 import { useFileUpload } from "@/features/files/hooks/useFileUpload";
+import { isExtensionAllowed } from "@/features/files/utils/extensions";
 import { FilePreviewDialog } from "./FilePreviewDialog";
 import { OpenAPI } from "@/client";
 import useCustomToast from "@/hooks/useCustomToast";
@@ -30,18 +31,6 @@ interface PendingUpload {
   targetRootDir: string;
   formValues: Record<string, string>;
   existingFiles: string[];
-}
-
-// Map dataTypes fileType → sets of valid lowercase extensions
-const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif"])
-
-function isExtensionAllowed(filePath: string, fileType: string): boolean {
-  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
-  if (fileType === "*") return true
-  if (fileType === "image/*") return IMAGE_EXTS.has(ext)
-  // Comma-separated list (e.g. ".csv,.xlsx,.xls") or single extension
-  const allowed = fileType.split(",").map((s) => s.trim().toLowerCase())
-  return allowed.some((a) => ext === a) || (allowed.includes(".tif") && ext === ".tiff")
 }
 
 export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete, onDockerError, label, subDir }: UploadListProps) {

@@ -1,0 +1,81 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "plot": 1,
+        "accession": "ACC-A",
+        "row": 1,
+        "column": 1
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.78253, 38.53356],
+          [-121.78246, 38.53356],
+          [-121.78246, 38.53363],
+          [-121.78253, 38.53363],
+          [-121.78253, 38.53356]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "plot": 2,
+        "accession": "ACC-B",
+        "row": 1,
+        "column": 2
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.78246, 38.53356],
+          [-121.78239, 38.53356],
+          [-121.78239, 38.53363],
+          [-121.78246, 38.53363],
+          [-121.78246, 38.53356]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "plot": 3,
+        "accession": "ACC-C",
+        "row": 2,
+        "column": 1
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.78253, 38.53363],
+          [-121.78246, 38.53363],
+          [-121.78246, 38.53370],
+          [-121.78253, 38.53370],
+          [-121.78253, 38.53363]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "plot": 4,
+        "accession": "ACC-D",
+        "row": 2,
+        "column": 2
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.78246, 38.53363],
+          [-121.78239, 38.53363],
+          [-121.78239, 38.53370],
+          [-121.78246, 38.53370],
+          [-121.78246, 38.53363]
+        ]]
+      }
+    }
+  ]
+}

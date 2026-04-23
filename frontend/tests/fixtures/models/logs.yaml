@@ -1,0 +1,11 @@
+train/box_loss: 0.045
+train/cls_loss: 0.012
+train/dfl_loss: 0.089
+metrics/precision(B): 0.91
+metrics/recall(B): 0.87
+metrics/mAP50(B): 0.89
+metrics/mAP50-95(B): 0.72
+lr/pg0: 0.001
+lr/pg1: 0.001
+lr/pg2: 0.001
+epoch: 3

@@ -30,7 +30,7 @@ export function TextField({
         id={id}
         type={type}
         placeholder={placeholder}
-        value={value}
+        value={value ?? ""}
         onChange={(e) => onChange?.(e.target.value)}
         className={`border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary w-full rounded-md border px-3 py-2 focus:border-transparent focus:ring-2 focus:outline-none ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
         disabled={disabled}

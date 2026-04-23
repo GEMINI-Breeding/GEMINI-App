@@ -2,40 +2,37 @@ import { defineConfig, devices } from '@playwright/test';
 import 'dotenv/config'
 
 /**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-
-/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
   testDir: './tests',
-  /* Run tests in files in parallel */
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? 'blob' : 'html',
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:5173',
-
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    /* Dedicated port for E2E so we don't collide with a user's regular
+       `npm run dev` on 5173. */
+    baseURL: 'http://localhost:5273',
     trace: 'on-first-retry',
   },
 
-  /* Configure projects for major browsers */
   projects: [
-    { name: 'setup', testMatch: /.*\.setup\.ts/ },
+    /* Original auth setup used by the pre-existing auth specs. Left in place
+       even though `isLoggedIn()` is currently stubbed so it redirects /login
+       to /, because un-stubbing auth later shouldn't require config churn. */
+    { name: 'setup', testMatch: /auth\.setup\.ts$/ },
+
+    /* New lightweight setup for the e2e-workflows suite: obtains a real JWT
+       from the backend's /login/access-token endpoint and seeds it into
+       localStorage. */
+    { name: 'e2e-setup', testMatch: /e2e\.setup\.ts$/ },
 
     {
       name: 'chromium',
+      testDir: './tests',
+      testIgnore: [/e2e\//, /.*\.setup\.ts/],
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/user.json',
@@ -43,49 +40,22 @@ export default defineConfig({
       dependencies: ['setup'],
     },
 
-    // {
-    //   name: 'firefox',
-    //   use: {
-    //     ...devices['Desktop Firefox'],
-    //     storageState: 'playwright/.auth/user.json',
-    //   },
-    //   dependencies: ['setup'],
-    // },
-
-    // {
-    //   name: 'webkit',
-    //   use: {
-    //     ...devices['Desktop Safari'],
-    //     storageState: 'playwright/.auth/user.json',
-    //   },
-    //   dependencies: ['setup'],
-    // },
-
-    /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
-
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
+    {
+      name: 'e2e-workflows',
+      testDir: './tests/e2e',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'playwright/.auth/e2e-user.json',
+        trace: 'retain-on-failure',
+        video: 'retain-on-failure',
+      },
+      dependencies: ['e2e-setup'],
+    },
   ],
 
-  /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
+    command: 'npm run dev -- --port 5273 --strictPort',
+    url: 'http://localhost:5273',
     reuseExistingServer: !process.env.CI,
   },
 });
