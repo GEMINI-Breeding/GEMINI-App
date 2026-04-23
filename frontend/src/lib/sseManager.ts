@@ -22,6 +22,18 @@ function apiUrl(path: string): string {
 
 const connections = new Map<string, SseEntry>()
 
+// Diagnostic counter exposed to E2E tests so they can assert that a run
+// didn't silently flap via the onerror retry loop. Gated out of production.
+interface SseDiagnostics {
+  errorCount: number
+  lastErrorTs: number | null
+}
+const diagnostics: SseDiagnostics = { errorCount: 0, lastErrorTs: null }
+if (typeof window !== "undefined" && import.meta.env.MODE !== "production") {
+  ;(window as unknown as { __gemiSseDiagnostics?: SseDiagnostics }).__gemiSseDiagnostics =
+    diagnostics
+}
+
 function open(runId: string) {
   const existing = connections.get(runId)
   const offset = existing?.offset ?? 0
@@ -60,6 +72,8 @@ function open(runId: string) {
   }
 
   es.onerror = () => {
+    diagnostics.errorCount += 1
+    diagnostics.lastErrorTs = Date.now()
     es.close()
     if (entry.listeners.size === 0) {
       console.log(`[sseManager] ${runId.slice(0,8)} connection error — no listeners, stopping`)
