@@ -1,0 +1,2 @@
+This is not an image file.
+It should be rejected when the Image Data type is selected.

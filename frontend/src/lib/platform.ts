@@ -63,6 +63,19 @@ export async function pickFiles(opts?: {
   multiple?: boolean;
   accept?: string; // e.g. "image/*,.csv"
 }): Promise<File[] | string[] | null> {
+  // E2E hook: the upload flow is Tauri-first and passes absolute paths to the
+  // backend. Browsers strip absolute paths from File objects, so Playwright
+  // tests inject paths via this hook (setup in tests/helpers/uploadHelpers.ts).
+  // Gated out of production so real users never hit it.
+  if (import.meta.env.MODE !== "production") {
+    const injected = (window as unknown as { __E2E_PICK_FILES__?: string[] })
+      .__E2E_PICK_FILES__;
+    if (injected && injected.length > 0) {
+      (window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ = undefined;
+      return injected;
+    }
+  }
+
   if (isTauri()) {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ multiple: opts?.multiple ?? false, directory: false });

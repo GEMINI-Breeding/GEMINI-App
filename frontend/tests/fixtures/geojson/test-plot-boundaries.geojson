@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "Plot": 1,
+        "Label": "Accession-A",
+        "Tier": 1,
+        "Bed": 1,
+        "Height_95p_meters": 0.85,
+        "Vegetation_Fraction": 0.72
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-121.745, 38.535], [-121.744, 38.535], [-121.744, 38.536], [-121.745, 38.536], [-121.745, 38.535]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "Plot": 2,
+        "Label": "Accession-B",
+        "Tier": 1,
+        "Bed": 2,
+        "Height_95p_meters": 1.12,
+        "Vegetation_Fraction": 0.65
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-121.744, 38.535], [-121.743, 38.535], [-121.743, 38.536], [-121.744, 38.536], [-121.744, 38.535]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "Plot": 3,
+        "Label": "Accession-A",
+        "Tier": 2,
+        "Bed": 1,
+        "Height_95p_meters": 0.93,
+        "Vegetation_Fraction": 0.81
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-121.745, 38.536], [-121.744, 38.536], [-121.744, 38.537], [-121.745, 38.537], [-121.745, 38.536]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "Plot": 4,
+        "Label": "Accession-C",
+        "Tier": 2,
+        "Bed": 2,
+        "Height_95p_meters": null,
+        "Vegetation_Fraction": 0.0
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-121.744, 38.536], [-121.743, 38.536], [-121.743, 38.537], [-121.744, 38.537], [-121.744, 38.536]]]
+      }
+    }
+  ]
+}
