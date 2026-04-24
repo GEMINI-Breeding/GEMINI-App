@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, migration/geminibase]
   pull_request:
-    branches: [main]
+    branches: [main, migration/geminibase]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,12 +37,97 @@ jobs:
           path: frontend/coverage
           retention-days: 14
 
-  e2e:
-    name: Frontend E2E (Playwright)
+  backend-unit:
+    name: Backend unit (pytest)
     runs-on: ubuntu-latest
-    needs: unit
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.*
+
+      - name: Install backend deps (no virtualenv)
+        run: |
+          poetry config virtualenvs.create false
+          poetry install --no-root --with test
+
+      - name: Run backend unit tests
+        run: |
+          # Use the existing fast unit-test suite. Integration tests that
+          # require infra live under tests/integration and are run separately
+          # by the compose-smoke job below.
+          python -m pytest tests/unit -q
+
+  compose-smoke:
+    name: Compose stack smoke
+    # Brings the GEMINIbase backend stack up from the root docker-compose.yaml
+    # (which `include:`s backend/gemini/pipeline/docker-compose.yaml) and hits
+    # the health + schema endpoints. This verifies the submodule-pointer +
+    # compose-include plumbing on every push, which was silently broken for
+    # all of Phases 0-3 under the previous workflow.
+    runs-on: ubuntu-latest
+    needs: [unit, backend-unit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Seed .env files
+        run: |
+          # scripts/setup-backend.sh runs submodule init + .env seeding.
+          bash scripts/setup-backend.sh
+
+      - name: Bring up the core stack (db, storage, rest-api, logger, titiler)
+        run: |
+          docker compose -f docker-compose.yaml up -d --build \
+            rest-api db storage storage-init logger titiler
+
+      - name: Wait for /healthz
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:7777/healthz > /dev/null; then
+              echo "rest-api healthy"; exit 0
+            fi
+            sleep 3
+          done
+          echo "rest-api failed to become healthy"
+          docker compose -f docker-compose.yaml logs rest-api
+          exit 1
+
+      - name: Sanity — all 28+ controllers register
+        run: |
+          curl -sf http://localhost:7777/schema/openapi.json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); n=len(d["paths"]); print(f"{n} paths registered"); assert n > 180, f"expected >180 paths, got {n}"'
+
+      - name: Dump rest-api logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yaml logs rest-api
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yaml down -v
+
+  e2e-playwright:
+    name: Frontend E2E (Playwright)
+    # Kept as a non-blocking signal during Phase 4 so we can see progress as
+    # SDK call sites get rewritten. Flip `continue-on-error: false` once
+    # Phase 4 lands and all `/api/v1/*` paths have been replaced.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: [compose-smoke]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:
@@ -50,44 +135,23 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Seed .env files
+        run: bash scripts/setup-backend.sh
 
-      - name: Install uv
+      - name: Bring up the full stack
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          docker compose -f docker-compose.yaml up -d --build \
+            rest-api db storage storage-init logger titiler \
+            geminibase-worker-ml geminibase-worker-geo geminibase-worker-flir
 
-      - name: Create repo .env for test config
+      - name: Wait for /healthz
         run: |
-          cp .env.example .env
-
-      - name: Sync backend deps
-        working-directory: backend
-        run: uv sync --frozen
-
-      - name: Pull ODM Docker image (for pipeline-orthomosaic.spec.ts)
-        run: docker pull opendronemap/odm
-
-      - name: Start backend (uvicorn)
-        working-directory: backend
-        env:
-          APP_DATA_ROOT: ${{ runner.temp }}/gemi-test-data
-          # Backend reads FRONTEND_HOST into its CORS allowlist. The Playwright
-          # dev server in this repo runs on 5273 (see playwright.config.ts).
-          FRONTEND_HOST: http://localhost:5273
-        run: |
-          mkdir -p "$APP_DATA_ROOT"
-          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/backend.log" 2>&1 &
           for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8000/api/v1/utils/health-check/ > /dev/null; then
-              echo "backend ready"; exit 0
-            fi
-            sleep 2
+            if curl -sf http://localhost:7777/healthz > /dev/null; then exit 0; fi
+            sleep 3
           done
-          echo "backend failed to start"; cat "$RUNNER_TEMP/backend.log"; exit 1
+          docker compose -f docker-compose.yaml logs rest-api
+          exit 1
 
       - name: Install frontend deps
         working-directory: frontend
@@ -99,7 +163,7 @@ jobs:
 
       - name: Run Playwright
         working-directory: frontend
-        run: npx playwright test --project=e2e-setup --project=e2e-workflows
+        run: npm run test:e2e
 
       - name: Upload Playwright report on failure
         if: failure()
@@ -111,10 +175,10 @@ jobs:
             frontend/test-results
           retention-days: 14
 
-      - name: Upload backend log on failure
+      - name: Dump stack logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-log
-          path: ${{ runner.temp }}/backend.log
-          retention-days: 14
+        run: docker compose -f docker-compose.yaml logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yaml down -v
