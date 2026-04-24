@@ -1,3 +1,16 @@
 .DS_Store
 .env
 .env.local
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Agent / planning artifacts (local only, never commit)
+CLAUDE.md
+task_plan.md
+findings.md
+progress.md
+
+# Frontend test coverage output
+frontend/coverage/

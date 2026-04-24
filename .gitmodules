@@ -1,7 +1,3 @@
-[submodule "backend/vendor/AgRowStitch"]
-	path = backend/vendor/AgRowStitch
-	url = https://github.com/GEMINI-Breeding/AgRowStitch.git
-	branch = opencv
-[submodule "backend/vendor/LightGlue"]
-	path = backend/vendor/LightGlue
-	url = https://github.com/cvg/LightGlue.git
+[submodule "backend"]
+	path = backend
+	url = https://github.com/GEMINI-Breeding/GEMINIbase.git
