@@ -12,7 +12,7 @@ interface UploadListProps {
   dataType: string | null;
   formValues: Record<string, string>;
   onFilesSelected?: (paths: string[]) => void;
-  onUploadComplete?: (destPaths: string[]) => void;
+  onUploadComplete?: (destPaths: string[], uploadId?: string) => void;
   onDockerError?: (message: string) => void;
   /** Optional label shown above the upload zone */
   label?: string;

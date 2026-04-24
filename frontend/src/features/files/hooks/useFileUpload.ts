@@ -12,8 +12,8 @@ interface UploadParams {
   targetRootDir: string;
   reupload?: boolean;
   formValues?: Record<string, string>;
-  /** Called with absolute dest paths of all successfully uploaded files */
-  onComplete?: (destPaths: string[]) => void;
+  /** Called with absolute dest paths of all successfully uploaded files and the upload record ID */
+  onComplete?: (destPaths: string[], uploadId?: string) => void;
   /** Called when a Docker-not-found/not-running error occurs during .bin extraction */
   onDockerError?: (message: string) => void;
 }
@@ -190,7 +190,7 @@ export function useFileUpload() {
                       completedAt: new Date(),
                       title: `Uploaded ${data.count} file(s)`,
                     });
-                    onComplete?.(completedDestPaths);
+                    onComplete?.(completedDestPaths, data.file_upload_id as string | undefined);
                   }
                   queryClient.invalidateQueries({ queryKey: ["workspace-card-images"] });
                   break;

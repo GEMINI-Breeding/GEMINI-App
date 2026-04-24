@@ -3,13 +3,53 @@
 mod sidecar_manager;
 
 /// Fetch `url` (GET or POST) and write the response body to `dest` on disk.
+/// Optional `headers` map (e.g. Authorization) is forwarded to the request.
 #[tauri::command]
-async fn download_to_file(url: String, dest: String, method: Option<String>) -> Result<(), String> {
+async fn download_to_file(
+    url: String,
+    dest: String,
+    method: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<(), String> {
     let client = reqwest::Client::new();
-    let req = match method.as_deref().unwrap_or("POST") {
+    let mut req = match method.as_deref().unwrap_or("POST") {
         "GET" => client.get(&url),
         _ => client.post(&url),
     };
+    if let Some(hdrs) = headers {
+        for (k, v) in hdrs {
+            req = req.header(k, v);
+        }
+    }
+    let response = req.send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Server returned {}", response.status()));
+    }
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// POST a JSON body to `url` and write the response bytes directly to `dest`.
+/// Used for authenticated downloads that need a Save As dialog (avoids passing
+/// large byte arrays over Tauri IPC, which serialises to JSON and freezes the UI).
+#[tauri::command]
+async fn download_post_to_file(
+    url: String,
+    dest: String,
+    body: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let mut req = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body(body);
+    if let Some(hdrs) = headers {
+        for (k, v) in hdrs {
+            req = req.header(k, v);
+        }
+    }
     let response = req.send().await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("Server returned {}", response.status()));
@@ -72,7 +112,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![download_to_file, open_devtools])
+            .invoke_handler(tauri::generate_handler![download_to_file, download_post_to_file, open_devtools])
             .setup(|app| {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -123,7 +163,7 @@ pub fn run() {
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
             .manage(sidecar_for_state)
-            .invoke_handler(tauri::generate_handler![download_to_file, read_sidecar_log])
+            .invoke_handler(tauri::generate_handler![download_to_file, download_post_to_file, read_sidecar_log])
             .setup(move |app| {
                 let app_handle = app.handle().clone();
 

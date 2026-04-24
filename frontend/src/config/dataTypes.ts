@@ -154,4 +154,39 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".csv,.xlsx,.xls",
     directory: ["ReferenceData"],
   },
+  "Multispectral Data": {
+    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fileType: ".tif,.tiff,.jpg,.jpeg,.png",
+    directory: [
+      "Raw",
+      "Year",
+      "Experiment",
+      "Location",
+      "Population",
+      "Date",
+      "Platform",
+      "Sensor",
+      "Images",
+    ],
+    customUpload: true,
+  },
+  "Thermal Data": {
+    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fileType: ".tif,.tiff,.jpg,.jpeg,.png",
+    directory: [
+      "Raw",
+      "Year",
+      "Experiment",
+      "Location",
+      "Population",
+      "Date",
+      "Platform",
+      "Sensor",
+      "Thermal",
+    ],
+    // FUTURE: after upload, show a config dialog for TIF uploads to specify whether
+    // the camera is radiometric (enabling raw temperature data extraction) and to
+    // set calibration parameters for non-radiometric thermal cameras.
+    // customUpload: true,
+  },
 };

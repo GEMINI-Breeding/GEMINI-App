@@ -1794,6 +1794,68 @@ def _import_extract_binary():
 
 _DOCKER_IMAGE = "gemi-bin-extractor:latest"
 
+# Cache the resolved docker binary path so we only search once.
+_docker_cmd: str | None = None
+
+
+def _find_docker() -> str:
+    """
+    Return the path to the docker CLI binary.
+
+    Docker Desktop on macOS is sometimes installed outside /usr/local/bin (e.g.
+    in ~/Desktop/Docker.app or ~/Applications/Docker.app) and its bin/ directory
+    is not on the PATH seen by the backend process.  We search common locations
+    and fall back to 'docker' (letting the OS raise FileNotFoundError as before).
+    """
+    global _docker_cmd
+    if _docker_cmd is not None:
+        return _docker_cmd
+
+    import shutil
+
+    # Fast path: already on PATH
+    found = shutil.which("docker")
+    if found:
+        _docker_cmd = found
+        return _docker_cmd
+
+    # Common macOS locations Docker Desktop may install to
+    candidates = [
+        Path.home() / ".docker" / "bin" / "docker",
+        Path("/Applications/Docker.app/Contents/Resources/bin/docker"),
+        Path.home() / "Applications" / "Docker.app" / "Contents" / "Resources" / "bin" / "docker",
+        Path.home() / "Desktop" / "Docker.app" / "Contents" / "Resources" / "bin" / "docker",
+        Path("/usr/local/bin/docker"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            _docker_cmd = str(candidate)
+            logger.info("Found docker at non-standard location: %s", _docker_cmd)
+            return _docker_cmd
+
+    # Not found — return bare name so callers get the standard FileNotFoundError
+    _docker_cmd = "docker"
+    return _docker_cmd
+
+
+def _docker_env() -> dict:
+    """
+    Return an environment dict for docker subprocess calls with the Docker bin
+    directory prepended to PATH.
+
+    Docker credential helpers (e.g. docker-credential-desktop) live alongside
+    the docker binary.  When Docker is installed in a non-standard location the
+    backend process may not have that directory on its PATH, causing build/pull
+    failures like "exec: docker-credential-desktop: not found".
+    """
+    docker_bin = str(Path(_find_docker()).parent)
+    current_path = os.environ.get("PATH", "")
+    if docker_bin not in current_path.split(os.pathsep):
+        augmented = docker_bin + os.pathsep + current_path
+    else:
+        augmented = current_path
+    return {**os.environ, "PATH": augmented}
+
 # Prevents concurrent docker build attempts (e.g. user retries while first build is running).
 _docker_build_lock = threading.Lock()
 _docker_build_in_progress = threading.Event()  # set while a build is running
@@ -1835,12 +1897,13 @@ def _image_needs_rebuild() -> bool:
     """Return True if the Docker image doesn't exist or was built from an older Dockerfile."""
     result = subprocess.run(
         [
-            "docker", "image", "inspect",
+            _find_docker(), "image", "inspect",
             "--format", "{{index .Config.Labels \"gemi.hash\"}}",
             _DOCKER_IMAGE,
         ],
         capture_output=True,
         text=True,
+        env=_docker_env(),
         **_WINFLAGS,
     )
     if result.returncode != 0:
@@ -1884,7 +1947,7 @@ def _build_bin_extractor_image(emit: Callable[[dict], None]) -> None:
         shutil.copytree(bin_to_images_src, tmp_path / "bin_to_images")
 
         cmd = [
-            "docker", "build",
+            _find_docker(), "build",
             "--build-arg", f"GEMI_HASH={_dockerfile_hash()}",
             "-t", _DOCKER_IMAGE,
             ".",
@@ -1896,6 +1959,7 @@ def _build_bin_extractor_image(emit: Callable[[dict], None]) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            env=_docker_env(),
             **_WINFLAGS,
         )
         assert proc.stdout is not None
@@ -1929,15 +1993,16 @@ def _ensure_docker_ready(emit: Callable[[dict], None]) -> None:
     # ── 1. Docker daemon reachable? ───────────────────────────────────────────
     try:
         subprocess.run(
-            ["docker", "info"],
+            [_find_docker(), "info"],
             capture_output=True,
             check=True,
             timeout=15,
+            env=_docker_env(),
             **_WINFLAGS,
         )
     except FileNotFoundError:
         raise RuntimeError(
-            ".bin extraction is not supported natively on Windows and Docker was not found.\n"
+            ".bin extraction is not supported natively on Windows/macOS and Docker was not found.\n"
             "\n"
             "To enable .bin extraction on Windows:\n"
             "  1. Install Docker Desktop: https://www.docker.com/products/docker-desktop/\n"
@@ -2006,7 +2071,7 @@ def _run_docker_container(
     container_name = f"gemi-binext-{_uuid.uuid4().hex[:12]}"
 
     cmd = [
-        "docker", "run", "-d",          # detached: returns immediately with container ID
+        _find_docker(), "run", "-d",     # detached: returns immediately with container ID
         "--name", container_name,
         *resource_flags,
         "-v", f"{host_bin_dir}:/input:ro",
@@ -2022,7 +2087,7 @@ def _run_docker_container(
 
     # Start the container.  This returns as soon as Docker confirms the
     # container is running — no blocking on stdout/stderr pipes.
-    start = subprocess.run(cmd, capture_output=True, text=True, timeout=60, **_WINFLAGS)
+    start = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_docker_env(), **_WINFLAGS)
     if start.returncode != 0:
         raise RuntimeError(
             f"docker run -d failed to start container:\n"
@@ -2037,8 +2102,9 @@ def _run_docker_container(
     def _docker_wait() -> None:
         try:
             r = subprocess.run(
-                ["docker", "wait", container_name],
+                [_find_docker(), "wait", container_name],
                 capture_output=True, text=True,
+                env=_docker_env(),
                 **_WINFLAGS,
             )
             _result_q.put(("done", r))
@@ -2059,8 +2125,9 @@ def _run_docker_container(
                 cancelled = True
                 try:
                     subprocess.run(
-                        ["docker", "stop", container_name],
+                        [_find_docker(), "stop", container_name],
                         timeout=30, capture_output=True,
+                        env=_docker_env(),
                         **_WINFLAGS,
                     )
                 except Exception as e:
@@ -2079,8 +2146,9 @@ def _run_docker_container(
     stdout = stderr = ""
     try:
         logs = subprocess.run(
-            ["docker", "logs", container_name],
+            [_find_docker(), "logs", container_name],
             capture_output=True, text=True, timeout=30,
+            env=_docker_env(),
             **_WINFLAGS,
         )
         stdout = logs.stdout or ""
@@ -2095,8 +2163,9 @@ def _run_docker_container(
     # Remove the container now that we have logs and the exit code.
     try:
         subprocess.run(
-            ["docker", "rm", "-f", container_name],
+            [_find_docker(), "rm", "-f", container_name],
             capture_output=True, timeout=30,
+            env=_docker_env(),
             **_WINFLAGS,
         )
     except Exception as e:
@@ -2286,7 +2355,7 @@ def extract_bin_files_batch(
     extract_binary = _import_extract_binary()
     use_docker = (
         extract_binary is None
-        and (sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1")
+        and (sys.platform in ("win32", "darwin") or os.environ.get("GEMI_FORCE_DOCKER") == "1")
     )
 
     if extract_binary is None and not use_docker:
@@ -2491,8 +2560,8 @@ def extract_bin_file(
     Output lives in Raw/ (not Intermediate/Processed) — extraction is not a
     processing step, it's making the raw data available.
 
-    On Linux/macOS: uses the farm_ng SDK directly from the Python environment.
-    On Windows:     falls back to a Docker container (gemi-bin-extractor image).
+    On Linux:        uses the farm_ng SDK directly from the Python environment.
+    On macOS/Windows: falls back to a Docker container (gemi-bin-extractor image) when farm_ng is not installed.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     emit({"event": "start", "message": f"Extracting {bin_path.name}…"})
@@ -2521,8 +2590,8 @@ def extract_bin_file(
                 emit({"event": "error", "message": str(exc)})
                 raise
 
-        elif sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1":
-            # Windows fallback — Docker container
+        elif sys.platform in ("win32", "darwin") or os.environ.get("GEMI_FORCE_DOCKER") == "1":
+            # Windows / macOS fallback — Docker container
             try:
                 _extract_binary_via_docker(bin_path, output_dir, emit)
             except RuntimeError as exc:

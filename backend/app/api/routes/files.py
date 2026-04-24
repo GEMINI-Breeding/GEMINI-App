@@ -873,6 +873,7 @@ def _copy_local_stream(
             "skipped": skipped,
             "count": len(uploaded),
             "has_errors": extraction_failed,
+            "file_upload_id": str(file_upload_id),
         }
     )
 

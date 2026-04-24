@@ -4,6 +4,7 @@ import { DataStructureForm, DataTypes, UploadList } from "../components";
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard";
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog";
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog";
+import { MultispectralUploadDialog } from "../components/MultispectralUploadDialog";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ export function UploadData() {
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null);
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null);
   const [refDataFile, setRefDataFile] = useState<File | null>(null);
+  const [multispectralUploadId, setMultispectralUploadId] = useState<string | null>(null);
 
   const handleDockerError = useCallback((msg: string) => {
     setDockerErrorMsg(msg);
@@ -77,7 +79,11 @@ export function UploadData() {
   );
 
   const handleUploadComplete = useCallback(
-    async (destPaths: string[]) => {
+    async (destPaths: string[], uploadId?: string) => {
+      if (selectedFileType === "Multispectral Data") {
+        if (uploadId) setMultispectralUploadId(uploadId);
+        return;
+      }
       if (selectedFileType === "Synced Metadata") {
         const csvPath = destPaths.find((p) => /\.csv$/i.test(p));
         if (!csvPath) return;
@@ -160,6 +166,14 @@ export function UploadData() {
         </div>
       </div>
 
+      {multispectralUploadId && (
+        <MultispectralUploadDialog
+          open
+          uploadId={multispectralUploadId}
+          onClose={() => setMultispectralUploadId(null)}
+        />
+      )}
+
       {refDataFile && (
         <ReferenceDataUploadDialog
           open
@@ -186,7 +200,7 @@ export function UploadData() {
             <DialogDescription asChild>
               <div className="text-muted-foreground space-y-3 text-sm">
                 <p>
-                  Extracting <strong className="text-foreground">.bin files</strong> on Windows
+                  Extracting <strong className="text-foreground">.bin files</strong> on Windows and macOS
                   requires Docker Desktop to run the extraction tool inside a Linux container.
                 </p>
                 {dockerErrorMsg?.toLowerCase().includes("not running") ||

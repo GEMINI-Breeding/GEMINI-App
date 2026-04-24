@@ -4,6 +4,21 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Resolve a potentially-relative URL to an absolute one for Rust reqwest.
+ * In production Tauri builds the sidecar injects __GEMI_BACKEND_URL__.
+ * In dev Tauri builds the backend runs separately; VITE_API_URL is the fallback.
+ * Browser fetch handles relative URLs fine via the Vite proxy, but reqwest cannot.
+ */
+function toAbsoluteUrl(url: string): string {
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  const base: string =
+    (window as any).__GEMI_BACKEND_URL__ ??
+    (import.meta as any).env?.VITE_API_URL ??
+    window.location.origin;
+  return base.replace(/\/$/, "") + (url.startsWith("/") ? url : `/${url}`);
+}
+
+/**
  * Download a URL as a file.
  * - In Tauri: shows a native "Save As" dialog then writes to disk.
  * - In browser: fetches the resource and triggers a browser download.
@@ -14,19 +29,66 @@ export async function downloadFile(
   filename: string,
   method: "GET" | "POST" = "GET",
   filters?: { name: string; extensions: string[] }[],
+  headers?: Record<string, string>,
 ): Promise<boolean> {
   if (isTauri()) {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { invoke } = await import("@tauri-apps/api/core");
     const dest = await save({ defaultPath: filename, filters });
     if (!dest) return false;
-    // absoluteApiUrl is caller's responsibility — pass absolute URL
-    await invoke("download_to_file", { url, dest, method });
+    await invoke("download_to_file", { url: toAbsoluteUrl(url), dest, method, headers });
     return true;
   }
 
   // Browser fallback: fetch → blob → anchor click
-  const res = await fetch(url, { method });
+  const res = await fetch(url, { method, headers });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+  return true;
+}
+
+/**
+ * POST JSON to `url` and save the response to disk.
+ * - In Tauri: shows a native "Save As" dialog, then Rust fetches + writes directly
+ *   (avoids serialising large byte arrays over IPC which freezes the UI).
+ * - In browser: fetch → blob → anchor click.
+ * Returns false if the user cancelled (Tauri save dialog only).
+ */
+export async function downloadPost(
+  url: string,
+  body: unknown,
+  filename: string,
+  filters?: { name: string; extensions: string[] }[],
+  headers?: Record<string, string>,
+): Promise<boolean> {
+  if (isTauri()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
+    const dest = await save({ defaultPath: filename, filters });
+    if (!dest) return false;
+    await invoke("download_post_to_file", {
+      url: toAbsoluteUrl(url),
+      dest,
+      body: JSON.stringify(body),
+      headers,
+    });
+    return true;
+  }
+
+  // Browser fallback
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(`Download failed: ${res.status}`);
   const blob = await res.blob();
   const blobUrl = URL.createObjectURL(blob);

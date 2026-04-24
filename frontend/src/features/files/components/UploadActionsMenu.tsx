@@ -1,4 +1,5 @@
-import { Download, EllipsisVertical, Images, Pencil } from "lucide-react"
+import { Download, EllipsisVertical, GitMerge, Images, Pencil } from "lucide-react"
+import { downloadFile } from "@/lib/platform"
 import { useState } from "react"
 
 import type { FileUploadPublic } from "@/client"
@@ -15,8 +16,12 @@ import { useProcess } from "@/contexts/ProcessContext"
 import DeleteUpload from "./DeleteUpload"
 import { EditUploadDialog } from "./EditUploadDialog"
 import { ImageViewerDialog } from "./ImageViewerDialog"
+import { MultispectralViewer } from "./MultispectralViewer"
+import { SensorMatchViewer } from "./SensorMatchViewer"
 
 const IMAGE_DATA_TYPES = new Set(["Image Data", "Farm-ng Binary File", "Orthomosaic"])
+const MULTISPECTRAL_TYPE = "Multispectral Data"
+const MATCHABLE_TYPES = new Set(["Multispectral Data", "Thermal Data"])
 
 interface UploadActionsMenuProps {
   upload: FileUploadPublic
@@ -29,31 +34,24 @@ async function downloadZip(upload: FileUploadPublic) {
       ? await (OpenAPI.TOKEN as () => Promise<string>)()
       : OpenAPI.TOKEN ?? ""
 
-  const res = await fetch(`${base}/api/v1/files/${upload.id}/download-zip`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
-
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  const disposition = res.headers.get("Content-Disposition")
-  const match = disposition?.match(/filename="([^"]+)"/)
-  a.download = match?.[1] ?? "download.zip"
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const label = [upload.experiment, upload.date].filter(Boolean).join("_") || "upload"
+  const filename = `${label}.zip`
+  const url = `${base}/api/v1/files/${upload.id}/download-zip`
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+  await downloadFile(url, filename, "GET", [{ name: "ZIP archive", extensions: ["zip"] }], headers)
 }
 
 export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
+  const [msViewerOpen, setMsViewerOpen] = useState(false)
+  const [matchViewerOpen, setMatchViewerOpen] = useState(false)
   const { addProcess, updateProcess } = useProcess()
 
   const canView = IMAGE_DATA_TYPES.has(upload.data_type)
+  const isMultispectral = upload.data_type === MULTISPECTRAL_TYPE
+  const canMatch = MATCHABLE_TYPES.has(upload.data_type)
   const viewerTitle = [upload.experiment, upload.location, upload.population, upload.date]
     .filter(Boolean)
     .join(" · ")
@@ -78,6 +76,28 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
               View images
             </DropdownMenuItem>
           )}
+          {isMultispectral && (
+            <DropdownMenuItem
+              onClick={() => {
+                setMenuOpen(false)
+                setMsViewerOpen(true)
+              }}
+            >
+              <Images className="mr-2 h-4 w-4" />
+              View bands
+            </DropdownMenuItem>
+          )}
+          {canMatch && (
+            <DropdownMenuItem
+              onClick={() => {
+                setMenuOpen(false)
+                setMatchViewerOpen(true)
+              }}
+            >
+              <GitMerge className="mr-2 h-4 w-4" />
+              Match with RGB
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onClick={() => {
               setMenuOpen(false)
@@ -91,7 +111,7 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
                 message: "Preparing archive…",
               })
               downloadZip(upload)
-                .then(() => updateProcess(pid, { status: "completed", progress: 100, message: "Saved to Downloads" }))
+                .then(() => updateProcess(pid, { status: "completed", progress: 100, message: "Saved" }))
                 .catch((e: any) => updateProcess(pid, { status: "error", message: e?.message ?? "Download failed" }))
             }}
           >
@@ -123,6 +143,23 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
           uploadId={String(upload.id)}
           title={viewerTitle}
           onClose={() => setViewerOpen(false)}
+        />
+      )}
+
+      {msViewerOpen && (
+        <MultispectralViewer
+          uploadId={String(upload.id)}
+          title={viewerTitle}
+          onClose={() => setMsViewerOpen(false)}
+        />
+      )}
+
+      {matchViewerOpen && (
+        <SensorMatchViewer
+          uploadId={String(upload.id)}
+          uploadDataType={upload.data_type}
+          title={viewerTitle}
+          onClose={() => setMatchViewerOpen(false)}
         />
       )}
     </>
