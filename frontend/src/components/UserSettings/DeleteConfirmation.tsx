@@ -22,10 +22,18 @@ const DeleteConfirmation = () => {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { handleSubmit } = useForm()
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
 
   const mutation = useMutation({
-    mutationFn: () => UsersService.deleteUserMe(),
+    mutationFn: () => {
+      if (!user?.id) {
+        throw new Error("No authenticated user to delete.")
+      }
+      // GEMINIbase has no dedicated /me delete — use the admin endpoint
+      // against the caller's own id. The backend's self-delete guard only
+      // blocks superusers; regular users can delete themselves.
+      return UsersService.apiUsersIdUserIdDeleteUser({ userId: String(user.id) })
+    },
     onSuccess: () => {
       showSuccessToast("Your account has been successfully deleted")
       logout()

@@ -4,7 +4,7 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 import { Suspense } from "react"
 
 import { type UserOutput, UsersService } from "@/client"
@@ -12,23 +12,22 @@ import AddUser from "@/components/Admin/AddUser"
 import { columns, type UserTableData } from "@/components/Admin/columns"
 import { DataTable } from "@/components/Common/DataTable"
 import PendingUsers from "@/components/Pending/PendingUsers"
-import useAuth from "@/hooks/useAuth"
+import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 
 function getUsersQueryOptions() {
   return {
-    queryFn: () => UsersService.readUsers({ skip: 0, limit: 100 }),
+    queryFn: () => UsersService.apiUsersAllGetAllUsers({ limit: 100, offset: 0 }),
     queryKey: ["users"],
   }
 }
 
 export const Route = createFileRoute("/_layout/admin")({
   component: Admin,
+  beforeLoad: () => {
+    if (!isLoggedIn()) throw redirect({ to: "/login" })
+  },
   head: () => ({
-    meta: [
-      {
-        title: "Admin - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Admin — GEMINI" }],
   }),
 })
 
@@ -36,7 +35,7 @@ function UsersTableContent() {
   const { user: currentUser } = useAuth()
   const { data: users } = useSuspenseQuery(getUsersQueryOptions())
 
-  const tableData: UserTableData[] = users.data.map((user: UserOutput) => ({
+  const tableData: UserTableData[] = (users ?? []).map((user: UserOutput) => ({
     ...user,
     isCurrentUser: currentUser?.id === user.id,
   }))

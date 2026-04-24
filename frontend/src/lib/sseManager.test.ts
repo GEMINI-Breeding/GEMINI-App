@@ -51,7 +51,7 @@ async function loadFresh(): Promise<SseModule> {
 }
 
 function latest(): Captured {
-  const es = instances.at(-1)
+  const es = instances[instances.length - 1]
   if (!es) throw new Error("No EventSource created yet")
   return es
 }

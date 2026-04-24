@@ -646,7 +646,7 @@ function WorkspaceReferenceDataSection({ workspaceId }: { workspaceId: string })
                 </tr>
               </thead>
               <tbody>
-                {unmatchedDataset?.match_report?.unmatched_plots?.map((p, i) => (
+                {unmatchedDataset?.match_report?.unmatched_plots?.map((p: any, i: number) => (
                   <tr key={i} className="border-t">
                     <td className="px-2 py-1.5">{p.plot_id || "—"}</td>
                     <td className="px-2 py-1.5">{p.col || "—"}</td>

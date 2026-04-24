@@ -6,7 +6,10 @@ function apiUrl(path: string): string {
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
+  // Phase 4 canonical token lives under gemini.auth.token. Full rewrite of
+  // this file lands in Phase 10 (Analyze migration); reading the correct
+  // storage key here keeps the tokens authenticated in the interim.
+  const token = localStorage.getItem("gemini.auth.token") || ""
   return { Authorization: `Bearer ${token}` }
 }
 

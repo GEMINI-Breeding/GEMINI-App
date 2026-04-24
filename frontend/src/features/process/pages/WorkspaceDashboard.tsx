@@ -203,7 +203,7 @@ export function WorkspaceDashboard() {
 
   // Pre-fetch card images for all workspaces so we can show them all at once
   const imageQueries = useQueries({
-    queries: workspaces.map((ws) => ({
+    queries: workspaces.map((ws: any) => ({
       queryKey: ["workspace-card-images", ws.id],
       queryFn: () =>
         fetch(apiUrl(`/api/v1/workspaces/${ws.id}/card-images`), {
@@ -318,7 +318,7 @@ export function WorkspaceDashboard() {
       <div className="flex-1 overflow-auto px-6 pb-6">
         {isLoading || (workspaces.length > 0 && !allImagesLoaded) ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {(isLoading ? Array(3).fill(null) : workspaces).map((_, i) => (
+            {(isLoading ? Array(3).fill(null) : workspaces).map((_: unknown, i: number) => (
               <div key={i} className="rounded-lg border bg-card overflow-hidden flex flex-col animate-pulse">
                 <div className="h-28 w-full bg-muted" />
                 <div className="p-4 flex flex-col gap-2">
@@ -341,7 +341,7 @@ export function WorkspaceDashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {workspaces.map((workspace) => (
+            {workspaces.map((workspace: any) => (
               <WorkspaceCard
                 key={workspace.id}
                 workspace={workspace}

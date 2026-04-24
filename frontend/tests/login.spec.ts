@@ -2,6 +2,8 @@ import { expect, type Page, test } from "@playwright/test"
 import { firstSuperuser, firstSuperuserPassword } from "./config.ts"
 import { randomPassword } from "./utils/random.ts"
 
+// Every test in this file starts from an anonymous browser context so the
+// login form is actually reachable.
 test.use({ storageState: { cookies: [], origins: [] } })
 
 const fillForm = async (page: Page, email: string, password: string) => {
@@ -16,92 +18,75 @@ const verifyInput = async (page: Page, testId: string) => {
   await expect(input).toBeEditable()
 }
 
+const waitForLoggedInShell = async (page: Page) => {
+  // After a successful login we land on /. The post-migration shell puts
+  // the user menu in the sidebar footer — use it as the "logged in" signal
+  // since the legacy "Welcome back…" string is gone.
+  await page.waitForURL("/")
+  await expect(page.getByTestId("user-menu")).toBeVisible()
+}
+
 test("Inputs are visible, empty and editable", async ({ page }) => {
   await page.goto("/login")
-
   await verifyInput(page, "email-input")
   await verifyInput(page, "password-input")
 })
 
 test("Log In button is visible", async ({ page }) => {
   await page.goto("/login")
-
   await expect(page.getByRole("button", { name: "Log In" })).toBeVisible()
 })
 
 test("Forgot Password link is visible", async ({ page }) => {
   await page.goto("/login")
-
   await expect(
     page.getByRole("link", { name: "Forgot your password?" }),
   ).toBeVisible()
 })
 
-test("Log in with valid email and password ", async ({ page }) => {
+test("Log in with valid email and password", async ({ page }) => {
   await page.goto("/login")
-
   await fillForm(page, firstSuperuser, firstSuperuserPassword)
   await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
+  await waitForLoggedInShell(page)
 })
 
 test("Log in with invalid email", async ({ page }) => {
   await page.goto("/login")
-
   await fillForm(page, "invalidemail", firstSuperuserPassword)
   await page.getByRole("button", { name: "Log In" }).click()
-
-  await expect(page.getByText("Invalid email address")).toBeVisible()
+  await expect(page.getByText(/invalid email/i)).toBeVisible()
 })
 
 test("Log in with invalid password", async ({ page }) => {
   const password = randomPassword()
-
   await page.goto("/login")
   await fillForm(page, firstSuperuser, password)
   await page.getByRole("button", { name: "Log In" }).click()
-
-  await expect(page.getByText("Incorrect email or password")).toBeVisible()
+  await expect(page.getByText(/incorrect email or password/i)).toBeVisible()
 })
 
-// Log out
+// ── Log out ────────────────────────────────────────────────────────────────
 
 test("Successful log out", async ({ page }) => {
   await page.goto("/login")
-
   await fillForm(page, firstSuperuser, firstSuperuserPassword)
   await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
+  await waitForLoggedInShell(page)
 
   await page.getByTestId("user-menu").click()
-  await page.getByRole("menuitem", { name: "Log out" }).click()
+  await page.getByTestId("logout-menu-item").click()
   await page.waitForURL("/login")
 })
 
 test("Logged-out user cannot access protected routes", async ({ page }) => {
   await page.goto("/login")
-
   await fillForm(page, firstSuperuser, firstSuperuserPassword)
   await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
+  await waitForLoggedInShell(page)
 
   await page.getByTestId("user-menu").click()
-  await page.getByRole("menuitem", { name: "Log out" }).click()
+  await page.getByTestId("logout-menu-item").click()
   await page.waitForURL("/login")
 
   await page.goto("/settings")
@@ -109,9 +94,12 @@ test("Logged-out user cannot access protected routes", async ({ page }) => {
 })
 
 test("Redirects to /login when token is wrong", async ({ page }) => {
-  await page.goto("/settings")
+  // Visit /login once so we have an origin against which to seed localStorage,
+  // then store a syntactically-invalid token and navigate to a protected
+  // route; the 401 interceptor should kick in and bounce us back.
+  await page.goto("/login")
   await page.evaluate(() => {
-    localStorage.setItem("access_token", "invalid_token")
+    localStorage.setItem("gemini.auth.token", "invalid_token")
   })
   await page.goto("/settings")
   await page.waitForURL("/login")

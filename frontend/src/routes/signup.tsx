@@ -1,11 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation } from "@tanstack/react-query"
 import {
   createFileRoute,
   Link as RouterLink,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router"
+import { AxiosError } from "axios"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 import { z } from "zod"
+
+import { UsersService } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -49,16 +55,12 @@ export const Route = createFileRoute("/signup")({
     }
   },
   head: () => ({
-    meta: [
-      {
-        title: "Sign Up - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Sign Up — GEMINI" }],
   }),
 })
 
 function SignUp() {
-  const isPending = false
+  const navigate = useNavigate()
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -71,7 +73,37 @@ function SignUp() {
     },
   })
 
-  const onSubmit = (_data: FormData) => {}
+  const signupMutation = useMutation({
+    mutationFn: (data: FormData) =>
+      UsersService.apiUsersSignupSignup({
+        requestBody: {
+          email: data.email,
+          password: data.password,
+          full_name: data.full_name,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Account created. Please log in.")
+      navigate({ to: "/login" })
+    },
+    onError: (err: unknown) => {
+      let message = "Signup failed. Please try again."
+      if (err instanceof AxiosError && err.response) {
+        const status = err.response.status
+        const detail = err.response.data?.error_description
+        if (status === 400) {
+          message = detail ?? "That email is already registered."
+        } else if (status === 503) {
+          message =
+            "Auth is disabled on the backend (GEMINI_JWT_SECRET unset); signup is unavailable."
+        }
+      }
+      toast.error(message)
+    },
+  })
+
+  const isPending = signupMutation.isPending
+  const onSubmit = (data: FormData) => signupMutation.mutate(data)
 
   return (
     <AuthLayout>

@@ -40,7 +40,7 @@ describe("analyzeApi", () => {
   }
 
   it("hits the runs endpoint with an Authorization header from localStorage", async () => {
-    localStorage.setItem("access_token", "tok-abc")
+    localStorage.setItem("gemini.auth.token", "tok-abc")
     fetchMock.mockReturnValueOnce(ok([{ run_id: "r1" }]))
 
     const out = await analyzeApi.listRuns()

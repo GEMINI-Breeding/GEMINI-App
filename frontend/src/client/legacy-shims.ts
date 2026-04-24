@@ -45,9 +45,11 @@ export const AnalyzeService = makeThrowingService("AnalyzeService")
 export const PipelinesService = makeThrowingService("PipelinesService")
 export const ProcessingService = makeThrowingService("ProcessingService")
 export const LoginService = makeThrowingService("LoginService")
+export const PrivateService = makeThrowingService("PrivateService")
+export const SettingsService = makeThrowingService("SettingsService")
 
 // Deliberately permissive type aliases — real shapes live elsewhere once
-// the Phase 5 rewrite of each page lands.
+// the rewrite of each page lands (Phases 6–11).
 export type ItemPublic = any
 export type ItemCreate = any
 export type ItemUpdate = any
@@ -58,3 +60,78 @@ export type Body_login_login_access_token = { username: string; password: string
 export type NewPassword = any
 export type UserPublic = any
 export type UsersPublic = any
+export type PipelinePublic = any
+export type PipelineRunPublic = any
+export type FileUploadPublic = any
+export type ReferenceDatasetWithMatch = any
+export type ReferenceDatasetPublic = any
+
+// ──────────────────────────────────────────────────────────────────────────
+// Runtime augmentation of regenerated services with legacy method names.
+//
+// Pre-migration feature pages call methods that don't exist on the new SDK
+// (e.g. FilesService.readFiles, ReferenceDataService.listDatasets). Rather
+// than rewrite every call site (Phase 6/10 work), attach throwing stubs
+// and declare the method names via module augmentation so TS accepts them.
+// Every attached method fails loudly at runtime; compilation passes.
+// ──────────────────────────────────────────────────────────────────────────
+import {
+  FilesService as _FilesService,
+  ReferenceDataService as _ReferenceDataService,
+  UtilsService as _UtilsService,
+} from "./sdk.gen"
+
+function _attach(svc: any, methods: string[], label: string): void {
+  for (const m of methods) {
+    if (typeof svc[m] !== "function") {
+      svc[m] = () => NOT_IMPL(`${label}.${m}`)
+    }
+  }
+}
+
+_attach(
+  _FilesService,
+  [
+    "readFiles",
+    "readFieldValues",
+    "deleteFile",
+    "updateFile",
+    "syncFiles",
+    "extractMetadata",
+  ],
+  "FilesService",
+)
+_attach(
+  _ReferenceDataService,
+  [
+    "listDatasets",
+    "listWorkspaceDatasets",
+    "matchPlot",
+    "associateDataset",
+    "removeDatasetFromWorkspace",
+  ],
+  "ReferenceDataService",
+)
+_attach(_UtilsService, ["capabilities", "dockerCheck"], "UtilsService")
+
+declare module "./sdk.gen" {
+  namespace FilesService {
+    function readFiles(...args: any[]): Promise<any>
+    function readFieldValues(...args: any[]): Promise<any>
+    function deleteFile(...args: any[]): Promise<any>
+    function updateFile(...args: any[]): Promise<any>
+    function syncFiles(...args: any[]): Promise<any>
+    function extractMetadata(...args: any[]): Promise<any>
+  }
+  namespace ReferenceDataService {
+    function listDatasets(...args: any[]): Promise<any>
+    function listWorkspaceDatasets(...args: any[]): Promise<any>
+    function matchPlot(...args: any[]): Promise<any>
+    function associateDataset(...args: any[]): Promise<any>
+    function removeDatasetFromWorkspace(...args: any[]): Promise<any>
+  }
+  namespace UtilsService {
+    function capabilities(...args: any[]): Promise<any>
+    function dockerCheck(...args: any[]): Promise<any>
+  }
+}

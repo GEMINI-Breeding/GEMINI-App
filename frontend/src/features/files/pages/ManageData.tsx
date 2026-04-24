@@ -49,7 +49,7 @@ function ManageDataTableContent({ selectedDataType }: { selectedDataType: string
 
   const filteredData = useMemo(() => {
     if (!selectedDataType) return files.data
-    return files.data.filter((f) => f.data_type === selectedDataType)
+    return files.data.filter((f: any) => f.data_type === selectedDataType)
   }, [files.data, selectedDataType])
 
   const table = useReactTable<FileUploadPublic>({

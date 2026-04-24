@@ -9,12 +9,12 @@ describe("useIsMobile", () => {
     const mql: Partial<MediaQueryList> = {
       matches: false,
       media: "",
-      addEventListener: (_: string, cb: (ev: MediaQueryListEvent) => void) => {
-        listeners.push(cb)
-      },
-      removeEventListener: (_: string, cb: (ev: MediaQueryListEvent) => void) => {
+      addEventListener: ((_: string, cb: EventListenerOrEventListenerObject) => {
+        listeners.push(cb as (ev: MediaQueryListEvent) => void)
+      }) as MediaQueryList["addEventListener"],
+      removeEventListener: ((_: string, cb: EventListenerOrEventListenerObject) => {
         listeners = listeners.filter((l) => l !== cb)
-      },
+      }) as MediaQueryList["removeEventListener"],
     }
     window.matchMedia = vi.fn(() => mql as MediaQueryList)
   })
