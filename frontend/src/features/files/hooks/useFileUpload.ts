@@ -1,220 +1,38 @@
-import { useCallback } from "react";
-import { OpenAPI } from "@/client";
-import { useProcess } from "@/contexts/ProcessContext";
-import useCustomToast from "@/hooks/useCustomToast";
-import type { ProcessItem } from "@/types/process";
-import { dataTypes } from "@/config/dataTypes";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react"
 
+/**
+ * Phase 4 transition stub.
+ *
+ * The pre-migration `uploadFiles` accepted *absolute server-side paths* and
+ * asked the Tauri-embedded FastAPI backend to copy them. GEMINIbase replaces
+ * that with pure-HTTP chunked upload from the browser (see
+ * `src/lib/chunkedUpload.ts`). The call-site rewrite is Phase 5 work because
+ * every dropzone / upload-button that feeds this hook needs to switch from
+ * filesystem paths to browser `File` objects.
+ *
+ * Until that rewrite lands, importing and rendering a page that calls
+ * `useFileUpload()` is fine — the throw only fires when the user actually
+ * triggers an upload.
+ */
 interface UploadParams {
-  filePaths: string[];
-  dataType: string;
-  targetRootDir: string;
-  reupload?: boolean;
-  formValues?: Record<string, string>;
-  /** Called with absolute dest paths of all successfully uploaded files */
-  onComplete?: (destPaths: string[]) => void;
-  /** Called when a Docker-not-found/not-running error occurs during .bin extraction */
-  onDockerError?: (message: string) => void;
-}
-
-function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+  filePaths: string[]
+  dataType: string
+  targetRootDir: string
+  reupload?: boolean
+  formValues?: Record<string, string>
+  onComplete?: (destPaths: string[]) => void
+  onDockerError?: (message: string) => void
 }
 
 export function useFileUpload() {
-  const { addProcess, updateProcess, updateProcessItem } = useProcess();
-  const { showErrorToastWithCopy } = useCustomToast();
-  const queryClient = useQueryClient();
+  const uploadFiles = useCallback((_params: UploadParams) => {
+    throw new Error(
+      "[useFileUpload] The legacy server-side path upload was removed in the " +
+        "GEMINIbase migration. Call sites need to use browser File objects and " +
+        "`uploadFileChunked` from src/lib/chunkedUpload.ts instead. Scheduled " +
+        "for rewrite in Phase 5.",
+    )
+  }, [])
 
-  const uploadFiles = useCallback(
-    async ({
-      filePaths,
-      dataType,
-      targetRootDir,
-      reupload = false,
-      formValues = {},
-      onComplete,
-      onDockerError,
-    }: UploadParams) => {
-      const items: ProcessItem[] = filePaths.map((p, i) => ({
-        id: String(i),
-        name: fileNameFromPath(p),
-        status: "pending" as const,
-      }));
-
-      const abortController = new AbortController();
-
-      const processId = addProcess({
-        type: "file_upload",
-        status: "running",
-        title: `Uploading ${filePaths.length} file(s)`,
-        items,
-        cancel: () => abortController.abort(),
-      });
-
-      const token = localStorage.getItem("access_token") || "";
-      const baseUrl = OpenAPI.BASE;
-
-      try {
-        const response = await fetch(
-          `${baseUrl}/api/v1/files/copy-local-stream`,
-          {
-            method: "POST",
-            signal: abortController.signal,
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              file_paths: filePaths,
-              data_type: dataType,
-              target_root_dir: targetRootDir,
-              reupload,
-              experiment: formValues.experiment || null,
-              location: formValues.location || null,
-              population: formValues.population || null,
-              date: formValues.date || null,
-              platform: formValues.platform || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultPlatform || null,
-              sensor: formValues.sensor || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultSensor || null,
-            }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          const errorMsg = `Server error: ${response.status} - ${errorText}`;
-          updateProcess(processId, {
-            status: "error",
-            error: errorMsg,
-          });
-          showErrorToastWithCopy(errorMsg);
-          return;
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          updateProcess(processId, {
-            status: "error",
-            error: "No response stream available",
-          });
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const completedDestPaths: string[] = [];
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          // Keep last potentially incomplete line in buffer
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-
-            try {
-              const data = JSON.parse(trimmed.slice(6));
-
-              switch (data.event) {
-                case "start":
-                  // Items already set up — mark all as pending (already done)
-                  break;
-
-                case "progress":
-                  updateProcessItem(processId, String(data.index), {
-                    status: data.status,
-                    label: data.status === "running" ? "Copied — extracting…" : undefined,
-                  });
-                  if (data.status === "completed" && data.dest_path) {
-                    completedDestPaths.push(data.dest_path as string);
-                  }
-                  break;
-
-                case "error":
-                  updateProcessItem(processId, String(data.index), {
-                    status: "error",
-                    error: data.message,
-                  });
-                  break;
-
-                case "extraction_progress":
-                  if (data.phase === "complete") {
-                    updateProcessItem(processId, String(data.index), {
-                      status: "completed",
-                      label: undefined,
-                    });
-                    updateProcess(processId, { message: undefined });
-                  } else if (data.phase === "error") {
-                    const errMsg: string = data.message || "Extraction failed"
-                    // Surface Docker availability errors as a popup
-                    if (
-                      onDockerError &&
-                      /docker/i.test(errMsg) &&
-                      /not found|not running|to be running|did not respond|not installed|not supported|start docker/i.test(errMsg)
-                    ) {
-                      onDockerError(errMsg)
-                    }
-                    updateProcessItem(processId, String(data.index), {
-                      status: "error",
-                      error: errMsg,
-                    });
-                    updateProcess(processId, { message: undefined });
-                  } else {
-                    updateProcessItem(processId, String(data.index), {
-                      status: "running",
-                      label: data.message || "Extracting…",
-                    });
-                    updateProcess(processId, {
-                      message: data.message || "Extracting…",
-                    });
-                  }
-                  break;
-
-                case "complete":
-                  if (data.has_errors) {
-                    updateProcess(processId, {
-                      status: "error",
-                      completedAt: new Date(),
-                      title: `Upload failed`,
-                      error: "Extraction failed — see file details above",
-                    });
-                  } else {
-                    updateProcess(processId, {
-                      status: "completed",
-                      completedAt: new Date(),
-                      title: `Uploaded ${data.count} file(s)`,
-                    });
-                    onComplete?.(completedDestPaths);
-                  }
-                  queryClient.invalidateQueries({ queryKey: ["workspace-card-images"] });
-                  break;
-              }
-            } catch {
-              // Ignore malformed lines
-            }
-          }
-        }
-
-        // Stream ended — the "complete" event handler above already
-        // marked the process. Nothing else to do here.
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
-          updateProcess(processId, { status: "error", error: "Cancelled", cancel: undefined });
-        } else {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          updateProcess(processId, { status: "error", error: errorMsg });
-          showErrorToastWithCopy(errorMsg);
-        }
-      }
-    },
-    [addProcess, updateProcess, updateProcessItem, showErrorToastWithCopy]
-  );
-
-  return { uploadFiles };
+  return { uploadFiles }
 }
