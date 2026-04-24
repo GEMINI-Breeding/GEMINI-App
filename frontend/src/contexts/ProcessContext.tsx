@@ -1,6 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import type { Process, ProcessItem } from "@/types/process"
-import { subscribe, closeRun } from "@/lib/sseManager"
+// Phase 6: ProcessContext subscribes over the new WebSocket-based manager
+// (/api/jobs/{id}/progress) instead of the pre-migration SSE channel.
+// The `runId` field on Process is now any subscription key — typically a
+// Job UUID submitted via /api/jobs/submit. sseManager stays in tree until
+// Phase 12 so any Phase-7+ feature still importing it fails loudly rather
+// than silently; every new subscriber must go through wsManager.
+import { closeJob, subscribe } from "@/lib/wsManager"
+import type { JobProgressEvent } from "@/lib/wsManager"
 
 type ProcessContextState = {
   processes: Process[]
@@ -87,9 +94,11 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
 
   const clearHistory = useCallback(() => setHistory([]), [])
 
-  // Subscribe to SSE for any running process with a runId.
-  // Uses the module-level sseManager so the connection survives navigation.
-  // Uses a Map so terminated runs can be re-subscribed if the step is restarted.
+  // Subscribe via wsManager for every running process that carries a runId
+  // (GEMINIbase Job UUID). The WebSocket stays open across navigation thanks
+  // to the module-level singleton. Terminal events (`evt.terminal`) roll the
+  // process into completed/error; further-progress events keep the bar
+  // moving.
   useEffect(() => {
     const activeRunIds = new Set(
       processes
@@ -97,34 +106,47 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         .map((p) => p.runId!),
     )
 
-    // Subscribe to newly active runIds
     for (const runId of activeRunIds) {
       if (activeSubs.current.has(runId)) continue
 
-      const unsub = subscribe(runId, (evt) => {
+      const unsub = subscribe(runId, (evt: JobProgressEvent) => {
         setProcesses((prev) =>
           prev.map((p) => {
             if (p.runId !== runId) return p
-            // Don't overwrite already-finished entries (e.g. a previous completed
-            // run sitting alongside a newly re-started run with the same runId)
+            // Don't overwrite already-finished entries (e.g. a previous
+            // completed run sitting alongside a newly-started run sharing an
+            // id in history).
             if (p.status === "completed" || p.status === "error") return p
-            if (evt.event === "complete") {
-              return { ...p, status: "completed", progress: 100, message: "Done" }
-            }
-            if (evt.event === "error") {
-              return { ...p, status: "error", message: evt.message ?? "Failed" }
-            }
-            if (evt.event === "cancelled") {
-              return { ...p, status: "error", message: "Cancelled" }
-            }
-            if (evt.event === "progress") {
-              return {
-                ...p,
-                ...(typeof evt.progress === "number" ? { progress: evt.progress } : {}),
-                ...(evt.message ? { message: evt.message } : {}),
+
+            if (evt.terminal) {
+              if (evt.status === "COMPLETED") {
+                return { ...p, status: "completed", progress: 100, message: "Done" }
+              }
+              if (evt.status === "FAILED") {
+                return {
+                  ...p,
+                  status: "error",
+                  message: evt.error_message ?? "Failed",
+                }
+              }
+              if (evt.status === "CANCELLED") {
+                return { ...p, status: "error", message: "Cancelled" }
               }
             }
-            return p
+
+            // Non-terminal progress update — derive a status message from
+            // progress_detail.stage when present, otherwise leave unchanged.
+            const stage =
+              (evt.progress_detail as { stage?: string } | null | undefined)
+                ?.stage ?? null
+            return {
+              ...p,
+              status: "running",
+              ...(typeof evt.progress === "number"
+                ? { progress: evt.progress }
+                : {}),
+              ...(stage ? { message: String(stage) } : {}),
+            }
           }),
         )
       })
@@ -132,14 +154,13 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
       activeSubs.current.set(runId, unsub)
     }
 
-    // Unsubscribe from runIds that are no longer active (completed/error/removed)
-    // so they can be re-subscribed if the same step is restarted, and close the
-    // SSE connection so the retry loop doesn't keep polling the backend.
+    // Unsubscribe from runIds no longer active so the socket can be GC'd
+    // and re-subscribed cleanly if the user restarts the step.
     for (const [runId, unsub] of activeSubs.current) {
       if (!activeRunIds.has(runId)) {
         unsub()
         activeSubs.current.delete(runId)
-        closeRun(runId)
+        closeJob(runId)
       }
     }
   }, [processes])

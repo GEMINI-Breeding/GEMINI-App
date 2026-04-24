@@ -1,18 +1,19 @@
 /**
- * ReferenceDataUploadDialog — column mapping step for Reference Data upload.
+ * ReferenceDataUploadDialog — two-step column mapping + upload for the
+ * Reference Data flow. Post-migration this talks to the Phase-2 endpoints
+ * `/api/reference_data/parse-headers` and `/api/reference_data/upload`
+ * via the regenerated SDK (`ReferenceDataService`).
  *
- * Opens after the user has selected a file in the Upload tab.  Metadata
- * (Name, Experiment, Location, Population, Date) is already filled in the
- * DataStructureForm on the left — this dialog only shows the column-mapping
- * table (same pattern as the Field Design upload in the pipeline flow).
- *
- * On submit, POSTs to POST /api/v1/reference-data/upload and shows a match
- * report toast.
+ * Opens after the user selects a reference CSV/Excel file in the Upload
+ * tab. Metadata (Name, Experiment, Location, Population, Date) is already
+ * filled in the DataStructureForm on the left — this dialog only shows
+ * the column-mapping table.
  */
 
 import { useEffect, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
-import { OpenAPI } from "@/client"
+
+import { ReferenceDataService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -24,10 +25,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import useCustomToast from "@/hooks/useCustomToast"
-
-function apiUrl(path: string): string {
-  return OpenAPI.BASE.replace(/\/$/, "") + path
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,37 +95,38 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
   const [mapping, setMapping] = useState<ColumnMapping>({})
   const [isParsing, setIsParsing] = useState(false)
 
-  // Parse headers when file changes
+  // Parse headers when file changes. CSVs are parsed client-side for speed;
+  // Excel files round-trip through the backend's parse-headers endpoint.
   useEffect(() => {
     if (!file) return
+    let cancelled = false
     setIsParsing(true)
     const lower = file.name.toLowerCase()
     if (lower.endsWith(".csv")) {
       file.text().then((text) => {
+        if (cancelled) return
         const hdrs = parseCSVHeaders(text)
         initMapping(hdrs)
         setIsParsing(false)
       })
     } else {
-      // Excel: call backend
-      const fd = new FormData()
-      fd.append("file", file)
-      const token = localStorage.getItem("access_token") || ""
-      fetch(apiUrl("/api/v1/reference-data/parse-headers"), {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
+      ReferenceDataService.apiReferenceDataParseHeadersParseHeaders({
+        formData: { file },
       })
-        .then((r) => r.json())
-        .then((data: { headers: string[] }) => {
-          initMapping(data.headers)
+        .then((data) => {
+          if (cancelled) return
+          initMapping(data?.headers ?? [])
           setIsParsing(false)
         })
         .catch(() => {
+          if (cancelled) return
           showErrorToast("Could not read file headers")
           setIsParsing(false)
           onClose()
         })
+    }
+    return () => {
+      cancelled = true
     }
   }, [file])
 
@@ -141,38 +139,25 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      const fd = new FormData()
-      fd.append("file", file)
-      // Default name to filename (without extension) if not provided
       const defaultName = file.name.replace(/\.[^.]+$/, "")
-      const params = new URLSearchParams({
+      const res = await ReferenceDataService.apiReferenceDataUploadUpload({
         name: formValues.name?.trim() || defaultName,
-        experiment: formValues.experiment ?? "",
-        location: formValues.location ?? "",
-        population: formValues.population ?? "",
-        date: formValues.date ?? "",
-        column_mapping_json: JSON.stringify(mapping),
+        experiment: formValues.experiment || undefined,
+        location: formValues.location || undefined,
+        population: formValues.population || undefined,
+        date: formValues.date || undefined,
+        columnMappingJson: JSON.stringify(mapping),
+        formData: { file },
       })
-      const token = localStorage.getItem("access_token") || ""
-      const res = await fetch(
-        apiUrl(`/api/v1/reference-data/upload?${params.toString()}`),
-        {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: fd,
-        }
-      )
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Upload failed" }))
-        throw new Error(err.detail ?? "Upload failed")
-      }
-      return res.json() as Promise<UploadResponse>
+      return res as UploadResponse
     },
     onSuccess: (data) => {
       const report = data.match_report
-      const plots = report ? `${report.matched}/${report.total}` : String(data.plot_count)
+      const plots = report
+        ? `${report.matched}/${report.total}`
+        : String(data.plot_count ?? 0)
       showSuccessToast(
-        `"${data.name}" uploaded — ${plots} plots. Associate it with a workspace in the Process tab.`
+        `"${data.name ?? "dataset"}" uploaded — ${plots} plots.`,
       )
       onClose()
     },

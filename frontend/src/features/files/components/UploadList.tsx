@@ -1,138 +1,158 @@
-import { Eye, File, X, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
-import { useState } from "react";
-import { UploadZone } from "./UploadZone";
-import { Button } from "@/components/ui/button";
-import { dataTypes } from "@/config/dataTypes";
-import { useFileUpload } from "@/features/files/hooks/useFileUpload";
-import { isExtensionAllowed } from "@/features/files/utils/extensions";
-import { FilePreviewDialog } from "./FilePreviewDialog";
-import { OpenAPI } from "@/client";
-import useCustomToast from "@/hooks/useCustomToast";
+import { ChevronDown, ChevronUp, File, X } from "lucide-react"
+import { useMemo, useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import { dataTypes } from "@/config/dataTypes"
+import {
+  useUploadQueue,
+  type UploadTask,
+} from "@/features/files/hooks/useUploadQueue"
+import { isExtensionAllowed } from "@/features/files/utils/extensions"
+import useCustomToast from "@/hooks/useCustomToast"
+import { UploadZone } from "./UploadZone"
 
 interface UploadListProps {
-  dataType: string | null;
-  formValues: Record<string, string>;
-  onFilesSelected?: (paths: string[]) => void;
-  onUploadComplete?: (destPaths: string[]) => void;
-  onDockerError?: (message: string) => void;
-  /** Optional label shown above the upload zone */
-  label?: string;
-  /** Optional sub-path appended to the target directory (e.g. "DEM") */
-  subDir?: string;
+  dataType: string | null
+  formValues: Record<string, string>
+  onFilesSelected?: (files: File[]) => void
+  /** Fired with the MinIO object paths of the successfully uploaded files. */
+  onUploadComplete?: (destPaths: string[]) => void
+  /** Optional label shown above the upload zone. */
+  label?: string
+  /** Optional sub-path appended to the target directory (e.g. "DEM"). */
+  subDir?: string
 }
 
-function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+function buildTargetRootDir(
+  dataType: string,
+  formValues: Record<string, string>,
+  subDir?: string,
+): string | null {
+  const cfg = dataTypes[dataType as keyof typeof dataTypes]
+  if (!cfg) return null
+  // Preserve the existing MinIO path convention so the new FilesService
+  // listing endpoints find the uploads under a predictable prefix.
+  const values = { ...formValues }
+  if (values["date"]) values["year"] = values["date"].split("-")[0]
+  let root = cfg.directory
+    .map((field) => values[field.toLowerCase()] || field)
+    .join("/")
+  if (subDir) root += `/${subDir}`
+  return root
 }
 
-interface PendingUpload {
-  filePaths: string[];
-  dataType: string;
-  targetRootDir: string;
-  formValues: Record<string, string>;
-  existingFiles: string[];
+function followUpForDataType(
+  dataType: string,
+): UploadTask["followUpJob"] {
+  // Amiga .bin files auto-extract via the FLIR worker. Everything else
+  // drops onto MinIO and is done.
+  if (dataType === "Farm-ng Binary File") return { kind: "extract_binary" }
+  return { kind: "none" }
 }
 
-export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete, onDockerError, label, subDir }: UploadListProps) {
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [previewPath, setPreviewPath] = useState<string | null>(null);
-  const [isChecking, setIsChecking] = useState(false);
-  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
-  const { uploadFiles } = useFileUpload();
-  const { showErrorToast } = useCustomToast();
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+}
 
-  const addFiles = (paths: string[]) => {
+export function UploadList({
+  dataType,
+  formValues,
+  onFilesSelected,
+  onUploadComplete,
+  label,
+  subDir,
+}: UploadListProps) {
+  const [selected, setSelected] = useState<File[]>([])
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const { showErrorToast } = useCustomToast()
+  const { run } = useUploadQueue()
+
+  const acceptAttr = useMemo(() => {
+    if (!dataType) return undefined
+    const cfg = dataTypes[dataType as keyof typeof dataTypes]
+    return cfg?.fileType && cfg.fileType !== "*" ? cfg.fileType : undefined
+  }, [dataType])
+
+  const addFiles = (files: File[]) => {
     if (dataType) {
       const cfg = dataTypes[dataType as keyof typeof dataTypes]
       if (cfg?.fileType) {
-        const rejected = paths.filter((p) => !isExtensionAllowed(p, cfg.fileType))
-        if (rejected.length > 0) {
-          const names = rejected.map((p) => p.split(/[\\/]/).pop()).join(", ")
-          showErrorToast(`Wrong file type for "${dataType}": ${names}`)
-          const accepted = paths.filter((p) => isExtensionAllowed(p, cfg.fileType))
-          if (accepted.length === 0) return
-          setSelectedPaths((prev) => [...prev, ...accepted]);
-          onFilesSelected?.(accepted);
-          return
+        const accepted: File[] = []
+        const rejected: File[] = []
+        for (const f of files) {
+          if (isExtensionAllowed(f.name, cfg.fileType)) accepted.push(f)
+          else rejected.push(f)
         }
+        if (rejected.length > 0) {
+          const names = rejected.map((f) => f.name).join(", ")
+          showErrorToast(`Wrong file type for "${dataType}": ${names}`)
+        }
+        if (accepted.length === 0) return
+        setSelected((prev) => [...prev, ...accepted])
+        onFilesSelected?.(accepted)
+        return
       }
     }
-    setSelectedPaths((prev) => [...prev, ...paths]);
-    onFilesSelected?.(paths);
-  };
+    setSelected((prev) => [...prev, ...files])
+    onFilesSelected?.(files)
+  }
 
   const removeFile = (index: number) => {
-    setSelectedPaths((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  function buildUploadParams() {
-    if (!dataType) return null;
-    const selectedDataType = dataTypes[dataType as keyof typeof dataTypes];
-    if (!selectedDataType) return null;
-    const values = { ...formValues };
-    if (values["date"]) values["year"] = values["date"].split("-")[0];
-    let targetRootDir = selectedDataType.directory
-      .map((field) => values[field.toLowerCase()] || field)
-      .join("/");
-    if (subDir) targetRootDir += `/${subDir}`;
-    return { values, targetRootDir };
+    setSelected((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleUploadClick = async () => {
-    const params = buildUploadParams();
-    if (!params) return;
-    const { values, targetRootDir } = params;
-
-    const fileNames = selectedPaths.map(fileNameFromPath);
-    setIsChecking(true);
-    try {
-      const res = await fetch(`${OpenAPI.BASE}/api/v1/files/check-existing`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-        body: JSON.stringify({ target_root_dir: targetRootDir, file_names: fileNames, data_type: dataType }),
-      });
-      const data = res.ok ? await res.json() : { existing: [] };
-      const existing: string[] = data.existing ?? [];
-
-      if (existing.length > 0) {
-        setPendingUpload({ filePaths: selectedPaths, dataType: dataType!, targetRootDir, formValues: values, existingFiles: existing });
-      } else {
-        doUpload(selectedPaths, dataType!, targetRootDir, values, false);
-      }
-    } catch {
-      // Check failed — proceed without warning
-      doUpload(selectedPaths, dataType!, params.targetRootDir, values, false);
-    } finally {
-      setIsChecking(false);
+    if (!dataType || selected.length === 0) return
+    const targetRootDir = buildTargetRootDir(dataType, formValues, subDir)
+    if (!targetRootDir) {
+      showErrorToast(`Unknown data type: ${dataType}`)
+      return
     }
-  };
 
-  function doUpload(filePaths: string[], dt: string, targetRootDir: string, values: Record<string, string>, reupload: boolean) {
-    uploadFiles({ filePaths, dataType: dt, targetRootDir, reupload, formValues: values, onComplete: onUploadComplete, onDockerError });
-    setSelectedPaths([]);
-    setPendingUpload(null);
+    const followUpJob = followUpForDataType(dataType)
+    const tasks: UploadTask[] = selected.map((file) => ({
+      file,
+      objectPath: `${targetRootDir}/${file.name}`,
+      followUpJob,
+    }))
+
+    setIsUploading(true)
+    try {
+      const result = await run(tasks, {
+        title:
+          followUpJob?.kind === "extract_binary"
+            ? `Uploading ${selected.length} .bin file(s) + extracting`
+            : `Uploading ${selected.length} file(s)`,
+      })
+      onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
+      setSelected([])
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   return (
-    <>
     <div data-onboarding="files-upload-zone" className="space-y-6">
       {label && (
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}
-      <UploadZone onFilesAdded={addFiles} />
+      <UploadZone onFilesAdded={addFiles} accept={acceptAttr} />
 
-      {selectedPaths.length > 0 && (
+      {selected.length > 0 && (
         <div className="border-border bg-card rounded-lg border p-6">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex w-full items-center justify-between text-left"
+            type="button"
           >
             <h3 className="text-foreground">
-              Selected Files ({selectedPaths.length})
+              Selected Files ({selected.length})
             </h3>
             {isExpanded ? (
               <ChevronUp className="text-muted-foreground h-5 w-5" />
@@ -143,30 +163,28 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
 
           {isExpanded && (
             <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
-              {selectedPaths.map((filePath, index) => (
+              {selected.map((file, index) => (
                 <div
-                  key={index}
+                  key={`${file.name}:${file.lastModified}:${index}`}
                   className="border-border bg-muted flex items-center justify-between rounded border p-2"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <File className="text-muted-foreground h-4 w-4 flex-shrink-0" />
                     <span className="text-foreground truncate">
-                      {fileNameFromPath(filePath)}
+                      {file.name}
+                    </span>
+                    <span className="text-muted-foreground text-xs flex-shrink-0">
+                      {formatBytes(file.size)}
                     </span>
                   </div>
                   <button
-                    onClick={(e) => { e.stopPropagation(); setPreviewPath(filePath); }}
-                    className="hover:bg-accent ml-2 flex-shrink-0 rounded p-1"
-                    title="Preview file"
-                  >
-                    <Eye className="text-muted-foreground h-4 w-4" />
-                  </button>
-                  <button
                     onClick={(e) => {
-                      e.stopPropagation();
-                      removeFile(index);
+                      e.stopPropagation()
+                      removeFile(index)
                     }}
                     className="hover:bg-accent ml-1 flex-shrink-0 rounded p-1"
+                    aria-label="Remove file"
+                    type="button"
                   >
                     <X className="text-muted-foreground h-4 w-4" />
                   </button>
@@ -179,13 +197,17 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
             <Button
               variant="outline"
               onClick={handleUploadClick}
-              disabled={isChecking}
+              disabled={isUploading}
+              data-testid="upload-submit"
             >
-              {isChecking ? "Checking…" : `Upload ${selectedPaths.length} file(s)`}
+              {isUploading
+                ? "Uploading…"
+                : `Upload ${selected.length} file(s)`}
             </Button>
             <Button
               variant="ghost"
-              onClick={() => setSelectedPaths([])}
+              onClick={() => setSelected([])}
+              disabled={isUploading}
             >
               Clear
             </Button>
@@ -193,51 +215,5 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
         </div>
       )}
     </div>
-
-      {previewPath && (
-        <FilePreviewDialog filePath={previewPath} onClose={() => setPreviewPath(null)} />
-      )}
-
-      {/* Conflict warning dialog */}
-      {pendingUpload && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-background w-full max-w-md rounded-xl border p-6 shadow-xl">
-            <div className="mb-3 flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-500" />
-              <h2 className="text-base font-semibold">Files already exist</h2>
-            </div>
-            <p className="text-muted-foreground mb-3 text-sm">
-              {pendingUpload.existingFiles.length === pendingUpload.filePaths.length
-                ? "All selected files already exist in the destination folder."
-                : `${pendingUpload.existingFiles.length} of ${pendingUpload.filePaths.length} selected files already exist in the destination folder.`}
-            </p>
-            <div className="bg-muted mb-4 max-h-36 overflow-y-auto rounded-md px-3 py-2">
-              {pendingUpload.existingFiles.map((name) => (
-                <p key={name} className="text-muted-foreground py-0.5 font-mono text-xs">{name}</p>
-              ))}
-            </div>
-            <p className="text-muted-foreground mb-4 text-sm">
-              Do you want to replace the existing files, or skip them and only upload new ones?
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button variant="ghost" onClick={() => setPendingUpload(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => doUpload(pendingUpload.filePaths, pendingUpload.dataType, pendingUpload.targetRootDir, pendingUpload.formValues, false)}
-              >
-                Skip existing
-              </Button>
-              <Button
-                onClick={() => doUpload(pendingUpload.filePaths, pendingUpload.dataType, pendingUpload.targetRootDir, pendingUpload.formValues, true)}
-              >
-                Replace all
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+  )
 }

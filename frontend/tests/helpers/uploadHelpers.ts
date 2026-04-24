@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import { expect } from "@playwright/test"
+
 import { waitForResponseOk } from "./waitFor"
 
 /** Navigate to the Files dashboard. The Upload section is active by default. */
@@ -15,13 +16,11 @@ export async function navigateToUpload(page: Page): Promise<void> {
 
 /**
  * Open the DataTypes dropdown and pick an entry by its visible label
- * (e.g. "Image Data", "Orthomosaic", "Field Design").
+ * (e.g. "Image Data", "Orthomosaic", "Farm-ng Binary File").
  */
 export async function selectDataType(page: Page, label: string): Promise<void> {
   await page.locator('[data-onboarding="files-data-type-selector"]').click()
   await page.getByRole("menuitem", { name: label, exact: true }).click()
-  // Once a type is selected the form appears; this anchor lets us chain fills
-  // without race conditions.
   await expect(
     page.locator('[data-onboarding="files-data-structure-form"]'),
   ).toBeVisible()
@@ -38,8 +37,7 @@ export interface UploadFormValues {
 
 /**
  * Fill the DataStructureForm. TextField renders `<label htmlFor={id}>` with id
- * equal to the field name, so getByLabel() with an exact match hits the right
- * input. Fields that don't apply to the current data type are skipped.
+ * equal to the field name, so `input#${field}` hits the right input.
  */
 export async function fillUploadForm(
   page: Page,
@@ -60,29 +58,23 @@ export async function fillUploadForm(
     if (!(await input.count())) continue
     await expect(input).toBeEnabled()
     await input.fill(value)
-    // The cascade (experiment → location → …) means the next input only
-    // enables after the previous value is committed. Wait for it briefly.
+    // The cascade (experiment → location → …) enables the next input only
+    // after the previous commits.
     await page.waitForTimeout(50)
   }
 }
 
 /**
- * Inject file paths via the test-mode hook in platform.ts::pickFiles and click
- * the upload zone. UploadZone calls pickFiles on click; our hook returns the
- * injected paths synchronously so onFilesAdded receives them exactly like
- * Tauri's native file dialog would.
+ * Select files via the hidden <input type="file"> inside UploadZone.
+ *
+ * The Phase-6 dropzone is browser-native: clicking it opens a file picker.
+ * Playwright can't drive that picker, so we `setInputFiles` on the input
+ * directly — which fires the same change event the picker would. Files
+ * are passed as absolute host paths (e.g. fixtures) because Playwright's
+ * setInputFiles reads them from disk.
  */
 export async function dropFiles(page: Page, filePaths: string[]): Promise<void> {
-  await page.evaluate((paths) => {
-    ;(window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ =
-      paths
-  }, filePaths)
-
-  const zone = page.getByRole("button", {
-    name: /click to browse or drag & drop files/i,
-  })
-  await zone.click()
-
+  await page.locator('[data-testid="upload-input"]').setInputFiles(filePaths)
   await expect(
     page.getByRole("heading", {
       name: new RegExp(`^Selected Files \\(${filePaths.length}\\)$`, "i"),
@@ -91,22 +83,37 @@ export async function dropFiles(page: Page, filePaths: string[]): Promise<void> 
 }
 
 /**
- * Click submit and wait for the streaming upload endpoint plus the
- * ProcessPanel card that shows the final "Uploaded N file(s)" title.
+ * Click the submit button and wait for every chunk upload to land. Phase 6
+ * uploads chunk-by-chunk (one POST per chunk) instead of one streaming
+ * call, so we wait for the final "Upload N file(s) + extracting" or
+ * "Uploaded N file(s)" state in the ProcessPanel to conclude the flow.
  */
 export async function submitUploadAndWait(
   page: Page,
   expectedFileCount: number,
+  opts: { timeoutMs?: number } = {},
 ): Promise<void> {
-  const streamPromise = waitForResponseOk(
+  // Wait for at least one /upload_chunk response to confirm the upload
+  // actually started; individual chunks happen in a loop afterwards.
+  const firstChunk = waitForResponseOk(
     page,
     "POST",
-    /\/api\/v1\/files\/copy-local-stream$/,
+    /\/api\/files\/upload_chunk$/,
     60_000,
   )
-  await page.getByRole("button", { name: /^upload \d+ file/i }).click()
-  await streamPromise
+  await page.locator('[data-testid="upload-submit"]').click()
+  await firstChunk
+
+  // The ProcessPanel title changes to "Uploaded …" when no follow-up job
+  // fires, or "Uploading … + extracting" when .bin files kick off an
+  // EXTRACT_BINARY job. Either terminal string means the client side is
+  // done and ProcessContext has taken over.
   await expect(
-    page.getByText(new RegExp(`^Uploaded ${expectedFileCount} file`, "i")),
-  ).toBeVisible({ timeout: 120_000 })
+    page.getByText(
+      new RegExp(
+        `^(Uploaded ${expectedFileCount} file|Uploading ${expectedFileCount} \\.bin file)`,
+        "i",
+      ),
+    ),
+  ).toBeVisible({ timeout: opts.timeoutMs ?? 120_000 })
 }

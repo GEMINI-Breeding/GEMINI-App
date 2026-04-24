@@ -1,8 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
 import { FolderTree } from "lucide-react";
 import { TextField } from "./TextField";
 import { dataTypes } from "@/config/dataTypes";
-import { FilesService } from "@/client";
+
+// Pre-migration, this form queried FilesService.readFieldValues to offer
+// autocomplete suggestions (previously-used experiment/location/population
+// values). The new backend has no equivalent endpoint — suggestions go
+// away; the form still works with plain text entry. Resurrecting them is
+// Phase 11 work (Taxonomy admin) once an "experiments/sites/populations"
+// CRUD surface exists.
 
 interface DataStructureFormProps {
   fileType?: string | null;
@@ -23,28 +28,6 @@ export function DataStructureForm({
   values = {},
   onChange,
 }: DataStructureFormProps) {
-  const { data: fieldValues } = useQuery({
-    queryKey: [
-      "field-values",
-      fileType,
-      values.experiment,
-      values.location,
-      values.population,
-      values.platform,
-      values.sensor,
-    ],
-    queryFn: () =>
-      FilesService.readFieldValues({
-        dataType: fileType ?? undefined,
-        experiment: values.experiment || undefined,
-        location: values.location || undefined,
-        population: values.population || undefined,
-        platform: values.platform || undefined,
-        sensor: values.sensor || undefined,
-      }),
-    enabled: !!fileType,
-  });
-
   // if no file type is selected show this message
   if (!fileType) {
     return (
@@ -86,7 +69,7 @@ export function DataStructureForm({
               value={values[field as keyof typeof values]}
               onChange={handleChange(field)}
               disabled={isDisabled}
-              suggestions={fieldValues?.[field]}
+              suggestions={undefined}
             />
           );
         })}

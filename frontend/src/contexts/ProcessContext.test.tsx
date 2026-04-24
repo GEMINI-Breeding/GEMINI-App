@@ -2,36 +2,34 @@ import { act, renderHook } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+// Mock the wsManager module before importing ProcessContext so the
+// auto-subscribe effect under test is wired to our capture functions
+// instead of real WebSockets.
 const subscribeMock = vi.fn()
-const closeRunMock = vi.fn()
+const closeJobMock = vi.fn()
 
-vi.mock("@/lib/sseManager", () => ({
+vi.mock("@/lib/wsManager", () => ({
   subscribe: (...args: unknown[]) => subscribeMock(...args),
-  closeRun: (...args: unknown[]) => closeRunMock(...args),
+  closeJob: (...args: unknown[]) => closeJobMock(...args),
 }))
 
 import { ProcessProvider, useProcess } from "./ProcessContext"
+import type { JobProgressEvent } from "@/lib/wsManager"
 
-type SseEvent =
-  | { event: "progress"; progress?: number; message?: string }
-  | { event: "complete" }
-  | { event: "error"; message?: string }
-  | { event: "cancelled" }
-
-type Listener = (evt: SseEvent) => void
+type Listener = (evt: JobProgressEvent) => void
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <ProcessProvider>{children}</ProcessProvider>
 )
 
-function setupSseCapture() {
+function setupCapture() {
   const listeners = new Map<string, Listener>()
   const unsubs = new Map<string, ReturnType<typeof vi.fn>>()
 
-  subscribeMock.mockImplementation((runId: string, fn: Listener) => {
-    listeners.set(runId, fn)
-    const unsub = vi.fn(() => listeners.delete(runId))
-    unsubs.set(runId, unsub)
+  subscribeMock.mockImplementation((jobId: string, fn: Listener) => {
+    listeners.set(jobId, fn)
+    const unsub = vi.fn(() => listeners.delete(jobId))
+    unsubs.set(jobId, unsub)
     return unsub
   })
 
@@ -41,7 +39,7 @@ function setupSseCapture() {
 describe("useProcess (consumer hook)", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
+    closeJobMock.mockReset()
   })
 
   it("throws a helpful error when called outside the provider", () => {
@@ -51,7 +49,7 @@ describe("useProcess (consumer hook)", () => {
   })
 
   it("exposes empty arrays and hasBeenActive=false initially", () => {
-    setupSseCapture()
+    setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     expect(result.current.processes).toEqual([])
     expect(result.current.history).toEqual([])
@@ -62,8 +60,8 @@ describe("useProcess (consumer hook)", () => {
 describe("ProcessContext mutation actions", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
-    setupSseCapture()
+    closeJobMock.mockReset()
+    setupCapture()
   })
 
   it("addProcess assigns an id + createdAt and flips hasBeenActive", () => {
@@ -156,7 +154,6 @@ describe("ProcessContext mutation actions", () => {
       })
     })
     act(() => result.current.removeProcess(id))
-    // Second remove is a no-op on an already-removed id, still only one history entry
     act(() => result.current.removeProcess(id))
     expect(result.current.history).toHaveLength(1)
   })
@@ -209,14 +206,14 @@ describe("ProcessContext mutation actions", () => {
   })
 })
 
-describe("ProcessContext SSE bridge", () => {
+describe("ProcessContext wsManager bridge", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
+    closeJobMock.mockReset()
   })
 
-  it("subscribes to an SSE stream for each running process that has a runId", () => {
-    const { listeners } = setupSseCapture()
+  it("subscribes for each running process that has a runId", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
 
     act(() => {
@@ -225,15 +222,15 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    expect(subscribeMock).toHaveBeenCalledWith("run-1", expect.any(Function))
-    expect(listeners.has("run-1")).toBe(true)
+    expect(subscribeMock).toHaveBeenCalledWith("job-1", expect.any(Function))
+    expect(listeners.has("job-1")).toBe(true)
   })
 
-  it("progress events update the process's progress + message fields", () => {
-    const { listeners } = setupSseCapture()
+  it("progress events update the process's progress field and translate progress_detail.stage to message", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -241,14 +238,14 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
     act(() =>
-      listeners.get("run-1")!({
-        event: "progress",
+      listeners.get("job-1")!({
+        status: "RUNNING",
         progress: 37,
-        message: "stage 2",
+        progress_detail: { stage: "stage 2" },
       }),
     )
     const p = result.current.processes[0]
@@ -256,8 +253,8 @@ describe("ProcessContext SSE bridge", () => {
     expect(p.message).toBe("stage 2")
   })
 
-  it("complete event marks the process as completed at 100%", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal COMPLETED marks the process as completed at 100%", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -265,18 +262,24 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "complete" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
     const p = result.current.processes[0]
     expect(p.status).toBe("completed")
     expect(p.progress).toBe(100)
     expect(p.message).toBe("Done")
   })
 
-  it("error event flips status=error and surfaces the provided message", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal FAILED flips status=error and surfaces the error_message", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -284,18 +287,24 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "error", message: "oom" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "FAILED",
+        error_message: "oom",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0]).toMatchObject({
       status: "error",
       message: "oom",
     })
   })
 
-  it("error event without a message falls back to 'Failed'", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal FAILED without an error_message falls back to 'Failed'", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -303,15 +312,20 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "error" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "FAILED",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0].message).toBe("Failed")
   })
 
-  it("cancelled event flips status=error with message 'Cancelled'", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal CANCELLED flips status=error with message 'Cancelled'", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -319,18 +333,23 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "cancelled" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "CANCELLED",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0]).toMatchObject({
       status: "error",
       message: "Cancelled",
     })
   })
 
-  it("terminal events cause the effect to unsubscribe and close the SSE connection", () => {
-    const { listeners, unsubs } = setupSseCapture()
+  it("terminal events cause the effect to unsubscribe and close the connection", () => {
+    const { listeners, unsubs } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -338,12 +357,17 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "complete" }))
-    // After the state update settles, the effect should have cleaned up:
-    expect(unsubs.get("run-1")).toHaveBeenCalled()
-    expect(closeRunMock).toHaveBeenCalledWith("run-1")
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    expect(unsubs.get("job-1")).toHaveBeenCalled()
+    expect(closeJobMock).toHaveBeenCalledWith("job-1")
   })
 })
