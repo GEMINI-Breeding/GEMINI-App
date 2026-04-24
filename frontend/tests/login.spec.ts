@@ -1,5 +1,9 @@
-import { expect, type Page, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
+
 import { firstSuperuser, firstSuperuserPassword } from "./config.ts"
+// Import `test` from helpers/fixtures so every case auto-attaches the
+// console-error guard required by CLAUDE.md's strict-E2E rule.
+import { expect, test } from "./helpers/fixtures"
 import { randomPassword } from "./utils/random.ts"
 
 // Every test in this file starts from an anonymous browser context so the
@@ -74,9 +78,23 @@ test("Successful log out", async ({ page }) => {
   await page.getByRole("button", { name: "Log In" }).click()
   await waitForLoggedInShell(page)
 
+  // Sanity check: the token is actually in storage before we log out.
+  const tokenBefore = await page.evaluate(() =>
+    localStorage.getItem("gemini.auth.token"),
+  )
+  expect(tokenBefore, "token must be set after login").toBeTruthy()
+
   await page.getByTestId("user-menu").click()
   await page.getByTestId("logout-menu-item").click()
   await page.waitForURL("/login")
+
+  // Logging out must actually clear the token — a logout that only fires the
+  // event without touching storage would leave the user effectively logged
+  // in across reloads.
+  const tokenAfter = await page.evaluate(() =>
+    localStorage.getItem("gemini.auth.token"),
+  )
+  expect(tokenAfter, "token must be cleared on logout").toBeFalsy()
 })
 
 test("Logged-out user cannot access protected routes", async ({ page }) => {

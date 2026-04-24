@@ -13,11 +13,14 @@ type Fixtures = {
 
 /**
  * Playwright test extension. Every spec that imports `test` from this file
- * automatically gets:
- *  - a console-error guard that fails the test on unexpected errors,
- *  - a unique run prefix that can be used as experiment/run names,
- *  - a guaranteed cleanup pass that deletes any uploads tagged with that
- *    prefix regardless of whether the test passed or failed.
+ * automatically gets a console-error guard that fails the test on
+ * unexpected errors (per the CLAUDE.md strict-E2E rule).
+ *
+ * `runPrefix` is opt-in — specs that don't request it skip the cleanup
+ * pass entirely. Relevant during the migration because the pre-migration
+ * seeder cleanup helpers (deleteWorkspacesByPrefix, deleteUploadsByPrefix)
+ * are currently throwing stubs; making them a non-auto fixture lets Phase
+ * 5 specs use the console-error guard without tripping on the stub.
  */
 export const test = base.extend<Fixtures>({
   consoleErrorGuard: [

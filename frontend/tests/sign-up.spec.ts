@@ -1,5 +1,8 @@
-import { expect, type Page, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
 
+// Import `test` from helpers/fixtures so every case auto-attaches the
+// console-error guard required by CLAUDE.md's strict-E2E rule.
+import { expect, test } from "./helpers/fixtures"
 import { randomEmail, randomPassword } from "./utils/random"
 
 test.use({ storageState: { cookies: [], origins: [] } })
@@ -53,6 +56,12 @@ test("Sign up with valid name, email, and password", async ({ page }) => {
   await page.goto("/signup")
   await fillForm(page, full_name, email, password, password)
   await page.getByRole("button", { name: "Sign Up" }).click()
+
+  // The happy path navigates to /login; a success toast is also rendered.
+  // If signup silently 500'd, the page would stay on /signup and this would
+  // time out — which is the correct failure.
+  await page.waitForURL("/login")
+  await expect(page.getByText(/account created/i)).toBeVisible()
 })
 
 test("Sign up with invalid email", async ({ page }) => {

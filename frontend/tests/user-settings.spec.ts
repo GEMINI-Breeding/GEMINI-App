@@ -1,5 +1,7 @@
-import { expect, test } from "@playwright/test"
 import { firstSuperuser, firstSuperuserPassword } from "./config.ts"
+// Import `test` from helpers/fixtures so every case auto-attaches the
+// console-error guard required by CLAUDE.md's strict-E2E rule.
+import { expect, test } from "./helpers/fixtures"
 
 /**
  * User-settings coverage for the post-migration shell.
@@ -50,12 +52,33 @@ test.describe("authenticated shell", () => {
     await page.waitForURL("/login")
   })
 
-  test("sidebar Experiment selector renders after login", async ({ page }) => {
+  test("sidebar Experiment selector is populated and switches on choice", async ({
+    page,
+  }) => {
     await logIn(page)
-    // Either the selector is populated with real experiments, or we see the
-    // "no experiments available" empty state — both are valid post-login.
-    const populated = page.getByTestId("experiment-selector")
-    const empty = page.getByTestId("experiment-selector-empty")
-    await expect(populated.or(empty)).toBeVisible()
+
+    // Create two experiments via the dialog so there's something to switch
+    // between. This is the only reliable way to seed state without a
+    // private-API call — CLAUDE.md forbids API seeding.
+    const name1 = `pw-exp-${Date.now()}-a`
+    const name2 = `pw-exp-${Date.now()}-b`
+
+    for (const name of [name1, name2]) {
+      await page.getByTestId("create-experiment-button").click()
+      await page.getByPlaceholder(/e\.g\.|name/i).fill(name)
+      await page.getByRole("button", { name: /create/i }).click()
+      // Dialog closes on success.
+      await expect(page.getByRole("dialog")).toBeHidden()
+    }
+
+    // Selector must be populated (never the empty-state fallback).
+    const selector = page.getByTestId("experiment-selector")
+    await expect(selector).toBeVisible()
+    await expect(selector).toContainText(name2)
+
+    // Switch selection back to the first created experiment.
+    await selector.click()
+    await page.getByRole("option", { name: name1 }).click()
+    await expect(selector).toContainText(name1)
   })
 })
