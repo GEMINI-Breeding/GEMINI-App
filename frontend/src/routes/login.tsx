@@ -1,13 +1,16 @@
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   createFileRoute,
   Link as RouterLink,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router"
+import { AxiosError } from "axios"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 import { z } from "zod"
 
-import type { Body_login_login_access_token as AccessToken } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -21,14 +24,14 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { isLoggedIn } from "@/hooks/useAuth"
+import { login } from "@/lib/auth"
 
 const formSchema = z.object({
   username: z.email(),
   password: z
     .string()
-    .min(1, { message: "Password is required" })
-    .min(8, { message: "Password must be at least 8 characters" }),
-}) satisfies z.ZodType<AccessToken>
+    .min(1, { message: "Password is required" }),
+})
 
 type FormData = z.infer<typeof formSchema>
 
@@ -36,22 +39,17 @@ export const Route = createFileRoute("/login")({
   component: Login,
   beforeLoad: async () => {
     if (isLoggedIn()) {
-      throw redirect({
-        to: "/",
-      })
+      throw redirect({ to: "/" })
     }
   },
   head: () => ({
-    meta: [
-      {
-        title: "Log In - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Log In — GEMINI" }],
   }),
 })
 
 function Login() {
-  const isPending = false
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -62,7 +60,29 @@ function Login() {
     },
   })
 
-  const onSubmit = (_data: FormData) => {}
+  const loginMutation = useMutation({
+    mutationFn: ({ username, password }: FormData) => login(username, password),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      navigate({ to: "/" })
+    },
+    onError: (err: unknown) => {
+      // The backend returns 400 for bad creds and 503 for "auth disabled".
+      // Map both into a single user-visible error to avoid leaking details.
+      let message = "Login failed. Please try again."
+      if (err instanceof AxiosError && err.response) {
+        const status = err.response.status
+        if (status === 400) message = "Incorrect email or password."
+        else if (status === 503)
+          message = "Auth is disabled on the backend (GEMINI_JWT_SECRET unset)."
+      }
+      toast.error(message)
+    },
+  })
+
+  const isPending = loginMutation.isPending
+
+  const onSubmit = (data: FormData) => loginMutation.mutate(data)
 
   return (
     <AuthLayout>

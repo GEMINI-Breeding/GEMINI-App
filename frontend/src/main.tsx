@@ -9,14 +9,20 @@ import { OpenAPI } from "./client"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import { ProcessProvider } from "./contexts/ProcessContext"
+import { installAuthInterceptors } from "./lib/auth"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
 // In production Tauri builds the sidecar injects __GEMI_BACKEND_URL__ before
 // the app loads. In dev mode we use "" so all requests use relative URLs and
-// go through the Vite proxy (/api → http://127.0.0.1:8000), which avoids
+// go through the Vite proxy (/api → http://127.0.0.1:7777), which avoids
 // WebKit cross-origin issues with localhost:PORT requests.
 OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
+
+// Wire the JWT bearer-token resolver and the 401 interceptor. After this call,
+// OpenAPI.TOKEN reads from localStorage on every request and a 401 response
+// (except from the login endpoint itself) triggers a logout.
+installAuthInterceptors()
 
 // Prevent browser zoom (Ctrl+scroll, Ctrl+/-, pinch) from breaking fixed
 // layouts and coordinate calculations in map/canvas tools.

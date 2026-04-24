@@ -1,5 +1,11 @@
-import { useCallback, useState } from "react"
-import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router"
+import { useCallback, useEffect, useState } from "react"
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router"
 import { CircleHelp } from "lucide-react"
 import { toast } from "sonner"
 
@@ -15,17 +21,41 @@ import {
 import { openUrl } from "@/lib/platform"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
+import { isLoggedIn } from "@/hooks/useAuth"
+import { onLogout } from "@/lib/auth"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
+  // Unauthenticated visitors land on /login. Any child route under
+  // /_layout inherits this guard, so the sidebar, dashboards, and all
+  // feature pages are gated behind a valid JWT. When auth is disabled
+  // on the backend (GEMINI_JWT_SECRET empty) we still redirect only when
+  // the caller has no stored token — which is the same condition as
+  // "never logged in," so the flow stays consistent.
+  beforeLoad: () => {
+    if (!isLoggedIn()) {
+      throw redirect({ to: "/login" })
+    }
+  },
 })
 
 function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const FULL_HEIGHT_PREFIXES = ["/files", "/analyze", "/settings", "/process"]
   const isFullHeight =
     location.pathname === "/" ||
     FULL_HEIGHT_PREFIXES.some((p) => location.pathname.startsWith(p))
+
+  // Follow the 401 interceptor's logout event out of this layout. Without
+  // this the user would remain on a data-dependent page after the token
+  // was cleared, trying to re-render against stale React Query caches.
+  useEffect(() => {
+    const off = onLogout(() => {
+      navigate({ to: "/login" })
+    })
+    return off
+  }, [navigate])
 
   const [helpOpen, setHelpOpen] = useState(false)
   const [tourSteps, setTourSteps] = useState<TourStep[] | null>(null)

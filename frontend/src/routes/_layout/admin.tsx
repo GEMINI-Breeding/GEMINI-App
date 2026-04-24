@@ -7,7 +7,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
 
-import { type UserPublic, UsersService } from "@/client"
+import { type UserOutput, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
 import { columns, type UserTableData } from "@/components/Admin/columns"
 import { DataTable } from "@/components/Common/DataTable"
@@ -36,7 +36,7 @@ function UsersTableContent() {
   const { user: currentUser } = useAuth()
   const { data: users } = useSuspenseQuery(getUsersQueryOptions())
 
-  const tableData: UserTableData[] = users.data.map((user: UserPublic) => ({
+  const tableData: UserTableData[] = users.data.map((user: UserOutput) => ({
     ...user,
     isCurrentUser: currentUser?.id === user.id,
   }))
