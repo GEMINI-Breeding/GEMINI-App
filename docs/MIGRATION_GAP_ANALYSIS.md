@@ -27,12 +27,12 @@ Reviewed each worker under `backend/gemini/workers/`.
 | SPLIT_ORTHOMOSAIC | `geo/worker.py:104` | **REAL** | Per-plot PNG masking, WGS84↔raster CRS |
 | EXTRACT_BINARY | `flir/worker.py:52` | **REAL** | torch + kornia + kornia-rs + farm-ng protobuf + `flir/bin_to_images.py:689+` — this is exactly what the old FastAPI backend's `bin_to_images/` did; no porting needed |
 | RUN_GWAS | `gwas/worker.py:57` | **REAL** | plink2 + gemma subprocess, matplotlib plots |
-| TRAIN_MODEL | — | **MISSING** | Type registered; worker dir `gemini/workers/ml/` does not exist; compose stanza commented out (pipeline compose lines 168–189) |
-| LOCATE_PLANTS | — | **MISSING** | Same as TRAIN_MODEL |
-| EXTRACT_TRAITS | — | **MISSING** | Same — **NOT** covered by geo worker; `geo/worker.py` supports only {CREATE_COG, TIF_TO_PNG, PROCESS_DRONE_TIFF, SPLIT_ORTHOMOSAIC} |
-| RUN_STITCH | — | **MISSING** | Type registered; worker dir `gemini/workers/stitch/` does not exist; compose stanza commented out (lines 190–227) |
+| TRAIN_MODEL | `ml/worker.py` | **STUB** (landed in Phase 3) | Wired in ml worker; returns FAILED with clear "not implemented" until a training framework is provisioned |
+| LOCATE_PLANTS | `ml/worker.py:83` | **REAL** (landed in Phase 3) | Roboflow cloud inference with tile + NMS; ported from main:backend/app/processing/inference_utils.py. Local inference-server mode deferred |
+| EXTRACT_TRAITS | `ml/worker.py:155` | **REAL** (landed in Phase 3) | ExG vegetation fraction + DEM canopy height; ported from main:backend/app/processing/aerial.py. Thermal deferred |
+| RUN_STITCH | `stitch/worker.py` | **SCAFFOLDED** (Phase 3) | Worker built; compose stanza stays commented until the AgRowStitch submodule lands at `gemini/workers/stitch/vendor/AgRowStitch/` |
 
-**Correction to the approved plan:** EXTRACT_BINARY already exists — Phase 3 drops the binary-extraction port task. The remaining worker gaps are ML (train/locate) + trait extraction + stitching.
+**Correction to the approved plan:** EXTRACT_BINARY already exists. EXTRACT_TRAITS was re-routed from "extend geo worker" to ml worker per `JOB_TYPE_WORKER_MAP`. Remaining gap: RUN_STITCH activation (AgRowStitch submodule).
 
 **Worker dependency matrix:**
 
@@ -130,7 +130,7 @@ POST /api/model_management/locate_info
 
 Changes warranted in the plan file:
 
-- **Phase 3 worker scope shrinks**: EXTRACT_BINARY is already implemented upstream in the FLIR worker. Drop the binary-extraction port task. Four workers still needed: `workers/stitch/` (RUN_STITCH), `workers/ml/` (LOCATE_PLANTS + TRAIN_MODEL), and extending `workers/geo/` to cover EXTRACT_TRAITS.
+- **Phase 3 worker scope shrinks**: EXTRACT_BINARY is already implemented upstream in the FLIR worker. Drop the binary-extraction port task. Two new workers needed: `workers/ml/` (LOCATE_PLANTS + EXTRACT_TRAITS + TRAIN_MODEL-stub) and `workers/stitch/` (RUN_STITCH).
 - **Phase 2 controller scope shrinks**: `plot_geometry` and `model_management` controllers are already rich. Upstream PR for plot-geometry becomes "add versioning semantics on top of existing endpoints" rather than "author from scratch."
 - **Phase 4 ordering**: The SDK regen step is mandatory and will churn every feature file at once. Can't do it page-by-page; plan for a single PR that flips the SDK and bulk-rewrites all call sites, with CI red until it's all green.
 - **No data migration** (already decided): skip `scripts/migrate_sqlite_to_postgres.py` / `migrate_files_to_minio.py`.
@@ -152,12 +152,12 @@ Note: the submodule now occupies `backend/`. All paths below are relative to `ba
 - New: `gemini/rest_api/controllers/auth.py`, `users.py`; `gemini/db/models/users.py`; alembic migration
 - New: `gemini/workers/stitch/` (worker.py + Dockerfile + requirements.txt)
 - New: `gemini/workers/ml/` (worker.py + Dockerfile + Roboflow `inference-sdk` integration)
-- Extend: `gemini/workers/geo/worker.py` to handle EXTRACT_TRAITS (ExG / height / thermal)
+- (landed in Phase 3) EXTRACT_TRAITS handled by `gemini/workers/ml/worker.py` (ExG + canopy height); thermal deferred.
 - Enhance: `gemini/rest_api/controllers/plot_geometry.py` for versioning (named versions, rename, activate, delete)
 
 ### Reuse from the old FastAPI backend (read from git history on `main`)
 These files have been deleted from `migration/geminibase`. Retrieve individual files with `git show main:<path>` when porting logic. Locations on `main`:
-- `backend/app/processing/aerial.py` — ExG / height / temp kernels for the new EXTRACT_TRAITS handler
+- `backend/app/processing/aerial.py` — ExG + canopy-height kernels for EXTRACT_TRAITS (ported into `workers/ml/trait_extraction.py`); temp kernels not yet ported.
 - `backend/app/processing/inference_utils.py` — `crop_image_with_overlap`, `run_inference_on_image`, `apply_nms` for the new LOCATE_PLANTS worker
 - `backend/vendor/AgRowStitch/` (its own GitHub repo: `github.com/GEMINI-Breeding/AgRowStitch`) + `backend/patches/AgRowStitch.py` + `backend/app/processing/ground.py` — stitching logic for the new `workers/stitch/` worker (drop the PyInstaller subprocess channel)
 - `backend/app/routes/login.py` + `backend/app/routes/users.py` — pattern for the new auth controller
