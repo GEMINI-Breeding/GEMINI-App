@@ -44,9 +44,10 @@ export const WorkspacesService = makeThrowingService("WorkspacesService")
 export const AnalyzeService = makeThrowingService("AnalyzeService")
 export const PipelinesService = makeThrowingService("PipelinesService")
 export const ProcessingService = makeThrowingService("ProcessingService")
-export const LoginService = makeThrowingService("LoginService")
-export const PrivateService = makeThrowingService("PrivateService")
 export const SettingsService = makeThrowingService("SettingsService")
+// LoginService and PrivateService had no callers left after Phase 5
+// (recover/reset-password only reference the name in comments; the
+// tests/utils/privateApi.ts seeder was deleted in the same pass).
 
 // Deliberately permissive type aliases — real shapes live elsewhere once
 // the rewrite of each page lands (Phases 6–11).

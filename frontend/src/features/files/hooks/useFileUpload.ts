@@ -1,18 +1,20 @@
 import { useCallback } from "react"
 
 /**
- * Phase 4 transition stub.
+ * Phase-4 transition stub.
  *
  * The pre-migration `uploadFiles` accepted *absolute server-side paths* and
  * asked the Tauri-embedded FastAPI backend to copy them. GEMINIbase replaces
  * that with pure-HTTP chunked upload from the browser (see
- * `src/lib/chunkedUpload.ts`). The call-site rewrite is Phase 5 work because
- * every dropzone / upload-button that feeds this hook needs to switch from
- * filesystem paths to browser `File` objects.
+ * `src/lib/chunkedUpload.ts`).
  *
- * Until that rewrite lands, importing and rendering a page that calls
- * `useFileUpload()` is fine — the throw only fires when the user actually
- * triggers an upload.
+ * Replacement scheduled: **Phase 6** (Files + Reference Data) — a new
+ * `src/features/files/hooks/useChunkedUpload.ts` will replace this file's
+ * entire surface. Every dropzone / upload-button that feeds this hook
+ * switches from filesystem paths to browser `File` objects at that point.
+ *
+ * Until then, importing and rendering a page that calls `useFileUpload()`
+ * is fine — the throw only fires when the user actually triggers an upload.
  */
 interface UploadParams {
   filePaths: string[]
@@ -30,7 +32,7 @@ export function useFileUpload() {
       "[useFileUpload] The legacy server-side path upload was removed in the " +
         "GEMINIbase migration. Call sites need to use browser File objects and " +
         "`uploadFileChunked` from src/lib/chunkedUpload.ts instead. Scheduled " +
-        "for rewrite in Phase 5.",
+        "for rewrite in Phase 6.",
     )
   }, [])
 
