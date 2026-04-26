@@ -1,10 +1,12 @@
 import {
+  Brain,
   ChartSpline,
   Folder,
   Home,
   type LucideIcon,
   Play,
   Settings,
+  Tags,
   Terminal,
 } from "lucide-react";
 
@@ -28,6 +30,17 @@ export const sidebarItems: NavItem[] = [
     title: "Process",
     path: "/process",
   },
+  {
+    icon: Brain,
+    title: "Models",
+    path: "/models",
+    subItems: [
+      { title: "Registry", path: "/models" },
+      { title: "Run inference", path: "/models/inference" },
+      { title: "Train", path: "/models/train" },
+    ],
+  },
+  { icon: Tags, title: "Annotations", path: "/annotations" },
   {
     icon: ChartSpline,
     title: "Analyze",

@@ -47,22 +47,59 @@ export function classColour(cls: string): string {
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
-export function plotImageUrl(recordId: string, plotId: string): string {
+/**
+ * Old Phase-pre-migration analyze URL. Kept as a stub returning empty
+ * string so the Phase-10 callsites (TraitMap / TraitsTable / MasterTable /
+ * QueryTab / PlotViewerWidget) keep compiling until Phase 10 rewires them
+ * onto `objectPath`. Returning empty string makes the fetch fail predictably
+ * (rather than 404'ing against a nonexistent endpoint).
+ */
+export function plotImageUrl(_recordId: string, _plotId: string): string {
+  return ""
+}
+
+/**
+ * Build the GEMINIbase file-download URL for a MinIO object path. The
+ * backend mounts everything in the bucket called "gemini" by default, so
+ * pass paths in the form "gemini/Processed/.../plot_3_accession_X.png".
+ *
+ * Used by the Phase 8 InferenceTool to fetch per-plot PNGs the SPLIT
+ * worker already wrote to MinIO.
+ */
+export function objectImageUrl(objectPath: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  const path = `/api/v1/analyze/trait-records/${recordId}/plot-image/${encodeURIComponent(plotId)}`
+  // Litestar's path-parameter parser already does decoding; we just need
+  // to ensure slashes inside the path are preserved.
+  const path = `/api/files/download/${objectPath.split("/").map(encodeURIComponent).join("/")}`
   return base ? `${base}${path}` : path
 }
 
 export function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem("access_token") || ""
+  // Phase 4 stores the JWT under this key (gemini.auth.token); the older
+  // `access_token` key is kept as a fallback so any in-flight code path
+  // that hasn't been migrated keeps working.
+  const token =
+    localStorage.getItem("gemini.auth.token") ||
+    localStorage.getItem("access_token") ||
+    ""
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export interface PlotImageProps {
-  recordId: string
-  plotId: string
+  /**
+   * Phase 10 (Analyze) callsite; pair with `plotId`. Until those callsites
+   * are rewritten onto `objectPath`, the URL helper returns an empty
+   * string and this code path is effectively non-functional.
+   */
+  recordId?: string
+  plotId?: string
+  /**
+   * Phase 8+ callsite. MinIO object path (e.g. "gemini/Processed/.../plot.png");
+   * served via `/api/files/download/{path}` with the standard JWT.
+   */
+  objectPath?: string
   /** When true, image is displayed rotated 90° CW (for ground/stitch plots). */
   rotate?: boolean
   predictions?: Prediction[]
@@ -76,6 +113,7 @@ export interface PlotImageProps {
 export function PlotImage({
   recordId,
   plotId,
+  objectPath,
   rotate = false,
   predictions = [],
   showDetections = false,
@@ -108,30 +146,32 @@ export function PlotImage({
     return () => obs.disconnect()
   }, [])
 
-  // Fetch image (authenticated)
+  // Fetch image (authenticated). Prefer objectPath (Phase 8+); fall back to
+  // the legacy (recordId, plotId) pair (Phase 10 — currently non-functional
+  // until those callsites are rewritten).
   useEffect(() => {
     setBlobUrl(null); setErrored(false); setDims(null)
-    let revoked = false; let objectUrl: string | null = null
-    const url = plotImageUrl(recordId, plotId)
-    console.debug(`[PlotImage] fetching recordId=${recordId} plotId=${plotId} → ${url}`)
+    const url = objectPath
+      ? objectImageUrl(objectPath)
+      : recordId && plotId
+        ? plotImageUrl(recordId, plotId)
+        : ""
+    if (!url) { setErrored(true); return }
+
+    let revoked = false; let createdObjectUrl: string | null = null
     fetch(url, { headers: authHeaders() })
       .then((res) => {
-        if (!res.ok) {
-          console.warn(`[PlotImage] HTTP ${res.status} for plotId=${plotId} recordId=${recordId} url=${url}`)
-          throw new Error(`HTTP ${res.status}`)
-        }
-        console.debug(`[PlotImage] OK ${res.status} for plotId=${plotId}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.blob()
       })
       .then((blob) => {
-        if (!revoked) { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl) }
+        if (!revoked) { createdObjectUrl = URL.createObjectURL(blob); setBlobUrl(createdObjectUrl) }
       })
-      .catch((err) => {
-        console.error(`[PlotImage] error for plotId=${plotId} recordId=${recordId}:`, err)
+      .catch(() => {
         if (!revoked) setErrored(true)
       })
-    return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [recordId, plotId])
+    return () => { revoked = true; if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl) }
+  }, [recordId, plotId, objectPath])
 
   // Draw detection overlay — correct coordinate math for both orientations
   useEffect(() => {
@@ -254,7 +294,7 @@ export function PlotImage({
         <>
           <img
             src={blobUrl}
-            alt={`plot ${plotId}`}
+            alt={`plot ${plotId ?? objectPath ?? ""}`}
             style={imgStyle}
             onLoad={(e) =>
               setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
