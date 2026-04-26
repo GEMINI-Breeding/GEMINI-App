@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest"
+
+import {
+  isAerialScopeComplete,
+  orthomosaicPath,
+  plotImagesPrefix,
+  processedPrefix,
+  rawImagesPrefix,
+  yearFromDate,
+} from "./paths"
+
+describe("yearFromDate", () => {
+  it("extracts the year from a YYYY-MM-DD string", () => {
+    expect(yearFromDate("2026-04-26")).toBe("2026")
+  })
+  it("returns empty for empty/null input", () => {
+    expect(yearFromDate(null)).toBe("")
+    expect(yearFromDate(undefined)).toBe("")
+    expect(yearFromDate("")).toBe("")
+  })
+})
+
+const SCOPE = {
+  year: "2026",
+  experiment: "ExpA",
+  location: "FieldX",
+  population: "P1",
+  date: "2026-04-26",
+  platform: "Drone",
+  sensor: "RGB",
+}
+
+describe("processedPrefix", () => {
+  it("matches the worker's _build_output_prefix shape", () => {
+    expect(processedPrefix(SCOPE)).toBe(
+      "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/",
+    )
+  })
+})
+
+describe("rawImagesPrefix", () => {
+  it("ends in Images/ under Raw/", () => {
+    expect(rawImagesPrefix(SCOPE)).toBe(
+      "Raw/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/Images/",
+    )
+  })
+})
+
+describe("plotImagesPrefix", () => {
+  it("appends PlotImages/ to the processed prefix", () => {
+    expect(plotImagesPrefix(SCOPE)).toBe(
+      "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/PlotImages/",
+    )
+  })
+})
+
+describe("orthomosaicPath", () => {
+  it("appends odm_orthophoto.tif to the processed prefix", () => {
+    expect(orthomosaicPath(SCOPE)).toBe(
+      "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/odm_orthophoto.tif",
+    )
+  })
+})
+
+describe("isAerialScopeComplete", () => {
+  it("requires every component", () => {
+    expect(isAerialScopeComplete(SCOPE)).toBe(true)
+    expect(isAerialScopeComplete({ ...SCOPE, date: "" })).toBe(false)
+    expect(isAerialScopeComplete({ ...SCOPE, platform: "" })).toBe(false)
+    expect(isAerialScopeComplete({})).toBe(false)
+  })
+})

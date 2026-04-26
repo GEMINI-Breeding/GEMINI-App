@@ -1,14 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { WorkspaceDashboard } from "@/features/process/pages/WorkspaceDashboard"
+import { ProcessingPipeline } from "@/features/process/pages/ProcessingPipeline"
 
 export const Route = createFileRoute("/_layout/process/")({
-  component: WorkspaceDashboard,
+  component: ProcessingPipeline,
   head: () => ({
-    meta: [
-      {
-        title: "Process - GEMI",
-      },
-    ],
+    meta: [{ title: "Process — GEMI" }],
   }),
 })

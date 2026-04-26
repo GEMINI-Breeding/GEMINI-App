@@ -22,12 +22,12 @@ import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
 import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
-import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
+import { Route as LayoutProcessSplitRouteImport } from './routes/_layout/process/split'
+import { Route as LayoutProcessPlotBoundariesRouteImport } from './routes/_layout/process/plot-boundaries'
+import { Route as LayoutProcessOrthomosaicRouteImport } from './routes/_layout/process/orthomosaic'
+import { Route as LayoutProcessExtractTraitsRouteImport } from './routes/_layout/process/extract-traits'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
-import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
-import { Route as LayoutProcessWorkspaceIdToolRouteImport } from './routes/_layout/process/$workspaceId/tool'
-import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
-import { Route as LayoutProcessWorkspaceIdRunRunIdRouteImport } from './routes/_layout/process/$workspaceId/run/$runId'
+import { Route as LayoutProcessJobsJobIdRouteImport } from './routes/_layout/process/jobs.$jobId'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -93,10 +93,27 @@ const LayoutAnalyzeIndexRoute = LayoutAnalyzeIndexRouteImport.update({
   path: '/analyze/',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutProcessWorkspaceIdRoute =
-  LayoutProcessWorkspaceIdRouteImport.update({
-    id: '/process/$workspaceId',
-    path: '/process/$workspaceId',
+const LayoutProcessSplitRoute = LayoutProcessSplitRouteImport.update({
+  id: '/process/split',
+  path: '/process/split',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutProcessPlotBoundariesRoute =
+  LayoutProcessPlotBoundariesRouteImport.update({
+    id: '/process/plot-boundaries',
+    path: '/process/plot-boundaries',
+    getParentRoute: () => LayoutRoute,
+  } as any)
+const LayoutProcessOrthomosaicRoute =
+  LayoutProcessOrthomosaicRouteImport.update({
+    id: '/process/orthomosaic',
+    path: '/process/orthomosaic',
+    getParentRoute: () => LayoutRoute,
+  } as any)
+const LayoutProcessExtractTraitsRoute =
+  LayoutProcessExtractTraitsRouteImport.update({
+    id: '/process/extract-traits',
+    path: '/process/extract-traits',
     getParentRoute: () => LayoutRoute,
   } as any)
 const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
@@ -104,30 +121,11 @@ const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
   path: '/analyze/$runId',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutProcessWorkspaceIdIndexRoute =
-  LayoutProcessWorkspaceIdIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
-  } as any)
-const LayoutProcessWorkspaceIdToolRoute =
-  LayoutProcessWorkspaceIdToolRouteImport.update({
-    id: '/tool',
-    path: '/tool',
-    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
-  } as any)
-const LayoutProcessWorkspaceIdPipelineRoute =
-  LayoutProcessWorkspaceIdPipelineRouteImport.update({
-    id: '/pipeline',
-    path: '/pipeline',
-    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
-  } as any)
-const LayoutProcessWorkspaceIdRunRunIdRoute =
-  LayoutProcessWorkspaceIdRunRunIdRouteImport.update({
-    id: '/run/$runId',
-    path: '/run/$runId',
-    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
-  } as any)
+const LayoutProcessJobsJobIdRoute = LayoutProcessJobsJobIdRouteImport.update({
+  id: '/process/jobs/$jobId',
+  path: '/process/jobs/$jobId',
+  getParentRoute: () => LayoutRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -140,14 +138,14 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
+  '/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
+  '/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
+  '/process/split': typeof LayoutProcessSplitRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
-  '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
-  '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
-  '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
-  '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
+  '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -160,13 +158,14 @@ export interface FileRoutesByTo {
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
+  '/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
+  '/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
+  '/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
+  '/process/split': typeof LayoutProcessSplitRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
-  '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
-  '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
-  '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
-  '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
+  '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -181,14 +180,14 @@ export interface FileRoutesById {
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/_layout/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
+  '/_layout/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
+  '/_layout/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
+  '/_layout/process/split': typeof LayoutProcessSplitRoute
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
   '/_layout/files/': typeof LayoutFilesIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
-  '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
-  '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
-  '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
-  '/_layout/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
+  '/_layout/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -203,14 +202,14 @@ export interface FileRouteTypes {
     | '/settings'
     | '/'
     | '/analyze/$runId'
-    | '/process/$workspaceId'
+    | '/process/extract-traits'
+    | '/process/orthomosaic'
+    | '/process/plot-boundaries'
+    | '/process/split'
     | '/analyze'
     | '/files'
     | '/process'
-    | '/process/$workspaceId/pipeline'
-    | '/process/$workspaceId/tool'
-    | '/process/$workspaceId/'
-    | '/process/$workspaceId/run/$runId'
+    | '/process/jobs/$jobId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -223,13 +222,14 @@ export interface FileRouteTypes {
     | '/settings'
     | '/'
     | '/analyze/$runId'
+    | '/process/extract-traits'
+    | '/process/orthomosaic'
+    | '/process/plot-boundaries'
+    | '/process/split'
     | '/analyze'
     | '/files'
     | '/process'
-    | '/process/$workspaceId/pipeline'
-    | '/process/$workspaceId/tool'
-    | '/process/$workspaceId'
-    | '/process/$workspaceId/run/$runId'
+    | '/process/jobs/$jobId'
   id:
     | '__root__'
     | '/_layout'
@@ -243,14 +243,14 @@ export interface FileRouteTypes {
     | '/_layout/settings'
     | '/_layout/'
     | '/_layout/analyze/$runId'
-    | '/_layout/process/$workspaceId'
+    | '/_layout/process/extract-traits'
+    | '/_layout/process/orthomosaic'
+    | '/_layout/process/plot-boundaries'
+    | '/_layout/process/split'
     | '/_layout/analyze/'
     | '/_layout/files/'
     | '/_layout/process/'
-    | '/_layout/process/$workspaceId/pipeline'
-    | '/_layout/process/$workspaceId/tool'
-    | '/_layout/process/$workspaceId/'
-    | '/_layout/process/$workspaceId/run/$runId'
+    | '/_layout/process/jobs/$jobId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -354,11 +354,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAnalyzeIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/process/$workspaceId': {
-      id: '/_layout/process/$workspaceId'
-      path: '/process/$workspaceId'
-      fullPath: '/process/$workspaceId'
-      preLoaderRoute: typeof LayoutProcessWorkspaceIdRouteImport
+    '/_layout/process/split': {
+      id: '/_layout/process/split'
+      path: '/process/split'
+      fullPath: '/process/split'
+      preLoaderRoute: typeof LayoutProcessSplitRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/process/plot-boundaries': {
+      id: '/_layout/process/plot-boundaries'
+      path: '/process/plot-boundaries'
+      fullPath: '/process/plot-boundaries'
+      preLoaderRoute: typeof LayoutProcessPlotBoundariesRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/process/orthomosaic': {
+      id: '/_layout/process/orthomosaic'
+      path: '/process/orthomosaic'
+      fullPath: '/process/orthomosaic'
+      preLoaderRoute: typeof LayoutProcessOrthomosaicRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/process/extract-traits': {
+      id: '/_layout/process/extract-traits'
+      path: '/process/extract-traits'
+      fullPath: '/process/extract-traits'
+      preLoaderRoute: typeof LayoutProcessExtractTraitsRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/analyze/$runId': {
@@ -368,58 +389,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAnalyzeRunIdRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/process/$workspaceId/': {
-      id: '/_layout/process/$workspaceId/'
-      path: '/'
-      fullPath: '/process/$workspaceId/'
-      preLoaderRoute: typeof LayoutProcessWorkspaceIdIndexRouteImport
-      parentRoute: typeof LayoutProcessWorkspaceIdRoute
-    }
-    '/_layout/process/$workspaceId/tool': {
-      id: '/_layout/process/$workspaceId/tool'
-      path: '/tool'
-      fullPath: '/process/$workspaceId/tool'
-      preLoaderRoute: typeof LayoutProcessWorkspaceIdToolRouteImport
-      parentRoute: typeof LayoutProcessWorkspaceIdRoute
-    }
-    '/_layout/process/$workspaceId/pipeline': {
-      id: '/_layout/process/$workspaceId/pipeline'
-      path: '/pipeline'
-      fullPath: '/process/$workspaceId/pipeline'
-      preLoaderRoute: typeof LayoutProcessWorkspaceIdPipelineRouteImport
-      parentRoute: typeof LayoutProcessWorkspaceIdRoute
-    }
-    '/_layout/process/$workspaceId/run/$runId': {
-      id: '/_layout/process/$workspaceId/run/$runId'
-      path: '/run/$runId'
-      fullPath: '/process/$workspaceId/run/$runId'
-      preLoaderRoute: typeof LayoutProcessWorkspaceIdRunRunIdRouteImport
-      parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    '/_layout/process/jobs/$jobId': {
+      id: '/_layout/process/jobs/$jobId'
+      path: '/process/jobs/$jobId'
+      fullPath: '/process/jobs/$jobId'
+      preLoaderRoute: typeof LayoutProcessJobsJobIdRouteImport
+      parentRoute: typeof LayoutRoute
     }
   }
 }
-
-interface LayoutProcessWorkspaceIdRouteChildren {
-  LayoutProcessWorkspaceIdPipelineRoute: typeof LayoutProcessWorkspaceIdPipelineRoute
-  LayoutProcessWorkspaceIdToolRoute: typeof LayoutProcessWorkspaceIdToolRoute
-  LayoutProcessWorkspaceIdIndexRoute: typeof LayoutProcessWorkspaceIdIndexRoute
-  LayoutProcessWorkspaceIdRunRunIdRoute: typeof LayoutProcessWorkspaceIdRunRunIdRoute
-}
-
-const LayoutProcessWorkspaceIdRouteChildren: LayoutProcessWorkspaceIdRouteChildren =
-  {
-    LayoutProcessWorkspaceIdPipelineRoute:
-      LayoutProcessWorkspaceIdPipelineRoute,
-    LayoutProcessWorkspaceIdToolRoute: LayoutProcessWorkspaceIdToolRoute,
-    LayoutProcessWorkspaceIdIndexRoute: LayoutProcessWorkspaceIdIndexRoute,
-    LayoutProcessWorkspaceIdRunRunIdRoute:
-      LayoutProcessWorkspaceIdRunRunIdRoute,
-  }
-
-const LayoutProcessWorkspaceIdRouteWithChildren =
-  LayoutProcessWorkspaceIdRoute._addFileChildren(
-    LayoutProcessWorkspaceIdRouteChildren,
-  )
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
@@ -428,10 +406,14 @@ interface LayoutRouteChildren {
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
-  LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
+  LayoutProcessExtractTraitsRoute: typeof LayoutProcessExtractTraitsRoute
+  LayoutProcessOrthomosaicRoute: typeof LayoutProcessOrthomosaicRoute
+  LayoutProcessPlotBoundariesRoute: typeof LayoutProcessPlotBoundariesRoute
+  LayoutProcessSplitRoute: typeof LayoutProcessSplitRoute
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
   LayoutFilesIndexRoute: typeof LayoutFilesIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
+  LayoutProcessJobsJobIdRoute: typeof LayoutProcessJobsJobIdRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
@@ -441,10 +423,14 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
-  LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
+  LayoutProcessExtractTraitsRoute: LayoutProcessExtractTraitsRoute,
+  LayoutProcessOrthomosaicRoute: LayoutProcessOrthomosaicRoute,
+  LayoutProcessPlotBoundariesRoute: LayoutProcessPlotBoundariesRoute,
+  LayoutProcessSplitRoute: LayoutProcessSplitRoute,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,
   LayoutFilesIndexRoute: LayoutFilesIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
+  LayoutProcessJobsJobIdRoute: LayoutProcessJobsJobIdRoute,
 }
 
 const LayoutRouteWithChildren =
