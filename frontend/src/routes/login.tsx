@@ -11,6 +11,7 @@ import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
 
+import { ApiError } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -69,13 +70,18 @@ function Login() {
     onError: (err: unknown) => {
       // The backend returns 400 for bad creds and 503 for "auth disabled".
       // Map both into a single user-visible error to avoid leaking details.
+      // The SDK throws ApiError for fetch-based calls; AxiosError applies
+      // to the (rare) axios paths.
       let message = "Login failed. Please try again."
-      if (err instanceof AxiosError && err.response) {
-        const status = err.response.status
-        if (status === 400) message = "Incorrect email or password."
-        else if (status === 503)
-          message = "Auth is disabled on the backend (GEMINI_JWT_SECRET unset)."
+      let status: number | undefined
+      if (err instanceof ApiError) {
+        status = err.status
+      } else if (err instanceof AxiosError && err.response) {
+        status = err.response.status
       }
+      if (status === 400) message = "Incorrect email or password."
+      else if (status === 503)
+        message = "Auth is disabled on the backend (GEMINI_JWT_SECRET unset)."
       toast.error(message)
     },
   })

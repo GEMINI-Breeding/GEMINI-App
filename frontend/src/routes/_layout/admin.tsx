@@ -45,6 +45,13 @@ function UsersTableContent() {
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    initialState: {
+      // Default page size of 10 (from TanStack) hid newly-created users
+      // behind page 2 — the row appeared in the data but the user couldn't
+      // see it after clicking Save. 50 keeps the typical admin view on a
+      // single page; the query already caps at 100 server-side.
+      pagination: { pageIndex: 0, pageSize: 50 },
+    },
   })
 
   return <DataTable table={table} />

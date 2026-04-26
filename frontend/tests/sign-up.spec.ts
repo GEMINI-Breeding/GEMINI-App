@@ -79,20 +79,34 @@ test("Sign up with invalid email", async ({ page }) => {
   await expect(page.getByText("Invalid email address")).toBeVisible()
 })
 
-test("Sign up with existing email", async ({ page }) => {
+test("Sign up with existing email", async ({ page, consoleErrorGuard }) => {
+  // The duplicate-email path is the test's subject: the second signup POST
+  // returns 400 with `{error:"Email taken", error_description:"..."}`, and
+  // the form surfaces that as a toast. Declare the deliberate 400 so the
+  // guard doesn't fail us on the resource-load failure.
+  consoleErrorGuard.expectError(/\/api\/users\/signup/)
   const fullName = "Test User"
   const email = randomEmail()
   const password = randomPassword()
 
-  // Sign up with an email
+  // First signup. Wait for the POST to complete (and the post-success
+  // navigation to /login) before attempting the duplicate, otherwise a
+  // race between the cancelled-by-navigation first request and the second
+  // request hits the backend's INSERT path with the email-existence check
+  // skipped on the second call — surfacing as a 500 instead of the
+  // expected 400.
   await page.goto("/signup")
-
   await fillForm(page, fullName, email, password, password)
+  const firstSignupResponse = page.waitForResponse(
+    (r) => r.url().includes("/api/users/signup") && r.request().method() === "POST",
+  )
   await page.getByRole("button", { name: "Sign Up" }).click()
+  await firstSignupResponse
+  await page.waitForURL("/login")
 
-  // Sign up again with the same email
+  // Sign up again with the same email — must resolve to a structured
+  // 400 with the "Email taken" detail.
   await page.goto("/signup")
-
   await fillForm(page, fullName, email, password, password)
   await page.getByRole("button", { name: "Sign Up" }).click()
 

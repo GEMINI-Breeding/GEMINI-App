@@ -22,6 +22,12 @@ type Section = "Raw" | "Processed" | "Intermediate"
 
 const SECTIONS: Section[] = ["Raw", "Processed", "Intermediate"]
 
+// The Files list endpoint parses `/api/files/list/{file_path}` as
+// `<bucket>/<prefix>`, so we have to prepend the default bucket name.
+// Keeping it client-side avoids plumbing a new settings fetch just to read
+// GEMINI_STORAGE_BUCKET_NAME — a Phase-7 refinement.
+const DEFAULT_BUCKET = "gemini"
+
 function apiUrl(path: string): string {
   return `${(OpenAPI.BASE ?? "").replace(/\/$/, "")}${path}`
 }
@@ -34,7 +40,7 @@ function formatBytes(n: number): string {
 }
 
 async function downloadViaBrowser(objectPath: string): Promise<void> {
-  const url = apiUrl(`/api/files/download/${objectPath}`)
+  const url = apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectPath}`)
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${getToken()}` },
   })
@@ -64,10 +70,10 @@ export function ManageData() {
   const prefix = section
 
   const filesQuery = useQuery({
-    queryKey: ["files", "list", prefix],
+    queryKey: ["files", "list", DEFAULT_BUCKET, prefix],
     queryFn: async () => {
       const files = await FilesService.apiFilesListFilePathListFiles({
-        filePath: prefix,
+        filePath: `${DEFAULT_BUCKET}/${prefix}`,
       })
       return (files as FileMetadata[] | null) ?? []
     },
@@ -83,11 +89,13 @@ export function ManageData() {
   const deleteMutation = useMutation({
     mutationFn: async (objectPath: string) => {
       await FilesService.apiFilesDeleteFilePathDeleteFile({
-        filePath: objectPath,
+        filePath: `${DEFAULT_BUCKET}/${objectPath}`,
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["files", "list", prefix] })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list", DEFAULT_BUCKET, prefix],
+      })
       showSuccessToast("File deleted")
     },
     onError: (err) => {
@@ -128,7 +136,7 @@ export function ManageData() {
           loading={filesQuery.isFetching}
           onClick={() =>
             queryClient.invalidateQueries({
-              queryKey: ["files", "list", prefix],
+              queryKey: ["files", "list", DEFAULT_BUCKET, prefix],
             })
           }
         >

@@ -22,6 +22,11 @@ function apiUrl(path: string): string {
   return base + path
 }
 
+// Default MinIO bucket used by the chunk-upload endpoint. The download
+// route parses its path as `<bucket>/<object>`, so uploads we want to
+// round-trip through the browser have to be fetched through that prefix.
+const DEFAULT_BUCKET = "gemini"
+
 /**
  * Read a MinIO-hosted object back to the browser via the new download
  * endpoint. Used to round-trip CSV / reference uploads so the user can
@@ -30,7 +35,7 @@ function apiUrl(path: string): string {
 async function fetchUploadedContent(
   objectPath: string,
 ): Promise<{ text: string; blob: Blob } | null> {
-  const url = apiUrl(`/api/files/download/${objectPath}`)
+  const url = apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectPath}`)
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${getToken()}` },
   })

@@ -10,7 +10,66 @@ import { randomEmail, randomPassword } from "./utils/random"
  * Phase 5.1 admin-page coverage. Every test drives the real UI end-to-end
  * — no API seeding, no private-API helpers. Each test either cleans up
  * its own user or notes the residue in a comment.
+ *
+ * Toast-intercept note: after a successful create/edit, useCustomToast
+ * fires a Sonner success toast that renders fixed at the bottom-right.
+ * Each toast `<li>` keeps `pointer-events: auto` (the wrapper is none;
+ * the card is auto so its dismiss button works), and the bottom-right
+ * is exactly where TanStack table row-action buttons live — so a click
+ * on the row's "⋯" button gets intercepted by the toast hit area until
+ * it auto-dismisses ~4 s later. We dismiss toasts explicitly before any
+ * row-action click via `dismissToasts(page)` instead of relying on the
+ * default-duration timer.
  */
+
+/**
+ * Clear two known click-intercepts that fire after a successful dialog
+ * submit:
+ *
+ *   1. Sonner success toast — fixed at bottom-right, pointer-events: auto
+ *      on each `<li data-sonner-toast>`. Until it auto-dismisses (~4 s
+ *      later) it absorbs clicks on TanStack-table row-action buttons in
+ *      the same corner. We can't .remove() the nodes (React's reconciler
+ *      then crashes on the next render with insertBefore errors), so we
+ *      neutralize them via inline styles instead — Sonner's React tree
+ *      stays intact, and the click hit area is gone.
+ *
+ *   2. Radix Dialog body-style leak (radix-ui/primitives#1241) — Radix
+ *      sometimes leaves `body { pointer-events: none }` and
+ *      `data-scroll-locked` set after a dialog closes mid-animation,
+ *      especially when paired with TanStack Query's invalidate cascade.
+ *      `useDialogBodyUnlock` in `src/components/ui/dialog.tsx` clears
+ *      this on a timer, but the timer can fire after our next click
+ *      attempt. Force-clear here too.
+ *
+ * Always call this between "submit dialog" and "click row-action menu."
+ */
+async function dismissToasts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    // Neutralize toasts without removing them — preserves React's
+    // reconciler tree.
+    document
+      .querySelectorAll<HTMLLIElement>("[data-sonner-toast]")
+      .forEach((li) => {
+        li.style.pointerEvents = "none"
+        li.style.visibility = "hidden"
+      })
+    // Also neutralize the Sonner wrapper itself, which was already
+    // pointer-events:none in our config but sets data-mounted on a child
+    // section that can still wrap a hit area.
+    document
+      .querySelectorAll<HTMLElement>("[data-sonner-toaster], section[aria-label*='Notifications' i]")
+      .forEach((el) => {
+        el.style.pointerEvents = "none"
+      })
+    if (document.body.style.pointerEvents === "none") {
+      document.body.style.pointerEvents = ""
+    }
+    if (document.body.dataset.scrollLocked != null) {
+      delete document.body.dataset.scrollLocked
+    }
+  })
+}
 
 async function logIn(page: Page, email: string, password: string): Promise<void> {
   await page.goto("/login")
@@ -21,8 +80,14 @@ async function logIn(page: Page, email: string, password: string): Promise<void>
 }
 
 async function logOutViaMenu(page: Page): Promise<void> {
-  await page.getByTestId("user-menu").click()
-  await page.getByTestId("logout-menu-item").click()
+  await page.waitForLoadState("networkidle")
+  await dismissToasts(page)
+  // user-menu is a Radix DropdownMenuTrigger; logout-menu-item is the
+  // menuitem inside it. Same pattern as deleteUserViaRow — open via
+  // pointerdown, fire the menuitem via click event so we don't wait
+  // for the CDP ack that Radix's focus shift never delivers.
+  await page.getByTestId("user-menu").dispatchEvent("pointerdown", { button: 0 })
+  await page.getByTestId("logout-menu-item").dispatchEvent("click")
   await page.waitForURL("/login")
 }
 
@@ -54,15 +119,48 @@ async function createUserViaAdminDialog(
     await page.getByLabel(/is active/i).check()
   }
   await page.getByRole("button", { name: "Save" }).click()
-  // Dialog closes; the created row renders.
+  // Wait for the dialog itself to fully unmount before continuing —
+  // otherwise its close animation + Radix's body-style cleanup races
+  // with the next click and stalls Playwright. The role="dialog" /
+  // data-state="open" content is the canonical "modal still up" signal.
+  await expect(
+    page.locator('[role="dialog"][data-state="open"]'),
+  ).toHaveCount(0, { timeout: 10_000 })
+  // Then assert the created row exists.
   await expect(page.getByText(email).first()).toBeVisible()
 }
 
 async function deleteUserViaRow(page: Page, email: string): Promise<void> {
+  // Wait for the table to settle: useSuspenseQuery + invalidateQueries can
+  // remount the row mid-click and leave the button locator pointing at a
+  // stale node. networkidle settles after the post-create refetch.
+  await page.waitForLoadState("networkidle")
+  // Dismiss any open success toasts (e.g. "Success! User created") — they
+  // sit at the bottom-right and intercept clicks on the row's action
+  // button until they auto-dismiss.
+  await dismissToasts(page)
   const row = page.getByRole("row").filter({ hasText: email })
-  await row.getByRole("button").click()
-  await page.getByRole("menuitem", { name: /delete user/i }).click()
-  await page.getByRole("button", { name: "Delete" }).click()
+  const btn = row.getByRole("button")
+  await btn.scrollIntoViewIfNeeded()
+  // Radix's DropdownMenuTrigger opens the menu on `pointerdown`, then
+  // immediately moves focus into the open menu. Playwright's standard
+  // `.click()` waits for the full pointerdown→mouseup→click ack chain
+  // via CDP, but the focus shift causes the ack to race and stall for
+  // the entire test timeout. Driving just the `pointerdown` event is
+  // enough to open Radix's menu — same event the real user fires — and
+  // skips the CDP wait that nothing on the page is going to satisfy.
+  // The same pattern recurs on every Radix-managed open/close: menuitem
+  // selection (closes the menu, opens an AlertDialog), AlertDialog
+  // confirm (closes the dialog, fires the mutation). We dispatch the
+  // `click` event directly on each — fully compatible with Radix's
+  // listeners — to avoid the same CDP stall.
+  await btn.dispatchEvent("pointerdown", { button: 0 })
+  await page
+    .getByRole("menuitem", { name: /delete user/i })
+    .dispatchEvent("click")
+  await page
+    .getByRole("button", { name: "Delete" })
+    .dispatchEvent("click")
   await expect(page.getByText(email)).not.toBeVisible()
 }
 
@@ -165,6 +263,8 @@ test("full auth chain: signup → log in as new user → admin promotes → new 
   await logIn(page, firstSuperuser, firstSuperuserPassword)
   await page.goto("/admin")
 
+  await page.waitForLoadState("networkidle")
+  await dismissToasts(page)
   const row = page.getByRole("row").filter({ hasText: email })
   await row.getByRole("button").click()
   await page.getByRole("menuitem", { name: /edit user/i }).click()

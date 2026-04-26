@@ -40,9 +40,14 @@ test.describe("authenticated shell", () => {
     await logIn(page)
     await page.goto("/settings")
     await expect(page).toHaveURL("/settings")
-    // Sidebar user-menu trigger shows the email on hover/open.
+    // Open the sidebar user-menu and assert the email shows up *inside the
+    // opened dropdown* — the sidebar trigger also renders the email
+    // permanently, so an unscoped getByText would match both elements and
+    // hit Playwright's strict-mode violation.
     await page.getByTestId("user-menu").click()
-    await expect(page.getByText(firstSuperuser)).toBeVisible()
+    const menu = page.getByRole("menu")
+    await expect(menu).toBeVisible()
+    await expect(menu.getByText(firstSuperuser)).toBeVisible()
   })
 
   test("sidebar Log Out item redirects to /login", async ({ page }) => {

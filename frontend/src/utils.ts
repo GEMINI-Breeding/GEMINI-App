@@ -6,7 +6,15 @@ function extractErrorMessage(err: ApiError): string {
     return err.message
   }
 
-  const errDetail = (err.body as any)?.detail
+  const body = err.body as any
+  // GEMINIbase shape: { error: "Short slug", error_description: "Human text." }
+  // The description is what actually surfaces to users; only fall back to the
+  // short slug when the description is missing.
+  if (body?.error_description) return body.error_description
+  if (body?.error && typeof body.error === "string") return body.error
+
+  // Legacy/FastAPI/Litestar default-validation shape: { detail: ... }
+  const errDetail = body?.detail
   if (Array.isArray(errDetail) && errDetail.length > 0) {
     return errDetail[0].msg
   }

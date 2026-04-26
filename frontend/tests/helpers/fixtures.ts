@@ -1,10 +1,8 @@
-import { test as base, type TestInfo } from "@playwright/test"
+import { test as base } from "@playwright/test"
 import {
   attachConsoleErrorGuard,
   type ConsoleErrorGuardHandle,
 } from "./consoleErrorGuard"
-import { deleteUploadsByPrefix, deleteWorkspacesByPrefix } from "./apiClient"
-import { makePrefix } from "./uniquePrefix"
 
 type Fixtures = {
   consoleErrorGuard: ConsoleErrorGuardHandle
@@ -16,11 +14,14 @@ type Fixtures = {
  * automatically gets a console-error guard that fails the test on
  * unexpected errors (per the CLAUDE.md strict-E2E rule).
  *
- * `runPrefix` is opt-in — specs that don't request it skip the cleanup
- * pass entirely. Relevant during the migration because the pre-migration
- * seeder cleanup helpers (deleteWorkspacesByPrefix, deleteUploadsByPrefix)
- * are currently throwing stubs; making them a non-auto fixture lets Phase
- * 5 specs use the console-error guard without tripping on the stub.
+ * `runPrefix` is intentionally not provided here. It used to wrap two
+ * pre-migration cleanup helpers (deleteWorkspacesByPrefix /
+ * deleteUploadsByPrefix) that are currently throwing stubs in
+ * helpers/apiClient.ts pending Phase 12. Wiring that fixture in as a
+ * silent-warn no-op was a trap: the first spec to opt in would think
+ * cleanup ran, when in reality nothing was deleted. We don't include the
+ * fixture at all until a real implementation lands — accessing it from a
+ * spec produces a clear test-time error instead of fake green.
  */
 export const test = base.extend<Fixtures>({
   consoleErrorGuard: [
@@ -31,21 +32,14 @@ export const test = base.extend<Fixtures>({
     },
     { auto: true },
   ],
-  runPrefix: async ({}, use, info: TestInfo) => {
-    const prefix = makePrefix(info)
-    try {
-      await use(prefix)
-    } finally {
-      try {
-        // Order matters: workspaces cascade-delete their pipelines/runs, and
-        // uploads are independent. Delete workspaces first so their runs are
-        // gone before we touch uploads.
-        await deleteWorkspacesByPrefix(prefix)
-        await deleteUploadsByPrefix(prefix)
-      } catch (err) {
-        console.warn("cleanup failed:", err)
-      }
-    }
+  runPrefix: async ({}, _use) => {
+    throw new Error(
+      "runPrefix fixture is not implemented. The pre-migration cleanup " +
+        "helpers (deleteWorkspacesByPrefix / deleteUploadsByPrefix) are " +
+        "throwing stubs scheduled for replacement in Phase 12. Until then, " +
+        "specs must use unique per-run identifiers and accept that test " +
+        "data accumulates in MinIO/Postgres.",
+    )
   },
 })
 

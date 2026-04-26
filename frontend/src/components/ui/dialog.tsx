@@ -4,10 +4,78 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Workaround for radix-ui/primitives#1241: Dialog leaks `pointer-events:
+ * none` and `data-scroll-locked` on `<body>` when it closes (especially
+ * mid-animation, or when multiple modals interact). The leak makes the
+ * page unclickable until the next user interaction unsticks it.
+ *
+ * `useDialogBodyUnlock` watches the dialog's `open` prop and, on every
+ * close, schedules a body-style restore after the close animation
+ * settles. We do this from the Dialog wrapper so every consumer of this
+ * primitive (AddUser, EditUser, DeleteUser, ReferenceDataUploadDialog,
+ * etc.) gets the fix without code changes.
+ *
+ * The check is conservative: we only clear if no other Radix modal is
+ * still open (matched by `body[data-scroll-locked]` plus any element
+ * with `data-state="open"` and `role="dialog"`).
+ */
+function useDialogBodyUnlock(
+  open: boolean | undefined,
+  defaultOpen: boolean | undefined,
+) {
+  const wasOpenRef = React.useRef(open ?? defaultOpen ?? false)
+  React.useEffect(() => {
+    const wasOpen = wasOpenRef.current
+    const isOpen = open ?? wasOpen
+    // Update before any early-return so subsequent transitions see the
+    // current state.
+    wasOpenRef.current = isOpen
+    if (!wasOpen || isOpen) return // act only on open → closed transitions
+
+    let cancelled = false
+    const cleanup = () => {
+      if (cancelled) return
+      // Don't fight a still-open modal. Radix sometimes nests dialogs;
+      // restore only when nothing else is asking the body to be locked.
+      const stillOpen = document.querySelector(
+        '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-state="open"][data-radix-popper-content-wrapper]',
+      )
+      if (stillOpen) return
+      const body = document.body
+      if (body.style.pointerEvents === "none") {
+        body.style.pointerEvents = ""
+      }
+      if (body.dataset.scrollLocked != null) {
+        delete body.dataset.scrollLocked
+      }
+    }
+    // Run twice: once after Radix's animation duration, again on the next
+    // frame in case the cleanup fires after our timer.
+    const t1 = setTimeout(cleanup, 250)
+    const t2 = setTimeout(cleanup, 600)
+    return () => {
+      cancelled = true
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [open])
+}
+
 function Dialog({
+  open,
+  defaultOpen,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  useDialogBodyUnlock(open, defaultOpen)
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      open={open}
+      defaultOpen={defaultOpen}
+      {...props}
+    />
+  )
 }
 
 function DialogTrigger({

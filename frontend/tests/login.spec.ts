@@ -62,7 +62,12 @@ test("Log in with invalid email", async ({ page }) => {
   await expect(page.getByText(/invalid email/i)).toBeVisible()
 })
 
-test("Log in with invalid password", async ({ page }) => {
+test("Log in with invalid password", async ({ page, consoleErrorGuard }) => {
+  // The wrong-password path is the test's subject: the 400 from
+  // /login/access-token is expected, and the toast message it produces is
+  // what we assert on. Tell the guard so it doesn't fail on the deliberate
+  // resource-load failure.
+  consoleErrorGuard.expectError(/login\/access-token/)
   const password = randomPassword()
   await page.goto("/login")
   await fillForm(page, firstSuperuser, password)
@@ -111,10 +116,21 @@ test("Logged-out user cannot access protected routes", async ({ page }) => {
   await page.waitForURL("/login")
 })
 
-test("Redirects to /login when token is wrong", async ({ page }) => {
+test("Redirects to /login when token is wrong", async ({
+  page,
+  consoleErrorGuard,
+}) => {
   // Visit /login once so we have an origin against which to seed localStorage,
   // then store a syntactically-invalid token and navigate to a protected
   // route; the 401 interceptor should kick in and bounce us back.
+  //
+  // The bad token triggers 401s on every authenticated query that fires
+  // before the interceptor unwinds the page (currently /api/users/me,
+  // /api/users/me/experiments, /api/experiments/all). Those 401s are the
+  // mechanism the test is exercising — declare them up front so the guard
+  // doesn't fail us on the deliberate denial path.
+  consoleErrorGuard.expectError(/\/api\/users\/me/)
+  consoleErrorGuard.expectError(/\/api\/experiments\/all/)
   await page.goto("/login")
   await page.evaluate(() => {
     localStorage.setItem("gemini.auth.token", "invalid_token")

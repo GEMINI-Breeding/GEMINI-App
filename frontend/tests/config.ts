@@ -6,14 +6,20 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 dotenv.config({ path: path.join(__dirname, "../../.env") })
+dotenv.config({ path: path.join(__dirname, "../../backend/gemini/pipeline/.env") })
 
-function getEnvVar(name: string): string {
-  const value = process.env[name]
-  if (!value) {
-    throw new Error(`Environment variable ${name} is undefined`)
-  }
-  return value
+function envOr(name: string, fallback: string): string {
+  return process.env[name] || fallback
 }
 
-export const firstSuperuser = getEnvVar("FIRST_SUPERUSER")
-export const firstSuperuserPassword = getEnvVar("FIRST_SUPERUSER_PASSWORD")
+// Credentials for the initial superuser bootstrapped by
+// `geminibase bootstrap-superuser`. Defaults match the pipeline .env
+// so a fresh local stack authenticates without extra wiring.
+export const firstSuperuser = envOr(
+  "GEMINI_FIRST_SUPERUSER_EMAIL",
+  envOr("FIRST_SUPERUSER", "admin@gemini.example.com"),
+)
+export const firstSuperuserPassword = envOr(
+  "GEMINI_FIRST_SUPERUSER_PASSWORD",
+  envOr("FIRST_SUPERUSER_PASSWORD", "gemini-admin-dev"),
+)

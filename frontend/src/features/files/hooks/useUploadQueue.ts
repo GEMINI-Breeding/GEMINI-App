@@ -105,11 +105,24 @@ export function useUploadQueue() {
           uploaded.push({ file: task.file, objectPath: result.objectPath })
 
           // Chain the follow-up job once the upload is durably on MinIO.
+          // The FLIR worker expects { files: [...filenames], localDirPath:
+          // <MinIO prefix without trailing slash> } so it can fetch from
+          // MinIO and accept multiple .bin chunks of the same recording.
           if (task.followUpJob?.kind === "extract_binary") {
+            const lastSlash = result.objectPath.lastIndexOf("/")
+            const localDirPath =
+              lastSlash > 0 ? result.objectPath.slice(0, lastSlash) : ""
+            const filename =
+              lastSlash > 0
+                ? result.objectPath.slice(lastSlash + 1)
+                : result.objectPath
             const job = await JobsService.apiJobsSubmitSubmitJob({
               requestBody: {
                 job_type: "EXTRACT_BINARY",
-                parameters: { input_path: result.objectPath },
+                parameters: {
+                  files: [filename],
+                  localDirPath,
+                },
               },
             })
             if (job?.id) {

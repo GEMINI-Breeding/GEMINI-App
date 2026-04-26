@@ -6,6 +6,11 @@ import 'dotenv/config'
  */
 export default defineConfig({
   testDir: './tests',
+  // Specs under `_phase7/` are pre-staged for the Phase 7 (Aerial Pipeline)
+  // migration step. They import seed helpers that don't exist yet and are
+  // excluded everywhere — set at the top level so Playwright doesn't even
+  // attempt to parse them when collecting tests.
+  testIgnore: [/_phase7\//],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -35,6 +40,14 @@ export default defineConfig({
       testIgnore: [/e2e\//, /.*\.setup\.ts/],
       use: {
         ...devices['Desktop Chrome'],
+        // Bump from the 1280×720 default. The admin users table sits
+        // inside a flex pane with its own overflow, so a row that lands
+        // below window height (>720px) ends up off-viewport: Playwright's
+        // auto-scroll only moves window.scrollY, not the inner pane,
+        // and `document.elementFromPoint(x, y)` returns null for points
+        // below the viewport — clicks hang. Tall viewport keeps the
+        // table fully on-screen across CRUD test runs.
+        viewport: { width: 1280, height: 1400 },
         storageState: 'playwright/.auth/user.json',
       },
       dependencies: ['setup'],
@@ -43,6 +56,7 @@ export default defineConfig({
     {
       name: 'e2e-workflows',
       testDir: './tests/e2e',
+      testIgnore: [/_phase7\//],
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/e2e-user.json',

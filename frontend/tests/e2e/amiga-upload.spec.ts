@@ -35,21 +35,25 @@ test.describe("Amiga .bin upload", () => {
     const binPath = fixturePath("binary", "test_amiga.0000.bin")
     await dropFiles(page, [binPath])
 
-    await submitUploadAndWait(page, 1, { timeoutMs: 180_000 })
+    // Skip the terminal "Done" wait — that covers the EXTRACT_BINARY
+    // follow-up job, which is exercised separately in amiga-extraction.
+    // Here we only care that the upload itself reaches MinIO.
+    await submitUploadAndWait(page, 1, { waitForDone: false })
 
     // Manage tab should list the uploaded file under its generated Raw/ path.
+    // Match by the FileRow's `data-testid="download-<object_name>"` (full
+    // MinIO path scoped to our experiment slug) rather than fuzzy text.
     await page.locator('[data-onboarding="files-tab-manage"]').click()
-    // The Manage view defaults to Raw/; filter for the new experiment slug to
-    // cut through any noise left by previous runs.
     await page
       .locator('[data-testid="manage-data-filter"]')
       .fill(experiment)
 
-    // Row list should contain the uploaded basename somewhere under Raw/.
     await expect(
       page
         .locator('[data-testid="manage-data-list"]')
-        .getByText("test_amiga.0000.bin"),
+        .locator(
+          `[data-testid^="download-"][data-testid*="${experiment}"][data-testid$="/test_amiga.0000.bin"]`,
+        ),
     ).toBeVisible({ timeout: 60_000 })
   })
 })

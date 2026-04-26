@@ -8,12 +8,15 @@ import { analyzeApi, type TraitRecord, type TraitsResponse } from "@/features/an
 
 // ── All trait records (catalog) ───────────────────────────────────────────────
 
+// Phase 10 rewires the dashboard onto the new analyze surface; until then the
+// `/api/v1/analyze/*` endpoints don't exist on GEMINIbase. Gate this off so the
+// dashboard mounts cleanly without console errors during the migration.
 export function useTraitRecords() {
   return useQuery({
     queryKey: ["trait-records"],
     queryFn: () => analyzeApi.listTraitRecords(),
+    enabled: false,
     staleTime: 30_000,
-    // Automatically re-check for new pipeline extractions every 30 seconds
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   })

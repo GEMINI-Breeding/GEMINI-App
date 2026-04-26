@@ -14,8 +14,8 @@ export function BackendStatus({ onReady }: BackendStatusProps) {
     const baseUrl = (window as any).__GEMI_BACKEND_URL__ ?? ""
     // Dev mode uses relative URL through Vite proxy; production uses injected base URL.
     const healthUrl = baseUrl
-      ? `${baseUrl}/api/v1/utils/health-check/`
-      : "/api/v1/utils/health-check/"
+      ? `${baseUrl}/api/utils/health-check`
+      : "/api/utils/health-check"
 
     const maxRetries = 60
     for (let i = 0; i < maxRetries; i++) {

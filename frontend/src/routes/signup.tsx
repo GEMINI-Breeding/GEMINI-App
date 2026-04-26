@@ -11,7 +11,7 @@ import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
 
-import { UsersService } from "@/client"
+import { ApiError, UsersService } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -88,15 +88,21 @@ function SignUp() {
     },
     onError: (err: unknown) => {
       let message = "Signup failed. Please try again."
-      if (err instanceof AxiosError && err.response) {
-        const status = err.response.status
-        const detail = err.response.data?.error_description
-        if (status === 400) {
-          message = detail ?? "That email is already registered."
-        } else if (status === 503) {
-          message =
-            "Auth is disabled on the backend (GEMINI_JWT_SECRET unset); signup is unavailable."
-        }
+      let status: number | undefined
+      let detail: string | undefined
+      if (err instanceof ApiError) {
+        status = err.status
+        const body = err.body as any
+        detail = body?.error_description ?? body?.error
+      } else if (err instanceof AxiosError && err.response) {
+        status = err.response.status
+        detail = err.response.data?.error_description
+      }
+      if (status === 400) {
+        message = detail ?? "That email is already registered."
+      } else if (status === 503) {
+        message =
+          "Auth is disabled on the backend (GEMINI_JWT_SECRET unset); signup is unavailable."
       }
       toast.error(message)
     },

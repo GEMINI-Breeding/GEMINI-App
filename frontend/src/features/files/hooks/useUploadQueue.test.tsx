@@ -108,12 +108,24 @@ describe("useUploadQueue", () => {
     })
 
     expect(mockedSubmit).toHaveBeenCalledTimes(2)
-    // Every submit goes through /api/jobs/submit with EXTRACT_BINARY +
-    // the MinIO input path from the upload.
+    // Every submit goes through /api/jobs/submit with EXTRACT_BINARY in the
+    // shape the FLIR worker expects: {files: [name], localDirPath: <prefix>}.
     expect(mockedSubmit.mock.calls[0][0]).toEqual({
       requestBody: {
         job_type: "EXTRACT_BINARY",
-        parameters: { input_path: "Raw/x.bin" },
+        parameters: {
+          files: ["x.bin"],
+          localDirPath: "Raw",
+        },
+      },
+    })
+    expect(mockedSubmit.mock.calls[1][0]).toEqual({
+      requestBody: {
+        job_type: "EXTRACT_BINARY",
+        parameters: {
+          files: ["y.bin"],
+          localDirPath: "Raw",
+        },
       },
     })
     expect(out?.jobIds).toEqual(["job-1", "job-2"])

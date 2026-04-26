@@ -59,11 +59,21 @@ export interface ReferenceAggregate {
 
 // ── Hooks ──────────────────────────────────────────────────────────────────────
 
-/** All reference datasets (global list — used for the config UI picker). */
-export function useReferenceDatasets() {
+/**
+ * All reference datasets (global list — used for the config UI picker).
+ *
+ * Phase 10 will rewire dashboard reference-data widgets onto the new
+ * `/api/reference_data` surface. Until then the legacy `/api/v1/reference-data/`
+ * URL doesn't resolve on GEMINIbase, so the query stays disabled by default
+ * to keep the dashboard mount clean. Callers that want to opt in explicitly
+ * (currently: none in production; the unit test overrides this) can pass
+ * `{ enabled: true }`.
+ */
+export function useReferenceDatasets(options: { enabled?: boolean } = {}) {
   return useQuery<ReferenceDataset[]>({
     queryKey: ["reference-datasets"],
     queryFn: () => get<ReferenceDataset[]>("/api/v1/reference-data/"),
+    enabled: options.enabled ?? false,
     staleTime: 5 * 60_000,
     retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
   })

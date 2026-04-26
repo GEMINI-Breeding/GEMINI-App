@@ -47,7 +47,7 @@ describe("useReferenceDatasets", () => {
 
   it("fetches the datasets list", async () => {
     fetchMock.mockReturnValueOnce(okJson([{ id: "d1", name: "Test" }]))
-    const { result } = renderHook(() => useReferenceDatasets(), {
+    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
       wrapper: makeWrapper(),
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -58,7 +58,7 @@ describe("useReferenceDatasets", () => {
   it("passes the Authorization header from localStorage", async () => {
     localStorage.setItem("access_token", "tok-xyz")
     fetchMock.mockReturnValueOnce(okJson([]))
-    const { result } = renderHook(() => useReferenceDatasets(), {
+    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
       wrapper: makeWrapper(),
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -70,7 +70,7 @@ describe("useReferenceDatasets", () => {
   it("surfaces the server-provided detail on error", async () => {
     // Hook's custom retry() retries non-404s up to 2×; return 404 so we fail fast.
     fetchMock.mockReturnValue(errJson(404, "boom"))
-    const { result } = renderHook(() => useReferenceDatasets(), {
+    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
       wrapper: makeWrapper(),
     })
     await waitFor(() => expect(result.current.isError).toBe(true))
@@ -79,11 +79,20 @@ describe("useReferenceDatasets", () => {
 
   it("falls back to 'HTTP <status>' when the error body has no detail", async () => {
     fetchMock.mockReturnValue(errJson(404))
-    const { result } = renderHook(() => useReferenceDatasets(), {
+    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
       wrapper: makeWrapper(),
     })
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect((result.current.error as Error).message).toBe("HTTP 404")
+  })
+
+  it("is disabled by default (Phase 10 gate) — no fetch on mount", async () => {
+    const { result } = renderHook(() => useReferenceDatasets(), {
+      wrapper: makeWrapper(),
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.current.fetchStatus).toBe("idle")
   })
 })
 
