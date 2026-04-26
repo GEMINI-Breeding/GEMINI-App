@@ -22,11 +22,25 @@ import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
 import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
+import { Route as LayoutAdminIndexRouteImport } from './routes/_layout/admin/index'
 import { Route as LayoutProcessSplitRouteImport } from './routes/_layout/process/split'
 import { Route as LayoutProcessPlotBoundariesRouteImport } from './routes/_layout/process/plot-boundaries'
 import { Route as LayoutProcessOrthomosaicRouteImport } from './routes/_layout/process/orthomosaic'
 import { Route as LayoutProcessExtractTraitsRouteImport } from './routes/_layout/process/extract-traits'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
+import { Route as LayoutAdminTraitsRouteImport } from './routes/_layout/admin/traits'
+import { Route as LayoutAdminTraitLevelsRouteImport } from './routes/_layout/admin/trait-levels'
+import { Route as LayoutAdminSitesRouteImport } from './routes/_layout/admin/sites'
+import { Route as LayoutAdminSensorsRouteImport } from './routes/_layout/admin/sensors'
+import { Route as LayoutAdminSensorTypesRouteImport } from './routes/_layout/admin/sensor-types'
+import { Route as LayoutAdminSensorPlatformsRouteImport } from './routes/_layout/admin/sensor-platforms'
+import { Route as LayoutAdminSeasonsRouteImport } from './routes/_layout/admin/seasons'
+import { Route as LayoutAdminPopulationsRouteImport } from './routes/_layout/admin/populations'
+import { Route as LayoutAdminLinesRouteImport } from './routes/_layout/admin/lines'
+import { Route as LayoutAdminDatasetTypesRouteImport } from './routes/_layout/admin/dataset-types'
+import { Route as LayoutAdminDataTypesRouteImport } from './routes/_layout/admin/data-types'
+import { Route as LayoutAdminDataFormatsRouteImport } from './routes/_layout/admin/data-formats'
+import { Route as LayoutAdminAccessionsRouteImport } from './routes/_layout/admin/accessions'
 import { Route as LayoutProcessJobsJobIdRouteImport } from './routes/_layout/process/jobs.$jobId'
 
 const SignupRoute = SignupRouteImport.update({
@@ -93,6 +107,11 @@ const LayoutAnalyzeIndexRoute = LayoutAnalyzeIndexRouteImport.update({
   path: '/analyze/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAdminIndexRoute = LayoutAdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
 const LayoutProcessSplitRoute = LayoutProcessSplitRouteImport.update({
   id: '/process/split',
   path: '/process/split',
@@ -121,6 +140,72 @@ const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
   path: '/analyze/$runId',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAdminTraitsRoute = LayoutAdminTraitsRouteImport.update({
+  id: '/traits',
+  path: '/traits',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminTraitLevelsRoute = LayoutAdminTraitLevelsRouteImport.update({
+  id: '/trait-levels',
+  path: '/trait-levels',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSitesRoute = LayoutAdminSitesRouteImport.update({
+  id: '/sites',
+  path: '/sites',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorsRoute = LayoutAdminSensorsRouteImport.update({
+  id: '/sensors',
+  path: '/sensors',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorTypesRoute = LayoutAdminSensorTypesRouteImport.update({
+  id: '/sensor-types',
+  path: '/sensor-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorPlatformsRoute =
+  LayoutAdminSensorPlatformsRouteImport.update({
+    id: '/sensor-platforms',
+    path: '/sensor-platforms',
+    getParentRoute: () => LayoutAdminRoute,
+  } as any)
+const LayoutAdminSeasonsRoute = LayoutAdminSeasonsRouteImport.update({
+  id: '/seasons',
+  path: '/seasons',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminPopulationsRoute = LayoutAdminPopulationsRouteImport.update({
+  id: '/populations',
+  path: '/populations',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminLinesRoute = LayoutAdminLinesRouteImport.update({
+  id: '/lines',
+  path: '/lines',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDatasetTypesRoute = LayoutAdminDatasetTypesRouteImport.update({
+  id: '/dataset-types',
+  path: '/dataset-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDataTypesRoute = LayoutAdminDataTypesRouteImport.update({
+  id: '/data-types',
+  path: '/data-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDataFormatsRoute = LayoutAdminDataFormatsRouteImport.update({
+  id: '/data-formats',
+  path: '/data-formats',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminAccessionsRoute = LayoutAdminAccessionsRouteImport.update({
+  id: '/accessions',
+  path: '/accessions',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
 const LayoutProcessJobsJobIdRoute = LayoutProcessJobsJobIdRouteImport.update({
   id: '/process/jobs/$jobId',
   path: '/process/jobs/$jobId',
@@ -132,16 +217,30 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/admin': typeof LayoutAdminRoute
+  '/admin': typeof LayoutAdminRouteWithChildren
   '/console': typeof LayoutConsoleRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
+  '/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/admin/lines': typeof LayoutAdminLinesRoute
+  '/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/admin/sites': typeof LayoutAdminSitesRoute
+  '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/admin/traits': typeof LayoutAdminTraitsRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
   '/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
   '/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
   '/process/split': typeof LayoutProcessSplitRoute
+  '/admin/': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
@@ -152,16 +251,29 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/admin': typeof LayoutAdminRoute
   '/console': typeof LayoutConsoleRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
+  '/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/admin/lines': typeof LayoutAdminLinesRoute
+  '/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/admin/sites': typeof LayoutAdminSitesRoute
+  '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/admin/traits': typeof LayoutAdminTraitsRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
   '/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
   '/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
   '/process/split': typeof LayoutProcessSplitRoute
+  '/admin': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
@@ -174,16 +286,30 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/admin': typeof LayoutAdminRouteWithChildren
   '/_layout/console': typeof LayoutConsoleRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
+  '/_layout/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/_layout/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/_layout/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/_layout/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/_layout/admin/lines': typeof LayoutAdminLinesRoute
+  '/_layout/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/_layout/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/_layout/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/_layout/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/_layout/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/_layout/admin/sites': typeof LayoutAdminSitesRoute
+  '/_layout/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/_layout/admin/traits': typeof LayoutAdminTraitsRoute
   '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/_layout/process/extract-traits': typeof LayoutProcessExtractTraitsRoute
   '/_layout/process/orthomosaic': typeof LayoutProcessOrthomosaicRoute
   '/_layout/process/plot-boundaries': typeof LayoutProcessPlotBoundariesRoute
   '/_layout/process/split': typeof LayoutProcessSplitRoute
+  '/_layout/admin/': typeof LayoutAdminIndexRoute
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
   '/_layout/files/': typeof LayoutFilesIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
@@ -201,11 +327,25 @@ export interface FileRouteTypes {
     | '/items'
     | '/settings'
     | '/'
+    | '/admin/accessions'
+    | '/admin/data-formats'
+    | '/admin/data-types'
+    | '/admin/dataset-types'
+    | '/admin/lines'
+    | '/admin/populations'
+    | '/admin/seasons'
+    | '/admin/sensor-platforms'
+    | '/admin/sensor-types'
+    | '/admin/sensors'
+    | '/admin/sites'
+    | '/admin/trait-levels'
+    | '/admin/traits'
     | '/analyze/$runId'
     | '/process/extract-traits'
     | '/process/orthomosaic'
     | '/process/plot-boundaries'
     | '/process/split'
+    | '/admin/'
     | '/analyze'
     | '/files'
     | '/process'
@@ -216,16 +356,29 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
-    | '/admin'
     | '/console'
     | '/items'
     | '/settings'
     | '/'
+    | '/admin/accessions'
+    | '/admin/data-formats'
+    | '/admin/data-types'
+    | '/admin/dataset-types'
+    | '/admin/lines'
+    | '/admin/populations'
+    | '/admin/seasons'
+    | '/admin/sensor-platforms'
+    | '/admin/sensor-types'
+    | '/admin/sensors'
+    | '/admin/sites'
+    | '/admin/trait-levels'
+    | '/admin/traits'
     | '/analyze/$runId'
     | '/process/extract-traits'
     | '/process/orthomosaic'
     | '/process/plot-boundaries'
     | '/process/split'
+    | '/admin'
     | '/analyze'
     | '/files'
     | '/process'
@@ -242,11 +395,25 @@ export interface FileRouteTypes {
     | '/_layout/items'
     | '/_layout/settings'
     | '/_layout/'
+    | '/_layout/admin/accessions'
+    | '/_layout/admin/data-formats'
+    | '/_layout/admin/data-types'
+    | '/_layout/admin/dataset-types'
+    | '/_layout/admin/lines'
+    | '/_layout/admin/populations'
+    | '/_layout/admin/seasons'
+    | '/_layout/admin/sensor-platforms'
+    | '/_layout/admin/sensor-types'
+    | '/_layout/admin/sensors'
+    | '/_layout/admin/sites'
+    | '/_layout/admin/trait-levels'
+    | '/_layout/admin/traits'
     | '/_layout/analyze/$runId'
     | '/_layout/process/extract-traits'
     | '/_layout/process/orthomosaic'
     | '/_layout/process/plot-boundaries'
     | '/_layout/process/split'
+    | '/_layout/admin/'
     | '/_layout/analyze/'
     | '/_layout/files/'
     | '/_layout/process/'
@@ -354,6 +521,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAnalyzeIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/admin/': {
+      id: '/_layout/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof LayoutAdminIndexRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
     '/_layout/process/split': {
       id: '/_layout/process/split'
       path: '/process/split'
@@ -389,6 +563,97 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAnalyzeRunIdRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/admin/traits': {
+      id: '/_layout/admin/traits'
+      path: '/traits'
+      fullPath: '/admin/traits'
+      preLoaderRoute: typeof LayoutAdminTraitsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/trait-levels': {
+      id: '/_layout/admin/trait-levels'
+      path: '/trait-levels'
+      fullPath: '/admin/trait-levels'
+      preLoaderRoute: typeof LayoutAdminTraitLevelsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sites': {
+      id: '/_layout/admin/sites'
+      path: '/sites'
+      fullPath: '/admin/sites'
+      preLoaderRoute: typeof LayoutAdminSitesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensors': {
+      id: '/_layout/admin/sensors'
+      path: '/sensors'
+      fullPath: '/admin/sensors'
+      preLoaderRoute: typeof LayoutAdminSensorsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensor-types': {
+      id: '/_layout/admin/sensor-types'
+      path: '/sensor-types'
+      fullPath: '/admin/sensor-types'
+      preLoaderRoute: typeof LayoutAdminSensorTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensor-platforms': {
+      id: '/_layout/admin/sensor-platforms'
+      path: '/sensor-platforms'
+      fullPath: '/admin/sensor-platforms'
+      preLoaderRoute: typeof LayoutAdminSensorPlatformsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/seasons': {
+      id: '/_layout/admin/seasons'
+      path: '/seasons'
+      fullPath: '/admin/seasons'
+      preLoaderRoute: typeof LayoutAdminSeasonsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/populations': {
+      id: '/_layout/admin/populations'
+      path: '/populations'
+      fullPath: '/admin/populations'
+      preLoaderRoute: typeof LayoutAdminPopulationsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/lines': {
+      id: '/_layout/admin/lines'
+      path: '/lines'
+      fullPath: '/admin/lines'
+      preLoaderRoute: typeof LayoutAdminLinesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/dataset-types': {
+      id: '/_layout/admin/dataset-types'
+      path: '/dataset-types'
+      fullPath: '/admin/dataset-types'
+      preLoaderRoute: typeof LayoutAdminDatasetTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/data-types': {
+      id: '/_layout/admin/data-types'
+      path: '/data-types'
+      fullPath: '/admin/data-types'
+      preLoaderRoute: typeof LayoutAdminDataTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/data-formats': {
+      id: '/_layout/admin/data-formats'
+      path: '/data-formats'
+      fullPath: '/admin/data-formats'
+      preLoaderRoute: typeof LayoutAdminDataFormatsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/accessions': {
+      id: '/_layout/admin/accessions'
+      path: '/accessions'
+      fullPath: '/admin/accessions'
+      preLoaderRoute: typeof LayoutAdminAccessionsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
     '/_layout/process/jobs/$jobId': {
       id: '/_layout/process/jobs/$jobId'
       path: '/process/jobs/$jobId'
@@ -399,8 +664,46 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface LayoutAdminRouteChildren {
+  LayoutAdminAccessionsRoute: typeof LayoutAdminAccessionsRoute
+  LayoutAdminDataFormatsRoute: typeof LayoutAdminDataFormatsRoute
+  LayoutAdminDataTypesRoute: typeof LayoutAdminDataTypesRoute
+  LayoutAdminDatasetTypesRoute: typeof LayoutAdminDatasetTypesRoute
+  LayoutAdminLinesRoute: typeof LayoutAdminLinesRoute
+  LayoutAdminPopulationsRoute: typeof LayoutAdminPopulationsRoute
+  LayoutAdminSeasonsRoute: typeof LayoutAdminSeasonsRoute
+  LayoutAdminSensorPlatformsRoute: typeof LayoutAdminSensorPlatformsRoute
+  LayoutAdminSensorTypesRoute: typeof LayoutAdminSensorTypesRoute
+  LayoutAdminSensorsRoute: typeof LayoutAdminSensorsRoute
+  LayoutAdminSitesRoute: typeof LayoutAdminSitesRoute
+  LayoutAdminTraitLevelsRoute: typeof LayoutAdminTraitLevelsRoute
+  LayoutAdminTraitsRoute: typeof LayoutAdminTraitsRoute
+  LayoutAdminIndexRoute: typeof LayoutAdminIndexRoute
+}
+
+const LayoutAdminRouteChildren: LayoutAdminRouteChildren = {
+  LayoutAdminAccessionsRoute: LayoutAdminAccessionsRoute,
+  LayoutAdminDataFormatsRoute: LayoutAdminDataFormatsRoute,
+  LayoutAdminDataTypesRoute: LayoutAdminDataTypesRoute,
+  LayoutAdminDatasetTypesRoute: LayoutAdminDatasetTypesRoute,
+  LayoutAdminLinesRoute: LayoutAdminLinesRoute,
+  LayoutAdminPopulationsRoute: LayoutAdminPopulationsRoute,
+  LayoutAdminSeasonsRoute: LayoutAdminSeasonsRoute,
+  LayoutAdminSensorPlatformsRoute: LayoutAdminSensorPlatformsRoute,
+  LayoutAdminSensorTypesRoute: LayoutAdminSensorTypesRoute,
+  LayoutAdminSensorsRoute: LayoutAdminSensorsRoute,
+  LayoutAdminSitesRoute: LayoutAdminSitesRoute,
+  LayoutAdminTraitLevelsRoute: LayoutAdminTraitLevelsRoute,
+  LayoutAdminTraitsRoute: LayoutAdminTraitsRoute,
+  LayoutAdminIndexRoute: LayoutAdminIndexRoute,
+}
+
+const LayoutAdminRouteWithChildren = LayoutAdminRoute._addFileChildren(
+  LayoutAdminRouteChildren,
+)
+
 interface LayoutRouteChildren {
-  LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutAdminRoute: typeof LayoutAdminRouteWithChildren
   LayoutConsoleRoute: typeof LayoutConsoleRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
@@ -417,7 +720,7 @@ interface LayoutRouteChildren {
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
-  LayoutAdminRoute: LayoutAdminRoute,
+  LayoutAdminRoute: LayoutAdminRouteWithChildren,
   LayoutConsoleRoute: LayoutConsoleRoute,
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
