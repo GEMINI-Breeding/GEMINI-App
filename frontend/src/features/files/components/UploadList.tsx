@@ -2,6 +2,14 @@ import { ChevronDown, ChevronUp, File, X } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { dataTypes } from "@/config/dataTypes"
 import {
   useUploadQueue,
@@ -41,6 +49,21 @@ function buildTargetRootDir(
   return root
 }
 
+function missingScopeFields(
+  dataType: string,
+  formValues: Record<string, string>,
+): string[] {
+  const cfg = dataTypes[dataType as keyof typeof dataTypes]
+  // `cfg.directory` is the MinIO path template (mixes literal segments
+  // like "Raw" / "Images" with field-name placeholders); `cfg.fields` is
+  // the list of form fields the user must fill. Validate against the
+  // latter — checking `directory` would always flag the literal segments
+  // as missing.
+  const fields = (cfg as { fields?: string[] } | undefined)?.fields
+  if (!fields || fields.length === 0) return []
+  return fields.filter((field) => !formValues[field]?.trim())
+}
+
 function followUpForDataType(
   dataType: string,
 ): UploadTask["followUpJob"] {
@@ -57,6 +80,26 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
 
+/**
+ * Browsers represent a dropped *folder* as a single 0-byte File entry whose
+ * name is the folder name (no extension, type === ""). UploadZone.tsx now
+ * walks `webkitGetAsEntry()` to expand directories into their files, so any
+ * 0-byte / type-less entry that reaches us here is a real upload artifact
+ * we deliberately want to flag — not a folder mis-detected as a file.
+ */
+function looksLikeFolderArtifact(f: File): boolean {
+  return f.size === 0 && (f.type === "" || !f.name.includes("."))
+}
+
+type RejectionDetails = {
+  title: string
+  description: string
+  /** Per-file lines so the user sees exactly what was rejected. */
+  rejectedNames: string[]
+  /** Optional remediation hint shown under the description. */
+  remediation?: string
+}
+
 export function UploadList({
   dataType,
   formValues,
@@ -68,7 +111,8 @@ export function UploadList({
   const [selected, setSelected] = useState<File[]>([])
   const [isExpanded, setIsExpanded] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
-  const { showErrorToast } = useCustomToast()
+  const [rejection, setRejection] = useState<RejectionDetails | null>(null)
+  const { showErrorToastWithCopy } = useCustomToast()
   const { run } = useUploadQueue()
 
   const acceptAttr = useMemo(() => {
@@ -78,27 +122,78 @@ export function UploadList({
   }, [dataType])
 
   const addFiles = (files: File[]) => {
-    if (dataType) {
-      const cfg = dataTypes[dataType as keyof typeof dataTypes]
-      if (cfg?.fileType) {
-        const accepted: File[] = []
-        const rejected: File[] = []
-        for (const f of files) {
-          if (isExtensionAllowed(f.name, cfg.fileType)) accepted.push(f)
-          else rejected.push(f)
-        }
-        if (rejected.length > 0) {
-          const names = rejected.map((f) => f.name).join(", ")
-          showErrorToast(`Wrong file type for "${dataType}": ${names}`)
-        }
-        if (accepted.length === 0) return
-        setSelected((prev) => [...prev, ...accepted])
-        onFilesSelected?.(accepted)
-        return
-      }
+    if (!dataType) {
+      setRejection({
+        title: "Pick a data type first",
+        description:
+          "Choose a data type (e.g. Image Data, Orthomosaic) before adding files. " +
+          "The data type controls where the files land in storage and which extensions are allowed.",
+        rejectedNames: files.map((f) => f.name),
+      })
+      return
     }
-    setSelected((prev) => [...prev, ...files])
-    onFilesSelected?.(files)
+
+    const cfg = dataTypes[dataType as keyof typeof dataTypes]
+    const accepted: File[] = []
+    const folderArtifacts: File[] = []
+    const wrongType: File[] = []
+
+    for (const f of files) {
+      if (looksLikeFolderArtifact(f)) {
+        folderArtifacts.push(f)
+        continue
+      }
+      if (cfg?.fileType && !isExtensionAllowed(f.name, cfg.fileType)) {
+        wrongType.push(f)
+        continue
+      }
+      accepted.push(f)
+    }
+
+    if (folderArtifacts.length > 0 && accepted.length === 0 && wrongType.length === 0) {
+      // Pure folder drop where the dropzone walker couldn't expand them.
+      // This happens on browsers without webkitGetAsEntry (rare) or when
+      // a user drops a folder that the browser refuses to read for
+      // permission reasons.
+      setRejection({
+        title: "Couldn't read that folder",
+        description:
+          "Folders should expand into the files they contain, but the browser " +
+          "passed them through as zero-byte entries. Try dropping the contents " +
+          "of the folder instead, or click the dropzone to pick files via the " +
+          "file picker.",
+        rejectedNames: folderArtifacts.map((f) => f.name),
+        remediation:
+          "Open the folder in Finder, select all the files inside, and drop those.",
+      })
+      return
+    }
+
+    if (wrongType.length > 0 || folderArtifacts.length > 0) {
+      const allowed = cfg?.fileType ?? "(any)"
+      const names = [...folderArtifacts, ...wrongType].map((f) => f.name)
+      const desc =
+        folderArtifacts.length > 0
+          ? `Some entries weren't usable. Folders need to be expanded into their files; other files don't match the allowed extensions for "${dataType}" (${allowed}).`
+          : `These files don't match the allowed extensions for "${dataType}" (${allowed}).`
+      setRejection({
+        title:
+          accepted.length > 0
+            ? `${names.length} file(s) skipped — ${accepted.length} accepted`
+            : "No files matched the selected data type",
+        description: desc,
+        rejectedNames: names,
+        remediation:
+          accepted.length > 0
+            ? "The accepted files are ready to upload. Press Upload to continue, or pick again."
+            : "Pick a different data type, or pick files whose extensions match the current one.",
+      })
+    }
+
+    if (accepted.length > 0) {
+      setSelected((prev) => [...prev, ...accepted])
+      onFilesSelected?.(accepted)
+    }
   }
 
   const removeFile = (index: number) => {
@@ -106,10 +201,38 @@ export function UploadList({
   }
 
   const handleUploadClick = async () => {
-    if (!dataType || selected.length === 0) return
+    if (!dataType) {
+      setRejection({
+        title: "No data type selected",
+        description:
+          "Pick a data type from the dropdown above before uploading.",
+        rejectedNames: [],
+      })
+      return
+    }
+    if (selected.length === 0) return
+
+    const missing = missingScopeFields(dataType, formValues)
+    if (missing.length > 0) {
+      setRejection({
+        title: "Required form fields are blank",
+        description:
+          `Fill in the following before uploading "${dataType}": ${missing.join(", ")}.`,
+        rejectedNames: [],
+        remediation:
+          "These fields determine the storage path. Without them, the files would land in a generic location and be hard to find later.",
+      })
+      return
+    }
+
     const targetRootDir = buildTargetRootDir(dataType, formValues, subDir)
     if (!targetRootDir) {
-      showErrorToast(`Unknown data type: ${dataType}`)
+      setRejection({
+        title: `Unknown data type: ${dataType}`,
+        description:
+          "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
+        rejectedNames: [],
+      })
       return
     }
 
@@ -131,7 +254,22 @@ export function UploadList({
       onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
       setSelected([])
     } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : String(err))
+      // Surface the *server's* error verbatim and keep it on screen until
+      // the user dismisses it. Network/HTTP failures during upload need
+      // copy-paste-able context; sonner's autodismiss eats them otherwise.
+      const message = err instanceof Error ? err.message : String(err)
+      setRejection({
+        title: "Upload failed",
+        description:
+          `The upload was interrupted by an error. The first failing chunk's response is below; ` +
+          `the partial upload is preserved on the server, so retrying the same files will resume from the failed chunk.`,
+        rejectedNames: [message],
+        remediation:
+          "Common causes: backend container restarted, JWT expired (try refreshing the page to re-login), or a 5xx upstream from MinIO.",
+      })
+      // Keep the toast as a brief breadcrumb that *something* failed, in case
+      // the user navigates away from this screen before opening the dialog.
+      showErrorToastWithCopy(message)
     } finally {
       setIsUploading(false)
     }
@@ -214,6 +352,40 @@ export function UploadList({
           </div>
         </div>
       )}
+
+      <Dialog
+        open={rejection !== null}
+        onOpenChange={(open) => !open && setRejection(null)}
+      >
+        <DialogContent data-testid="upload-error-dialog">
+          <DialogHeader>
+            <DialogTitle>{rejection?.title}</DialogTitle>
+            <DialogDescription>{rejection?.description}</DialogDescription>
+          </DialogHeader>
+          {rejection?.remediation && (
+            <p className="text-sm text-muted-foreground">
+              {rejection.remediation}
+            </p>
+          )}
+          {rejection && rejection.rejectedNames.length > 0 && (
+            <div className="max-h-48 overflow-y-auto rounded border bg-muted/40 p-2 text-xs font-mono">
+              {rejection.rejectedNames.map((n, i) => (
+                <div key={`${i}:${n}`} className="truncate">
+                  {n}
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              data-testid="upload-error-dismiss"
+              onClick={() => setRejection(null)}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
