@@ -163,7 +163,10 @@ export function AnnotationsPage() {
             {cvat.isPending ? "Checking…" : "Open CVAT"}
           </Button>
           {cvat.data && (
-            <span className="text-xs text-muted-foreground">
+            <span
+              data-testid="annotations-cvat-status"
+              className="text-xs text-muted-foreground"
+            >
               {cvat.data.status} {cvat.data.message ? `— ${cvat.data.message}` : ""}
             </span>
           )}
