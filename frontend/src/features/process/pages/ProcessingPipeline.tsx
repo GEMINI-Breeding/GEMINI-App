@@ -78,10 +78,23 @@ export function ProcessingPipeline() {
   )
   useEffect(() => writeStoredAerialFields(fields), [fields])
 
-  const { data: jobs = [] } = useJobs({
+  const { data: rawJobs = [] } = useJobs({
     experimentId: ctx.experimentId,
     refetchIntervalMs: 5_000,
   })
+
+  // Newest-first. The backend sorts the same way, but a client-side
+  // pass keeps the UI sane even if a future call site bypasses the
+  // server sort (or if a stale React-Query cache slips through).
+  const jobs = useMemo(() => {
+    const copy = [...rawJobs]
+    copy.sort((a, b) => {
+      const aMs = a.created_at ? Date.parse(a.created_at) : 0
+      const bMs = b.created_at ? Date.parse(b.created_at) : 0
+      return bMs - aMs
+    })
+    return copy
+  }, [rawJobs])
 
   // Bucket the latest job per JOB_TYPE for the step status badges.
   const latestByType = useMemo(() => {

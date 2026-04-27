@@ -18,6 +18,7 @@ import {
   SensorPlatformsService,
   SensorsService,
   SitesService,
+  UsersService,
   type ExperimentOutput,
   type PopulationOutput,
   type SeasonOutput,
@@ -152,21 +153,49 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New experiment name is empty")
-      // Search first.
+      // Search first. If it already exists globally we still want to ensure
+      // the current user is associated — without that link the sidebar
+      // ExperimentSelector filters it out and the just-created experiment
+      // appears as "no experiments available."
       const existing = (await ExperimentsService.apiExperimentsGetExperiments({
         experimentName: trimmed,
       })) as ExperimentOutput[] | null
       const match = existing?.find((e) => e.experiment_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      // Otherwise create.
-      const created = (await ExperimentsService.apiExperimentsCreateExperiment({
-        requestBody: { experiment_name: trimmed },
-      })) as ExperimentOutput
+      const expId = match?.id != null
+        ? String(match.id)
+        : await createExperimentRow(trimmed)
+      await ensureUserAssociated(expId)
       qc.invalidateQueries({ queryKey: ["experiments", "all"] })
       qc.invalidateQueries({ queryKey: ["users", "me", "experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
+      return { id: expId, name: trimmed }
     }
     throw new Error("Experiment is required")
+  }
+
+  async function createExperimentRow(name: string): Promise<string> {
+    const created = (await ExperimentsService.apiExperimentsCreateExperiment({
+      requestBody: { experiment_name: name },
+    })) as ExperimentOutput
+    return String(created.id ?? "")
+  }
+
+  /**
+   * Idempotent "this user owns this experiment" link. POSTing to
+   * /me/experiments when the link already exists is a no-op on the
+   * backend (returns 200 with a "already associated" message).
+   * Anything else is best-effort: a failure here doesn't void the
+   * upload — the user can still see the experiment via /admin if
+   * they're a superuser.
+   */
+  async function ensureUserAssociated(experimentId: string): Promise<void> {
+    if (!experimentId) return
+    try {
+      await UsersService.apiUsersMeExperimentsAssociateMyExperiment({
+        requestBody: { experiment_id: experimentId },
+      })
+    } catch {
+      // Best-effort.
+    }
   }
 
   async function resolveOrCreateSite(
@@ -177,15 +206,22 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New site name is empty")
-      const existing = (await SitesService.apiSitesGetSites({
+      // Scope the search to the parent experiment: a Site row that exists
+      // globally but isn't linked to the active experiment is a *new
+      // association*, not a reuse. Re-calling create with experiment_name
+      // is safe — the backend's get_or_create dedupes on row identity and
+      // always re-runs `associate_experiment` if the link is missing.
+      const scoped = (await SitesService.apiSitesGetSites({
         siteName: trimmed,
+        experimentName: parentExperiment,
       })) as SiteOutput[] | null
-      const match = existing?.find((s) => s.site_name === trimmed)
+      const match = scoped?.find((s) => s.site_name === trimmed)
       if (match?.id != null) return { id: String(match.id), name: trimmed }
       const created = (await SitesService.apiSitesCreateSite({
         requestBody: { site_name: trimmed, experiment_name: parentExperiment },
       })) as SiteOutput
       qc.invalidateQueries({ queryKey: ["sites", "all"] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
       return { id: String(created.id ?? ""), name: trimmed }
     }
     throw new Error("Site is required")
@@ -199,15 +235,17 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New population name is empty")
-      const existing = (await PopulationsService.apiPopulationsGetPopulations({
+      const scoped = (await PopulationsService.apiPopulationsGetPopulations({
         populationName: trimmed,
+        experimentName: parentExperiment,
       })) as PopulationOutput[] | null
-      const match = existing?.find((p) => p.population_name === trimmed)
+      const match = scoped?.find((p) => p.population_name === trimmed)
       if (match?.id != null) return { id: String(match.id), name: trimmed }
       const created = (await PopulationsService.apiPopulationsCreatePopulation({
         requestBody: { population_name: trimmed, experiment_name: parentExperiment },
       })) as PopulationOutput
       qc.invalidateQueries({ queryKey: ["populations", "all"] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
       return { id: String(created.id ?? ""), name: trimmed }
     }
     throw new Error("Population is required")
@@ -221,15 +259,17 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New season name is empty")
-      const existing = (await SeasonsService.apiSeasonsGetSeasons({
+      const scoped = (await SeasonsService.apiSeasonsGetSeasons({
         seasonName: trimmed,
+        experimentName: parentExperiment,
       })) as SeasonOutput[] | null
-      const match = existing?.find((s) => s.season_name === trimmed)
+      const match = scoped?.find((s) => s.season_name === trimmed)
       if (match?.id != null) return { id: String(match.id), name: trimmed }
       const created = (await SeasonsService.apiSeasonsCreateSeason({
         requestBody: { season_name: trimmed, experiment_name: parentExperiment },
       })) as SeasonOutput
       qc.invalidateQueries({ queryKey: ["seasons", "all"] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
       return { id: String(created.id ?? ""), name: trimmed }
     }
     throw new Error("Season is required")
@@ -243,10 +283,11 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New sensor platform name is empty")
-      const existing = (await SensorPlatformsService.apiSensorPlatformsGetSensorPlatforms({
+      const scoped = (await SensorPlatformsService.apiSensorPlatformsGetSensorPlatforms({
         sensorPlatformName: trimmed,
+        experimentName: parentExperiment,
       })) as SensorPlatformOutput[] | null
-      const match = existing?.find((s) => s.sensor_platform_name === trimmed)
+      const match = scoped?.find((s) => s.sensor_platform_name === trimmed)
       if (match?.id != null) return { id: String(match.id), name: trimmed }
       const created = (await SensorPlatformsService.apiSensorPlatformsCreateSensorPlatform({
         requestBody: {
@@ -255,6 +296,7 @@ export function useResolveScope() {
         },
       })) as SensorPlatformOutput
       qc.invalidateQueries({ queryKey: ["sensorPlatforms", "all"] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
       return { id: String(created.id ?? ""), name: trimmed }
     }
     throw new Error("Sensor platform is required")
@@ -269,10 +311,11 @@ export function useResolveScope() {
     if (c.kind === "new") {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New sensor name is empty")
-      const existing = (await SensorsService.apiSensorsGetSensors({
+      const scoped = (await SensorsService.apiSensorsGetSensors({
         sensorName: trimmed,
+        experimentName: parentExperiment,
       })) as SensorOutput[] | null
-      const match = existing?.find((s) => s.sensor_name === trimmed)
+      const match = scoped?.find((s) => s.sensor_name === trimmed)
       if (match?.id != null) return { id: String(match.id), name: trimmed }
       const created = (await SensorsService.apiSensorsCreateSensor({
         requestBody: {
@@ -282,6 +325,7 @@ export function useResolveScope() {
         },
       })) as SensorOutput
       qc.invalidateQueries({ queryKey: ["sensors", "all"] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
       return { id: String(created.id ?? ""), name: trimmed }
     }
     throw new Error("Sensor is required")

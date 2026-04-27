@@ -8,7 +8,11 @@ import type { Process } from "@/types/process"
 
 function processProgress(process: Process): number {
   if (process.type === "processing") {
-    return process.progress ?? (process.status === "completed" ? 100 : 0)
+    // Workers report progress as float percentages (e.g. ODM streams
+    // 3.27299...% during image upload); round to keep the bar width
+    // and the visible label sane.
+    const raw = process.progress ?? (process.status === "completed" ? 100 : 0)
+    return Math.round(raw)
   }
   const total = process.items.length
   if (total === 0) return process.status === "completed" ? 100 : 0
@@ -25,8 +29,7 @@ function processStatusLabel(process: Process): string {
   if (process.status === "completed") return "Done"
   if (process.status === "error") return "Failed"
   if (process.type === "processing") {
-    const pct = process.progress ?? 0
-    return `${pct}%`
+    return `${Math.round(process.progress ?? 0)}%`
   }
   const total = process.items.length
   const done = process.items.filter(

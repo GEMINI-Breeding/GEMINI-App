@@ -17,15 +17,23 @@ vi.mock("@/lib/wsManager", () => ({
   closeJob: vi.fn(),
 }))
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { ProcessProvider, useProcess } from "@/contexts/ProcessContext"
 import { useChunkedUpload } from "./useChunkedUpload"
 
 const mockedUpload = uploadFileChunked as unknown as ReturnType<typeof vi.fn>
 
-const wrapper = ({ children }: { children: ReactNode }) => (
-  <ProcessProvider>{children}</ProcessProvider>
-)
+const wrapper = ({ children }: { children: ReactNode }) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return (
+    <QueryClientProvider client={client}>
+      <ProcessProvider>{children}</ProcessProvider>
+    </QueryClientProvider>
+  )
+}
 
 function useHarness() {
   const upload = useChunkedUpload()

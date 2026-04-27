@@ -119,10 +119,21 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     const expRows = (await verifyExp.json()) as Array<{ experiment_name?: string }>
     expect(expRows.some((r) => r.experiment_name === experimentName)).toBe(true)
 
-    // 5. Sidebar selector now lists the new experiment. Open it and
-    //    confirm the option is visible.
-    const sidebarTrigger = page.getByRole("combobox").first()
-    await sidebarTrigger.click()
+    // 5. Sidebar selector should now show the new experiment as the
+    //    *active* selection (the upload-list switches `experimentId` on
+    //    success), AND the dropdown lists it as a real option (the
+    //    user-association call ran). The user's original complaint was
+    //    that the sidebar said "No experiments available" after upload —
+    //    that empty-state would be visible here if the association call
+    //    didn't run.
+    await expect(
+      page.getByTestId("experiment-selector-empty"),
+    ).toHaveCount(0)
+    await expect(
+      page.getByTestId("experiment-selector"),
+    ).toContainText(experimentName)
+
+    await page.getByTestId("experiment-selector").click()
     await expect(
       page.getByRole("option", { name: experimentName }),
     ).toBeVisible({ timeout: 10_000 })

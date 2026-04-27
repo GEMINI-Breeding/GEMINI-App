@@ -37,12 +37,18 @@ export function ExperimentSelector({
 }: {
   size?: "sm" | "default"
 }) {
-  const { user } = useAuth()
+  const { user, isUserLoading } = useAuth()
   const { experimentId, setExperimentId } = useExperimentScope()
   const isSuperuser = Boolean(user?.is_superuser)
 
   const { data: all, isLoading: loadingAll } = useAllExperiments()
-  const { data: myIds } = useMyExperimentIds()
+  const { data: myIds, isLoading: loadingMyIds } = useMyExperimentIds()
+
+  // While `user` is still loading the `isSuperuser` flag is necessarily
+  // false, so a naive filter would temporarily hide *every* experiment
+  // for a superuser and surface an "empty" state. Treat the user query
+  // as a hard precondition for filtering.
+  const stillLoading = loadingAll || isUserLoading || (!isSuperuser && loadingMyIds)
 
   const visible = useMemo(
     () => filterVisible(all ?? [], myIds ?? [], isSuperuser),
@@ -51,13 +57,19 @@ export function ExperimentSelector({
 
   // Auto-select the first visible experiment on login if none is picked yet,
   // so downstream feature pages don't render an "empty" state unnecessarily.
+  // Also re-fire if the previously stored experimentId no longer matches a
+  // visible row (e.g. it was deleted, or my-experiments shrank).
   useEffect(() => {
-    if (!experimentId && visible.length > 0 && visible[0].id != null) {
+    if (visible.length === 0) return
+    const match = experimentId
+      ? visible.find((e) => String(e.id) === experimentId)
+      : null
+    if (!match && visible[0].id != null) {
       setExperimentId(String(visible[0].id))
     }
   }, [experimentId, visible, setExperimentId])
 
-  if (loadingAll) {
+  if (stillLoading) {
     return (
       <div className="text-xs text-muted-foreground px-2 py-1">
         Loading experiments…
@@ -68,10 +80,15 @@ export function ExperimentSelector({
   if (visible.length === 0) {
     return (
       <div
-        className="text-xs text-muted-foreground px-2 py-1"
+        className="space-y-1 px-2 py-1 text-xs text-muted-foreground"
         data-testid="experiment-selector-empty"
       >
-        No experiments available.
+        <p>No experiments yet.</p>
+        <p>
+          Click <span className="font-medium">+</span> above to create one,
+          or upload data on the <span className="font-medium">Files</span> tab —
+          the upload form creates an experiment for you.
+        </p>
       </div>
     )
   }

@@ -23,8 +23,16 @@ import {
 } from "@/features/experiments/hooks/useExperimentData"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { yearFromDate } from "@/features/process/lib/paths"
+import { useAvailableScopeOptions } from "@/features/process/hooks/useAvailableScopeOptions"
 
 export type AerialScopeFields = {
   date: string
@@ -101,6 +109,28 @@ export function AerialScopePicker({
   value: AerialScopeFields
   onChange: (next: AerialScopeFields) => void
 }) {
+  const ctx = useAerialScopeContext()
+
+  // Resolve the picker's effective experiment/site/population — sidebar
+  // values take precedence unless the override fields are non-blank.
+  const effective = {
+    experiment: value.experimentOverride?.trim() || ctx.experimentName,
+    location: value.locationOverride?.trim() || ctx.siteName,
+    population: value.populationOverride?.trim() || ctx.populationName,
+  }
+
+  const available = useAvailableScopeOptions(
+    effective,
+    value.date || null,
+    value.platform || null,
+  )
+
+  const datesEmpty = !available.isLoading && available.dates.length === 0
+  const platformsEmpty =
+    !available.isLoading && Boolean(value.date) && available.platforms.length === 0
+  const sensorsEmpty =
+    !available.isLoading && Boolean(value.platform) && available.sensors.length === 0
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3">
@@ -108,48 +138,123 @@ export function AerialScopePicker({
           <Label htmlFor="aerial-date" className="mb-1.5 text-xs">
             Date
           </Label>
-          <Input
-            id="aerial-date"
-            type="date"
-            value={value.date}
-            onChange={(e) => onChange({ ...value, date: e.target.value })}
-          />
+          {available.scopeIncomplete ? (
+            <p
+              data-testid="aerial-date-empty"
+              className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+            >
+              Pick experiment / site / population in the sidebar first.
+            </p>
+          ) : (
+            <Select
+              value={value.date || ""}
+              onValueChange={(v) => onChange({ ...value, date: v, platform: "", sensor: "" })}
+              disabled={available.isLoading || datesEmpty}
+            >
+              <SelectTrigger
+                id="aerial-date"
+                data-testid="aerial-date-select"
+              >
+                <SelectValue
+                  placeholder={
+                    available.isLoading
+                      ? "Loading…"
+                      : datesEmpty
+                        ? "No data uploaded yet"
+                        : "Select a date"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {available.dates.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <div>
           <Label htmlFor="aerial-platform" className="mb-1.5 text-xs">
             Platform
           </Label>
-          <Input
-            id="aerial-platform"
-            list="aerial-platform-options"
-            placeholder="Drone"
-            value={value.platform}
-            onChange={(e) => onChange({ ...value, platform: e.target.value })}
-          />
-          <datalist id="aerial-platform-options">
-            {COMMON_PLATFORMS.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
+          <Select
+            value={value.platform || ""}
+            onValueChange={(v) => onChange({ ...value, platform: v, sensor: "" })}
+            disabled={!value.date || available.isLoading || platformsEmpty}
+          >
+            <SelectTrigger
+              id="aerial-platform"
+              data-testid="aerial-platform-select"
+            >
+              <SelectValue
+                placeholder={
+                  !value.date
+                    ? "Pick a date first"
+                    : available.isLoading
+                      ? "Loading…"
+                      : platformsEmpty
+                        ? "No platforms for this date"
+                        : "Select a platform"
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {available.platforms.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <Label htmlFor="aerial-sensor" className="mb-1.5 text-xs">
             Sensor
           </Label>
-          <Input
-            id="aerial-sensor"
-            list="aerial-sensor-options"
-            placeholder="RGB"
-            value={value.sensor}
-            onChange={(e) => onChange({ ...value, sensor: e.target.value })}
-          />
-          <datalist id="aerial-sensor-options">
-            {COMMON_SENSORS.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
+          <Select
+            value={value.sensor || ""}
+            onValueChange={(v) => onChange({ ...value, sensor: v })}
+            disabled={!value.platform || available.isLoading || sensorsEmpty}
+          >
+            <SelectTrigger
+              id="aerial-sensor"
+              data-testid="aerial-sensor-select"
+            >
+              <SelectValue
+                placeholder={
+                  !value.platform
+                    ? "Pick a platform first"
+                    : available.isLoading
+                      ? "Loading…"
+                      : sensorsEmpty
+                        ? "No sensors for this platform"
+                        : "Select a sensor"
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {available.sensors.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
+
+      {available.empty && !available.scopeIncomplete && (
+        <p
+          data-testid="aerial-empty-state"
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+        >
+          No data has been uploaded yet under this experiment / site / population.
+          Upload some via the Files tab first, then come back here.
+        </p>
+      )}
+
       <details className="text-xs">
         <summary className="text-muted-foreground cursor-pointer select-none">
           Override path components (experiment / site / population)
@@ -163,7 +268,7 @@ export function AerialScopePicker({
               id="aerial-experiment"
               placeholder="(uses sidebar experiment)"
               value={value.experimentOverride ?? ""}
-              onChange={(e) => onChange({ ...value, experimentOverride: e.target.value })}
+              onChange={(e) => onChange({ ...value, experimentOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
           </div>
           <div>
@@ -174,7 +279,7 @@ export function AerialScopePicker({
               id="aerial-location"
               placeholder="(uses sidebar site)"
               value={value.locationOverride ?? ""}
-              onChange={(e) => onChange({ ...value, locationOverride: e.target.value })}
+              onChange={(e) => onChange({ ...value, locationOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
           </div>
           <div>
@@ -185,7 +290,7 @@ export function AerialScopePicker({
               id="aerial-population"
               placeholder="(uses sidebar population)"
               value={value.populationOverride ?? ""}
-              onChange={(e) => onChange({ ...value, populationOverride: e.target.value })}
+              onChange={(e) => onChange({ ...value, populationOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
           </div>
         </div>

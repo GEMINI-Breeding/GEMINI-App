@@ -1,4 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+
+import { JobsService, type JobOutput } from "@/client"
+import { ExperimentContext } from "@/contexts/ExperimentContext"
+import useAuth from "@/hooks/useAuth"
 import type { Process, ProcessItem } from "@/types/process"
 // Phase 6: ProcessContext subscribes over the new WebSocket-based manager
 // (/api/jobs/{id}/progress) instead of the pre-migration SSE channel.
@@ -94,6 +99,75 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
 
   const clearHistory = useCallback(() => setHistory([]), [])
 
+  // ── Crash recovery: rehydrate ProcessPanel from /api/jobs/all ──────────
+  // ProcessContext is in-memory: a browser refresh / crash empties
+  // `processes`, leaving any RUNNING backend job invisible in the UI even
+  // though the worker is still chewing on it. On every mount we ask the
+  // backend for jobs in non-terminal states for the active experiment and
+  // re-register them via `addProcess({runId})`. The wsManager-subscribe
+  // effect below then auto-attaches and the bottom panel + JobDetail
+  // resume streaming as if the user had never left.
+  //
+  // ExperimentProvider wraps ProcessProvider in main.tsx, so `experimentId`
+  // is normally available. Vitest specs that mount ProcessProvider in
+  // isolation don't wrap in ExperimentProvider — fall back to null in
+  // that case rather than throwing, since the rehydration query is
+  // already auth-gated and a null experimentId just means "rehydrate all
+  // running jobs visible to this user".
+  const experimentId = useOptionalExperimentScope()
+  // Gate the rehydration query on `useAuth().user` rather than the raw
+  // `isLoggedIn()` check. `isLoggedIn()` only checks for a token's
+  // existence, not its validity — a stale or malformed token would
+  // pass that check, fire /api/jobs/all, and produce a 401 that the
+  // console-error guard in our E2E suite (correctly) treats as a
+  // failure. Waiting for `useAuth` to confirm /api/users/me succeeded
+  // means the rehydration only fires when we know the token is good.
+  const { user } = useAuth()
+  const { data: liveBackendJobs } = useQuery<JobOutput[], Error>({
+    queryKey: ["process-rehydrate", "running-jobs", experimentId],
+    queryFn: async () => {
+      const all = (await JobsService.apiJobsAllGetAllJobs({})) as JobOutput[] | null
+      const list = all ?? []
+      const live = list.filter(
+        (j) => j.status === "RUNNING" || j.status === "PENDING",
+      )
+      if (!experimentId) return live
+      return live.filter((j) => (j as { experiment_id?: string }).experiment_id === experimentId)
+    },
+    enabled: Boolean(user),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
+
+  useEffect(() => {
+    if (!liveBackendJobs || liveBackendJobs.length === 0) return
+    setProcesses((prev) => {
+      const known = new Set(prev.filter((p) => p.runId).map((p) => p.runId!))
+      const additions: Process[] = []
+      for (const j of liveBackendJobs) {
+        const runId = String(j.id ?? "")
+        if (!runId || known.has(runId)) continue
+        const detail = (j.progress_detail ?? null) as { stage?: string } | null
+        additions.push({
+          id: crypto.randomUUID(),
+          type: "processing",
+          status: "running",
+          title: `${j.job_type} job ${runId.slice(0, 8)}`,
+          items: [],
+          createdAt: new Date(),
+          runId,
+          progress: typeof j.progress === "number" ? Math.round(j.progress) : 0,
+          message: detail?.stage,
+          link: `/process/jobs/${runId}`,
+        })
+      }
+      if (additions.length === 0) return prev
+      setHasBeenActive(true)
+      return [...prev, ...additions]
+    })
+  }, [liveBackendJobs])
+
   // Subscribe via wsManager for every running process that carries a runId
   // (GEMINIbase Job UUID). The WebSocket stays open across navigation thanks
   // to the module-level singleton. Terminal events (`evt.terminal`) roll the
@@ -182,6 +256,18 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
       {children}
     </ProcessContext.Provider>
   )
+}
+
+/**
+ * Read the experiment id from ExperimentProvider if we're inside one,
+ * else return null. Avoids requiring every test that mounts
+ * ProcessProvider to also wrap in ExperimentProvider. Uses
+ * `useContext` directly (no try/catch around hook calls — that would
+ * violate React's rules of hooks).
+ */
+function useOptionalExperimentScope(): string | null {
+  const ctx = useContext(ExperimentContext)
+  return ctx?.experimentId ?? null
 }
 
 export function useProcess() {

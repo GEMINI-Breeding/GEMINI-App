@@ -43,7 +43,7 @@ const empty: ExperimentScope = {
   populationId: null,
 }
 
-const ExperimentContext = createContext<ExperimentContextValue | null>(null)
+export const ExperimentContext = createContext<ExperimentContextValue | null>(null)
 
 function readStored(): ExperimentScope {
   try {

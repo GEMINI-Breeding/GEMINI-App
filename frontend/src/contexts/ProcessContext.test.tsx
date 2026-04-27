@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -18,9 +19,20 @@ import type { JobProgressEvent } from "@/lib/wsManager"
 
 type Listener = (evt: JobProgressEvent) => void
 
-const wrapper = ({ children }: { children: ReactNode }) => (
-  <ProcessProvider>{children}</ProcessProvider>
-)
+// ProcessProvider now uses TanStack Query for the crash-recovery
+// rehydration (see ProcessContext.tsx ~line 118). The query is
+// auth-gated and won't fire in tests (no token in localStorage),
+// but `useQuery` still requires a QueryClient in context.
+const wrapper = ({ children }: { children: ReactNode }) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return (
+    <QueryClientProvider client={client}>
+      <ProcessProvider>{children}</ProcessProvider>
+    </QueryClientProvider>
+  )
+}
 
 function setupCapture() {
   const listeners = new Map<string, Listener>()

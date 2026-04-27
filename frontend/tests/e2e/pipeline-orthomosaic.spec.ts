@@ -75,26 +75,26 @@ test.describe("Pipeline: orthomosaic generation", () => {
     // typically land in <30s.
     await submitUploadAndWait(page, DRONE_IMAGES.length)
 
-    // 2. Open the Phase-7 OrthomosaicTool, set the per-tool scope, submit.
-    //    The platform/sensor inputs are free-text (with autocomplete), so we
-    //    feed in whatever the upload form persisted.
+    // 2. Switch the sidebar Experiment selector to the just-created
+    //    experiment so the AerialScopePicker can discover its uploads.
+    //    (The upload form's create-or-pick flow registered every entity.)
+    await page.getByTestId("experiment-selector").click()
+    await page.getByRole("option", { name: experiment }).click()
+
+    // 3. Open the Phase-7 OrthomosaicTool. Pick date / platform / sensor
+    //    from the dropdowns the picker derives by listing what's actually
+    //    been uploaded under this experiment.
     await page.goto("/process/orthomosaic")
     await expect(
       page.getByRole("heading", { name: /orthomosaic \(run_odm\)/i }),
     ).toBeVisible()
 
-    await page.locator("#aerial-date").fill(date)
-    await page.locator("#aerial-platform").fill(platform)
-    await page.locator("#aerial-sensor").fill(sensor)
-    // Open the path-component overrides — the upload form just wrote
-    // free-form strings into the MinIO prefix; no Experiment/Site/Population
-    // entities exist in the database, so the page's default ExperimentContext
-    // lookup wouldn't resolve. The override fields let the picker drive paths
-    // directly off whatever the user typed during upload.
-    await page.locator("summary", { hasText: /override path components/i }).click()
-    await page.locator("#aerial-experiment").fill(experiment)
-    await page.locator("#aerial-location").fill(location)
-    await page.locator("#aerial-population").fill(population)
+    await page.getByTestId("aerial-date-select").click()
+    await page.getByRole("option", { name: date }).click()
+    await page.getByTestId("aerial-platform-select").click()
+    await page.getByRole("option", { name: platform }).click()
+    await page.getByTestId("aerial-sensor-select").click()
+    await page.getByRole("option", { name: sensor }).click()
 
     await expect(page.getByText(/5 images? found/i)).toBeVisible({
       timeout: 30_000,
@@ -142,5 +142,31 @@ test.describe("Pipeline: orthomosaic generation", () => {
       orthoNames.length,
       `expected at least one odm_orthophoto.tif under ${processedPrefix}, got ${JSON.stringify(files.map((f) => f.object_name))}`,
     ).toBeGreaterThan(0)
+
+    // 5. Auto-chained CREATE_COG must also have written its output. The ODM
+    //    worker submits a CREATE_COG job after the ortho lands; the COG
+    //    worker writes `<base>-Pyramid<ext>` to the same prefix. Wait up
+    //    to 5 min for it (small ortho → quick COG, but be lenient).
+    const expectedCog = `${processedPrefix}odm_orthophoto-Pyramid.tif`
+    const cogDeadline = Date.now() + 5 * 60_000
+    let cogFound = false
+    while (Date.now() < cogDeadline) {
+      const r = await request.get(
+        new URL(`/api/files/list/gemini/${processedPrefix}`, baseURL).toString(),
+        { headers: { Authorization: `Bearer ${access_token}` } },
+      )
+      if (r.ok()) {
+        const ents = (await r.json()) as Array<{ object_name: string }>
+        if (ents.some((e) => e.object_name === expectedCog)) {
+          cogFound = true
+          break
+        }
+      }
+      await page.waitForTimeout(5_000)
+    }
+    expect(
+      cogFound,
+      `expected the auto-chained CREATE_COG worker to write ${expectedCog} within 5 min`,
+    ).toBe(true)
   })
 })

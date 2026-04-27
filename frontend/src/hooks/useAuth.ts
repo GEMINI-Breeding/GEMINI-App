@@ -35,19 +35,42 @@ function useIsLoggedIn(): boolean {
 
 const useAuth = () => {
   const loggedIn = useIsLoggedIn()
-  const { data: user } = useQuery<UserOutput | null, Error>({
+  const {
+    data: user,
+    isLoading: userLoading,
+    error: userError,
+  } = useQuery<UserOutput | null, Error>({
     queryKey: ["currentUser"],
     queryFn: async () => {
       if (!loggedIn) return null
       return UsersService.apiUsersMeReadMe()
     },
     enabled: loggedIn,
+    // Don't keep retrying a busted token — one rejection means the JWT
+    // is expired / signed with a different secret / outright invalid,
+    // and the only recovery is to log out.
+    retry: false,
   })
+
+  // Failsafe: the global axios 401 interceptor in lib/auth.ts is supposed
+  // to fire logout on any 401, but the SDK's exception path can swallow
+  // the response and surface the failure here as a TanStack Query error
+  // instead. Treat any failure of /api/users/me as token-rejection so
+  // the _layout's onLogout listener can bounce the user to /login.
+  useEffect(() => {
+    if (loggedIn && userError) _logout()
+  }, [loggedIn, userError])
 
   return {
     isLoggedIn: loggedIn,
     logout: _logout,
     user: user ?? null,
+    /**
+     * True until /api/users/me has resolved at least once. Useful for
+     * components that need to wait on `is_superuser` before deciding
+     * whether to filter scoped data.
+     */
+    isUserLoading: loggedIn && (userLoading || user === undefined),
   }
 }
 

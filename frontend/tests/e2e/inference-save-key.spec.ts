@@ -43,12 +43,23 @@ test.describe("Inference page: API key persistence + run-button gating", () => {
     ).toBeVisible({ timeout: 15_000 })
 
     // Read the previous key value (so we can restore it at the end).
+    // Wait until the page's `useEffect([user?.id])` has hydrated `apiKey`
+    // from `user_info.roboflow_api_key` — without this, a race between
+    // our fill() and the hydration can leave the field empty when we
+    // click Save (the button is disabled when apiKey is empty).
     const keyField = page.getByTestId("inference-api-key")
     await expect(keyField).toBeVisible()
+    // Brief settle so the hydration useEffect runs at least once.
+    await page.waitForTimeout(250)
     const previousKey = await keyField.inputValue()
 
     // ── 1. Type the new key + click Save → assert real PATCH /api/users/me ─
     await keyField.fill(newKey)
+    // Confirm React received the fill before we click — the Save button
+    // is `disabled={!apiKey || isPending}` so without this assertion a
+    // re-render race between fill and click can leave it disabled.
+    await expect(keyField).toHaveValue(newKey)
+    await expect(page.getByTestId("inference-save-key")).toBeEnabled()
     const patchWait = page.waitForResponse(
       (r: Response) =>
         /\/api\/users\/me$/.test(r.url()) && r.request().method() === "PATCH",
@@ -82,27 +93,17 @@ test.describe("Inference page: API key persistence + run-button gating", () => {
       timeout: 10_000,
     })
 
-    // ── 4. Cleanup — restore the previous key so the suite is idempotent.
-    //       The Save button is disabled when the field is empty, so when
-    //       the previous value was empty (a fresh user) we hit the SDK
-    //       directly rather than try to click a disabled button. Either
-    //       way, the persisted user_info.roboflow_api_key is reset. ─────
-    if (previousKey) {
-      await page.getByTestId("inference-api-key").fill(previousKey)
-      const restoreWait = page.waitForResponse(
-        (r: Response) =>
-          /\/api\/users\/me$/.test(r.url()) && r.request().method() === "PATCH",
-      )
-      await page.getByTestId("inference-save-key").click()
-      await restoreWait
-    } else {
-      // Clear roboflow_api_key from user_info via direct PATCH.
-      const restoreResp = await request.patch("/api/users/me", {
-        headers: { Authorization: `Bearer ${token}` },
-        data: { user_info: { ...info, roboflow_api_key: "" } },
-      })
-      expect(restoreResp.ok()).toBe(true)
-    }
+    // ── 4. Cleanup — clear via the SDK directly. The Save button's
+    //       disabled-when-empty rule rules out using the UI for a
+    //       restore-to-empty path, and the previousKey may legitimately
+    //       have been a value we want to preserve OR an empty string.
+    //       The direct PATCH covers both cleanly. ────────────────────────
+    const restoreInfo = { ...(info ?? {}), roboflow_api_key: previousKey || "" }
+    const restoreResp = await request.patch("/api/users/me", {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { user_info: restoreInfo },
+    })
+    expect(restoreResp.ok()).toBe(true)
   })
 
   test("Run-inference button is disabled until model + key + scope + plot images", async ({

@@ -30,7 +30,10 @@ export function JobDetail({ jobId }: { jobId: string }) {
   }, [jobId])
 
   const status = liveProgress?.status ?? job?.status ?? "—"
-  const progress = liveProgress?.progress ?? job?.progress ?? 0
+  // Workers report progress as floats (e.g. 3.27299...% during ODM image
+  // streaming). Round before binding to UI so the bar width and label
+  // stay legible.
+  const progress = Math.round(liveProgress?.progress ?? job?.progress ?? 0)
   const stage =
     (liveProgress?.progress_detail as { stage?: string } | null | undefined)?.stage ??
     null
@@ -74,14 +77,20 @@ export function JobDetail({ jobId }: { jobId: string }) {
           )}
           {job?.result && (
             <Row label="Result">
-              <pre className="bg-muted max-h-60 overflow-auto rounded p-2 text-xs">
+              <pre
+                className="bg-muted max-h-60 overflow-auto rounded p-2 text-xs whitespace-pre-wrap break-all"
+                data-testid="job-detail-result"
+              >
                 {JSON.stringify(job.result, null, 2)}
               </pre>
             </Row>
           )}
           {job?.parameters && (
             <Row label="Parameters">
-              <pre className="bg-muted max-h-60 overflow-auto rounded p-2 text-xs">
+              <pre
+                className="bg-muted max-h-60 overflow-auto rounded p-2 text-xs whitespace-pre-wrap break-all"
+                data-testid="job-detail-parameters"
+              >
                 {JSON.stringify(job.parameters, null, 2)}
               </pre>
             </Row>

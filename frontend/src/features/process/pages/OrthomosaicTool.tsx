@@ -59,7 +59,24 @@ import {
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
-const RECONSTRUCTION_QUALITY = ["Default", "Lowest", "Low", "Medium", "High", "Ultra"] as const
+const RECONSTRUCTION_QUALITY = ["Default", "Lowest", "Low", "Medium", "High", "Ultra", "Custom"] as const
+
+// Hint copy shown under the quality dropdown so users know what each
+// preset actually does. The flag values mirror QUALITY_PRESETS in
+// backend/gemini/workers/odm/worker.py — keep in sync if you tweak
+// the worker side.
+const QUALITY_HINTS: Record<(typeof RECONSTRUCTION_QUALITY)[number], string> = {
+  Default: "Worker defaults (full-quality reconstruction).",
+  Lowest:
+    "Memory-friendly: feature/pc/depthmap all 'lowest', max 4 cores. Designed to fit in a 7-8 GiB Docker engine.",
+  Low: "feature/pc-quality 'low', depthmap 512px. Faster + lower RAM than Default.",
+  Medium:
+    "feature/pc-quality 'medium', depthmap 640px. Balanced; the safest first try on large flights.",
+  High: "feature/pc-quality 'high'. Higher detail, ~2x more RAM than Default.",
+  Ultra:
+    "feature/pc-quality 'ultra', depthmap 1280px. Highest detail; needs 16-32 GiB+ RAM headroom.",
+  Custom: "Use the textbox below to pass raw NodeODM CLI flags.",
+}
 const DEFAULT_BUCKET = "gemini"
 
 export function OrthomosaicTool() {
@@ -204,7 +221,7 @@ export function OrthomosaicTool() {
               Reconstruction quality
             </Label>
             <Select value={quality} onValueChange={(v) => setQuality(v as typeof quality)}>
-              <SelectTrigger id="ortho-quality">
+              <SelectTrigger id="ortho-quality" data-testid="ortho-quality">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -215,22 +232,28 @@ export function OrthomosaicTool() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="ortho-custom" className="mb-1.5 text-xs">
-              Custom NodeODM options (optional)
-            </Label>
-            <Input
-              id="ortho-custom"
-              placeholder='e.g. "--fast-orthophoto --skip-3dmodel"'
-              value={customOptions}
-              onChange={(e) => setCustomOptions(e.target.value)}
-            />
-            <p className="text-muted-foreground mt-1 text-xs">
-              Forwarded as-is to NodeODM. Drop a <code>gcp_list.txt</code> alongside your raw images
-              for ground-control points.
+            <p className="text-muted-foreground mt-1 text-xs" data-testid="ortho-quality-hint">
+              {QUALITY_HINTS[quality]}
             </p>
           </div>
+          {quality === "Custom" && (
+            <div>
+              <Label htmlFor="ortho-custom" className="mb-1.5 text-xs">
+                Custom NodeODM options
+              </Label>
+              <Input
+                id="ortho-custom"
+                data-testid="ortho-custom-options"
+                placeholder='e.g. "--fast-orthophoto --skip-3dmodel"'
+                value={customOptions}
+                onChange={(e) => setCustomOptions(e.target.value)}
+              />
+              <p className="text-muted-foreground mt-1 text-xs">
+                Forwarded as-is to NodeODM. Drop a <code>gcp_list.txt</code> alongside your raw images
+                for ground-control points.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

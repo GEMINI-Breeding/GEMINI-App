@@ -12,6 +12,7 @@ import {
 import { sidebarItems } from "@/config/navigation"
 import { CreateExperimentDialog } from "@/features/experiments/components/CreateExperimentDialog"
 import { ExperimentSelector } from "@/features/experiments/components/ExperimentSelector"
+import { ScopeChildSelectors } from "@/features/experiments/components/ScopeChildSelectors"
 import useAuth from "@/hooks/useAuth"
 import { Main } from "./Main"
 import { User } from "./User"
@@ -29,8 +30,9 @@ export function AppSidebar() {
             <span>Experiment</span>
             <CreateExperimentDialog />
           </SidebarGroupLabel>
-          <SidebarGroupContent className="px-2">
+          <SidebarGroupContent className="space-y-2 px-2">
             <ExperimentSelector />
+            <ScopeChildSelectors />
           </SidebarGroupContent>
         </SidebarGroup>
         <Main items={sidebarItems} />

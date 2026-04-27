@@ -1,54 +1,33 @@
 /**
- * Phase 7: extract-traits page form rigor.
+ * Phase 7 form-rigor: SplitOrthomosaicTool POSTs the right body.
  *
- * The first cut of this spec only asserted "Submit button stays
- * disabled when no active boundary version exists" — useless for
- * catching the realistic regression of "form field A silently dropped
- * from the submit body". The audit caught this gap.
+ * Pre-this-commit, no spec covered the SPLIT_ORTHOMOSAIC submit path
+ * at all. The audit's bug-introduction matrix flagged "SPLIT submitted
+ * with wrong scope path" and "boundaries empty / wrong shape" as
+ * silently-shipping-green failures.
  *
- * This pass:
- *   1. Disabled-state when scope is empty (the prior assertion, kept).
- *   2. With pre-seeded scope + active boundary version: typing into
- *      `exg_threshold` and `dem_path` ends up under `parameters` in
- *      the POST /api/jobs/submit body.
- *
- * The full happy-path EXTRACT_TRAITS run needs a real RGB ortho on
- * MinIO at the scope-derived path — out of scope here, lives in
- * Phase-15 hardening.
+ * This spec runs in seconds: seeds entities + an active plot-geometry
+ * version + a Raw placeholder so the picker dropdowns populate, drives
+ * the form to Submit, intercepts the request body, and asserts the
+ * `boundaries` FeatureCollection actually has features and the path
+ * components match.
  */
 import type { Page } from "@playwright/test"
 
 import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { expect, test } from "../helpers/fixtures"
 
-test.describe("Pipeline: extract traits", () => {
+test.describe("Pipeline: split orthomosaic", () => {
   test.setTimeout(60_000)
 
-  test("page renders, picker reports empty scope, submit stays disabled", async ({
-    page,
-  }) => {
-    await page.goto("/process/extract-traits")
-    await expect(
-      page.getByRole("heading", { name: /extract traits/i }),
-    ).toBeVisible()
-
-    const submit = page.getByRole("button", { name: /run extract traits/i })
-    await expect(submit).toBeDisabled()
-  })
-
-  test("form fields land verbatim in the submit body", async ({
+  test("Run split: submit body carries non-empty boundaries + correct scope", async ({
     page,
     request,
     baseURL,
-    consoleErrorGuard,
   }) => {
-    // The trait-map widget polls for Traits-WGS84.geojson, which doesn't
-    // exist until a real EXTRACT_TRAITS run has produced it. The 404 is
-    // expected for this form-only spec.
-    consoleErrorGuard.expectError(/\/Traits-WGS84\.geojson/)
     if (!baseURL) throw new Error("baseURL not configured")
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const experiment = `pw-et-${stamp}`
+    const experiment = `pw-sp-${stamp}`
     const date = "2026-04-27"
     const directory = `Processed/2026/${experiment}/Davis/Cowpea/${date}/Drone/RGB/`
 
@@ -63,7 +42,7 @@ test.describe("Pipeline: extract traits", () => {
     const { access_token } = (await loginRes.json()) as { access_token: string }
     const authHeader = { Authorization: `Bearer ${access_token}` }
 
-    // Seed entities + a Raw/ placeholder so the picker dropdowns populate.
+    // Seed entities.
     for (const [path, body] of [
       ["/api/experiments", { experiment_name: experiment }],
       ["/api/sites", { site_name: "Davis", experiment_name: experiment }],
@@ -93,24 +72,26 @@ test.describe("Pipeline: extract traits", () => {
       headers: { ...authHeader, "Content-Type": "application/json" },
       data: { experiment_id: expId },
     })
+
+    // Raw placeholder so the picker discovers (date, Drone, RGB).
     await request.post(new URL("/api/files/upload_chunk", baseURL).toString(), {
       headers: authHeader,
       multipart: {
         file_chunk: { name: "p.part0", mimeType: "image/jpeg", buffer: Buffer.from("x") },
         chunk_index: "0",
         total_chunks: "1",
-        file_identifier: `et-seed-${stamp}`,
+        file_identifier: `sp-seed-${stamp}`,
         object_name: `Raw/2026/${experiment}/Davis/Cowpea/${date}/Drone/RGB/Images/p.jpg`,
       },
     })
 
-    // Seed a plot-geometry version + auto-activate it.
+    // Seed an active plot-geometry version with one polygon.
     const seedFc: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
       features: [
         {
           type: "Feature",
-          properties: { plot: 1 },
+          properties: { plot: 1, accession: "test" },
           geometry: {
             type: "Polygon",
             coordinates: [
@@ -126,7 +107,7 @@ test.describe("Pipeline: extract traits", () => {
         },
       ],
     }
-    const seedRes = await request.post(
+    await request.post(
       new URL("/api/plot_geometry/versions/save", baseURL).toString(),
       {
         headers: { ...authHeader, "Content-Type": "application/json" },
@@ -137,38 +118,38 @@ test.describe("Pipeline: extract traits", () => {
         },
       },
     )
-    expect(seedRes.ok()).toBe(true)
 
-    // Drive the UI: switch sidebar experiment, navigate, pick scope,
-    // type into the form fields, intercept the submit body.
+    // Drive the UI: switch to the test experiment, navigate, pick scope,
+    // submit, intercept the body.
     await page.goto("/")
     await page.getByTestId("experiment-selector").click()
     await page.getByRole("option", { name: experiment }).click()
-    await page.goto("/process/extract-traits")
+    await page.goto("/process/split")
     await expect(
-      page.getByRole("heading", { name: /extract traits/i }),
+      page.getByRole("heading", { name: /split orthomosaic/i }),
     ).toBeVisible({ timeout: 10_000 })
 
     await pickScope(page, date)
-    await page.locator("input#exg").fill("0.42")
-    await page.locator("input#dem").fill(`Processed/2026/${experiment}/dem.tif`)
 
     const submitWait = page.waitForRequest(
       (r) =>
         /\/api\/jobs\/submit$/.test(r.url()) && r.method() === "POST",
     )
-    await page.getByRole("button", { name: /run extract traits/i }).click()
+    await page.getByRole("button", { name: /^run split$/i }).click()
     const req = await submitWait
     const body = JSON.parse(req.postData() ?? "{}") as {
       job_type?: string
       parameters?: Record<string, unknown>
     }
-    expect(body.job_type).toBe("EXTRACT_TRAITS")
-    expect(body.parameters?.exg_threshold).toBe(0.42)
-    expect(body.parameters?.dem_path).toBe(`Processed/2026/${experiment}/dem.tif`)
-    // Sanity: scope-derived paths also present.
-    expect(typeof body.parameters?.orthomosaic_path).toBe("string")
-    expect(typeof body.parameters?.boundary_geojson_path).toBe("string")
+    expect(body.job_type).toBe("SPLIT_ORTHOMOSAIC")
+    expect(body.parameters?.year).toBe("2026")
+    expect(body.parameters?.experiment).toBe(experiment)
+    expect(body.parameters?.location).toBe("Davis")
+    expect(body.parameters?.population).toBe("Cowpea")
+    expect(body.parameters?.date).toBe(date)
+    const boundaries = body.parameters?.boundaries as GeoJSON.FeatureCollection
+    expect(boundaries?.type).toBe("FeatureCollection")
+    expect(boundaries?.features?.length).toBeGreaterThan(0)
   })
 })
 
