@@ -11,17 +11,40 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { dataTypes } from "@/config/dataTypes"
+import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import {
   useUploadQueue,
   type UploadTask,
 } from "@/features/files/hooks/useUploadQueue"
+import {
+  useResolveScope,
+  type ResolvedScope,
+  type UploadScopeChoices,
+} from "@/features/files/hooks/useUploadScope"
 import { isExtensionAllowed } from "@/features/files/utils/extensions"
 import useCustomToast from "@/hooks/useCustomToast"
 import { UploadZone } from "./UploadZone"
 
+// Form-field key (the dataTypes config language) → scope key (the entity
+// language). Used to translate the scope map the parent passes in.
+const FORM_FIELD_TO_SCOPE_KEY: Record<string, keyof UploadScopeChoices> = {
+  experiment: "experiment",
+  location: "site",
+  population: "population",
+  platform: "sensorPlatform",
+  sensor: "sensor",
+}
+
 interface UploadListProps {
   dataType: string | null
   formValues: Record<string, string>
+  /**
+   * Per-form-field entity choice (existing/new/none). The upload click
+   * resolves any "new" choice via the scope-resolver hook before chunked
+   * upload starts, so the experiment/site/etc. row exists in the DB by
+   * the time the file lands in MinIO.
+   */
+  scope?: Record<string, EntityChoice>
   onFilesSelected?: (files: File[]) => void
   /** Fired with the MinIO object paths of the successfully uploaded files. */
   onUploadComplete?: (destPaths: string[]) => void
@@ -49,19 +72,28 @@ function buildTargetRootDir(
   return root
 }
 
-function missingScopeFields(
-  dataType: string,
-  formValues: Record<string, string>,
-): string[] {
+function requiredFormFields(dataType: string): string[] {
   const cfg = dataTypes[dataType as keyof typeof dataTypes]
-  // `cfg.directory` is the MinIO path template (mixes literal segments
-  // like "Raw" / "Images" with field-name placeholders); `cfg.fields` is
-  // the list of form fields the user must fill. Validate against the
-  // latter — checking `directory` would always flag the literal segments
-  // as missing.
-  const fields = (cfg as { fields?: string[] } | undefined)?.fields
-  if (!fields || fields.length === 0) return []
-  return fields.filter((field) => !formValues[field]?.trim())
+  return ((cfg as { fields?: string[] } | undefined)?.fields ?? []).slice()
+}
+
+/**
+ * A form field is considered "filled" if either:
+ *   - it has a non-empty plain value (date), OR
+ *   - the parent passed an EntityChoice that is `existing` or a `new` with a
+ *     non-blank name (the upload click will resolve it before posting).
+ */
+function isFieldFilled(
+  field: string,
+  formValues: Record<string, string>,
+  scope: Record<string, EntityChoice> | undefined,
+): boolean {
+  if (formValues[field]?.trim()) return true
+  const c = scope?.[field]
+  if (!c) return false
+  if (c.kind === "existing") return Boolean(c.id && c.name)
+  if (c.kind === "new") return c.name.trim().length > 0
+  return false
 }
 
 function followUpForDataType(
@@ -103,6 +135,7 @@ type RejectionDetails = {
 export function UploadList({
   dataType,
   formValues,
+  scope,
   onFilesSelected,
   onUploadComplete,
   label,
@@ -111,9 +144,11 @@ export function UploadList({
   const [selected, setSelected] = useState<File[]>([])
   const [isExpanded, setIsExpanded] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [resolveStatus, setResolveStatus] = useState<string | null>(null)
   const [rejection, setRejection] = useState<RejectionDetails | null>(null)
   const { showErrorToastWithCopy } = useCustomToast()
   const { run } = useUploadQueue()
+  const { resolveScope } = useResolveScope()
 
   const acceptAttr = useMemo(() => {
     if (!dataType) return undefined
@@ -212,39 +247,57 @@ export function UploadList({
     }
     if (selected.length === 0) return
 
-    const missing = missingScopeFields(dataType, formValues)
+    const required = requiredFormFields(dataType)
+    const missing = required.filter(
+      (field) => !isFieldFilled(field, formValues, scope),
+    )
     if (missing.length > 0) {
       setRejection({
-        title: "Required form fields are blank",
+        title: "Required fields are blank",
         description:
-          `Fill in the following before uploading "${dataType}": ${missing.join(", ")}.`,
+          `Fill in the following before uploading "${dataType}": ${missing.join(", ")}. ` +
+          `Each scope field must either pick an existing entity or "+ Create new…" with a name.`,
         rejectedNames: [],
         remediation:
-          "These fields determine the storage path. Without them, the files would land in a generic location and be hard to find later.",
+          "These fields control which database entities the files associate with. Without them, the files would land in storage but be invisible from the rest of the app.",
       })
       return
     }
-
-    const targetRootDir = buildTargetRootDir(dataType, formValues, subDir)
-    if (!targetRootDir) {
-      setRejection({
-        title: `Unknown data type: ${dataType}`,
-        description:
-          "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
-        rejectedNames: [],
-      })
-      return
-    }
-
-    const followUpJob = followUpForDataType(dataType)
-    const tasks: UploadTask[] = selected.map((file) => ({
-      file,
-      objectPath: `${targetRootDir}/${file.name}`,
-      followUpJob,
-    }))
 
     setIsUploading(true)
     try {
+      // 1. Resolve any "+ Create new…" entity choices via search-or-create.
+      //    On success the resolved names land in formValues so the path
+      //    builder picks them up.
+      const resolved = await resolveScopeForFields(required)
+
+      // Build the merged form values: resolved entity names override any
+      // mirrored copy from the parent.
+      const merged: Record<string, string> = { ...formValues }
+      for (const field of required) {
+        const r = resolved[FORM_FIELD_TO_SCOPE_KEY[field]]
+        if (r) merged[field] = r.name
+      }
+
+      const targetRootDir = buildTargetRootDir(dataType, merged, subDir)
+      if (!targetRootDir) {
+        setRejection({
+          title: `Unknown data type: ${dataType}`,
+          description:
+            "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
+          rejectedNames: [],
+        })
+        return
+      }
+
+      const followUpJob = followUpForDataType(dataType)
+      const tasks: UploadTask[] = selected.map((file) => ({
+        file,
+        objectPath: `${targetRootDir}/${file.name}`,
+        followUpJob,
+      }))
+
+      setResolveStatus(null)
       const result = await run(tasks, {
         title:
           followUpJob?.kind === "extract_binary"
@@ -255,24 +308,45 @@ export function UploadList({
       setSelected([])
     } catch (err) {
       // Surface the *server's* error verbatim and keep it on screen until
-      // the user dismisses it. Network/HTTP failures during upload need
-      // copy-paste-able context; sonner's autodismiss eats them otherwise.
+      // the user dismisses it.
       const message = err instanceof Error ? err.message : String(err)
       setRejection({
-        title: "Upload failed",
-        description:
-          `The upload was interrupted by an error. The first failing chunk's response is below; ` +
-          `the partial upload is preserved on the server, so retrying the same files will resume from the failed chunk.`,
+        title: resolveStatus
+          ? `Failed while ${resolveStatus}`
+          : "Upload failed",
+        description: resolveStatus
+          ? `The upload was blocked because the entity creation step failed. ` +
+            `The error from the backend is shown below.`
+          : `The upload was interrupted by an error. The first failing chunk's response is below; ` +
+            `the partial upload is preserved on the server, so retrying the same files will resume from the failed chunk.`,
         rejectedNames: [message],
-        remediation:
-          "Common causes: backend container restarted, JWT expired (try refreshing the page to re-login), or a 5xx upstream from MinIO.",
+        remediation: resolveStatus
+          ? "Try a different name (the entity may already exist with conflicting attributes), or check that the parent entity (experiment) is the one you intended."
+          : "Common causes: backend container restarted, JWT expired (try refreshing the page to re-login), or a 5xx upstream from MinIO.",
       })
-      // Keep the toast as a brief breadcrumb that *something* failed, in case
-      // the user navigates away from this screen before opening the dialog.
       showErrorToastWithCopy(message)
     } finally {
       setIsUploading(false)
+      setResolveStatus(null)
     }
+  }
+
+  /**
+   * Translate the per-form-field scope map into the EntityChoice map the
+   * resolver expects, then run the create-or-get pipeline.
+   */
+  async function resolveScopeForFields(fields: string[]): Promise<ResolvedScope> {
+    if (!scope) return {}
+    const choices: UploadScopeChoices = {}
+    for (const field of fields) {
+      const scopeKey = FORM_FIELD_TO_SCOPE_KEY[field]
+      if (!scopeKey) continue
+      const c = scope[field]
+      if (c) choices[scopeKey] = c
+    }
+    if (Object.keys(choices).length === 0) return {}
+    setResolveStatus("registering entities")
+    return resolveScope(choices)
   }
 
   return (
@@ -339,7 +413,9 @@ export function UploadList({
               data-testid="upload-submit"
             >
               {isUploading
-                ? "Uploading…"
+                ? resolveStatus
+                  ? `Registering entities…`
+                  : "Uploading…"
                 : `Upload ${selected.length} file(s)`}
             </Button>
             <Button

@@ -36,14 +36,32 @@ export interface UploadFormValues {
 }
 
 /**
- * Fill the DataStructureForm. TextField renders `<label htmlFor={id}>` with id
- * equal to the field name, so `input#${field}` hits the right input.
+ * Fill the DataStructureForm. The form is now a stack of entity dropdowns
+ * (Experiment / Site / Population / Sensor platform / Sensor) where each
+ * field can either pick an existing row or "+ Create new…" with a typed
+ * name. Date stays a free-text date input.
  *
- * The form has a cascade: experiment → location → population → date → …,
- * each input enabled only after the previous commits. Instead of relying
- * on a fixed sleep (fragile on slow CI), we await `:enabled` on the next
- * field before filling it.
+ * Helper behavior: every value passed in is treated as a *new entity name*
+ * — that's what the existing test suite needs, since each spec generates
+ * unique-stamped names and expects them to be created on the fly. The
+ * first time the spec runs, the create-new path executes; on re-runs, the
+ * resolveScope hook's search-by-name dedupes them.
  */
+const FORM_FIELD_TO_SELECT_TESTID: Record<string, string> = {
+  experiment: "entity-select-experiment",
+  location: "entity-select-site",
+  population: "entity-select-population",
+  platform: "entity-select-sensorplatform",
+  sensor: "entity-select-sensor",
+}
+const FORM_FIELD_TO_NEW_INPUT_TESTID: Record<string, string> = {
+  experiment: "entity-new-experiment",
+  location: "entity-new-site",
+  population: "entity-new-population",
+  platform: "entity-new-sensorplatform",
+  sensor: "entity-new-sensor",
+}
+
 export async function fillUploadForm(
   page: Page,
   values: UploadFormValues,
@@ -59,12 +77,28 @@ export async function fillUploadForm(
   for (const field of fieldOrder) {
     const value = values[field]
     if (!value) continue
-    const input = page.locator(`input#${field}`)
-    if (!(await input.count())) continue
-    // Wait for the cascade to enable this field before typing.
-    await expect(input).toBeEnabled()
-    await input.fill(value)
-    await expect(input).toHaveValue(value)
+
+    if (field === "date") {
+      const input = page.locator("input#date")
+      if (!(await input.count())) continue
+      await expect(input).toBeEnabled()
+      await input.fill(value)
+      continue
+    }
+
+    const selectTestId = FORM_FIELD_TO_SELECT_TESTID[field]
+    const newInputTestId = FORM_FIELD_TO_NEW_INPUT_TESTID[field]
+    if (!selectTestId || !newInputTestId) continue
+
+    const trigger = page.getByTestId(selectTestId)
+    if (!(await trigger.count())) continue
+    await expect(trigger).toBeEnabled()
+    await trigger.click()
+    // Pick the "+ Create new…" sentinel and then fill the new-name input.
+    await page.getByTestId(`entity-create-${selectTestId.replace("entity-select-", "")}`).click()
+    const newInput = page.getByTestId(newInputTestId)
+    await expect(newInput).toBeVisible()
+    await newInput.fill(value)
   }
 }
 

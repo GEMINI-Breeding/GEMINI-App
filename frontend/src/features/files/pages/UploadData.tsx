@@ -13,6 +13,7 @@ import {
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
+import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
@@ -48,6 +49,7 @@ async function fetchUploadedContent(
 export function UploadData() {
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null)
   const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [scope, setScope] = useState<Record<string, EntityChoice>>({})
   const [rgbTifPath, setRgbTifPath] = useState<string | null>(null)
   const [demTifPath, setDemTifPath] = useState<string | null>(null)
   const [syncedCsvText, setSyncedCsvText] = useState<string | null>(null)
@@ -55,8 +57,39 @@ export function UploadData() {
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null)
   const [refDataFile, setRefDataFile] = useState<File | null>(null)
 
-  const handleFormChange = (field: string, value: string) => {
+  const handleValueChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleScopeChange = (field: string, choice: EntityChoice) => {
+    setScope((prev) => {
+      const next = { ...prev, [field]: choice }
+      // Clearing or changing the experiment invalidates downstream entity
+      // choices that were created against the previous experiment. Reset
+      // them so the user re-picks (or re-creates) explicitly rather than
+      // accidentally reusing a stale id.
+      if (field === "experiment") {
+        return { experiment: choice }
+      }
+      return next
+    })
+    // Mirror the visible name into formValues so downstream consumers
+    // (path builder, ReferenceDataUploadDialog) keep working without
+    // having to know about the EntityChoice type.
+    const name =
+      choice.kind === "existing"
+        ? choice.name
+        : choice.kind === "new"
+          ? choice.name
+          : ""
+    setFormValues((prev) => {
+      const next = { ...prev, [field]: name }
+      if (field === "experiment") {
+        // Wipe the dependent fields' mirrored names too.
+        for (const k of ["location", "population", "platform", "sensor"]) delete next[k]
+      }
+      return next
+    })
   }
 
   /**
@@ -129,8 +162,10 @@ export function UploadData() {
             />
             <DataStructureForm
               fileType={selectedFileType}
+              scope={scope}
               values={formValues}
-              onChange={handleFormChange}
+              onScopeChange={handleScopeChange}
+              onValueChange={handleValueChange}
             />
           </div>
 
@@ -140,6 +175,7 @@ export function UploadData() {
                 <UploadList
                   dataType={selectedFileType}
                   formValues={formValues}
+                  scope={scope}
                   onFilesSelected={handleFilesSelected}
                   onUploadComplete={handleRgbUploadComplete}
                   label="RGB Orthomosaic (.tif) — required"
@@ -155,6 +191,7 @@ export function UploadData() {
                 <UploadList
                   dataType="Orthomosaic DEM"
                   formValues={formValues}
+                  scope={scope}
                   onUploadComplete={handleDemUploadComplete}
                   label="DEM (.tif) — optional (required for plant height)"
                 />
@@ -170,6 +207,7 @@ export function UploadData() {
             <UploadList
               dataType={selectedFileType}
               formValues={formValues}
+              scope={scope}
               onFilesSelected={handleFilesSelected}
               onUploadComplete={handleUploadComplete}
             />

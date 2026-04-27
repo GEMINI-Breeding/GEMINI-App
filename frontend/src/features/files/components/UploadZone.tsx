@@ -81,14 +81,14 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
   const results = await Promise.all(
     items.map(async (item) => {
       if (item.kind !== "file") return [] as File[]
-      const entry = (item as DataTransferItem & {
-        webkitGetAsEntry?: () => FileSystemEntryLike | null
+      const rawEntry = (item as DataTransferItem & {
+        webkitGetAsEntry?: () => unknown
       }).webkitGetAsEntry?.()
-      if (!entry) {
+      if (!rawEntry) {
         const f = item.getAsFile()
         return f ? [f] : []
       }
-      return entryToFiles(entry)
+      return entryToFiles(rawEntry as unknown as FileSystemEntryLike)
     }),
   )
   return results.flat()

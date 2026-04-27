@@ -188,7 +188,7 @@ test.describe("UploadList: blocked-submit dialogs", () => {
 
     const dialog = page.locator('[data-testid="upload-error-dialog"]')
     await expect(dialog).toBeVisible({ timeout: 5_000 })
-    await expect(dialog).toContainText(/required form fields are blank/i)
+    await expect(dialog).toContainText(/required fields are blank/i)
     // Should call out at least one of the path components by name.
     await expect(dialog).toContainText(/(experiment|location|date|platform|sensor)/i)
   })
