@@ -116,10 +116,12 @@ export function PlotBoundaryPrep({
       gapXMeters: gapMeters,
       gapYMeters: gapMeters,
     })
-    setFeatures([
-      { ...outer, properties: { ...(outer.properties ?? {}), role: "outer" } },
-      ...grid,
-    ])
+    // Replace the feature list with just the grid. The outer rectangle
+    // would otherwise be saved as one giant "plot" that wraps all the
+    // others — SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS treat every feature
+    // in the FeatureCollection as a distinct plot, so an enclosing
+    // rectangle creates a junk plot covering the whole field.
+    setFeatures(grid)
   }
 
   async function handleSaveOnly() {
