@@ -18,16 +18,12 @@ import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
-import { Route as LayoutAnnotationsRouteImport } from './routes/_layout/annotations'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
-import { Route as LayoutModelsIndexRouteImport } from './routes/_layout/models/index'
 import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
 import { Route as LayoutAdminIndexRouteImport } from './routes/_layout/admin/index'
 import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
-import { Route as LayoutModelsTrainRouteImport } from './routes/_layout/models/train'
-import { Route as LayoutModelsInferenceRouteImport } from './routes/_layout/models/inference'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
 import { Route as LayoutAdminTraitsRouteImport } from './routes/_layout/admin/traits'
 import { Route as LayoutAdminTraitLevelsRouteImport } from './routes/_layout/admin/trait-levels'
@@ -92,11 +88,6 @@ const LayoutConsoleRoute = LayoutConsoleRouteImport.update({
   path: '/console',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutAnnotationsRoute = LayoutAnnotationsRouteImport.update({
-  id: '/annotations',
-  path: '/annotations',
-  getParentRoute: () => LayoutRoute,
-} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -105,11 +96,6 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
 const LayoutProcessIndexRoute = LayoutProcessIndexRouteImport.update({
   id: '/process/',
   path: '/process/',
-  getParentRoute: () => LayoutRoute,
-} as any)
-const LayoutModelsIndexRoute = LayoutModelsIndexRouteImport.update({
-  id: '/models/',
-  path: '/models/',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutFilesIndexRoute = LayoutFilesIndexRouteImport.update({
@@ -133,16 +119,6 @@ const LayoutProcessWorkspaceIdRoute =
     path: '/process/$workspaceId',
     getParentRoute: () => LayoutRoute,
   } as any)
-const LayoutModelsTrainRoute = LayoutModelsTrainRouteImport.update({
-  id: '/models/train',
-  path: '/models/train',
-  getParentRoute: () => LayoutRoute,
-} as any)
-const LayoutModelsInferenceRoute = LayoutModelsInferenceRouteImport.update({
-  id: '/models/inference',
-  path: '/models/inference',
-  getParentRoute: () => LayoutRoute,
-} as any)
 const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
   id: '/analyze/$runId',
   path: '/analyze/$runId',
@@ -250,7 +226,6 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/admin': typeof LayoutAdminRouteWithChildren
-  '/annotations': typeof LayoutAnnotationsRoute
   '/console': typeof LayoutConsoleRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -269,13 +244,10 @@ export interface FileRoutesByFullPath {
   '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/admin/traits': typeof LayoutAdminTraitsRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/models/inference': typeof LayoutModelsInferenceRoute
-  '/models/train': typeof LayoutModelsTrainRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/admin/': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
-  '/models': typeof LayoutModelsIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -288,7 +260,6 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/annotations': typeof LayoutAnnotationsRoute
   '/console': typeof LayoutConsoleRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -307,12 +278,9 @@ export interface FileRoutesByTo {
   '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/admin/traits': typeof LayoutAdminTraitsRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/models/inference': typeof LayoutModelsInferenceRoute
-  '/models/train': typeof LayoutModelsTrainRoute
   '/admin': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
-  '/models': typeof LayoutModelsIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -328,7 +296,6 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/_layout/admin': typeof LayoutAdminRouteWithChildren
-  '/_layout/annotations': typeof LayoutAnnotationsRoute
   '/_layout/console': typeof LayoutConsoleRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -347,13 +314,10 @@ export interface FileRoutesById {
   '/_layout/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/_layout/admin/traits': typeof LayoutAdminTraitsRoute
   '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
-  '/_layout/models/inference': typeof LayoutModelsInferenceRoute
-  '/_layout/models/train': typeof LayoutModelsTrainRoute
   '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/_layout/admin/': typeof LayoutAdminIndexRoute
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
   '/_layout/files/': typeof LayoutFilesIndexRoute
-  '/_layout/models/': typeof LayoutModelsIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
@@ -369,7 +333,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/admin'
-    | '/annotations'
     | '/console'
     | '/items'
     | '/settings'
@@ -388,13 +351,10 @@ export interface FileRouteTypes {
     | '/admin/trait-levels'
     | '/admin/traits'
     | '/analyze/$runId'
-    | '/models/inference'
-    | '/models/train'
     | '/process/$workspaceId'
     | '/admin/'
     | '/analyze'
     | '/files'
-    | '/models'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
@@ -407,7 +367,6 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
-    | '/annotations'
     | '/console'
     | '/items'
     | '/settings'
@@ -426,12 +385,9 @@ export interface FileRouteTypes {
     | '/admin/trait-levels'
     | '/admin/traits'
     | '/analyze/$runId'
-    | '/models/inference'
-    | '/models/train'
     | '/admin'
     | '/analyze'
     | '/files'
-    | '/models'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
@@ -446,7 +402,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/_layout/admin'
-    | '/_layout/annotations'
     | '/_layout/console'
     | '/_layout/items'
     | '/_layout/settings'
@@ -465,13 +420,10 @@ export interface FileRouteTypes {
     | '/_layout/admin/trait-levels'
     | '/_layout/admin/traits'
     | '/_layout/analyze/$runId'
-    | '/_layout/models/inference'
-    | '/_layout/models/train'
     | '/_layout/process/$workspaceId'
     | '/_layout/admin/'
     | '/_layout/analyze/'
     | '/_layout/files/'
-    | '/_layout/models/'
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
     | '/_layout/process/$workspaceId/tool'
@@ -553,13 +505,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutConsoleRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/annotations': {
-      id: '/_layout/annotations'
-      path: '/annotations'
-      fullPath: '/annotations'
-      preLoaderRoute: typeof LayoutAnnotationsRouteImport
-      parentRoute: typeof LayoutRoute
-    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -572,13 +517,6 @@ declare module '@tanstack/react-router' {
       path: '/process'
       fullPath: '/process'
       preLoaderRoute: typeof LayoutProcessIndexRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/models/': {
-      id: '/_layout/models/'
-      path: '/models'
-      fullPath: '/models'
-      preLoaderRoute: typeof LayoutModelsIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/files/': {
@@ -607,20 +545,6 @@ declare module '@tanstack/react-router' {
       path: '/process/$workspaceId'
       fullPath: '/process/$workspaceId'
       preLoaderRoute: typeof LayoutProcessWorkspaceIdRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/models/train': {
-      id: '/_layout/models/train'
-      path: '/models/train'
-      fullPath: '/models/train'
-      preLoaderRoute: typeof LayoutModelsTrainRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/models/inference': {
-      id: '/_layout/models/inference'
-      path: '/models/inference'
-      fullPath: '/models/inference'
-      preLoaderRoute: typeof LayoutModelsInferenceRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/analyze/$runId': {
@@ -821,36 +745,28 @@ const LayoutProcessWorkspaceIdRouteWithChildren =
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRouteWithChildren
-  LayoutAnnotationsRoute: typeof LayoutAnnotationsRoute
   LayoutConsoleRoute: typeof LayoutConsoleRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
-  LayoutModelsInferenceRoute: typeof LayoutModelsInferenceRoute
-  LayoutModelsTrainRoute: typeof LayoutModelsTrainRoute
   LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
   LayoutFilesIndexRoute: typeof LayoutFilesIndexRoute
-  LayoutModelsIndexRoute: typeof LayoutModelsIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
   LayoutProcessJobsJobIdRoute: typeof LayoutProcessJobsJobIdRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRouteWithChildren,
-  LayoutAnnotationsRoute: LayoutAnnotationsRoute,
   LayoutConsoleRoute: LayoutConsoleRoute,
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
-  LayoutModelsInferenceRoute: LayoutModelsInferenceRoute,
-  LayoutModelsTrainRoute: LayoutModelsTrainRoute,
   LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,
   LayoutFilesIndexRoute: LayoutFilesIndexRoute,
-  LayoutModelsIndexRoute: LayoutModelsIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
   LayoutProcessJobsJobIdRoute: LayoutProcessJobsJobIdRoute,
 }

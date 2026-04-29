@@ -1,12 +1,10 @@
 import {
-  Brain,
   ChartSpline,
   Folder,
   Home,
   type LucideIcon,
   Play,
   Settings,
-  Tags,
   Terminal,
 } from "lucide-react";
 
@@ -22,6 +20,11 @@ export type NavItem = {
   subItems?: SubItem[];
 };
 
+// Mirrors `main`'s sidebar exactly. ML / inference / annotation features
+// are routed through the Process pipeline wizard (Roboflow model config
+// in the pipeline-wizard Step 3; inference as the wizard's `inference`
+// step opened via RunTool). The standalone /models and /annotations
+// surfaces from Phase 8 were removed because they didn't exist on main.
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
   { icon: Folder, title: "Files", path: "/files" },
@@ -30,17 +33,6 @@ export const sidebarItems: NavItem[] = [
     title: "Process",
     path: "/process",
   },
-  {
-    icon: Brain,
-    title: "Models",
-    path: "/models",
-    subItems: [
-      { title: "Registry", path: "/models" },
-      { title: "Run inference", path: "/models/inference" },
-      { title: "Train", path: "/models/train" },
-    ],
-  },
-  { icon: Tags, title: "Annotations", path: "/annotations" },
   {
     icon: ChartSpline,
     title: "Analyze",
