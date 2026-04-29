@@ -32,6 +32,14 @@ export default defineConfig({
         // to /api/jobs/{id}/progress using the same origin as HTTP calls.
         ws: true,
       },
+      // TiTiler runs in the GEMINIbase compose stack at :8091 and serves COG
+      // tiles for the orthomosaic overlay on the boundary map. Same proxy
+      // pattern as /api so the frontend can use relative URLs.
+      "/titiler": {
+        target: "http://127.0.0.1:8091",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/titiler/, ""),
+      },
     },
   },
 })

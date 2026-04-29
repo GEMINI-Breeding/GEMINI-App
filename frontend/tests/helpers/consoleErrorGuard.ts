@@ -11,6 +11,14 @@ const KNOWN_BENIGN_PATTERNS: RegExp[] = [
   // still logs the response status. The check is a once-per-day fire-and-
   // forget; it's not a code-level failure.
   /api\.github\.com\/repos\/[^)\s]*\/releases\/latest/,
+  // TiTiler returns 404 for COG tile coordinates that fall inside the
+  // overall bounding-box rectangle but outside the ortho's actual data
+  // footprint (drone orthomosaics are non-rectangular — the corners of
+  // the bbox are nodata). Leaflet's `bounds` option only clips at the
+  // bbox level, so edge tiles still get requested. The tile layer
+  // already swallows these via `tileerror`; Chromium still logs the
+  // network 404. This is cosmetic, not a real failure.
+  /\/titiler\/cog\/tiles\/[^)\s]*\)/,
 ]
 
 export interface ConsoleErrorGuardHandle {

@@ -253,6 +253,42 @@ test.describe("R4a: aerial wizard happy path", () => {
       page.getByTestId("boundary-save-and-complete"),
     ).toBeDisabled() // disabled until the user draws a polygon
 
+    // Basemap toggle: Leaflet's built-in layers control sits in the top-right
+    // and is collapsed by default. Hovering expands it; we then look for the
+    // OSM/Esri labels.
+    const layersControl = page.locator(".leaflet-control-layers")
+    await expect(layersControl).toBeVisible()
+    await layersControl.hover()
+    await expect(page.locator(".leaflet-control-layers-list")).toContainText(
+      "Streets (OSM)",
+    )
+    await expect(page.locator(".leaflet-control-layers-list")).toContainText(
+      "Satellite (Esri)",
+    )
+
+    // Ortho overlay: this run just produced odm_orthophoto.tif, so TiTiler
+    // must be able to read it. We assert the tilejson endpoint resolves
+    // (proves the COG is valid + reachable end-to-end) and that the
+    // <img> tile elements are appended to the DOM (proves the leaflet
+    // layer is actually mounted and pointed at our COG). We don't assert
+    // on .leaflet-tile-loaded because drone orthos are non-rectangular
+    // within their bbox — the corner tiles 404 with no visible tile
+    // ever loading at the auto-fit zoom for a small 5-image dataset.
+    await expect(
+      page.locator('img.leaflet-tile[src*="/titiler/cog/tiles/"]').first(),
+    ).toBeAttached({ timeout: 30_000 })
+    const tilejsonProbe = await request.get(
+      new URL(
+        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(
+          `s3://gemini/Processed/2022/${experiment}/${location}/${population}/${date}/DJI/FC6310S/odm_orthophoto.tif`,
+        )}`,
+        // The /titiler proxy is only available on the dev server; from
+        // Playwright's `request` we hit the dev server's port directly.
+        baseURL,
+      ).toString(),
+    )
+    expect(tilejsonProbe.ok()).toBe(true)
+
     // ── 8. Backend assertion: ODM actually wrote the orthomosaic. ────────
     // Mirrors the Phase 7 spec — confirms the wizard's RUN_ODM payload
     // produced a real artifact, not just a green-looking UI.

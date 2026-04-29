@@ -9,7 +9,6 @@
  * Lost vs main (deferred to future passes):
  *   - Auto-boundary estimation from TIF georeferencing (no GEMINIbase
  *     endpoint).
- *   - Mosaic/orthomosaic background tiles (TiTiler integration deferred).
  *   - Field-design CSV row/col auto-population.
  *   - Stitch-version selection (ground-pipeline territory; R6).
  *
@@ -19,7 +18,9 @@
  * the active version from the same directory.
  */
 import { useEffect, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
+import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -44,6 +45,10 @@ import {
   useSavePlotGeometryVersion,
   type PlotGeometryStateSnapshot,
 } from "@/features/process/hooks/usePlotGeometry"
+import {
+  resolveActiveOrtho,
+  s3UrlForOrtho,
+} from "@/features/process/lib/activeOrtho"
 import { generateGridFeatures } from "@/features/process/lib/grid"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
@@ -52,6 +57,8 @@ import {
   type Run,
 } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
+
+const DEFAULT_BUCKET = "gemini"
 
 export interface PlotBoundaryPrepProps {
   run: Run
@@ -79,6 +86,64 @@ export function PlotBoundaryPrep({
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  // List the processed prefix so buildOrthoVersions can derive the version
+  // list. Same query key shape as OrthoVersionsPanel uses, so a delete from
+  // there invalidates this view.
+  const filesQuery = useQuery({
+    queryKey: ["files", "list", `${DEFAULT_BUCKET}/${directory}`],
+    queryFn: () =>
+      FilesService.apiFilesListFilePathListFiles({
+        filePath: `${DEFAULT_BUCKET}/${directory}`,
+      }),
+  })
+  const activeOrtho = useMemo(
+    () => resolveActiveOrtho(run, scope, filesQuery.data ?? []),
+    [run, scope, filesQuery.data],
+  )
+  const s3Url = activeOrtho ? s3UrlForOrtho(activeOrtho) : null
+
+  // TiTiler 2.0.1 exposes tilejson under /cog/{TMS}/tilejson.json. Asking for
+  // WebMercatorQuad gives us a WGS84 `bounds` array (west, south, east, north)
+  // and a fully-qualified XYZ template in `tiles[0]`. We rewrite TiTiler's
+  // absolute URL onto our /titiler proxy so it works in both dev (vite proxy)
+  // and bundled deployments where TiTiler isn't reachable on :8091.
+  const tilejsonQuery = useQuery({
+    queryKey: ["titiler", "tilejson", s3Url],
+    queryFn: async () => {
+      const res = await fetch(
+        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}`,
+      )
+      if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
+      return res.json() as Promise<{
+        tiles: string[]
+        bounds: [number, number, number, number]
+      }>
+    },
+    enabled: !!s3Url,
+    staleTime: 5 * 60_000,
+  })
+
+  const orthoTileUrl = useMemo(() => {
+    const t = tilejsonQuery.data?.tiles?.[0]
+    if (!t) return undefined
+    // Strip the absolute origin so we go through the /titiler proxy.
+    return t.replace(/^https?:\/\/[^/]+/, "/titiler")
+  }, [tilejsonQuery.data])
+
+  // tilejson bounds: [west, south, east, north] in WGS84.
+  // BoundaryMap wants [[south, west], [north, east]].
+  const orthoBounds = useMemo<
+    [[number, number], [number, number]] | undefined
+  >(() => {
+    const b = tilejsonQuery.data?.bounds
+    if (!b) return undefined
+    const [w, s, e, n] = b
+    return [
+      [s, w],
+      [n, e],
+    ]
+  }, [tilejsonQuery.data])
 
   const loaded = useLoadPlotGeometryVersion(directory, versionToLoad)
   useEffect(() => {
@@ -197,10 +262,22 @@ export function PlotBoundaryPrep({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <BoundaryMap features={features} onFeaturesChange={setFeatures} />
-            <p className="text-muted-foreground mt-2 text-xs">
-              {features.length} feature{features.length === 1 ? "" : "s"} drawn
-            </p>
+            <BoundaryMap
+              features={features}
+              onFeaturesChange={setFeatures}
+              orthoTileUrl={orthoTileUrl}
+              orthoBounds={orthoBounds}
+            />
+            <div className="mt-2 flex items-center justify-between text-xs">
+              <p className="text-muted-foreground">
+                {features.length} feature{features.length === 1 ? "" : "s"} drawn
+              </p>
+              {activeOrtho && tilejsonQuery.isError && (
+                <p className="text-muted-foreground italic">
+                  Couldn't read ortho metadata — drawing on basemap.
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
 
