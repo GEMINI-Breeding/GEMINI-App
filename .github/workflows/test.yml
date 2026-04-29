@@ -153,6 +153,15 @@ jobs:
           docker compose -f docker-compose.yaml logs rest-api
           exit 1
 
+      - name: Bootstrap initial superuser
+        run: |
+          # The e2e suite logs in as GEMINI_FIRST_SUPERUSER on every test.
+          # The compose stack does NOT auto-bootstrap that user; we have to
+          # call `geminibase bootstrap-superuser` ourselves once the API
+          # is healthy. Idempotent: re-bootstraps cleanly on a re-run.
+          docker compose -f docker-compose.yaml exec -T rest-api \
+            geminibase bootstrap-superuser
+
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci --legacy-peer-deps

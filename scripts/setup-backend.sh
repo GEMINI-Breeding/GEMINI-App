@@ -39,6 +39,19 @@ if grep -qE '^GEMINI_JWT_SECRET=$' "$PIPELINE_ENV"; then
     rm -f "${PIPELINE_ENV}.bak"
 fi
 
+# Same trick for the initial superuser. .env.example leaves these blank
+# because real deployments choose their own admin account, but a fresh
+# stack needs SOMETHING for `geminibase bootstrap-superuser` (and for
+# the e2e suite, which logs in as this user on every test) to succeed.
+if grep -qE '^GEMINI_FIRST_SUPERUSER_EMAIL=$' "$PIPELINE_ENV"; then
+    log "Seeding GEMINI_FIRST_SUPERUSER_EMAIL/PASSWORD with dev defaults"
+    sed -i.bak \
+        -e 's|^GEMINI_FIRST_SUPERUSER_EMAIL=$|GEMINI_FIRST_SUPERUSER_EMAIL=admin@gemini.example.com|' \
+        -e 's|^GEMINI_FIRST_SUPERUSER_PASSWORD=$|GEMINI_FIRST_SUPERUSER_PASSWORD=gemini-admin-dev|' \
+        "$PIPELINE_ENV"
+    rm -f "${PIPELINE_ENV}.bak"
+fi
+
 UI_ENV_EXAMPLE="$BACKEND_DIR/gemini-ui/.env.example"
 UI_ENV="$BACKEND_DIR/gemini-ui/.env"
 if [[ -f "$UI_ENV_EXAMPLE" && ! -f "$UI_ENV" ]]; then
