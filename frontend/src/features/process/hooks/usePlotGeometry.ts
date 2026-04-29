@@ -75,12 +75,16 @@ export function useLoadPlotGeometryVersion(
     queryKey: ["plot-geometry", "version", directory, version],
     queryFn: async () => {
       if (!directory) throw new Error("directory required")
+      if (version == null) throw new Error("version required")
       const res = await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion(
         { requestBody: { directory, version } },
       )
       return res as unknown as PlotGeometryVersionLoaded
     },
-    enabled: isLoggedIn() && Boolean(directory),
+    // Only fire when the caller has actually picked a version. Without
+    // this gate the load endpoint 404s on every render where no version
+    // is selected — noisy and breaks the strict-E2E console-error guard.
+    enabled: isLoggedIn() && Boolean(directory) && version != null,
   })
 }
 

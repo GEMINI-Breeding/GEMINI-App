@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useQuery } from "@tanstack/react-query"
 
 import { JobsService, type JobOutput } from "@/client"
-import { ExperimentContext } from "@/contexts/ExperimentContext"
+import { useProcessScope } from "@/features/process/lib/processScope"
+import { findRunByJobId } from "@/features/process/lib/runStore"
 import useAuth from "@/hooks/useAuth"
 import type { Process, ProcessItem } from "@/types/process"
 // Phase 6: ProcessContext subscribes over the new WebSocket-based manager
@@ -108,13 +109,10 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
   // effect below then auto-attaches and the bottom panel + JobDetail
   // resume streaming as if the user had never left.
   //
-  // ExperimentProvider wraps ProcessProvider in main.tsx, so `experimentId`
-  // is normally available. Vitest specs that mount ProcessProvider in
-  // isolation don't wrap in ExperimentProvider — fall back to null in
-  // that case rather than throwing, since the rehydration query is
-  // already auth-gated and a null experimentId just means "rehydrate all
-  // running jobs visible to this user".
-  const experimentId = useOptionalExperimentScope()
+  // useProcessScope is a module-level store (no Provider needed) so it
+  // works the same in app + isolated test mounts. A null experimentId
+  // means "rehydrate all running jobs visible to this user".
+  const { experimentId } = useProcessScope()
   // Gate the rehydration query on `useAuth().user` rather than the raw
   // `isLoggedIn()` check. `isLoggedIn()` only checks for a token's
   // existence, not its validity — a stale or malformed token would
@@ -149,6 +147,13 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         const runId = String(j.id ?? "")
         if (!runId || known.has(runId)) continue
         const detail = (j.progress_detail ?? null) as { stage?: string } | null
+        // Reverse-lookup which Run owns this job so the panel "View" link
+        // drops the user back into the wizard run page rather than a
+        // standalone job detail. After R7 there is no /process/jobs/* route,
+        // so jobs unknown to runStore (e.g. submitted by an old branch) are
+        // silently dropped from rehydration.
+        const owningRun = findRunByJobId(runId)
+        if (!owningRun) continue
         additions.push({
           id: crypto.randomUUID(),
           type: "processing",
@@ -159,7 +164,7 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
           runId,
           progress: typeof j.progress === "number" ? Math.round(j.progress) : 0,
           message: detail?.stage,
-          link: `/process/jobs/${runId}`,
+          link: `/process/${owningRun.workspaceId}/run/${owningRun.id}`,
         })
       }
       if (additions.length === 0) return prev
@@ -256,18 +261,6 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
       {children}
     </ProcessContext.Provider>
   )
-}
-
-/**
- * Read the experiment id from ExperimentProvider if we're inside one,
- * else return null. Avoids requiring every test that mounts
- * ProcessProvider to also wrap in ExperimentProvider. Uses
- * `useContext` directly (no try/catch around hook calls — that would
- * violate React's rules of hooks).
- */
-function useOptionalExperimentScope(): string | null {
-  const ctx = useContext(ExperimentContext)
-  return ctx?.experimentId ?? null
 }
 
 export function useProcess() {

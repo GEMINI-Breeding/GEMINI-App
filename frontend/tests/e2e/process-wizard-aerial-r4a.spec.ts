@@ -1,0 +1,289 @@
+/**
+ * Phase R4a smoke: aerial wizard end-to-end against the real ODM worker.
+ *
+ * Drives the restored Workspace → Pipeline → Run → Steps wizard:
+ *   1. Upload 5 drone images via the Files UI.
+ *   2. Create a workspace bound to a real experiment.
+ *   3. Walk the 3-step pipeline wizard (name → quality → roboflow=skip).
+ *   4. Create a Run, pick its date/platform/sensor in the Run Setup card.
+ *   5. Run the data_sync step → assert step row flips to "completed".
+ *   6. Run the orthomosaic step → assert step row goes "running" → terminal.
+ *   7. Verify the bug fixes from manual testing on 2026-04-28:
+ *        a. Progress log timestamps differ across entries (bug 1).
+ *        b. Step row's status flips off "running" once the WS terminal
+ *           frame arrives — the StepRow's data-status flips and the
+ *           action button label changes from "Running…" to "Re-run"
+ *           (bug 2).
+ *
+ * Strict-E2E (CLAUDE.md):
+ *   - Real upload, real RUN_ODM submission, real wsManager subscription.
+ *   - Asserts user-visible outcome (StepRow status flip, log timestamps).
+ *   - Console-error guard auto-attached via tests/helpers/fixtures.
+ *
+ * Cost: ~3-5 min in steady state (most of it is ODM compute).
+ */
+import { firstSuperuser, firstSuperuserPassword } from "../config"
+import { expect, test } from "../helpers/fixtures"
+import { fixturePath } from "../helpers/fixturePath"
+import {
+  dropFiles,
+  fillUploadForm,
+  navigateToUpload,
+  selectDataType,
+  submitUploadAndWait,
+} from "../helpers/uploadHelpers"
+
+const ODM_TIMEOUT_MS = 15 * 60_000
+
+const DRONE_IMAGES = [
+  "2022-06-27_100MEDIA_DJI_0876.JPG",
+  "2022-06-27_100MEDIA_DJI_0877.JPG",
+  "2022-06-27_100MEDIA_DJI_0878.JPG",
+  "2022-06-27_100MEDIA_DJI_0879.JPG",
+  "2022-06-27_100MEDIA_DJI_0880.JPG",
+]
+
+test.describe("R4a: aerial wizard happy path", () => {
+  test.setTimeout(ODM_TIMEOUT_MS + 3 * 60_000)
+
+  test("upload → workspace → pipeline → run → orthomosaic → step settles", async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("baseURL not configured")
+
+    const stamp = Date.now()
+    const experiment = `pw-r4a-${stamp}`
+    const location = "Davis"
+    const population = "Cowpea"
+    const date = "2022-06-27"
+    const platform = "DJI"
+    const sensor = "FC6310S"
+    const workspaceName = `R4a Workspace ${stamp}`
+    const pipelineName = `R4a Aerial ${stamp}`
+
+    // ── 1. Upload 5 drone images via the Files UI. ───────────────────────
+    await navigateToUpload(page)
+    await selectDataType(page, "Image Data")
+    await fillUploadForm(page, {
+      experiment,
+      location,
+      population,
+      date,
+      platform,
+      sensor,
+    })
+    await dropFiles(
+      page,
+      DRONE_IMAGES.map((n) => fixturePath("images", "drone", n)),
+    )
+    await submitUploadAndWait(page, DRONE_IMAGES.length)
+
+    // ── 2. Create a workspace tied to the just-created experiment. ───────
+    await page.goto("/process")
+    await expect(
+      page.getByRole("heading", { name: /^process$/i }),
+    ).toBeVisible()
+    await page.locator('[data-onboarding="process-new-workspace"]').click()
+    await page.getByLabel(/workspace name/i).fill(workspaceName)
+    await page.getByRole("combobox", { name: /experiment/i }).click()
+    await page.getByRole("option", { name: experiment }).click()
+    await page.getByRole("button", { name: /create workspace/i }).click()
+
+    // The new card is identifiable by its name; click into the workspace.
+    const card = page.getByText(workspaceName, { exact: true })
+    await expect(card).toBeVisible()
+    await card.click()
+
+    // ── 3. Walk the 3-step pipeline wizard (Aerial). ─────────────────────
+    await expect(
+      page.getByRole("heading", { name: workspaceName }),
+    ).toBeVisible()
+    await page
+      .getByRole("button", { name: /create aerial pipeline/i })
+      .click()
+
+    // Step 1: name
+    await page.getByLabel(/pipeline name/i).fill(pipelineName)
+    await page.getByRole("button", { name: /^next$/i }).click()
+
+    // Step 2: default quality (leave on Default), then Next
+    await expect(
+      page.getByText(/default reconstruction quality/i),
+    ).toBeVisible()
+    await page.getByRole("button", { name: /^next$/i }).click()
+
+    // Step 3: leave Roboflow empty, click Create Pipeline
+    await page.getByRole("button", { name: /create pipeline/i }).click()
+
+    // ── 4. Create a Run from the pipeline card. ──────────────────────────
+    await expect(
+      page.getByRole("heading", { name: workspaceName }),
+    ).toBeVisible()
+    await page.getByRole("button", { name: /new run/i }).first().click()
+
+    // Lands on RunDetail. Pick the run's date/platform/sensor in the
+    // Run Setup card. The picker auto-selects the workspace's experiment
+    // because the workspace's defaultScope.experimentId was seeded from
+    // the create dialog.
+    await expect(
+      page.getByText(/run setup/i, { exact: false }).first(),
+    ).toBeVisible()
+    await page.getByTestId("aerial-date-select").click()
+    await page.getByRole("option", { name: date }).click()
+    await page.getByTestId("aerial-platform-select").click()
+    await page.getByRole("option", { name: platform }).click()
+    await page.getByTestId("aerial-sensor-select").click()
+    await page.getByRole("option", { name: sensor }).click()
+
+    await expect(
+      page.getByText(new RegExp(`${DRONE_IMAGES.length} images? found`)),
+    ).toBeVisible({ timeout: 30_000 })
+
+    // ── 5. Run data_sync. Should flip to completed near-instantly. ───────
+    const dataSyncRow = page.getByTestId("step-row-data_sync")
+    await expect(dataSyncRow).toHaveAttribute("data-status", "ready")
+    await dataSyncRow.getByRole("button", { name: /run step/i }).click()
+    await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
+      timeout: 5_000,
+    })
+
+    // ── 6. Submit orthomosaic and wait through the wsManager terminal. ───
+    const orthoRow = page.getByTestId("step-row-orthomosaic")
+    // gcp_selection is optional, so orthomosaic must be "ready" once
+    // data_sync is completed.
+    await expect(orthoRow).toHaveAttribute("data-status", "ready", {
+      timeout: 5_000,
+    })
+    const orthoRunBtn = orthoRow.getByRole("button", { name: /run step/i })
+    await orthoRunBtn.click()
+
+    // Status flips to "running" almost immediately (RUN_ODM submission
+    // returns a job id, runApi.appendStepJobId flips status, the
+    // useEffect picks up the new running step and subscribes to WS).
+    await expect(orthoRow).toHaveAttribute("data-status", "running", {
+      timeout: 30_000,
+    })
+
+    // Bottom ProcessPanel registers the orthomosaic process.
+    await expect(
+      page.locator(`text=orthomosaic — ${pipelineName}`).first(),
+    ).toBeVisible({ timeout: 30_000 })
+
+    // ── 7. Wait for terminal — bug 2 reproduction surface. ──────────────
+    // The pre-fix bug left data-status="running" forever even after the
+    // WS reported COMPLETED. The expectation below would have failed
+    // until setStepState was wired into the terminal-event branch.
+    await expect(orthoRow).toHaveAttribute("data-status", "completed", {
+      timeout: ODM_TIMEOUT_MS,
+    })
+
+    // Action button label flips from "Running…" to "Re-run" on the
+    // completed step (and is no longer disabled).
+    const reRunBtn = orthoRow.getByRole("button", { name: /^re-run$/i })
+    await expect(reRunBtn).toBeVisible()
+    await expect(reRunBtn).toBeEnabled()
+
+    // ── R4b assertion: OrthoVersionsPanel renders with v1 row. ──────────
+    // Sanity-check that the version table appears under the completed
+    // step and lists the just-produced ortho. The synthesized v1 entry
+    // exists because RUN_ODM landed an `odm_orthophoto.tif` even before
+    // we saved any rename metadata.
+    const orthoPanel = orthoRow.getByTestId("ortho-versions-panel")
+    await expect(orthoPanel).toBeVisible({ timeout: 30_000 })
+    await expect(
+      orthoPanel.getByTestId("ortho-version-row-1"),
+    ).toBeVisible({ timeout: 30_000 })
+
+    // ── R4c assertion: trait_extraction step row is gated by boundaries. ─
+    // plot_boundary_prep is a non-optional prereq, so trait_extraction's
+    // row stays in "locked" status with a disabled Run Step button until
+    // the user completes plot_boundary_prep.
+    const traitRow = page.getByTestId("step-row-trait_extraction")
+    await expect(traitRow).toHaveAttribute("data-status", "locked")
+    await expect(traitRow.getByRole("button", { name: /run step/i })).toBeDisabled()
+
+    // ── 7a. Bug 1 reproduction surface: log timestamps must differ. ─────
+    // Expand the completed log via the chevron toggle (only present on
+    // completed rows in the StepRow). The progress log entries each
+    // carry data-timestamp set at WS arrival time; if all entries share
+    // a timestamp the bug is back.
+    //
+    // Done BEFORE the R5a tool-route assertion below because Open Tool
+    // navigates the page; orthoRow is only resolvable on the run page.
+    await orthoRow
+      .getByRole("button", { name: /expand details/i })
+      .click()
+    const logEntries = orthoRow.getByTestId("progress-log-entry")
+    const entryCount = await logEntries.count()
+    expect(entryCount).toBeGreaterThan(1)
+    const timestamps = new Set<string>()
+    for (let i = 0; i < entryCount; i++) {
+      const ts = await logEntries.nth(i).getAttribute("data-timestamp")
+      if (ts) timestamps.add(ts)
+    }
+    // ODM emits progress over many seconds; expect more than one distinct
+    // arrival timestamp. Tolerant assertion: even if some chunks arrive
+    // in the same millisecond, the start frame is synthesized at
+    // subscribe time and any later progress frame must differ.
+    expect(
+      timestamps.size,
+      `progress log timestamps should differ across entries; got ${timestamps.size} distinct values from ${entryCount} entries`,
+    ).toBeGreaterThan(1)
+
+    // ── R5a assertion: plot_boundary_prep tool route renders. ───────────
+    // Click "Open Tool" on plot_boundary_prep. RunTool dispatches to the
+    // restored PlotBoundaryPrep component, which renders the Save and
+    // Generate Grid affordances. End-to-end polygon drawing requires
+    // pixel-perfect mouse events on Leaflet — that's covered by manual
+    // testing and the component-level unit test. The e2e just confirms
+    // the dispatch and primary controls are present. Done LAST because
+    // navigating to the tool page makes orthoRow / step rows above
+    // unreachable.
+    const boundaryRow = page.getByTestId("step-row-plot_boundary_prep")
+    await expect(boundaryRow).toHaveAttribute("data-status", "ready")
+    await boundaryRow.getByRole("button", { name: /open tool/i }).click()
+    await expect(
+      page.getByRole("heading", { name: /plot boundary prep/i }),
+    ).toBeVisible()
+    await expect(page.getByTestId("boundary-rows")).toBeVisible()
+    await expect(page.getByTestId("boundary-cols")).toBeVisible()
+    await expect(
+      page.getByTestId("boundary-save-and-complete"),
+    ).toBeDisabled() // disabled until the user draws a polygon
+
+    // ── 8. Backend assertion: ODM actually wrote the orthomosaic. ────────
+    // Mirrors the Phase 7 spec — confirms the wizard's RUN_ODM payload
+    // produced a real artifact, not just a green-looking UI.
+    const tokenRes = await request.post(
+      new URL("/api/users/login/access-token", baseURL).toString(),
+      {
+        data: { email: firstSuperuser, password: firstSuperuserPassword },
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+    expect(tokenRes.ok()).toBe(true)
+    const { access_token } = (await tokenRes.json()) as { access_token: string }
+
+    const processedPrefix = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const listRes = await request.get(
+      new URL(
+        `/api/files/list/gemini/${processedPrefix}`,
+        baseURL,
+      ).toString(),
+      { headers: { Authorization: `Bearer ${access_token}` } },
+    )
+    expect(listRes.ok()).toBe(true)
+    const files = (await listRes.json()) as Array<{ object_name: string }>
+    const orthoNames = files
+      .map((f) => f.object_name ?? "")
+      .filter((n) => n.endsWith("odm_orthophoto.tif"))
+    expect(
+      orthoNames.length,
+      `expected odm_orthophoto.tif under ${processedPrefix}, got ${JSON.stringify(
+        files.map((f) => f.object_name),
+      )}`,
+    ).toBeGreaterThan(0)
+  })
+})

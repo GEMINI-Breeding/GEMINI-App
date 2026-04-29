@@ -1,26 +1,30 @@
 /**
- * AerialScopePicker — shared scope picker for the Phase-7 aerial pipeline.
+ * AerialScopePicker — shared scope picker for the Process tool pages.
  *
- * The experiment / season / site / population side comes from the global
- * ExperimentSelector (sidebar). Each Phase-7 tool additionally needs:
- *   - date (per-flight date, "YYYY-MM-DD")
- *   - platform (e.g. "Drone")
- *   - sensor (e.g. "RGB")
+ * Owns the full scope locally (no global sidebar dependency):
+ *   - experiment / season / site / population — from useProcessScope, a
+ *     localStorage-backed store shared by every Process tool page so that
+ *     navigating between Orthomosaic / Boundaries / Split / Traits / Inference
+ *     keeps the same scope across tabs and reloads.
+ *   - date / platform / sensor — controlled by the parent tool page (these
+ *     vary mission-to-mission and the user often runs RUN_ODM for one date
+ *     while inspecting SPLIT_ORTHOMOSAIC for another).
  *
- * These three live as local state on each tool page rather than the global
- * scope, because they vary mission-to-mission and the user often runs
- * RUN_ODM for one date while looking at SPLIT_ORTHOMOSAIC for another.
- *
- * The component is "controlled" — the parent owns the values and hands them
- * back from the worker calls.
+ * The override fields below are escape hatches for path components when the
+ * data on disk doesn't have a matching entity row in the DB.
  */
-import { useExperimentScope } from "@/contexts/ExperimentContext"
+import { useEffect, useMemo } from "react"
+
+import type { ExperimentOutput } from "@/client"
+import { useProcessScope } from "@/features/process/lib/processScope"
 import {
   useExperimentPopulations,
   useExperimentSeasons,
   useExperimentSites,
   useAllExperiments,
+  useMyExperimentIds,
 } from "@/features/experiments/hooks/useExperimentData"
+import useAuth from "@/hooks/useAuth"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -61,7 +65,7 @@ export const COMMON_PLATFORMS = ["Drone", "Amiga", "RoverM2", "DJI"] as const
 export const COMMON_SENSORS = ["RGB", "Thermal", "Multispectral", "LiDAR", "FC6310S"] as const
 
 export function useAerialScopeContext(): AerialScopeContext {
-  const { experimentId, seasonId, siteId, populationId } = useExperimentScope()
+  const { experimentId, seasonId, siteId, populationId } = useProcessScope()
   const { data: experiments = [] } = useAllExperiments()
   const { data: seasons = [] } = useExperimentSeasons(experimentId)
   const { data: sites = [] } = useExperimentSites(experimentId)
@@ -102,6 +106,236 @@ export function buildAerialScope(
   }
 }
 
+function filterVisible(
+  all: ExperimentOutput[],
+  myIds: string[],
+  isSuperuser: boolean,
+): ExperimentOutput[] {
+  if (isSuperuser) return all
+  const mySet = new Set(myIds)
+  return all.filter((e) => e.id != null && mySet.has(String(e.id)))
+}
+
+/**
+ * Process-scope selectors: experiment / season / site / population.
+ *
+ * Renders inline above the date / platform / sensor row in the picker. Reads
+ * from useProcessScope (the localStorage-backed Process-only scope store) so
+ * the selection persists across Process tool tabs and reloads.
+ *
+ * Auto-picks the first visible experiment on mount if none is set yet, and
+ * auto-picks any single-option child selector — same UX the deleted sidebar
+ * ScopeChildSelectors offered.
+ */
+export function ProcessScopeSelectors() {
+  const { user, isUserLoading } = useAuth()
+  const {
+    experimentId,
+    setExperimentId,
+    seasonId,
+    setSeasonId,
+    siteId,
+    setSiteId,
+    populationId,
+    setPopulationId,
+  } = useProcessScope()
+  const isSuperuser = Boolean(user?.is_superuser)
+
+  const { data: all, isLoading: loadingAll } = useAllExperiments()
+  const { data: myIds, isLoading: loadingMyIds } = useMyExperimentIds()
+  const { data: seasons = [], isLoading: loadingSeasons } = useExperimentSeasons(experimentId)
+  const { data: sites = [], isLoading: loadingSites } = useExperimentSites(experimentId)
+  const { data: populations = [], isLoading: loadingPopulations } =
+    useExperimentPopulations(experimentId)
+
+  const stillLoadingExperiments =
+    loadingAll || isUserLoading || (!isSuperuser && loadingMyIds)
+
+  const visible = useMemo(
+    () => filterVisible(all ?? [], myIds ?? [], isSuperuser),
+    [all, myIds, isSuperuser],
+  )
+
+  // Auto-select the first visible experiment if none is set, mirroring the
+  // deleted sidebar ExperimentSelector. Also re-fire if the stored
+  // experimentId no longer matches a visible row.
+  useEffect(() => {
+    if (visible.length === 0) return
+    const match = experimentId
+      ? visible.find((e) => String(e.id) === experimentId)
+      : null
+    if (!match && visible[0].id != null) {
+      setExperimentId(String(visible[0].id))
+    }
+  }, [experimentId, visible, setExperimentId])
+
+  // Auto-pick the only child option to save the user a click.
+  useEffect(() => {
+    if (!seasonId && seasons.length === 1 && seasons[0].id != null) {
+      setSeasonId(String(seasons[0].id))
+    }
+  }, [seasonId, seasons, setSeasonId])
+  useEffect(() => {
+    if (!siteId && sites.length === 1 && sites[0].id != null) {
+      setSiteId(String(sites[0].id))
+    }
+  }, [siteId, sites, setSiteId])
+  useEffect(() => {
+    if (!populationId && populations.length === 1 && populations[0].id != null) {
+      setPopulationId(String(populations[0].id))
+    }
+  }, [populationId, populations, setPopulationId])
+
+  const seasonOptions = (seasons ?? [])
+    .filter((s) => s.id != null)
+    .map((s) => ({ id: String(s.id), name: s.season_name ?? "(unnamed)" }))
+  const siteOptions = (sites ?? [])
+    .filter((s) => s.id != null)
+    .map((s) => ({ id: String(s.id), name: s.site_name ?? "(unnamed)" }))
+  const populationOptions = (populations ?? [])
+    .filter((p) => p.id != null)
+    .map((p) => ({ id: String(p.id), name: p.population_name ?? "(unnamed)" }))
+
+  return (
+    <div className="grid grid-cols-4 gap-3">
+      <div>
+        <Label htmlFor="process-experiment" className="mb-1.5 text-xs">
+          Experiment
+        </Label>
+        {stillLoadingExperiments ? (
+          <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            Loading…
+          </p>
+        ) : visible.length === 0 ? (
+          <p
+            data-testid="process-experiment-empty"
+            className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+          >
+            No experiments yet — create one via Files upload.
+          </p>
+        ) : (
+          <Select
+            value={experimentId ?? undefined}
+            onValueChange={(v) => setExperimentId(v || null)}
+          >
+            <SelectTrigger
+              id="process-experiment"
+              data-testid="process-experiment-select"
+            >
+              <SelectValue placeholder="Select experiment" />
+            </SelectTrigger>
+            <SelectContent>
+              {visible.map((e) => (
+                <SelectItem key={String(e.id)} value={String(e.id)}>
+                  {e.experiment_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+      <div>
+        <Label htmlFor="process-season" className="mb-1.5 text-xs">
+          Season
+        </Label>
+        <Select
+          value={seasonId ?? undefined}
+          onValueChange={(v) => setSeasonId(v || null)}
+          disabled={!experimentId || loadingSeasons || seasonOptions.length === 0}
+        >
+          <SelectTrigger id="process-season" data-testid="process-season-select">
+            <SelectValue
+              placeholder={
+                !experimentId
+                  ? "Pick experiment first"
+                  : loadingSeasons
+                    ? "Loading…"
+                    : seasonOptions.length === 0
+                      ? "None registered"
+                      : "Select season"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {seasonOptions.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="process-site" className="mb-1.5 text-xs">
+          Site
+        </Label>
+        <Select
+          value={siteId ?? undefined}
+          onValueChange={(v) => setSiteId(v || null)}
+          disabled={!experimentId || loadingSites || siteOptions.length === 0}
+        >
+          <SelectTrigger id="process-site" data-testid="process-site-select">
+            <SelectValue
+              placeholder={
+                !experimentId
+                  ? "Pick experiment first"
+                  : loadingSites
+                    ? "Loading…"
+                    : siteOptions.length === 0
+                      ? "None registered"
+                      : "Select site"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {siteOptions.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="process-population" className="mb-1.5 text-xs">
+          Population
+        </Label>
+        <Select
+          value={populationId ?? undefined}
+          onValueChange={(v) => setPopulationId(v || null)}
+          disabled={
+            !experimentId || loadingPopulations || populationOptions.length === 0
+          }
+        >
+          <SelectTrigger
+            id="process-population"
+            data-testid="process-population-select"
+          >
+            <SelectValue
+              placeholder={
+                !experimentId
+                  ? "Pick experiment first"
+                  : loadingPopulations
+                    ? "Loading…"
+                    : populationOptions.length === 0
+                      ? "None registered"
+                      : "Select population"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {populationOptions.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
 export function AerialScopePicker({
   value,
   onChange,
@@ -133,6 +367,7 @@ export function AerialScopePicker({
 
   return (
     <div className="space-y-3">
+      <ProcessScopeSelectors />
       <div className="grid grid-cols-3 gap-3">
         <div>
           <Label htmlFor="aerial-date" className="mb-1.5 text-xs">
@@ -143,7 +378,7 @@ export function AerialScopePicker({
               data-testid="aerial-date-empty"
               className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
             >
-              Pick experiment / site / population in the sidebar first.
+              Pick experiment / site / population above first.
             </p>
           ) : (
             <Select
@@ -266,7 +501,7 @@ export function AerialScopePicker({
             </Label>
             <Input
               id="aerial-experiment"
-              placeholder="(uses sidebar experiment)"
+              placeholder="(uses scope experiment)"
               value={value.experimentOverride ?? ""}
               onChange={(e) => onChange({ ...value, experimentOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
@@ -277,7 +512,7 @@ export function AerialScopePicker({
             </Label>
             <Input
               id="aerial-location"
-              placeholder="(uses sidebar site)"
+              placeholder="(uses scope site)"
               value={value.locationOverride ?? ""}
               onChange={(e) => onChange({ ...value, locationOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
@@ -288,7 +523,7 @@ export function AerialScopePicker({
             </Label>
             <Input
               id="aerial-population"
-              placeholder="(uses sidebar population)"
+              placeholder="(uses scope population)"
               value={value.populationOverride ?? ""}
               onChange={(e) => onChange({ ...value, populationOverride: e.target.value, date: "", platform: "", sensor: "" })}
             />
