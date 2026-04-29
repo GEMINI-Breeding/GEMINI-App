@@ -74,7 +74,7 @@ export function PlotMarker({ onCancel }: PlotMarkerProps) {
         <div className="flex items-center justify-end pt-2">
           {onCancel && (
             <Button variant="outline" onClick={onCancel}>
-              Back to run
+              Close
             </Button>
           )}
         </div>

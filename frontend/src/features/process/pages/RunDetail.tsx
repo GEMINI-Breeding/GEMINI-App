@@ -1222,7 +1222,11 @@ export function RunDetail() {
           </Button>
         </div>
 
-        {pipeline?.type === "aerial" && (
+        {/* Both aerial + ground pipelines need a flight scope (date /
+            platform / sensor) to find raw images at the right MinIO
+            prefix. The ground pipeline path naming is the same as the
+            aerial one — `rawImagesPrefix(scope)` works for both. */}
+        {(pipeline?.type === "aerial" || pipeline?.type === "ground") && (
           <div className="mb-6 space-y-4">
             <RunSetupCard fields={aerialFields} onChange={setAerialFields} />
             <Card>

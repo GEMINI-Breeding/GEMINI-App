@@ -109,7 +109,7 @@ test.describe("R6: ground pipeline wiring (what's possible)", () => {
     await expect(
       page.getByText(/depends on backend endpoints not yet shipped/i),
     ).toBeVisible()
-    await page.getByRole("button", { name: /back to run/i }).click()
+    await page.getByRole("button", { name: /^close$/i }).click()
 
     // Mark plot_marking as skipped through runStore directly so we can
     // test the stitching gating downstream. The wizard treats

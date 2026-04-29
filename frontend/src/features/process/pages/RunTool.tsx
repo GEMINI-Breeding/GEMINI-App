@@ -34,6 +34,7 @@ const STEP_LABELS: Record<string, string> = {
   plot_marking: "Plot Marking",
   gcp_selection: "GCP Selection",
   plot_boundary_prep: "Plot Boundary Prep",
+  edge_crop: "Edge Crop",
   inference: "Inference",
 }
 
@@ -44,6 +45,8 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
     "Select each ground control point in a drone image and mark its pixel location.",
   plot_boundary_prep:
     "Draw the outer field boundary, configure plot grid dimensions, and save as a versioned plot-boundary record.",
+  edge_crop:
+    "Configure the per-side pixel margin AgRowStitch trims from each input image before matching features.",
   inference:
     "Run Roboflow detection or segmentation on plot images and view results.",
 }
