@@ -51,6 +51,13 @@ export default defineConfig({
     {
       name: 'e2e-workflows',
       testDir: './tests/e2e',
+      // Force serial execution: the chunked-upload state is REST-API-process-
+      // local (in-memory dict + /tmp tempfiles per task_plan.md Phase 5/15),
+      // so concurrent uploads from parallel specs collide and surface as
+      // 500s on /api/files/upload_chunk. Once that state moves to Redis we
+      // can drop this back to fullyParallel.
+      fullyParallel: false,
+      workers: 1,
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/e2e-user.json',
