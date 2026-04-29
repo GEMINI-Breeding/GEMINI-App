@@ -1,31 +1,30 @@
 /**
  * Chunked upload primitive for the GEMINIbase file-storage contract.
  *
- * The old FastAPI backend had a single-shot `/api/v1/files/copy-local-stream`
- * that took absolute server-side paths (Tauri-only — only worked when the
- * backend and frontend shared a filesystem). The new GEMINIbase model is
- * pure-HTTP: the browser slices a File into chunks and posts them one at a
- * time; the backend assembles them on MinIO.
+ * Each HTTP chunk maps 1-to-1 onto an S3 multipart-upload part on MinIO. The
+ * backend never buffers the file through local disk — it streams each chunk
+ * straight into a MinIO part and asks MinIO to assemble on the final chunk.
  *
- * Endpoints (see gemini/rest_api/controllers/files.py):
+ * Endpoints (see backend/gemini/rest_api/controllers/files.py):
  *   POST /api/files/upload_chunk           — multipart: file_chunk, chunk_index,
  *                                            total_chunks, file_identifier,
  *                                            object_name, bucket_name?
- *   POST /api/files/check_uploaded_chunks  — returns which chunk indices are
- *                                            already uploaded; supports resume
+ *   POST /api/files/check_uploaded_chunks  — JSON {file_identifier, total_chunks};
+ *                                            returns uploaded_part_numbers (1-indexed)
+ *                                            so the client can resume out-of-order.
+ *   POST /api/files/abort_upload           — JSON {file_identifier}; aborts the
+ *                                            in-progress S3 multipart upload.
  *
- * For .bin uploads the caller then submits a JOB_TYPE=EXTRACT_BINARY via
- * POST /api/jobs/submit and subscribes to the WS progress. The progress-side
- * dance is handled by `src/lib/wsManager.ts`.
- *
- * This primitive is deliberately minimal: it uploads *one* file with progress
- * callbacks. Higher-level flows (multi-file queue, UI process-panel wiring,
- * retries across browser refreshes) belong in the feature layer (Phase 5).
+ * Chunks for one file upload in parallel with bounded concurrency, since S3
+ * parts are independent. Resume is random-access: the client diffs the
+ * server's reported part numbers against {1..totalChunks} and re-sends the
+ * missing ones.
  */
 import { OpenAPI } from "@/client/core/OpenAPI"
 import { getToken } from "@/lib/auth"
 
-const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024 // 5 MiB
+const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024 // 8 MiB (>= S3 5 MiB minimum)
+const DEFAULT_PARALLEL_PARTS = 4
 
 export type ChunkedUploadProgress = {
   /** Bytes uploaded so far across all chunks (including already-resumed ones). */
@@ -45,7 +44,7 @@ export type ChunkedUploadOptions = {
   file: File | Blob
   /**
    * Stable identifier for this upload. If the user retries the same file the
-   * backend will skip chunks already stored under this identifier — so reuse
+   * backend will skip parts already stored under this identifier — so reuse
    * the same string (e.g. a hash) across retries to resume.
    */
   fileIdentifier: string
@@ -53,8 +52,10 @@ export type ChunkedUploadOptions = {
   objectName: string
   /** MinIO bucket; defaults to the stack's GEMINI_STORAGE_BUCKET_NAME. */
   bucketName?: string
-  /** Bytes per chunk. Defaults to 5 MiB. */
+  /** Bytes per chunk. Defaults to 8 MiB; must be >= 5 MiB for S3 multipart. */
   chunkSize?: number
+  /** Max chunks of this file in flight at once. Defaults to 4. */
+  parallelParts?: number
   /** Progress callback fired after each successful chunk. */
   onProgress?: (p: ChunkedUploadProgress) => void
   /** Abort signal — chunks stop being posted once this is aborted. */
@@ -73,10 +74,10 @@ function resolveApiUrl(path: string): string {
   return base ? `${base}${path}` : path
 }
 
-async function checkUploadedChunkCount(
+async function checkUploadedPartNumbers(
   fileIdentifier: string,
   totalChunks: number,
-): Promise<number> {
+): Promise<Set<number>> {
   const url = resolveApiUrl("/api/files/check_uploaded_chunks")
   const token = getToken()
   const resp = await fetch(url, {
@@ -90,16 +91,32 @@ async function checkUploadedChunkCount(
       total_chunks: totalChunks,
     }),
   })
-  if (!resp.ok) return 0
+  if (!resp.ok) return new Set()
   try {
-    // The backend returns `uploaded_chunks` as a count, not a list of indices,
-    // so we can only resume contiguous prefixes. That matches how the chunk
-    // upload endpoint processes them anyway: chunk_index N requires N−1 to
-    // already be present.
-    const body = (await resp.json()) as { uploaded_chunks?: number }
-    return typeof body.uploaded_chunks === "number" ? body.uploaded_chunks : 0
+    const body = (await resp.json()) as { uploaded_part_numbers?: number[] }
+    return new Set(body.uploaded_part_numbers ?? [])
   } catch {
-    return 0
+    return new Set()
+  }
+}
+
+/**
+ * Cancel an in-progress multipart upload server-side. Safe to call after the
+ * upload has already finished or aborted — the backend treats it as a no-op.
+ */
+export async function abortUpload(fileIdentifier: string): Promise<void> {
+  const token = getToken()
+  try {
+    await fetch(resolveApiUrl("/api/files/abort_upload"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ file_identifier: fileIdentifier }),
+    })
+  } catch {
+    // Best-effort cleanup; nothing the caller can do if this fails.
   }
 }
 
@@ -144,9 +161,11 @@ async function uploadOneChunk({
 }
 
 /**
- * Upload a single file chunk-by-chunk to MinIO via the GEMINIbase REST API.
- * Automatically skips already-uploaded chunks when the same fileIdentifier
- * is reused (resume-after-retry).
+ * Upload a single file to MinIO via the GEMINIbase chunked-upload protocol.
+ *
+ * Splits the file into N >=5 MiB chunks and uploads them as S3 multipart parts
+ * in parallel. Already-uploaded parts (reported by the server) are skipped, so
+ * passing the same fileIdentifier across retries resumes where it left off.
  */
 export async function uploadFileChunked(
   opts: ChunkedUploadOptions,
@@ -157,42 +176,78 @@ export async function uploadFileChunked(
     objectName,
     bucketName,
     chunkSize = DEFAULT_CHUNK_SIZE,
+    parallelParts = DEFAULT_PARALLEL_PARTS,
     onProgress,
     signal,
   } = opts
 
   const total = file.size
   const totalChunks = Math.max(1, Math.ceil(total / chunkSize))
-  const alreadyCount = await checkUploadedChunkCount(fileIdentifier, totalChunks)
+  const alreadyUploaded = await checkUploadedPartNumbers(fileIdentifier, totalChunks)
 
-  let uploaded = Math.min(total, alreadyCount * chunkSize)
-
-  for (let i = 0; i < totalChunks; i++) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
-    if (i < alreadyCount) continue
-
-    const start = i * chunkSize
+  let uploaded = 0
+  for (const partNumber of alreadyUploaded) {
+    if (partNumber < 1 || partNumber > totalChunks) continue
+    const start = (partNumber - 1) * chunkSize
     const end = Math.min(start + chunkSize, total)
-    const chunk = file.slice(start, end)
+    uploaded += end - start
+  }
 
-    await uploadOneChunk({
-      chunk,
-      chunkIndex: i,
-      totalChunks,
-      fileIdentifier,
-      objectName,
-      bucketName,
-      signal,
-    })
+  // Build the list of chunk indices that still need to be sent.
+  const pending: number[] = []
+  for (let i = 0; i < totalChunks; i++) {
+    if (!alreadyUploaded.has(i + 1)) pending.push(i)
+  }
 
-    uploaded = Math.min(total, uploaded + (end - start))
-    onProgress?.({
-      uploaded,
-      total,
-      fraction: total > 0 ? uploaded / total : 1,
-      chunkIndex: i,
-      totalChunks,
-    })
+  let cursor = 0
+  let firstError: unknown = null
+
+  async function worker() {
+    while (true) {
+      if (firstError) return
+      if (signal?.aborted) return
+      const idx = cursor++
+      if (idx >= pending.length) return
+      const chunkIndex = pending[idx]
+      const start = chunkIndex * chunkSize
+      const end = Math.min(start + chunkSize, total)
+      const chunk = file.slice(start, end)
+      try {
+        await uploadOneChunk({
+          chunk,
+          chunkIndex,
+          totalChunks,
+          fileIdentifier,
+          objectName,
+          bucketName,
+          signal,
+        })
+      } catch (err) {
+        if (!firstError) firstError = err
+        return
+      }
+      uploaded = Math.min(total, uploaded + (end - start))
+      onProgress?.({
+        uploaded,
+        total,
+        fraction: total > 0 ? uploaded / total : 1,
+        chunkIndex,
+        totalChunks,
+      })
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, parallelParts), pending.length || 1)
+  const workers = Array.from({ length: workerCount }, () => worker())
+  await Promise.all(workers)
+
+  if (signal?.aborted) {
+    abortUpload(fileIdentifier).catch(() => {})
+    throw new DOMException("Aborted", "AbortError")
+  }
+  if (firstError) {
+    abortUpload(fileIdentifier).catch(() => {})
+    throw firstError
   }
 
   return { objectName, bucketName, bytes: total, chunkCount: totalChunks }

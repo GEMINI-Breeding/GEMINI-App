@@ -4,9 +4,10 @@
  * Mocks global fetch so we verify:
  *   - the number of chunks derived from chunkSize + file size
  *   - the multipart bodies sent per chunk (chunk_index, total_chunks, ids)
- *   - resume: check_uploaded_chunks pre-call, skip already-uploaded indices
- *   - abort via AbortSignal
- *   - onProgress reports monotonic uploaded bytes and fraction
+ *   - resume: check_uploaded_chunks pre-call, skip part numbers reported by the server
+ *   - parallel chunk uploads when parallelParts > 1
+ *   - abort via AbortSignal also POSTs /abort_upload
+ *   - onProgress reports monotonic uploaded bytes
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -18,7 +19,7 @@ type FetchCall = {
   body: FormData | string | undefined
 }
 
-function mockFetch(impl: (call: FetchCall) => Response): FetchCall[] {
+function mockFetch(impl: (call: FetchCall) => Promise<Response> | Response): FetchCall[] {
   const calls: FetchCall[] = []
   global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const call: FetchCall = {
@@ -51,7 +52,7 @@ describe("uploadFileChunked", () => {
     const calls = mockFetch((c) => {
       if (c.url.includes("check_uploaded_chunks")) {
         return new Response(
-          JSON.stringify({ uploaded_chunks: 0, total_chunks: 3, complete: false }),
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 3, complete: false }),
           { status: 200 },
         )
       }
@@ -63,6 +64,7 @@ describe("uploadFileChunked", () => {
       fileIdentifier: "fid-1",
       objectName: "bucket/path/test.bin",
       chunkSize: 1000,
+      parallelParts: 1,
       onProgress: (p) => progress.push(p.uploaded),
     })
 
@@ -76,20 +78,19 @@ describe("uploadFileChunked", () => {
       expect(c.method).toBe("POST")
       expect(c.body).toBeInstanceOf(FormData)
     }
-    // uploaded is non-decreasing
     for (let i = 1; i < progress.length; i++) {
       expect(progress[i]).toBeGreaterThanOrEqual(progress[i - 1])
     }
-    // final uploaded equals total
     expect(progress[progress.length - 1]).toBe(2500)
   })
 
-  it("resumes by skipping already-uploaded chunks reported by the server", async () => {
+  it("resumes by skipping the part numbers the server reports", async () => {
     const file = makeFile(3000)
     const calls = mockFetch((c) => {
       if (c.url.includes("check_uploaded_chunks")) {
+        // Server already has parts 1 and 3 (1-indexed). Only part 2 (chunk_index 1) should be re-sent.
         return new Response(
-          JSON.stringify({ uploaded_chunks: 2, total_chunks: 3, complete: false }),
+          JSON.stringify({ uploaded_part_numbers: [1, 3], total_chunks: 3, complete: false }),
           { status: 200 },
         )
       }
@@ -100,43 +101,88 @@ describe("uploadFileChunked", () => {
       fileIdentifier: "fid-2",
       objectName: "bucket/path/test.bin",
       chunkSize: 1000,
+      parallelParts: 1,
     })
-    // One upload_chunk (index 2) only; index 0 and 1 were already on the server.
     const uploadCalls = calls.filter((c) => c.url.includes("upload_chunk"))
     expect(uploadCalls).toHaveLength(1)
+    const form = uploadCalls[0].body as FormData
+    expect(form.get("chunk_index")).toBe("1")
     expect(result.chunkCount).toBe(3)
   })
 
-  it("stops early when the AbortSignal fires", async () => {
-    const file = makeFile(3000)
-    mockFetch((c) => {
+  it("uploads multiple chunks in parallel when parallelParts > 1", async () => {
+    const file = makeFile(4000) // 4 chunks of 1000
+    let inFlight = 0
+    let maxInFlight = 0
+    const calls = mockFetch(async (c) => {
       if (c.url.includes("check_uploaded_chunks")) {
         return new Response(
-          JSON.stringify({ uploaded_chunks: 0, total_chunks: 3 }),
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 4, complete: false }),
           { status: 200 },
         )
       }
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      // Yield to the event loop so concurrent calls can pile up.
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
       return new Response("{}", { status: 201 })
     })
-    const controller = new AbortController()
-    const promise = uploadFileChunked({
+    await uploadFileChunked({
       file,
-      fileIdentifier: "fid-3",
-      objectName: "bucket/x",
+      fileIdentifier: "fid-par",
+      objectName: "bucket/par.bin",
       chunkSize: 1000,
-      signal: controller.signal,
-      onProgress: () => controller.abort(), // abort after first chunk lands
+      parallelParts: 3,
     })
-    await expect(promise).rejects.toThrowError(/abort/i)
+    expect(maxInFlight).toBeGreaterThanOrEqual(2)
+    expect(calls.filter((c) => c.url.includes("upload_chunk"))).toHaveLength(4)
+  })
+
+  it("posts /abort_upload and rejects when the AbortSignal fires", async () => {
+    const file = makeFile(3000)
+    const controller = new AbortController()
+    const calls = mockFetch(async (c) => {
+      if (c.url.includes("check_uploaded_chunks")) {
+        return new Response(
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 3 }),
+          { status: 200 },
+        )
+      }
+      if (c.url.includes("abort_upload")) {
+        return new Response("{}", { status: 200 })
+      }
+      // Abort partway through the chunk uploads.
+      controller.abort()
+      // Mimic fetch's behaviour when the signal is aborted mid-flight.
+      throw new DOMException("Aborted", "AbortError")
+    })
+    await expect(
+      uploadFileChunked({
+        file,
+        fileIdentifier: "fid-3",
+        objectName: "bucket/x",
+        chunkSize: 1000,
+        parallelParts: 1,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow()
+    // Wait a microtask so the best-effort abort_upload fetch is observed.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(calls.some((c) => c.url.includes("abort_upload"))).toBe(true)
   })
 
   it("rethrows the chunk-server error when a chunk POST fails", async () => {
     const file = makeFile(1000)
     mockFetch((c) => {
       if (c.url.includes("check_uploaded_chunks")) {
-        return new Response(JSON.stringify({ uploaded_chunks: 0, total_chunks: 1 }), {
-          status: 200,
-        })
+        return new Response(
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 1 }),
+          { status: 200 },
+        )
+      }
+      if (c.url.includes("abort_upload")) {
+        return new Response("{}", { status: 200 })
       }
       return new Response("boom", { status: 500 })
     })
@@ -146,6 +192,7 @@ describe("uploadFileChunked", () => {
         fileIdentifier: "fid-4",
         objectName: "bucket/x",
         chunkSize: 1000,
+        parallelParts: 1,
       }),
     ).rejects.toThrowError(/500/)
   })
