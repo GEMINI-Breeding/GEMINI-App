@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   autoDetect,
@@ -49,6 +48,8 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
   const [mapping, setMapping] = useState<Partial<Record<FdTargetKey, string>>>(
     {},
   )
+  const [fileName, setFileName] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { showErrorToast } = useCustomToast()
 
   function reset() {
@@ -56,6 +57,8 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
     setHeaders([])
     setParsedRows([])
     setMapping({})
+    setFileName(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   function handleClose() {
@@ -66,6 +69,7 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    setFileName(file.name)
     const reader = new FileReader()
     reader.onload = (ev) => {
       const text = (ev.target?.result as string) ?? ""
@@ -122,15 +126,33 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
 
         {step === "upload" && (
           <div className="space-y-3">
-            <Label htmlFor="fd-file">Select CSV file</Label>
-            <Input
-              id="fd-file"
-              data-testid="field-design-file"
-              type="file"
-              accept=".csv,text/csv"
-              className="mt-1"
-              onChange={handleFileChange}
-            />
+            <Label htmlFor="fd-file-button">Select CSV file</Label>
+            <div className="flex items-center gap-3">
+              <Button
+                id="fd-file-button"
+                type="button"
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose file
+              </Button>
+              <span
+                className="text-muted-foreground text-sm"
+                data-testid="fd-file-name"
+              >
+                {fileName ?? "No file chosen"}
+              </span>
+              {/* Keep the native input in the DOM so the click() ref + the
+                  Playwright `setInputFiles` testid path both still work. */}
+              <input
+                ref={fileInputRef}
+                data-testid="field-design-file"
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
           </div>
         )}
 

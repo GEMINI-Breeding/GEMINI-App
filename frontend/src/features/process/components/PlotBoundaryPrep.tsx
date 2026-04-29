@@ -30,6 +30,14 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -86,6 +94,7 @@ export function PlotBoundaryPrep({
   const [gapMeters, setGapMeters] = useState(0)
   const [fieldDesign, setFieldDesign] = useState<FieldDesign | null>(null)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   // Grid generation has two modes: "manual" (user picks rows/cols) and
   // "fd" (rows/cols come from an uploaded field-design CSV, which also
   // tags each polygon with the CSV's plot metadata). The user toggles
@@ -570,14 +579,25 @@ export function PlotBoundaryPrep({
                   <strong>Generate plot grid</strong>.
                 </p>
               ) : null}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={regenerateGrid}
-                disabled={gridMode === "fd" && !fieldDesign}
-              >
-                Generate plot grid
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={regenerateGrid}
+                  disabled={gridMode === "fd" && !fieldDesign}
+                >
+                  Generate plot grid
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="boundary-clear-all"
+                  onClick={() => setClearConfirmOpen(true)}
+                  disabled={features.length === 0}
+                >
+                  Clear all polygons
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -648,6 +668,41 @@ export function PlotBoundaryPrep({
         onClose={() => setFdDialogOpen(false)}
         onSaved={handleFieldDesignSaved}
       />
+
+      <Dialog
+        open={clearConfirmOpen}
+        onOpenChange={(o) => !o && setClearConfirmOpen(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear all polygons?</DialogTitle>
+            <DialogDescription>
+              This removes the {features.length} polygon
+              {features.length === 1 ? "" : "s"} currently drawn on the map.
+              You'll need to draw an outer boundary again before regenerating
+              the grid. This cannot be undone (until you save again).
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setClearConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="boundary-clear-all-confirm"
+              onClick={() => {
+                setFeatures([])
+                setClearConfirmOpen(false)
+              }}
+            >
+              Clear all
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
