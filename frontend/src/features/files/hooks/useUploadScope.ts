@@ -8,6 +8,12 @@
  * import-wizard/step-upload.tsx`: search by name first to dedupe across
  * multiple uploads, fall back to create on miss. This keeps two simultaneous
  * uploads of the same new experiment from racing into a unique-violation.
+ *
+ * The five experiment-scoped resolvers (Site, Population, Season,
+ * SensorPlatform, Sensor) all delegate to a single factory at
+ * `src/features/files/lib/uploadScopeHelpers.ts`. Experiment is its own
+ * special case because it searches without an experiment scope and also
+ * runs ensureUserAssociated.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -27,6 +33,7 @@ import {
   type SiteOutput,
 } from "@/client"
 import type { EntityChoice, EntityOption } from "@/features/files/components/EntitySelectField"
+import { resolveOrCreateEntity } from "@/features/files/lib/uploadScopeHelpers"
 import { isLoggedIn } from "@/lib/auth"
 
 export type ScopeKey = "experiment" | "site" | "population" | "season" | "sensorPlatform" | "sensor"
@@ -148,37 +155,6 @@ export function useScopeOptions() {
 export function useResolveScope() {
   const qc = useQueryClient()
 
-  async function resolveOrCreateExperiment(c: EntityChoice): Promise<{ id: string; name: string }> {
-    if (c.kind === "existing") return { id: c.id, name: c.name }
-    if (c.kind === "new") {
-      const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New experiment name is empty")
-      // Search first. If it already exists globally we still want to ensure
-      // the current user is associated — without that link the experiment
-      // dropdowns filter it out (non-superusers only see their own
-      // experiments) and it would appear as "no experiments available."
-      const existing = (await ExperimentsService.apiExperimentsGetExperiments({
-        experimentName: trimmed,
-      })) as ExperimentOutput[] | null
-      const match = existing?.find((e) => e.experiment_name === trimmed)
-      const expId = match?.id != null
-        ? String(match.id)
-        : await createExperimentRow(trimmed)
-      await ensureUserAssociated(expId)
-      qc.invalidateQueries({ queryKey: ["experiments", "all"] })
-      qc.invalidateQueries({ queryKey: ["users", "me", "experiments"] })
-      return { id: expId, name: trimmed }
-    }
-    throw new Error("Experiment is required")
-  }
-
-  async function createExperimentRow(name: string): Promise<string> {
-    const created = (await ExperimentsService.apiExperimentsCreateExperiment({
-      requestBody: { experiment_name: name },
-    })) as ExperimentOutput
-    return String(created.id ?? "")
-  }
-
   /**
    * Idempotent "this user owns this experiment" link. POSTing to
    * /me/experiments when the link already exists is a no-op on the
@@ -198,137 +174,148 @@ export function useResolveScope() {
     }
   }
 
-  async function resolveOrCreateSite(
+  /**
+   * Experiment is the special case: it searches without an experiment
+   * scope and also runs ensureUserAssociated so the new row appears in
+   * the user's experiment dropdown.
+   */
+  async function resolveOrCreateExperiment(
     c: EntityChoice,
-    parentExperiment: string,
   ): Promise<{ id: string; name: string }> {
     if (c.kind === "existing") return { id: c.id, name: c.name }
     if (c.kind === "new") {
       const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New site name is empty")
-      // Scope the search to the parent experiment: a Site row that exists
-      // globally but isn't linked to the active experiment is a *new
-      // association*, not a reuse. Re-calling create with experiment_name
-      // is safe — the backend's get_or_create dedupes on row identity and
-      // always re-runs `associate_experiment` if the link is missing.
-      const scoped = (await SitesService.apiSitesGetSites({
-        siteName: trimmed,
-        experimentName: parentExperiment,
-      })) as SiteOutput[] | null
-      const match = scoped?.find((s) => s.site_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      const created = (await SitesService.apiSitesCreateSite({
-        requestBody: { site_name: trimmed, experiment_name: parentExperiment },
-      })) as SiteOutput
-      qc.invalidateQueries({ queryKey: ["sites", "all"] })
-      qc.invalidateQueries({ queryKey: ["experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
+      if (!trimmed) throw new Error("New experiment name is empty")
+      const existing = (await ExperimentsService.apiExperimentsGetExperiments({
+        experimentName: trimmed,
+      })) as ExperimentOutput[] | null
+      const match = existing?.find((e) => e.experiment_name === trimmed)
+      const expId =
+        match?.id != null
+          ? String(match.id)
+          : await (async () => {
+              const created = (await ExperimentsService.apiExperimentsCreateExperiment({
+                requestBody: { experiment_name: trimmed },
+              })) as ExperimentOutput
+              return String(created.id ?? "")
+            })()
+      await ensureUserAssociated(expId)
+      qc.invalidateQueries({ queryKey: ["experiments", "all"] })
+      qc.invalidateQueries({ queryKey: ["users", "me", "experiments"] })
+      return { id: expId, name: trimmed }
     }
-    throw new Error("Site is required")
+    throw new Error("Experiment is required")
   }
 
-  async function resolveOrCreatePopulation(
+  function invalidateAfter(...keys: string[]) {
+    return () => {
+      for (const k of keys) qc.invalidateQueries({ queryKey: [k] })
+      qc.invalidateQueries({ queryKey: ["experiments"] })
+    }
+  }
+
+  function resolveOrCreateSite(c: EntityChoice, parentExperiment: string) {
+    return resolveOrCreateEntity<SiteOutput>(c, {
+      entityLabel: "site",
+      search: async (name) =>
+        (await SitesService.apiSitesGetSites({
+          siteName: name,
+          experimentName: parentExperiment,
+        })) as SiteOutput[] | null,
+      getName: (r) => r.site_name,
+      getId: (r) => r.id,
+      create: async (name) =>
+        (await SitesService.apiSitesCreateSite({
+          requestBody: { site_name: name, experiment_name: parentExperiment },
+        })) as SiteOutput,
+      onResolved: invalidateAfter("sites"),
+    })
+  }
+
+  function resolveOrCreatePopulation(c: EntityChoice, parentExperiment: string) {
+    return resolveOrCreateEntity<PopulationOutput>(c, {
+      entityLabel: "population",
+      search: async (name) =>
+        (await PopulationsService.apiPopulationsGetPopulations({
+          populationName: name,
+          experimentName: parentExperiment,
+        })) as PopulationOutput[] | null,
+      getName: (r) => r.population_name,
+      getId: (r) => r.id,
+      create: async (name) =>
+        (await PopulationsService.apiPopulationsCreatePopulation({
+          requestBody: { population_name: name, experiment_name: parentExperiment },
+        })) as PopulationOutput,
+      onResolved: invalidateAfter("populations"),
+    })
+  }
+
+  function resolveOrCreateSeason(c: EntityChoice, parentExperiment: string) {
+    return resolveOrCreateEntity<SeasonOutput>(c, {
+      entityLabel: "season",
+      search: async (name) =>
+        (await SeasonsService.apiSeasonsGetSeasons({
+          seasonName: name,
+          experimentName: parentExperiment,
+        })) as SeasonOutput[] | null,
+      getName: (r) => r.season_name,
+      getId: (r) => r.id,
+      create: async (name) =>
+        (await SeasonsService.apiSeasonsCreateSeason({
+          requestBody: { season_name: name, experiment_name: parentExperiment },
+        })) as SeasonOutput,
+      onResolved: invalidateAfter("seasons"),
+    })
+  }
+
+  function resolveOrCreateSensorPlatform(
     c: EntityChoice,
     parentExperiment: string,
-  ): Promise<{ id: string; name: string }> {
-    if (c.kind === "existing") return { id: c.id, name: c.name }
-    if (c.kind === "new") {
-      const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New population name is empty")
-      const scoped = (await PopulationsService.apiPopulationsGetPopulations({
-        populationName: trimmed,
-        experimentName: parentExperiment,
-      })) as PopulationOutput[] | null
-      const match = scoped?.find((p) => p.population_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      const created = (await PopulationsService.apiPopulationsCreatePopulation({
-        requestBody: { population_name: trimmed, experiment_name: parentExperiment },
-      })) as PopulationOutput
-      qc.invalidateQueries({ queryKey: ["populations", "all"] })
-      qc.invalidateQueries({ queryKey: ["experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
-    }
-    throw new Error("Population is required")
+  ) {
+    return resolveOrCreateEntity<SensorPlatformOutput>(c, {
+      entityLabel: "sensor platform",
+      search: async (name) =>
+        (await SensorPlatformsService.apiSensorPlatformsGetSensorPlatforms({
+          sensorPlatformName: name,
+          experimentName: parentExperiment,
+        })) as SensorPlatformOutput[] | null,
+      getName: (r) => r.sensor_platform_name,
+      getId: (r) => r.id,
+      create: async (name) =>
+        (await SensorPlatformsService.apiSensorPlatformsCreateSensorPlatform({
+          requestBody: {
+            sensor_platform_name: name,
+            experiment_name: parentExperiment,
+          },
+        })) as SensorPlatformOutput,
+      onResolved: invalidateAfter("sensorPlatforms"),
+    })
   }
 
-  async function resolveOrCreateSeason(
-    c: EntityChoice,
-    parentExperiment: string,
-  ): Promise<{ id: string; name: string }> {
-    if (c.kind === "existing") return { id: c.id, name: c.name }
-    if (c.kind === "new") {
-      const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New season name is empty")
-      const scoped = (await SeasonsService.apiSeasonsGetSeasons({
-        seasonName: trimmed,
-        experimentName: parentExperiment,
-      })) as SeasonOutput[] | null
-      const match = scoped?.find((s) => s.season_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      const created = (await SeasonsService.apiSeasonsCreateSeason({
-        requestBody: { season_name: trimmed, experiment_name: parentExperiment },
-      })) as SeasonOutput
-      qc.invalidateQueries({ queryKey: ["seasons", "all"] })
-      qc.invalidateQueries({ queryKey: ["experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
-    }
-    throw new Error("Season is required")
-  }
-
-  async function resolveOrCreateSensorPlatform(
-    c: EntityChoice,
-    parentExperiment: string,
-  ): Promise<{ id: string; name: string }> {
-    if (c.kind === "existing") return { id: c.id, name: c.name }
-    if (c.kind === "new") {
-      const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New sensor platform name is empty")
-      const scoped = (await SensorPlatformsService.apiSensorPlatformsGetSensorPlatforms({
-        sensorPlatformName: trimmed,
-        experimentName: parentExperiment,
-      })) as SensorPlatformOutput[] | null
-      const match = scoped?.find((s) => s.sensor_platform_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      const created = (await SensorPlatformsService.apiSensorPlatformsCreateSensorPlatform({
-        requestBody: {
-          sensor_platform_name: trimmed,
-          experiment_name: parentExperiment,
-        },
-      })) as SensorPlatformOutput
-      qc.invalidateQueries({ queryKey: ["sensorPlatforms", "all"] })
-      qc.invalidateQueries({ queryKey: ["experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
-    }
-    throw new Error("Sensor platform is required")
-  }
-
-  async function resolveOrCreateSensor(
+  function resolveOrCreateSensor(
     c: EntityChoice,
     parentExperiment: string,
     parentPlatform: string,
-  ): Promise<{ id: string; name: string }> {
-    if (c.kind === "existing") return { id: c.id, name: c.name }
-    if (c.kind === "new") {
-      const trimmed = c.name.trim()
-      if (!trimmed) throw new Error("New sensor name is empty")
-      const scoped = (await SensorsService.apiSensorsGetSensors({
-        sensorName: trimmed,
-        experimentName: parentExperiment,
-      })) as SensorOutput[] | null
-      const match = scoped?.find((s) => s.sensor_name === trimmed)
-      if (match?.id != null) return { id: String(match.id), name: trimmed }
-      const created = (await SensorsService.apiSensorsCreateSensor({
-        requestBody: {
-          sensor_name: trimmed,
-          experiment_name: parentExperiment,
-          sensor_platform_name: parentPlatform,
-        },
-      })) as SensorOutput
-      qc.invalidateQueries({ queryKey: ["sensors", "all"] })
-      qc.invalidateQueries({ queryKey: ["experiments"] })
-      return { id: String(created.id ?? ""), name: trimmed }
-    }
-    throw new Error("Sensor is required")
+  ) {
+    return resolveOrCreateEntity<SensorOutput>(c, {
+      entityLabel: "sensor",
+      search: async (name) =>
+        (await SensorsService.apiSensorsGetSensors({
+          sensorName: name,
+          experimentName: parentExperiment,
+        })) as SensorOutput[] | null,
+      getName: (r) => r.sensor_name,
+      getId: (r) => r.id,
+      create: async (name) =>
+        (await SensorsService.apiSensorsCreateSensor({
+          requestBody: {
+            sensor_name: name,
+            experiment_name: parentExperiment,
+            sensor_platform_name: parentPlatform,
+          },
+        })) as SensorOutput,
+      onResolved: invalidateAfter("sensors"),
+    })
   }
 
   /**

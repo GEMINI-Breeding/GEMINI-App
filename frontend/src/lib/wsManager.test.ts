@@ -101,4 +101,38 @@ describe("wsManager", () => {
     vi.useRealTimers()
     closeJob("job-3")
   })
+
+  it("reconnects after a transient close while listeners remain", async () => {
+    vi.useFakeTimers()
+    const { subscribe, closeJob } = await import("./wsManager")
+    subscribe("job-4", () => {})
+    expect(FakeWs.instances).toHaveLength(1)
+    // Simulate a transient close (the server didn't send a terminal frame).
+    FakeWs.instances[0].close()
+    // The retry timer is set for 2000ms; before that, no new socket.
+    expect(FakeWs.instances).toHaveLength(1)
+    vi.advanceTimersByTime(2000)
+    // After the timer fires, open() runs and a fresh socket is created.
+    expect(FakeWs.instances).toHaveLength(2)
+    expect(FakeWs.instances[1].url).toContain("/api/jobs/job-4/progress")
+    vi.useRealTimers()
+    closeJob("job-4")
+  })
+
+  it("closeJob clears the pending retry timer and drops the connection entry", async () => {
+    vi.useFakeTimers()
+    const { subscribe, closeJob } = await import("./wsManager")
+    subscribe("job-5", () => {})
+    FakeWs.instances[0].close()
+    // A retry timer is now pending. closeJob must cancel it.
+    closeJob("job-5")
+    vi.advanceTimersByTime(5000)
+    expect(FakeWs.instances).toHaveLength(1)
+    // Re-subscribing should open a brand-new connection because the entry
+    // for job-5 was deleted.
+    subscribe("job-5", () => {})
+    expect(FakeWs.instances).toHaveLength(2)
+    vi.useRealTimers()
+    closeJob("job-5")
+  })
 })

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -12,6 +12,32 @@ const closeJobMock = vi.fn()
 vi.mock("@/lib/wsManager", () => ({
   subscribe: (...args: unknown[]) => subscribeMock(...args),
   closeJob: (...args: unknown[]) => closeJobMock(...args),
+}))
+
+// useAuth gates the rehydration query (`enabled: Boolean(user)`). We
+// flip it per-test to drive the null-user vs logged-in branches.
+const authMock = vi.fn<() => { user: { id: string } | null }>(() => ({
+  user: null,
+}))
+vi.mock("@/hooks/useAuth", () => ({
+  default: () => authMock(),
+  isLoggedIn: () => false,
+}))
+
+// JobsService.apiJobsAllGetAllJobs is the rehydration data source.
+const apiJobsAllMock = vi.fn()
+vi.mock("@/client", () => ({
+  JobsService: {
+    apiJobsAllGetAllJobs: (...args: unknown[]) => apiJobsAllMock(...args),
+  },
+}))
+
+// findRunByJobId is the reverse-lookup that lets rehydration build the
+// `/process/{wsId}/run/{runId}` link. Stubbed so rehydration tests
+// don't need to seed the real runStore.
+const findRunByJobIdMock = vi.fn()
+vi.mock("@/features/process/lib/runStore", () => ({
+  findRunByJobId: (jobId: string) => findRunByJobIdMock(jobId),
 }))
 
 import { ProcessProvider, useProcess } from "./ProcessContext"
@@ -52,6 +78,10 @@ describe("useProcess (consumer hook)", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
     closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
   })
 
   it("throws a helpful error when called outside the provider", () => {
@@ -73,6 +103,10 @@ describe("ProcessContext mutation actions", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
     closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
     setupCapture()
   })
 
@@ -222,6 +256,10 @@ describe("ProcessContext wsManager bridge", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
     closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
   })
 
   it("subscribes for each running process that has a runId", () => {
@@ -381,5 +419,83 @@ describe("ProcessContext wsManager bridge", () => {
     )
     expect(unsubs.get("job-1")).toHaveBeenCalled()
     expect(closeJobMock).toHaveBeenCalledWith("job-1")
+  })
+})
+
+describe("ProcessContext crash-recovery rehydration", () => {
+  beforeEach(() => {
+    subscribeMock.mockReset()
+    closeJobMock.mockReset()
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
+    authMock.mockReset()
+    setupCapture()
+  })
+
+  it("does not query /api/jobs/all when useAuth().user is null", async () => {
+    authMock.mockReturnValue({ user: null })
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    // Give the query layer a tick to settle.
+    await waitFor(() => {
+      expect(result.current.processes).toEqual([])
+    })
+    expect(apiJobsAllMock).not.toHaveBeenCalled()
+  })
+
+  it("rehydrates running jobs into processes with a /process/{wsId}/run/{runId} link", async () => {
+    authMock.mockReturnValue({ user: { id: "u-1" } })
+    apiJobsAllMock.mockResolvedValue([
+      {
+        id: "job-rehydrate-1",
+        job_type: "RUN_ODM",
+        status: "RUNNING",
+        progress: 47,
+        progress_detail: { stage: "stitching" },
+      },
+    ])
+    findRunByJobIdMock.mockReturnValue({
+      id: "run-uuid-1",
+      workspaceId: "ws-uuid-1",
+    })
+
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    await waitFor(() => {
+      expect(result.current.processes).toHaveLength(1)
+    })
+
+    const p = result.current.processes[0]
+    expect(p).toMatchObject({
+      type: "processing",
+      status: "running",
+      runId: "job-rehydrate-1",
+      progress: 47,
+      message: "stitching",
+      link: "/process/ws-uuid-1/run/run-uuid-1",
+    })
+    expect(result.current.hasBeenActive).toBe(true)
+  })
+
+  it("silently drops rehydrated jobs whose owning Run is unknown to runStore", async () => {
+    authMock.mockReturnValue({ user: { id: "u-1" } })
+    apiJobsAllMock.mockResolvedValue([
+      {
+        id: "orphan-job",
+        job_type: "RUN_ODM",
+        status: "RUNNING",
+        progress: 10,
+      },
+    ])
+    findRunByJobIdMock.mockReturnValue(undefined)
+
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    // Wait long enough for the effect to settle. The query resolves but
+    // the post-query effect must not push anything into `processes`.
+    await waitFor(() => {
+      expect(apiJobsAllMock).toHaveBeenCalled()
+    })
+    // Confirm the post-resolve effect actually ran by waiting another tick.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(result.current.processes).toEqual([])
+    expect(findRunByJobIdMock).toHaveBeenCalledWith("orphan-job")
   })
 })
