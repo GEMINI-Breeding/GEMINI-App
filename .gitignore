@@ -11,6 +11,12 @@ CLAUDE.md
 task_plan.md
 findings.md
 progress.md
+.claude/
 
 # Frontend test coverage output
 frontend/coverage/
+
+# Playwright leftover output (one per failed test, regenerated each run)
+test-results/
+frontend/test-results/
+frontend/playwright-report/
