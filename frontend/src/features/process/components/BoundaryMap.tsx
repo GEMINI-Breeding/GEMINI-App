@@ -105,6 +105,12 @@ export function BoundaryMap({
     const editable = L.featureGroup().addTo(map)
     layerRef.current = editable
     mapRef.current = map
+    // Expose for e2e: the field-design spec needs to inject a polygon
+    // programmatically rather than driving the Geoman toolbar over a
+    // non-deterministic ortho. The map and L are otherwise unreachable
+    // from the test runner.
+    ;(window as unknown as { __leafletMap__?: L.Map }).__leafletMap__ = map
+    ;(window as unknown as { L?: typeof L }).L = L
 
     map.pm.addControls({
       position: "topleft",
@@ -146,6 +152,8 @@ export function BoundaryMap({
       layerRef.current = null
       orthoLayerRef.current = null
       didFitOrthoRef.current = false
+      const w = window as unknown as { __leafletMap__?: L.Map }
+      if (w.__leafletMap__ === map) w.__leafletMap__ = undefined
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, zoom])

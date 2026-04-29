@@ -521,5 +521,162 @@ test.describe("R4a: aerial wizard happy path", () => {
         files.map((f) => f.object_name),
       )}`,
     ).toBeGreaterThan(0)
+
+    // ── Field-design CSV upload + label injection. ───────────────────────
+    //
+    // Page is still on PlotBoundaryPrep with the ortho rendered. Exercise
+    // the full field-design flow: upload CSV → map columns → confirm
+    // rows/cols auto-populate → draw a polygon → generate grid → assert
+    // labels rode onto the saved snapshot.
+    //
+    // The fixture (e2e-field-design.csv, 4 rows: 2 rows × 2 cols) has
+    // clean column names (`row`, `column`, `plot`, `accession`) so the
+    // dialog's autoDetect resolves them without manual mapping.
+    await expect(page.getByTestId("field-design-banner")).toContainText(
+      /no field design/i,
+    )
+    await page.getByTestId("field-design-upload").click({ noWaitAfter: false })
+    await page
+      .getByTestId("field-design-file")
+      .setInputFiles(fixturePath("csv", "e2e-field-design.csv"))
+    // autoDetect should land mapping on `row`/`column` etc. Confirm the
+    // required dropdowns are non-empty before clicking Confirm.
+    await expect(page.getByTestId("field-design-map-row")).toHaveValue("row")
+    await expect(page.getByTestId("field-design-map-col")).toHaveValue("column")
+    await page.getByTestId("field-design-confirm").click()
+
+    // Banner now shows the loaded plot count, replace button is visible.
+    await expect(page.getByTestId("field-design-banner")).toContainText(
+      /4\s*plots loaded/,
+    )
+    await expect(page.getByTestId("field-design-replace")).toBeVisible()
+
+    // The fixture has 2 rows × 2 cols. Auto-populate should set the inputs
+    // accordingly — we hadn't drawn a grid yet, so dimensionsFromDesign
+    // wins.
+    await expect(page.getByTestId("boundary-rows")).toHaveValue("2")
+    await expect(page.getByTestId("boundary-cols")).toHaveValue("2")
+
+    // Draw a small outer rectangle programmatically through the BoundaryMap
+    // API surface: PlotBoundaryPrep accepts a feature list via Leaflet
+    // Geoman. Triggering the user-flow draw via simulated mouse events
+    // is brittle on a non-deterministic ortho; instead, use the page's
+    // exposed test helper to inject a polygon. If no helper is exposed,
+    // skip ahead to clicking Generate against an existing geometry.
+    //
+    // We inject by dispatching a Leaflet Geoman create event directly.
+    // The component's onFeaturesChange handler picks it up and renders.
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __leafletMap__?: {
+          getBounds(): {
+            getSouthWest(): { lat: number; lng: number }
+            getNorthEast(): { lat: number; lng: number }
+          }
+          fire(name: string, payload: unknown): void
+        }
+        L?: {
+          polygon(ring: [number, number][]): { addTo(map: unknown): unknown }
+        }
+      }
+      const map = w.__leafletMap__
+      if (!map || !w.L) return
+      const L = w.L
+      const bounds = map.getBounds()
+      const sw = bounds.getSouthWest()
+      const ne = bounds.getNorthEast()
+      // Inscribe a small rectangle in the ortho viewport.
+      const w2 = (ne.lng - sw.lng) * 0.4
+      const h2 = (ne.lat - sw.lat) * 0.4
+      const cx = (sw.lng + ne.lng) / 2
+      const cy = (sw.lat + ne.lat) / 2
+      const ring: [number, number][] = [
+        [cy - h2 / 2, cx - w2 / 2],
+        [cy - h2 / 2, cx + w2 / 2],
+        [cy + h2 / 2, cx + w2 / 2],
+        [cy + h2 / 2, cx - w2 / 2],
+        [cy - h2 / 2, cx - w2 / 2],
+      ]
+      const layer = L.polygon(ring)
+      layer.addTo(map)
+      map.fire("pm:create", { layer, shape: "Polygon" })
+    })
+
+    // Click Generate — labels should be injected into the grid features.
+    await page.getByRole("button", { name: /generate plot grid/i }).click()
+
+    // Save & complete: confirms the snapshot round-trips with field_design.
+    const saveBtn = page.getByTestId("boundary-save-and-complete")
+    await expect(saveBtn).toBeEnabled()
+    await saveBtn.click()
+    // RunTool's `onSaved={goBack}` navigates away from the tool route once
+    // save+activate succeed. Waiting for the URL to leave the tool route is
+    // the most direct signal that the mutations actually completed (rather
+    // than just the button text reverting before the network round trip).
+    await page.waitForURL((url) => !url.pathname.includes("/tool/"), {
+      timeout: 15_000,
+    })
+    // Then wait for the boundary step row to flip to "completed" on the
+    // run detail page — that's downstream of the activate mutation
+    // settling and proves the version is selectable for trait extraction.
+    await expect(
+      page.getByTestId("step-row-plot_boundary_prep"),
+    ).toHaveAttribute("data-status", "completed", { timeout: 15_000 })
+
+    // Backend assertion: load the active plot-geometry version and verify
+    // its state_snapshot.field_design carries the CSV's accession values.
+    // processedPrefix() in src/features/process/lib/paths.ts has a
+    // trailing slash; list_for_directory matches by exact equality.
+    const dirPath = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const versionsRes = await request.post(
+      new URL("/api/plot_geometry/versions/list", baseURL).toString(),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access_token}`,
+        },
+        data: { directory: dirPath },
+      },
+    )
+    expect(versionsRes.ok()).toBe(true)
+    const versions = (await versionsRes.json()) as Array<{
+      version: number
+      is_active: boolean
+    }>
+    const active = versions.find((v) => v.is_active)
+    expect(active, `expected an active plot-geometry version`).toBeTruthy()
+
+    const loadRes = await request.post(
+      new URL("/api/plot_geometry/versions/load", baseURL).toString(),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access_token}`,
+        },
+        data: { directory: dirPath, version: active!.version },
+      },
+    )
+    expect(loadRes.ok()).toBe(true)
+    const loaded = (await loadRes.json()) as {
+      state_snapshot: {
+        boundaries: { features: Array<{ properties: Record<string, unknown> }> }
+        field_design?: { rows: Array<Record<string, string>> }
+      }
+    }
+    expect(
+      loaded.state_snapshot.field_design,
+      "field_design must persist on the snapshot",
+    ).toBeTruthy()
+    expect(loaded.state_snapshot.field_design!.rows).toHaveLength(4)
+    // At least one polygon must carry an `accession` from the CSV.
+    const accessions = loaded.state_snapshot.boundaries.features
+      .map((f) => f.properties?.accession)
+      .filter(Boolean)
+    expect(
+      accessions.length,
+      `expected at least one polygon to be tagged with accession; got properties: ${JSON.stringify(
+        loaded.state_snapshot.boundaries.features.map((f) => f.properties),
+      )}`,
+    ).toBeGreaterThan(0)
   })
 })
