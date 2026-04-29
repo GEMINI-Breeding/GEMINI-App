@@ -86,6 +86,12 @@ export function PlotBoundaryPrep({
   const [gapMeters, setGapMeters] = useState(0)
   const [fieldDesign, setFieldDesign] = useState<FieldDesign | null>(null)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
+  // Grid generation has two modes: "manual" (user picks rows/cols) and
+  // "fd" (rows/cols come from an uploaded field-design CSV, which also
+  // tags each polygon with the CSV's plot metadata). The user toggles
+  // between them; switching back to "manual" doesn't discard the loaded
+  // field design (so re-toggling restores it without re-upload).
+  const [gridMode, setGridMode] = useState<"manual" | "fd">("manual")
 
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
@@ -167,6 +173,9 @@ export function PlotBoundaryPrep({
     const fd = loaded.data.state_snapshot.field_design
     if (fd) {
       setFieldDesign(fd)
+      // The version was saved with a field design, so default the UI to
+      // the field-design tab on reload.
+      setGridMode("fd")
       // Auto-populate Rows/Cols only when the loaded version has no grid
       // yet — otherwise the saved grid wins.
       if (!grid) {
@@ -205,9 +214,13 @@ export function PlotBoundaryPrep({
     // others — SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS treat every feature
     // in the FeatureCollection as a distinct plot, so an enclosing
     // rectangle creates a junk plot covering the whole field.
-    const labeled = fieldDesign
-      ? applyLabelsToFeatures(grid, fieldDesign)
-      : grid
+    // Apply CSV-derived labels only when the user is in field-design
+    // mode. In manual mode the loaded field design is intentionally
+    // ignored so the polygons stay free of CSV metadata.
+    const labeled =
+      gridMode === "fd" && fieldDesign
+        ? applyLabelsToFeatures(grid, fieldDesign)
+        : grid
     setFeatures(labeled)
   }
 
@@ -229,11 +242,14 @@ export function PlotBoundaryPrep({
   function handleFieldDesignSaved(fd: FieldDesign) {
     setFieldDesign(fd)
     setFdDialogOpen(false)
-    // Auto-populate Rows/Cols only when the user hasn't drawn a grid yet.
+    setGridMode("fd")
+    const dims = dimensionsFromDesign(fd)
+    setRows(dims.rows)
+    setCols(dims.cols)
     if (features.length === 0) {
-      const dims = dimensionsFromDesign(fd)
-      setRows(dims.rows)
-      setCols(dims.cols)
+      showSuccessToast(
+        `Field design loaded — ${fd.rows.length} plots (${dims.rows} × ${dims.cols}).`,
+      )
     } else {
       // Re-label existing geometry against the newly uploaded design.
       const fc: GeoJSON.FeatureCollection = {
@@ -242,6 +258,9 @@ export function PlotBoundaryPrep({
       }
       const merged = mergeLabelsIntoExisting(fc, fd)
       setFeatures(merged.features as GeoJSON.Feature[])
+      showSuccessToast(
+        `Field design loaded — ${fd.rows.length} plots applied to existing geometry.`,
+      )
     }
   }
 
@@ -289,7 +308,12 @@ export function PlotBoundaryPrep({
       boundaries: { type: "FeatureCollection", features },
       grid: { rows, cols, spacing_m: gapMeters, angle_deg: angle },
       created_from: features.length > 1 ? "grid" : "draw",
-      ...(fieldDesign ? { field_design: fieldDesign } : {}),
+      // Only persist the field design when the user is on the field-
+      // design tab. Otherwise toggling to Manual + saving would still
+      // carry hidden CSV state on the snapshot.
+      ...(gridMode === "fd" && fieldDesign
+        ? { field_design: fieldDesign }
+        : {}),
     }
     const v = await save.mutateAsync({
       directory,
@@ -350,149 +374,210 @@ export function PlotBoundaryPrep({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
-                    Rows
-                  </Label>
-                  <Input
-                    id="grid-rows"
-                    data-testid="boundary-rows"
-                    type="number"
-                    min={1}
-                    value={rows}
-                    onChange={(e) => setRows(Number(e.target.value) || 1)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
-                    Cols
-                  </Label>
-                  <Input
-                    id="grid-cols"
-                    data-testid="boundary-cols"
-                    type="number"
-                    min={1}
-                    value={cols}
-                    onChange={(e) => setCols(Number(e.target.value) || 1)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
-                    Angle (°)
-                  </Label>
-                  <Input
-                    id="grid-angle"
-                    type="number"
-                    value={angle}
-                    onChange={(e) => setAngle(Number(e.target.value) || 0)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
-                    Gap (m)
-                  </Label>
-                  <Input
-                    id="grid-gap"
-                    type="number"
-                    min={0}
-                    value={gapMeters}
-                    onChange={(e) => setGapMeters(Number(e.target.value) || 0)}
-                  />
-                </div>
-              </div>
-              <Button size="sm" variant="outline" onClick={regenerateGrid}>
+              <Tabs
+                value={gridMode}
+                onValueChange={(v) => setGridMode(v as "manual" | "fd")}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="manual" data-testid="grid-mode-manual">
+                    Manual
+                  </TabsTrigger>
+                  <TabsTrigger value="fd" data-testid="grid-mode-fd">
+                    Field design CSV
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="manual" className="space-y-3 pt-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
+                        Rows
+                      </Label>
+                      <Input
+                        id="grid-rows"
+                        data-testid="boundary-rows"
+                        type="number"
+                        min={1}
+                        value={rows}
+                        onChange={(e) => setRows(Number(e.target.value) || 1)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
+                        Cols
+                      </Label>
+                      <Input
+                        id="grid-cols"
+                        data-testid="boundary-cols"
+                        type="number"
+                        min={1}
+                        value={cols}
+                        onChange={(e) => setCols(Number(e.target.value) || 1)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
+                        Angle (°)
+                      </Label>
+                      <Input
+                        id="grid-angle"
+                        type="number"
+                        value={angle}
+                        onChange={(e) => setAngle(Number(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
+                        Gap (m)
+                      </Label>
+                      <Input
+                        id="grid-gap"
+                        type="number"
+                        min={0}
+                        value={gapMeters}
+                        onChange={(e) =>
+                          setGapMeters(Number(e.target.value) || 0)
+                        }
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="fd" className="space-y-3 pt-3">
+                  <div
+                    className="rounded border bg-muted/30 p-2 text-xs"
+                    data-testid="field-design-banner"
+                  >
+                    {fieldDesign ? (
+                      <>
+                        <p className="mb-1.5">
+                          Field design:{" "}
+                          <strong>{fieldDesign.rows.length}</strong> plots
+                          loaded ({rows} × {cols})
+                        </p>
+                        <div className="mb-2 flex items-center gap-3">
+                          <Label
+                            htmlFor="fd-flip-rows"
+                            className="flex items-center gap-1.5 font-normal"
+                          >
+                            <Checkbox
+                              id="fd-flip-rows"
+                              data-testid="fd-flip-rows"
+                              checked={fieldDesign.transform.flipRows}
+                              onCheckedChange={(v) =>
+                                setFdTransform({
+                                  ...fieldDesign.transform,
+                                  flipRows: v === true,
+                                })
+                              }
+                            />
+                            Flip rows
+                          </Label>
+                          <Label
+                            htmlFor="fd-flip-cols"
+                            className="flex items-center gap-1.5 font-normal"
+                          >
+                            <Checkbox
+                              id="fd-flip-cols"
+                              data-testid="fd-flip-cols"
+                              checked={fieldDesign.transform.flipCols}
+                              onCheckedChange={(v) =>
+                                setFdTransform({
+                                  ...fieldDesign.transform,
+                                  flipCols: v === true,
+                                })
+                              }
+                            />
+                            Flip cols
+                          </Label>
+                          <Label
+                            htmlFor="fd-swap-axes"
+                            className="flex items-center gap-1.5 font-normal"
+                          >
+                            <Checkbox
+                              id="fd-swap-axes"
+                              data-testid="fd-swap-axes"
+                              checked={fieldDesign.transform.swapAxes}
+                              onCheckedChange={(v) =>
+                                setFdTransform({
+                                  ...fieldDesign.transform,
+                                  swapAxes: v === true,
+                                })
+                              }
+                            />
+                            Swap axes
+                          </Label>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          data-testid="field-design-replace"
+                          onClick={() => setFdDialogOpen(true)}
+                        >
+                          Replace field design
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-muted-foreground mb-1.5">
+                          Upload a CSV mapping (row, col) coordinates to plot
+                          metadata. Rows/cols come from the design.
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          data-testid="field-design-upload"
+                          onClick={() => setFdDialogOpen(true)}
+                        >
+                          Upload field design
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="grid-angle-fd" className="mb-1.5 text-xs">
+                        Angle (°)
+                      </Label>
+                      <Input
+                        id="grid-angle-fd"
+                        type="number"
+                        value={angle}
+                        onChange={(e) => setAngle(Number(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
+                        Gap (m)
+                      </Label>
+                      <Input
+                        id="grid-gap-fd"
+                        type="number"
+                        min={0}
+                        value={gapMeters}
+                        onChange={(e) =>
+                          setGapMeters(Number(e.target.value) || 0)
+                        }
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              {features.length === 0 ? (
+                <p className="text-amber-700 dark:text-amber-400 text-xs">
+                  Draw an outer boundary on the map, then click{" "}
+                  <strong>Generate plot grid</strong>.
+                </p>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={regenerateGrid}
+                disabled={gridMode === "fd" && !fieldDesign}
+              >
                 Generate plot grid
               </Button>
-
-              <div
-                className="rounded border bg-muted/30 p-2 text-xs"
-                data-testid="field-design-banner"
-              >
-                {fieldDesign ? (
-                  <>
-                    <p className="mb-1.5">
-                      Field design: <strong>{fieldDesign.rows.length}</strong>{" "}
-                      plots loaded
-                    </p>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Label
-                        htmlFor="fd-flip-rows"
-                        className="flex items-center gap-1.5 font-normal"
-                      >
-                        <Checkbox
-                          id="fd-flip-rows"
-                          data-testid="fd-flip-rows"
-                          checked={fieldDesign.transform.flipRows}
-                          onCheckedChange={(v) =>
-                            setFdTransform({
-                              ...fieldDesign.transform,
-                              flipRows: v === true,
-                            })
-                          }
-                        />
-                        Flip rows
-                      </Label>
-                      <Label
-                        htmlFor="fd-flip-cols"
-                        className="flex items-center gap-1.5 font-normal"
-                      >
-                        <Checkbox
-                          id="fd-flip-cols"
-                          data-testid="fd-flip-cols"
-                          checked={fieldDesign.transform.flipCols}
-                          onCheckedChange={(v) =>
-                            setFdTransform({
-                              ...fieldDesign.transform,
-                              flipCols: v === true,
-                            })
-                          }
-                        />
-                        Flip cols
-                      </Label>
-                      <Label
-                        htmlFor="fd-swap-axes"
-                        className="flex items-center gap-1.5 font-normal"
-                      >
-                        <Checkbox
-                          id="fd-swap-axes"
-                          data-testid="fd-swap-axes"
-                          checked={fieldDesign.transform.swapAxes}
-                          onCheckedChange={(v) =>
-                            setFdTransform({
-                              ...fieldDesign.transform,
-                              swapAxes: v === true,
-                            })
-                          }
-                        />
-                        Swap axes
-                      </Label>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-testid="field-design-replace"
-                      onClick={() => setFdDialogOpen(true)}
-                    >
-                      Replace field design
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-muted-foreground mb-1.5">
-                      No field design — upload to label plots automatically.
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-testid="field-design-upload"
-                      onClick={() => setFdDialogOpen(true)}
-                    >
-                      Upload field design
-                    </Button>
-                  </>
-                )}
-              </div>
             </CardContent>
           </Card>
 

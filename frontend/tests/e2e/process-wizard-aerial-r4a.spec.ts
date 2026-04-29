@@ -525,15 +525,16 @@ test.describe("R4a: aerial wizard happy path", () => {
     // ── Field-design CSV upload + label injection. ───────────────────────
     //
     // Page is still on PlotBoundaryPrep with the ortho rendered. Exercise
-    // the full field-design flow: upload CSV → map columns → confirm
-    // rows/cols auto-populate → draw a polygon → generate grid → assert
-    // labels rode onto the saved snapshot.
+    // the full field-design flow: switch to the FD tab → upload CSV → map
+    // columns → confirm rows/cols auto-populate → draw a polygon →
+    // generate grid → assert labels rode onto the saved snapshot.
     //
     // The fixture (e2e-field-design.csv, 4 rows: 2 rows × 2 cols) has
     // clean column names (`row`, `column`, `plot`, `accession`) so the
     // dialog's autoDetect resolves them without manual mapping.
+    await page.getByTestId("grid-mode-fd").click()
     await expect(page.getByTestId("field-design-banner")).toContainText(
-      /no field design/i,
+      /upload a csv/i,
     )
     await page.getByTestId("field-design-upload").click({ noWaitAfter: false })
     await page
@@ -545,17 +546,23 @@ test.describe("R4a: aerial wizard happy path", () => {
     await expect(page.getByTestId("field-design-map-col")).toHaveValue("column")
     await page.getByTestId("field-design-confirm").click()
 
-    // Banner now shows the loaded plot count, replace button is visible.
+    // Banner now shows the loaded plot count + the auto-derived
+    // dimensions, replace button is visible.
     await expect(page.getByTestId("field-design-banner")).toContainText(
       /4\s*plots loaded/,
     )
+    await expect(page.getByTestId("field-design-banner")).toContainText(
+      /\(2\s*×\s*2\)/,
+    )
     await expect(page.getByTestId("field-design-replace")).toBeVisible()
 
-    // The fixture has 2 rows × 2 cols. Auto-populate should set the inputs
-    // accordingly — we hadn't drawn a grid yet, so dimensionsFromDesign
-    // wins.
+    // Sanity-check the underlying rows/cols state by switching back to
+    // Manual: the inputs should reflect the auto-populated dimensions.
+    // Then return to the FD tab so we generate with field-design labels.
+    await page.getByTestId("grid-mode-manual").click()
     await expect(page.getByTestId("boundary-rows")).toHaveValue("2")
     await expect(page.getByTestId("boundary-cols")).toHaveValue("2")
+    await page.getByTestId("grid-mode-fd").click()
 
     // Draw a small outer rectangle programmatically through the BoundaryMap
     // API surface: PlotBoundaryPrep accepts a feature list via Leaflet

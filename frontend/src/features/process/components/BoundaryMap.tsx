@@ -233,7 +233,12 @@ export function BoundaryMap({
   return (
     <div
       ref={mapEl}
-      className={className ?? "h-[500px] w-full rounded-md border"}
+      // `isolate` creates a new stacking context so Leaflet's pane
+      // z-indexes (200-800) stay scoped to inside the map. Without it,
+      // panes participate in the root stacking context and render *above*
+      // body-portaled dialogs/overlays (z-50), which makes the
+      // FieldDesignUploadDialog appear cut off or hidden behind tiles.
+      className={className ?? "h-[500px] w-full rounded-md border isolate"}
     />
   )
 }
