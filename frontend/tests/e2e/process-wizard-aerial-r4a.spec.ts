@@ -43,8 +43,18 @@ const DRONE_IMAGES = [
   "2022-06-27_100MEDIA_DJI_0880.JPG",
 ]
 
+// ODM is the heaviest job in the suite — NodeODM + worker-odm consume
+// several GB and stitching 5 drone images takes 5-10 minutes even on
+// fast hardware. GitHub's free runners (2 vCPU / 7 GB) blow past the
+// 15-minute timeout consistently. Gate the test on RUN_HEAVY_E2E=1
+// so it still runs locally (where the user has the full stack up
+// with the ODM workers) but doesn't pin CI red. The CI compose-up
+// step doesn't even bring up nodeodm + worker-odm.
+const HEAVY_E2E = process.env.RUN_HEAVY_E2E === "1"
+
 test.describe("R4a: aerial wizard happy path", () => {
   test.setTimeout(ODM_TIMEOUT_MS + 3 * 60_000)
+  test.skip(!HEAVY_E2E, "Set RUN_HEAVY_E2E=1 to run the ODM-bound spec")
 
   test("upload → workspace → pipeline → run → orthomosaic → step settles", async ({
     page,
