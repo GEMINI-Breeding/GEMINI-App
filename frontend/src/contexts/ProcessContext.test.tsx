@@ -488,14 +488,14 @@ describe("ProcessContext crash-recovery rehydration", () => {
     findRunByJobIdMock.mockReturnValue(undefined)
 
     const { result } = renderHook(() => useProcess(), { wrapper })
-    // Wait long enough for the effect to settle. The query resolves but
-    // the post-query effect must not push anything into `processes`.
+    // Wait directly on the post-query effect having run (i.e. the
+    // findRunByJobId reverse-lookup was attempted). Waiting on
+    // apiJobsAllMock alone races with React's commit phase on slow
+    // CI runners — the query has resolved but the effect hasn't
+    // dispatched yet, so the assertion fires too early.
     await waitFor(() => {
-      expect(apiJobsAllMock).toHaveBeenCalled()
+      expect(findRunByJobIdMock).toHaveBeenCalledWith("orphan-job")
     })
-    // Confirm the post-resolve effect actually ran by waiting another tick.
-    await new Promise((r) => setTimeout(r, 0))
     expect(result.current.processes).toEqual([])
-    expect(findRunByJobIdMock).toHaveBeenCalledWith("orphan-job")
   })
 })
