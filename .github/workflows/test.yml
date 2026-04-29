@@ -55,9 +55,13 @@ jobs:
       - name: Install Poetry
         run: pipx install poetry==2.*
 
-      - name: Install backend deps (no virtualenv)
+      - name: Install backend deps
         run: |
-          poetry config virtualenvs.create false
+          # Use Poetry's own venv rather than the system Python. With
+          # virtualenvs.create=false, `poetry install` tries to overwrite
+          # apt-installed packages (urllib3, idna, packaging, PyJWT, ...)
+          # whose RECORD files are missing on the GHA Debian runner image,
+          # which fails every time. A Poetry-managed venv sidesteps that.
           poetry install --no-root --with test
 
       - name: Run backend unit tests
@@ -65,7 +69,7 @@ jobs:
           # Use the existing fast unit-test suite. Integration tests that
           # require infra live under tests/integration and are run separately
           # by the compose-smoke job below.
-          python -m pytest tests/unit -q
+          poetry run pytest tests/unit -q
 
   compose-smoke:
     name: Compose stack smoke
