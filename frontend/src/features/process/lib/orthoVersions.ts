@@ -90,26 +90,41 @@ export function buildOrthoVersions(
     `${DEFAULT_BUCKET}/${prefix}${filename}`
   const meta = readOrthoOutputs(run)
 
-  // Index every file by its (basename) and (full object_name minus bucket
-  // for path comparisons).
+  // Index every file by basename + full object_name, and capture each
+  // file's MinIO last_modified so the "Created" column can fall back to
+  // the on-disk timestamp when no runStore metadata is recorded.
   const filesByName = new Set<string>()
   const filesByPath = new Set<string>()
+  const lastModifiedByName = new Map<string, string>()
+  const lastModifiedByPath = new Map<string, string>()
   for (const f of files) {
     const name = f.object_name ?? ""
-    filesByName.add(name.split("/").pop() ?? "")
+    const basename = name.split("/").pop() ?? ""
+    filesByName.add(basename)
     filesByPath.add(name)
+    const lm = (f as { last_modified?: string }).last_modified
+    if (lm) {
+      lastModifiedByName.set(basename, lm)
+      lastModifiedByPath.set(name, lm)
+    }
   }
   const cogPresent = filesByName.has(COG_FILENAME)
   const orthoPresent = filesByName.has(ORTHO_FILENAME)
 
-  // Helper: does the meta entry's file exist on disk?
   function metaExists(m: OrthoVersionMeta): boolean {
     if (m.path) {
-      // Trim leading bucket segment to compare against object_name.
       const relative = m.path.replace(/^[^/]+\//, "")
       return filesByPath.has(relative)
     }
     return filesByName.has(m.filename)
+  }
+
+  function lastModifiedFor(m: OrthoVersionMeta): string | null {
+    if (m.path) {
+      const relative = m.path.replace(/^[^/]+\//, "")
+      return lastModifiedByPath.get(relative) ?? null
+    }
+    return lastModifiedByName.get(m.filename) ?? null
   }
 
   const versions: OrthoVersion[] = []
@@ -123,8 +138,10 @@ export function buildOrthoVersions(
       label: m.label ?? null,
       source: m.source,
       jobId: m.jobId,
-      createdAt: m.createdAt,
-      // COG only meaningful for the ODM-output filename.
+      // Prefer the runStore metadata's createdAt (set when the user
+      // imports / when R4a's job submission writes one); fall back to
+      // MinIO's last_modified for legacy on-disk files we never recorded.
+      createdAt: m.createdAt ?? lastModifiedFor(m),
       hasCog: m.filename === ORTHO_FILENAME && cogPresent,
     })
   }
@@ -135,7 +152,7 @@ export function buildOrthoVersions(
       path: defaultProcessedPath(ORTHO_FILENAME),
       label: null,
       source: "RUN_ODM",
-      createdAt: null,
+      createdAt: lastModifiedByName.get(ORTHO_FILENAME) ?? null,
       hasCog: cogPresent,
     })
   }

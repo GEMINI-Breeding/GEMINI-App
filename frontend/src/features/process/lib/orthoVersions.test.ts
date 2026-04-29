@@ -15,11 +15,11 @@ const scope = {
   sensor: "RGB",
 }
 
-function file(name: string): FileMetadata {
+function file(name: string, lastModified?: string): FileMetadata {
   return {
     object_name: `Processed/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/${name}`,
     size: 0,
-    last_modified: null,
+    last_modified: lastModified ?? null,
     etag: null,
     content_type: null,
   } as unknown as FileMetadata
@@ -88,6 +88,36 @@ describe("buildOrthoVersions", () => {
       file("odm_orthophoto-Pyramid.tif"),
     ])
     expect(out[0].hasCog).toBe(true)
+  })
+
+  it("falls back to MinIO last_modified when no runStore metadata exists", () => {
+    const out = buildOrthoVersions(undefined, scope, [
+      file("odm_orthophoto.tif", "2026-04-28T12:00:00.000Z"),
+    ])
+    expect(out[0].createdAt).toBe("2026-04-28T12:00:00.000Z")
+  })
+
+  it("uses MinIO last_modified for legacy meta entries with no createdAt-on-disk match", () => {
+    // Synthesize a meta entry without createdAt (shouldn't really happen
+    // — schema requires it — but defend against drift). Cast to bypass
+    // the type check for the test.
+    const run = makeRun([])
+    const stepState = run.steps.orthomosaic
+    if (stepState) {
+      stepState.outputs = {
+        versions: [
+          {
+            filename: "odm_orthophoto.tif",
+            source: "RUN_ODM",
+            createdAt: undefined as unknown as string,
+          },
+        ],
+      }
+    }
+    const out = buildOrthoVersions(run, scope, [
+      file("odm_orthophoto.tif", "2026-04-29T01:00:00.000Z"),
+    ])
+    expect(out[0].createdAt).toBe("2026-04-29T01:00:00.000Z")
   })
 
   it("uses runStore meta to attach labels and createdAt, newest first", () => {
