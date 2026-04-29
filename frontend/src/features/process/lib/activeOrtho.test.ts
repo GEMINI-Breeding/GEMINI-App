@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 
 import type { FileMetadata } from "@/client"
 
-import { resolveActiveOrtho, s3UrlForOrtho } from "./activeOrtho"
+import {
+  buildTitilerTileUrl,
+  resolveActiveOrtho,
+  s3UrlForOrtho,
+} from "./activeOrtho"
 import type { OrthoVersion } from "./orthoVersions"
 import type { Run } from "./runStore"
 
@@ -50,7 +54,9 @@ describe("resolveActiveOrtho", () => {
   })
 
   it("returns null when scope is null", () => {
-    expect(resolveActiveOrtho(makeRun(), null, [file("odm_orthophoto.tif")])).toBeNull()
+    expect(
+      resolveActiveOrtho(makeRun(), null, [file("odm_orthophoto.tif")]),
+    ).toBeNull()
   })
 
   it("picks the newest version when multiple exist on disk", () => {
@@ -105,6 +111,44 @@ describe("s3UrlForOrtho", () => {
       createdAt: null,
       hasCog: true,
     }
-    expect(s3UrlForOrtho(v)).toBe("s3://gemini/Raw/foo/Orthomosaic/ortho-Pyramid.tif")
+    expect(s3UrlForOrtho(v)).toBe(
+      "s3://gemini/Raw/foo/Orthomosaic/ortho-Pyramid.tif",
+    )
+  })
+})
+
+describe("buildTitilerTileUrl", () => {
+  it("produces the standard XYZ template", () => {
+    const url = buildTitilerTileUrl(
+      "s3://gemini/Processed/foo/odm_orthophoto.tif",
+    )
+    expect(url).toContain("/titiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}")
+    expect(url).toContain("tilesize=256")
+  })
+
+  it("encodes spaces in the s3 URL as %20, not +", () => {
+    // Regression: TiTiler 2.0.1's tilejson `tiles[0]` template uses `+`
+    // for spaces in the s3 URL (form-encoded query convention). When
+    // the browser round-trips that URL, S3 receives literal `+` rather
+    // than spaces and 404s on object keys with spaces (e.g. real-world
+    // population names like "Cowpea MAGIC"). buildTitilerTileUrl uses
+    // encodeURIComponent which always emits %20, which S3 decodes
+    // correctly. Asserting the encoded form here means a regression
+    // that reverts to tilejson's `tiles[0]` will fail this test
+    // without needing an end-to-end round trip.
+    const url = buildTitilerTileUrl(
+      "s3://gemini/Processed/2026/Davis/Cowpea MAGIC/odm_orthophoto.tif",
+    )
+    expect(url).toContain("Cowpea%20MAGIC")
+    expect(url).not.toContain("Cowpea+MAGIC")
+  })
+
+  it("encodes other reserved characters consistently", () => {
+    const url = buildTitilerTileUrl(
+      "s3://gemini/Processed/path/with#hash & ampersand.tif",
+    )
+    // # would terminate URL parsing; & would split the query.
+    expect(url).toContain(encodeURIComponent("#"))
+    expect(url).toContain(encodeURIComponent("&"))
   })
 })

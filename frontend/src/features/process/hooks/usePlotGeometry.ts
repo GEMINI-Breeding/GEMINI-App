@@ -17,6 +17,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { PlotGeometryService } from "@/client"
+import type { FieldDesign } from "@/features/process/lib/fieldDesign"
 import { isLoggedIn } from "@/lib/auth"
 
 export type PlotGeometryVersion = {
@@ -36,6 +37,7 @@ export type PlotGeometryStateSnapshot = {
     angle_deg: number
   }
   created_from?: "draw" | "grid" | "import"
+  field_design?: FieldDesign
 }
 
 export type PlotGeometryVersionLoaded = PlotGeometryVersion & {
@@ -50,7 +52,11 @@ export type GpsShiftStatus = {
   reference_lon?: number
 }
 
-const versionKey = (directory: string) => ["plot-geometry", "versions", directory]
+const versionKey = (directory: string) => [
+  "plot-geometry",
+  "versions",
+  directory,
+]
 const gpsKey = (directory: string) => ["plot-geometry", "gps-shift", directory]
 
 export function usePlotGeometryVersions(directory: string | null | undefined) {
@@ -58,9 +64,10 @@ export function usePlotGeometryVersions(directory: string | null | undefined) {
     queryKey: versionKey(directory ?? ""),
     queryFn: async () => {
       if (!directory) return []
-      const res = await PlotGeometryService.apiPlotGeometryVersionsListListVersions(
-        { requestBody: { directory } },
-      )
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsListListVersions({
+          requestBody: { directory },
+        })
       return (res as PlotGeometryVersion[] | null) ?? []
     },
     enabled: isLoggedIn() && Boolean(directory),
@@ -76,9 +83,10 @@ export function useLoadPlotGeometryVersion(
     queryFn: async () => {
       if (!directory) throw new Error("directory required")
       if (version == null) throw new Error("version required")
-      const res = await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion(
-        { requestBody: { directory, version } },
-      )
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+          requestBody: { directory, version },
+        })
       return res as unknown as PlotGeometryVersionLoaded
     },
     // Only fire when the caller has actually picked a version. Without
@@ -100,15 +108,14 @@ export function useSavePlotGeometryVersion() {
     }
   >({
     mutationFn: async ({ directory, stateSnapshot, name }) => {
-      const res = await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion(
-        {
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
           requestBody: {
             directory,
             state_snapshot: stateSnapshot as unknown as Record<string, unknown>,
             name: name ?? undefined,
           },
-        },
-      )
+        })
       return res as unknown as PlotGeometryVersion
     },
     onSuccess: (_, vars) => {
@@ -152,9 +159,10 @@ export function useGpsShiftStatus(directory: string | null | undefined) {
     queryKey: gpsKey(directory ?? ""),
     queryFn: async () => {
       if (!directory) return { shifted: false }
-      const res = await PlotGeometryService.apiPlotGeometryGpsShiftStatusCheckGpsShiftStatus(
-        { requestBody: { directory } },
-      )
+      const res =
+        await PlotGeometryService.apiPlotGeometryGpsShiftStatusCheckGpsShiftStatus(
+          { requestBody: { directory } },
+        )
       return res as unknown as GpsShiftStatus
     },
     enabled: isLoggedIn() && Boolean(directory),
@@ -170,7 +178,11 @@ export function useShiftGps() {
   >({
     mutationFn: async ({ directory, currentLat, currentLon }) => {
       return PlotGeometryService.apiPlotGeometryShiftGpsShiftGps({
-        requestBody: { directory, current_lat: currentLat, current_lon: currentLon },
+        requestBody: {
+          directory,
+          current_lat: currentLat,
+          current_lon: currentLon,
+        },
       })
     },
     onSuccess: (_, vars) => {

@@ -23,8 +23,8 @@
  * Cost: ~3-5 min in steady state (most of it is ODM compute).
  */
 import { firstSuperuser, firstSuperuserPassword } from "../config"
-import { expect, test } from "../helpers/fixtures"
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -110,9 +110,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     await expect(
       page.getByRole("heading", { name: workspaceName }),
     ).toBeVisible()
-    await page
-      .getByRole("button", { name: /create aerial pipeline/i })
-      .click()
+    await page.getByRole("button", { name: /create aerial pipeline/i }).click()
 
     // Step 1: name
     await page.getByLabel(/pipeline name/i).fill(pipelineName)
@@ -131,7 +129,10 @@ test.describe("R4a: aerial wizard happy path", () => {
     await expect(
       page.getByRole("heading", { name: workspaceName }),
     ).toBeVisible()
-    await page.getByRole("button", { name: /new run/i }).first().click()
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
 
     // Lands on RunDetail. Pick the run's date/platform/sensor in the
     // Run Setup card. The picker auto-selects the workspace's experiment
@@ -202,9 +203,9 @@ test.describe("R4a: aerial wizard happy path", () => {
     // we saved any rename metadata.
     const orthoPanel = orthoRow.getByTestId("ortho-versions-panel")
     await expect(orthoPanel).toBeVisible({ timeout: 30_000 })
-    await expect(
-      orthoPanel.getByTestId("ortho-version-row-1"),
-    ).toBeVisible({ timeout: 30_000 })
+    await expect(orthoPanel.getByTestId("ortho-version-row-1")).toBeVisible({
+      timeout: 30_000,
+    })
 
     // ── R4c assertion: trait_extraction step row is gated by boundaries. ─
     // plot_boundary_prep is a non-optional prereq, so trait_extraction's
@@ -212,7 +213,9 @@ test.describe("R4a: aerial wizard happy path", () => {
     // the user completes plot_boundary_prep.
     const traitRow = page.getByTestId("step-row-trait_extraction")
     await expect(traitRow).toHaveAttribute("data-status", "locked")
-    await expect(traitRow.getByRole("button", { name: /run step/i })).toBeDisabled()
+    await expect(
+      traitRow.getByRole("button", { name: /run step/i }),
+    ).toBeDisabled()
 
     // ── 7a. Bug 1 reproduction surface: log timestamps must differ. ─────
     // Expand the completed log via the chevron toggle (only present on
@@ -222,9 +225,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     //
     // Done BEFORE the R5a tool-route assertion below because Open Tool
     // navigates the page; orthoRow is only resolvable on the run page.
-    await orthoRow
-      .getByRole("button", { name: /expand details/i })
-      .click()
+    await orthoRow.getByRole("button", { name: /expand details/i }).click()
     const logEntries = orthoRow.getByTestId("progress-log-entry")
     const entryCount = await logEntries.count()
     expect(entryCount).toBeGreaterThan(1)
@@ -259,9 +260,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     ).toBeVisible()
     await expect(page.getByTestId("boundary-rows")).toBeVisible()
     await expect(page.getByTestId("boundary-cols")).toBeVisible()
-    await expect(
-      page.getByTestId("boundary-save-and-complete"),
-    ).toBeDisabled() // disabled until the user draws a polygon
+    await expect(page.getByTestId("boundary-save-and-complete")).toBeDisabled() // disabled until the user draws a polygon
 
     // Basemap toggle: Leaflet's built-in layers control sits in the top-right
     // and is collapsed by default. Hovering expands it; we then look for the
@@ -287,6 +286,22 @@ test.describe("R4a: aerial wizard happy path", () => {
     await expect(
       page.locator('img.leaflet-tile[src*="/titiler/cog/tiles/"]').first(),
     ).toBeAttached({ timeout: 30_000 })
+    // At least one tile <img> must have actually loaded (naturalWidth > 0).
+    // toBeAttached is too lax — a tilesize/tileSize mismatch would render
+    // every <img> with src pointing at TiTiler but with naturalWidth 0
+    // (broken-image), and the "ortho is on the map" assertion would still
+    // pass while the user sees nothing. This catches that.
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator('img.leaflet-tile[src*="/titiler/cog/tiles/"]')
+            .evaluateAll((imgs) =>
+              imgs.some((el) => (el as HTMLImageElement).naturalWidth > 0),
+            ),
+        { timeout: 20_000 },
+      )
+      .toBe(true)
     const tilejsonProbe = await request.get(
       new URL(
         `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(
@@ -298,6 +313,184 @@ test.describe("R4a: aerial wizard happy path", () => {
       ).toString(),
     )
     expect(tilejsonProbe.ok()).toBe(true)
+
+    // ── Visible ortho assertion: top element at the map center. ──────────
+    //
+    // The DOM checks above pass even for bugs that hide the ortho from
+    // the user (z-order regressions, layer teardown after first paint).
+    // What we actually care about: when the auto-fit lands, is the
+    // top-most rendered element at the map's geographic centroid an
+    // ortho tile? document.elementFromPoint(centerX, centerY) returns
+    // the top element — for a healthy ortho, that's a TiTiler-served
+    // <img>. For a z-order regression, it's a basemap tile. For a
+    // layer-teardown bug, the test polls until the assertion holds,
+    // so a brief flash isn't enough — the ortho must be the top
+    // element after the page has settled.
+    //
+    // Why elementFromPoint and not pixel sampling: cross-origin tile
+    // images (TiTiler, Esri, OSM) without crossOrigin="anonymous" can
+    // taint a canvas read in WebKit, returning null. The DOM-level
+    // check is robust to that.
+    //
+    // Don't wait for networkidle: the wizard keeps WS connections alive
+    // and the page never goes idle. Rely on expect.poll below to wait
+    // for the ortho tile to finish loading.
+    // Identify which tile layer is on top at the map's center point.
+    //
+    // We can't use document.elementFromPoint here: Leaflet panes have
+    // pointer-events:none so click/drag pass through to the map, which
+    // means elementFromPoint returns the .leaflet-container div, not
+    // the actual tile <img>. Instead, enumerate all loaded leaflet
+    // tile <img>s, find the ones whose bounding box contains the
+    // centroid, and pick the one with the highest CSS z-index (the
+    // ortho lives in a custom orthoPane at z-index 250; basemap tiles
+    // are in tilePane at z-index 200). Whichever wins identifies the
+    // visually-top layer at center.
+    const topLayerAtCenter = async (): Promise<string> =>
+      page.evaluate(() => {
+        const mapDiv = document.querySelector(
+          ".leaflet-container",
+        ) as HTMLElement | null
+        if (!mapDiv) return "no-map"
+        const mapRect = mapDiv.getBoundingClientRect()
+        const cx = mapRect.left + mapRect.width / 2
+        const cy = mapRect.top + mapRect.height / 2
+        const tiles = Array.from(
+          document.querySelectorAll<HTMLImageElement>("img.leaflet-tile"),
+        )
+        type Hit = { src: string; z: number }
+        const hits: Hit[] = []
+        for (const img of tiles) {
+          if (!img.complete || !img.naturalWidth) continue
+          const r = img.getBoundingClientRect()
+          if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom)
+            continue
+          // Walk up to the nearest .leaflet-pane to read its z-index.
+          let pane: HTMLElement | null = img.parentElement
+          while (pane && !pane.classList.contains("leaflet-pane")) {
+            pane = pane.parentElement
+          }
+          const z = pane ? parseInt(getComputedStyle(pane).zIndex, 10) || 0 : 0
+          hits.push({ src: img.src, z })
+        }
+        if (hits.length === 0) return "no-tile-at-center"
+        hits.sort((a, b) => b.z - a.z)
+        const top = hits[0]
+        if (top.src.includes("/titiler/cog/tiles/")) return "ortho"
+        if (top.src.includes("openstreetmap")) return "osm"
+        if (top.src.includes("arcgisonline")) return "esri"
+        return `unknown:${top.src.slice(0, 60)}`
+      })
+
+    // Poll because Leaflet finishes layout slightly after networkidle.
+    try {
+      await expect
+        .poll(topLayerAtCenter, {
+          timeout: 15_000,
+          message:
+            "Top element at map center should be a /titiler/cog/tiles/ <img>; " +
+            "a non-ortho result indicates a z-order regression, layer-teardown " +
+            "bug, or wrong auto-fit (ortho rendered offscreen).",
+        })
+        .toBe("ortho")
+    } catch (err) {
+      // Surface what the page actually showed so future failures
+      // self-diagnose (which layer was on top, what tile URLs existed).
+      const diag = await page.evaluate(() => {
+        const mapDiv = document.querySelector(
+          ".leaflet-container",
+        ) as HTMLElement | null
+        if (!mapDiv) return { kind: "no-map" as const }
+        const rect = mapDiv.getBoundingClientRect()
+        const cx = Math.round(rect.left + rect.width / 2)
+        const cy = Math.round(rect.top + rect.height / 2)
+        const tiles = Array.from(
+          document.querySelectorAll<HTMLImageElement>("img.leaflet-tile"),
+        ).map((img) => ({
+          src: img.src,
+          loaded: img.complete && img.naturalWidth > 0,
+          x: img.getBoundingClientRect().x,
+          y: img.getBoundingClientRect().y,
+          w: img.getBoundingClientRect().width,
+          h: img.getBoundingClientRect().height,
+        }))
+        const topEl = document.elementFromPoint(cx, cy)
+        const topElInfo = topEl
+          ? {
+              tag: (topEl as HTMLElement).tagName,
+              src: (topEl as HTMLImageElement).src,
+              cls: (topEl as HTMLElement).className,
+            }
+          : null
+        return {
+          kind: "diag" as const,
+          mapRect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+          centerXY: { cx, cy },
+          tiles,
+          topEl: topElInfo,
+        }
+      })
+      // eslint-disable-next-line no-console
+      console.log("ORTHO DIAGNOSTIC:", JSON.stringify(diag, null, 2))
+      throw err
+    }
+
+    // ── Interaction: basemap toggle keeps the ortho on top. ───────────────
+    //
+    // Regression test for the z-order bug: when L.control.layers swaps
+    // basemaps, the new basemap was landing above the ortho. Fixed by
+    // putting the ortho on a custom orthoPane at z-index 250.
+    //
+    // The Leaflet layers control collapses on mouseout, which races with
+    // .check() — between hovering and clicking the radio, the flyout
+    // hides and the input gets display:none. Force-expand the control
+    // by adding the `leaflet-control-layers-expanded` class directly,
+    // then click radios with force:true so actionability isn't blocked
+    // if Leaflet collapses again mid-click.
+    await page.evaluate(() => {
+      document
+        .querySelector(".leaflet-control-layers")
+        ?.classList.add("leaflet-control-layers-expanded")
+    })
+    await page
+      .locator('input[type="radio"].leaflet-control-layers-selector')
+      .nth(1)
+      .check({ force: true })
+    await page.waitForTimeout(500)
+    await page.evaluate(() => {
+      document
+        .querySelector(".leaflet-control-layers")
+        ?.classList.add("leaflet-control-layers-expanded")
+    })
+    await page
+      .locator('input[type="radio"].leaflet-control-layers-selector')
+      .nth(0)
+      .check({ force: true })
+    await page.waitForTimeout(500)
+    await expect
+      .poll(topLayerAtCenter, {
+        timeout: 10_000,
+        message:
+          "After basemap toggle, top element at map center should still be the ortho. " +
+          "A non-ortho result indicates a z-order regression in the basemap-toggle path.",
+      })
+      .toBe("ortho")
+
+    // ── Interaction: zoom out — exercises the proxy 404 rewrite path. ────
+    //
+    // Drone orthos are non-rectangular within their WGS84 bounding box.
+    // When the user zooms out, Leaflet requests tiles that TiTiler 404s
+    // on (no pixel data at those coords). Without the /titiler proxy's
+    // 404→200 rewrite, those errors trip the console-error guard and
+    // fail the test. Click the Zoom out button several times to
+    // guarantee at least one out-of-footprint tile request fires.
+    for (let i = 0; i < 4; i++) {
+      await page.locator(".leaflet-control-zoom-out").click()
+      await page.waitForTimeout(250)
+    }
+    // Settle: allow tile fetches to complete so any 404 surfaces before
+    // the assertions in the next phase / consoleErrorGuard.assertClean.
+    await page.waitForTimeout(2_000)
 
     // ── 8. Backend assertion: ODM actually wrote the orthomosaic. ────────
     // Mirrors the Phase 7 spec — confirms the wizard's RUN_ODM payload
@@ -314,10 +507,7 @@ test.describe("R4a: aerial wizard happy path", () => {
 
     const processedPrefix = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
     const listRes = await request.get(
-      new URL(
-        `/api/files/list/gemini/${processedPrefix}`,
-        baseURL,
-      ).toString(),
+      new URL(`/api/files/list/gemini/${processedPrefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${access_token}` } },
     )
     expect(listRes.ok()).toBe(true)

@@ -9,7 +9,6 @@
  * Lost vs main (deferred to future passes):
  *   - Auto-boundary estimation from TIF georeferencing (no GEMINIbase
  *     endpoint).
- *   - Field-design CSV row/col auto-population.
  *   - Stitch-version selection (ground-pipeline territory; R6).
  *
  * Step completion: when the user clicks "Save & complete step", we save
@@ -17,8 +16,9 @@
  * step to completed. Trait extraction's boundary-version picker reads
  * the active version from the same directory.
  */
-import { useEffect, useMemo, useState } from "react"
+
 import { useQuery } from "@tanstack/react-query"
+import { useEffect, useMemo, useState } from "react"
 
 import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -29,33 +29,35 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
+import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
 import { VersionPicker } from "@/features/process/components/VersionPicker"
 import {
+  type PlotGeometryStateSnapshot,
   useActivatePlotGeometryVersion,
   useLoadPlotGeometryVersion,
   useSavePlotGeometryVersion,
-  type PlotGeometryStateSnapshot,
 } from "@/features/process/hooks/usePlotGeometry"
 import {
+  buildTitilerTileUrl,
   resolveActiveOrtho,
   s3UrlForOrtho,
 } from "@/features/process/lib/activeOrtho"
+import {
+  applyLabelsToFeatures,
+  dimensionsFromDesign,
+  type FdTransform,
+  type FieldDesign,
+  mergeLabelsIntoExisting,
+} from "@/features/process/lib/fieldDesign"
 import { generateGridFeatures } from "@/features/process/lib/grid"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
-import {
-  setStepState,
-  type Run,
-} from "@/features/process/lib/runStore"
+import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const DEFAULT_BUCKET = "gemini"
@@ -82,6 +84,8 @@ export function PlotBoundaryPrep({
   const [cols, setCols] = useState(10)
   const [angle, setAngle] = useState(0)
   const [gapMeters, setGapMeters] = useState(0)
+  const [fieldDesign, setFieldDesign] = useState<FieldDesign | null>(null)
+  const [fdDialogOpen, setFdDialogOpen] = useState(false)
 
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
@@ -108,11 +112,16 @@ export function PlotBoundaryPrep({
   // and a fully-qualified XYZ template in `tiles[0]`. We rewrite TiTiler's
   // absolute URL onto our /titiler proxy so it works in both dev (vite proxy)
   // and bundled deployments where TiTiler isn't reachable on :8091.
+  // Force tilesize=256 so the standard z/x/y maps to a 256px-equivalent
+  // geographic extent (matches Leaflet's default tileSize: 256). TiTiler
+  // 2.0.1 defaults to tilesize=512 in its tilejson template, which would
+  // require either tileSize: 512 + zoomOffset on the Leaflet side or
+  // result in tiles that depict the wrong geographic area for the slot.
   const tilejsonQuery = useQuery({
     queryKey: ["titiler", "tilejson", s3Url],
     queryFn: async () => {
       const res = await fetch(
-        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}`,
+        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
       )
       if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
       return res.json() as Promise<{
@@ -124,12 +133,10 @@ export function PlotBoundaryPrep({
     staleTime: 5 * 60_000,
   })
 
-  const orthoTileUrl = useMemo(() => {
-    const t = tilejsonQuery.data?.tiles?.[0]
-    if (!t) return undefined
-    // Strip the absolute origin so we go through the /titiler proxy.
-    return t.replace(/^https?:\/\/[^/]+/, "/titiler")
-  }, [tilejsonQuery.data])
+  const orthoTileUrl = useMemo(
+    () => (s3Url ? buildTitilerTileUrl(s3Url) : undefined),
+    [s3Url],
+  )
 
   // tilejson bounds: [west, south, east, north] in WGS84.
   // BoundaryMap wants [[south, west], [north, east]].
@@ -157,6 +164,17 @@ export function PlotBoundaryPrep({
       setAngle(grid.angle_deg ?? 0)
       setGapMeters(grid.spacing_m ?? 0)
     }
+    const fd = loaded.data.state_snapshot.field_design
+    if (fd) {
+      setFieldDesign(fd)
+      // Auto-populate Rows/Cols only when the loaded version has no grid
+      // yet — otherwise the saved grid wins.
+      if (!grid) {
+        const dims = dimensionsFromDesign(fd)
+        setRows(dims.rows)
+        setCols(dims.cols)
+      }
+    }
   }, [loaded.data])
 
   function regenerateGrid() {
@@ -168,7 +186,8 @@ export function PlotBoundaryPrep({
           (f.properties?.role ?? "outer") === "outer",
       ) ??
       features.find(
-        (f): f is GeoJSON.Feature<GeoJSON.Polygon> => f.geometry?.type === "Polygon",
+        (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
+          f.geometry?.type === "Polygon",
       )
     if (!outer) {
       showErrorToast("Draw an outer boundary first, then generate the grid.")
@@ -186,7 +205,44 @@ export function PlotBoundaryPrep({
     // others — SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS treat every feature
     // in the FeatureCollection as a distinct plot, so an enclosing
     // rectangle creates a junk plot covering the whole field.
-    setFeatures(grid)
+    const labeled = fieldDesign
+      ? applyLabelsToFeatures(grid, fieldDesign)
+      : grid
+    setFeatures(labeled)
+  }
+
+  function setFdTransform(transform: FdTransform) {
+    if (!fieldDesign) return
+    const next: FieldDesign = { ...fieldDesign, transform }
+    setFieldDesign(next)
+    // Re-label the existing geometry live without redrawing.
+    if (features.length > 0) {
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features,
+      }
+      const merged = mergeLabelsIntoExisting(fc, next)
+      setFeatures(merged.features as GeoJSON.Feature[])
+    }
+  }
+
+  function handleFieldDesignSaved(fd: FieldDesign) {
+    setFieldDesign(fd)
+    setFdDialogOpen(false)
+    // Auto-populate Rows/Cols only when the user hasn't drawn a grid yet.
+    if (features.length === 0) {
+      const dims = dimensionsFromDesign(fd)
+      setRows(dims.rows)
+      setCols(dims.cols)
+    } else {
+      // Re-label existing geometry against the newly uploaded design.
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features,
+      }
+      const merged = mergeLabelsIntoExisting(fc, fd)
+      setFeatures(merged.features as GeoJSON.Feature[])
+    }
   }
 
   async function handleSaveOnly() {
@@ -194,7 +250,9 @@ export function PlotBoundaryPrep({
       await saveCurrent()
       showSuccessToast("Saved plot-geometry version")
     } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : "Failed to save version")
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to save version",
+      )
     }
   }
 
@@ -231,6 +289,7 @@ export function PlotBoundaryPrep({
       boundaries: { type: "FeatureCollection", features },
       grid: { rows, cols, spacing_m: gapMeters, angle_deg: angle },
       created_from: features.length > 1 ? "grid" : "draw",
+      ...(fieldDesign ? { field_design: fieldDesign } : {}),
     }
     const v = await save.mutateAsync({
       directory,
@@ -270,7 +329,8 @@ export function PlotBoundaryPrep({
             />
             <div className="mt-2 flex items-center justify-between text-xs">
               <p className="text-muted-foreground">
-                {features.length} feature{features.length === 1 ? "" : "s"} drawn
+                {features.length} feature{features.length === 1 ? "" : "s"}{" "}
+                drawn
               </p>
               {activeOrtho && tilejsonQuery.isError && (
                 <p className="text-muted-foreground italic">
@@ -344,6 +404,95 @@ export function PlotBoundaryPrep({
               <Button size="sm" variant="outline" onClick={regenerateGrid}>
                 Generate plot grid
               </Button>
+
+              <div
+                className="rounded border bg-muted/30 p-2 text-xs"
+                data-testid="field-design-banner"
+              >
+                {fieldDesign ? (
+                  <>
+                    <p className="mb-1.5">
+                      Field design: <strong>{fieldDesign.rows.length}</strong>{" "}
+                      plots loaded
+                    </p>
+                    <div className="flex items-center gap-3 mb-2">
+                      <Label
+                        htmlFor="fd-flip-rows"
+                        className="flex items-center gap-1.5 font-normal"
+                      >
+                        <Checkbox
+                          id="fd-flip-rows"
+                          data-testid="fd-flip-rows"
+                          checked={fieldDesign.transform.flipRows}
+                          onCheckedChange={(v) =>
+                            setFdTransform({
+                              ...fieldDesign.transform,
+                              flipRows: v === true,
+                            })
+                          }
+                        />
+                        Flip rows
+                      </Label>
+                      <Label
+                        htmlFor="fd-flip-cols"
+                        className="flex items-center gap-1.5 font-normal"
+                      >
+                        <Checkbox
+                          id="fd-flip-cols"
+                          data-testid="fd-flip-cols"
+                          checked={fieldDesign.transform.flipCols}
+                          onCheckedChange={(v) =>
+                            setFdTransform({
+                              ...fieldDesign.transform,
+                              flipCols: v === true,
+                            })
+                          }
+                        />
+                        Flip cols
+                      </Label>
+                      <Label
+                        htmlFor="fd-swap-axes"
+                        className="flex items-center gap-1.5 font-normal"
+                      >
+                        <Checkbox
+                          id="fd-swap-axes"
+                          data-testid="fd-swap-axes"
+                          checked={fieldDesign.transform.swapAxes}
+                          onCheckedChange={(v) =>
+                            setFdTransform({
+                              ...fieldDesign.transform,
+                              swapAxes: v === true,
+                            })
+                          }
+                        />
+                        Swap axes
+                      </Label>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="field-design-replace"
+                      onClick={() => setFdDialogOpen(true)}
+                    >
+                      Replace field design
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground mb-1.5">
+                      No field design — upload to label plots automatically.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="field-design-upload"
+                      onClick={() => setFdDialogOpen(true)}
+                    >
+                      Upload field design
+                    </Button>
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -368,7 +517,11 @@ export function PlotBoundaryPrep({
                 <Button
                   data-testid="boundary-save-and-complete"
                   onClick={handleSaveAndComplete}
-                  disabled={features.length === 0 || save.isPending || activate.isPending}
+                  disabled={
+                    features.length === 0 ||
+                    save.isPending ||
+                    activate.isPending
+                  }
                 >
                   {save.isPending || activate.isPending
                     ? "Saving…"
@@ -404,6 +557,12 @@ export function PlotBoundaryPrep({
           />
         </TabsContent>
       </Tabs>
+
+      <FieldDesignUploadDialog
+        open={fdDialogOpen}
+        onClose={() => setFdDialogOpen(false)}
+        onSaved={handleFieldDesignSaved}
+      />
     </div>
   )
 }

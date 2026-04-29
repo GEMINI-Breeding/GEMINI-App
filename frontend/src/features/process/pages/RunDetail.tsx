@@ -13,8 +13,9 @@
  *   - runEvents — wsManager → legacy ProgressEvent shape adapter
  *   - useProcess — bottom ProcessPanel registration
  */
-import { useNavigate, useParams } from "@tanstack/react-router"
+
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate, useParams } from "@tanstack/react-router"
 import {
   AlertCircle,
   ArrowLeft,
@@ -33,10 +34,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
-  FilesService,
-  JobsService,
   type FileMetadata,
+  FilesService,
   type JobOutput,
+  JobsService,
 } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -58,37 +59,37 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import {
+  type AerialScopeFields,
   AerialScopePicker,
   buildAerialScope,
   useAerialScopeContext,
-  type AerialScopeFields,
 } from "@/features/process/components/AerialScopePicker"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import {
-  TraitExtractionDialog,
   type TraitDialogState,
+  TraitExtractionDialog,
 } from "@/features/process/components/TraitExtractionDialog"
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
 import { usePlotGeometryVersions } from "@/features/process/hooks/usePlotGeometry"
 import { buildOrthoVersions } from "@/features/process/lib/orthoVersions"
-import { useProcessScope } from "@/features/process/lib/processScope"
 import {
+  type AerialScope,
   isAerialScopeComplete,
   processedPrefix,
   rawImagesPrefix,
-  type AerialScope,
 } from "@/features/process/lib/paths"
+import { useProcessScope } from "@/features/process/lib/processScope"
 import {
   executeStep,
   markStepSkipped,
-  stopStep,
   type OrthomosaicParams,
+  stopStep,
 } from "@/features/process/lib/runApi"
 import {
   closeJobConnection,
-  subscribeJobAsRunEvent,
   type RunProgressEvent,
+  subscribeJobAsRunEvent,
 } from "@/features/process/lib/runEvents"
 import {
   setStepState,
@@ -105,15 +106,7 @@ import { isLoggedIn } from "@/lib/auth"
 type StepKind = "interactive" | "compute" | "optional"
 
 /** Phases whose step rows are functional (not pending-restoration stubs). */
-const LIVE_PHASES = new Set([
-  "R4a",
-  "R4b",
-  "R4c",
-  "R5a",
-  "R5b",
-  "R5c",
-  "R6",
-])
+const LIVE_PHASES = new Set(["R4a", "R4b", "R4c", "R5a", "R5b", "R5c", "R6"])
 function isLive(phase?: string): boolean {
   return !phase || LIVE_PHASES.has(phase)
 }
@@ -228,7 +221,13 @@ const AERIAL_STEPS: StepDef[] = [
 
 // ── Step status helpers ─────────────────────────────────────────────────────
 
-type StepStatus = "completed" | "running" | "failed" | "ready" | "locked" | "skipped"
+type StepStatus =
+  | "completed"
+  | "running"
+  | "failed"
+  | "ready"
+  | "locked"
+  | "skipped"
 
 function getStepStatus(
   stepKey: string,
@@ -275,7 +274,7 @@ function ProgressLog({ events }: { events: RunProgressEvent[] }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" })
-  }, [events])
+  }, [])
 
   if (events.length === 0) return null
 
@@ -421,12 +420,18 @@ function StepRow(props: StepRowProps) {
                 {step.label}
               </span>
               {status === "skipped" && (
-                <Badge variant="outline" className="text-muted-foreground text-xs">
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground text-xs"
+                >
                   skipped
                 </Badge>
               )}
               {status !== "skipped" && step.kind === "optional" && (
-                <Badge variant="outline" className="text-muted-foreground text-xs">
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground text-xs"
+                >
                   optional
                 </Badge>
               )}
@@ -436,7 +441,10 @@ function StepRow(props: StepRowProps) {
                 </Badge>
               )}
               {step.wiredIn && !isLive(step.wiredIn) && (
-                <Badge variant="outline" className="text-amber-700 border-amber-400 text-xs">
+                <Badge
+                  variant="outline"
+                  className="text-amber-700 border-amber-400 text-xs"
+                >
                   {step.wiredIn}
                 </Badge>
               )}
@@ -544,8 +552,8 @@ function RunSetupCard({
       <CardHeader>
         <CardTitle className="text-base">Run setup</CardTitle>
         <CardDescription>
-          Pick the flight date, platform, and sensor for this run. The orthomosaic
-          step uses these to locate raw images on MinIO.
+          Pick the flight date, platform, and sensor for this run. The
+          orthomosaic step uses these to locate raw images on MinIO.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -650,8 +658,8 @@ function OrthomosaicOptions({
             }
           />
           <p className="text-muted-foreground mt-1 text-xs">
-            Forwarded as-is to NodeODM. Drop a <code>gcp_list.txt</code> alongside
-            your raw images for ground-control points.
+            Forwarded as-is to NodeODM. Drop a <code>gcp_list.txt</code>{" "}
+            alongside your raw images for ground-control points.
           </p>
         </div>
       )}
@@ -675,8 +683,10 @@ export function RunDetail() {
   const { addProcess, updateProcess, processes } = useProcess()
   const ctx = useAerialScopeContext()
   const queryClient = useQueryClient()
-  const { experimentId: scopedExperimentId, setExperimentId: setScopedExperimentId } =
-    useProcessScope()
+  const {
+    experimentId: scopedExperimentId,
+    setExperimentId: setScopedExperimentId,
+  } = useProcessScope()
 
   // The workspace owns the experiment; push that into the shared
   // useProcessScope store so AerialScopePicker (and the path-listing
@@ -829,6 +839,9 @@ export function RunDetail() {
     () => progressBuffer.get(runId) ?? null,
   )
   const activeSubsRef = useRef<Map<string, () => void>>(new Map())
+  const activePollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(
+    new Map(),
+  )
 
   useEffect(() => {
     if (!run) return
@@ -841,40 +854,49 @@ export function RunDetail() {
     // Subscribe to new jobs.
     for (const [jobId, stepKey] of desired) {
       if (activeSubsRef.current.has(jobId)) continue
-      // Belt-and-suspenders: if the page reloaded after the job already
-      // terminated, the live WebSocket may not replay its last frame
-      // (wsManager's `lastEvent` cache is in-memory and gone after reload).
-      // Poll the job once on subscribe so we can settle the runStore step
-      // even if no further WS event arrives.
-      JobsService.apiJobsJobIdGetJob({ jobId })
-        .then((job) => {
-          const j = job as JobOutput | null
-          if (!j) return
-          const status = String(j.status ?? "")
-          if (status === "COMPLETED") {
-            setStepState(runId, stepKey, {
-              status: "completed",
-              completedAt: new Date().toISOString(),
-            })
-          } else if (status === "FAILED") {
-            setStepState(runId, stepKey, {
-              status: "failed",
-              error: String(
-                (j as { error_message?: string }).error_message ?? "Failed",
-              ),
-              completedAt: new Date().toISOString(),
-            })
-          } else if (status === "CANCELLED") {
-            setStepState(runId, stepKey, {
-              status: "failed",
-              error: "Cancelled",
-              completedAt: new Date().toISOString(),
-            })
-          }
-        })
-        .catch(() => {
-          // Best-effort — the live WS subscription below is the primary path.
-        })
+      // Belt-and-suspenders fallback: poll /api/jobs/{id} alongside the WS
+      // subscription. The WS is the primary signal, but if the worker's
+      // terminal-status PATCH ever loses a race to the WS broadcast (e.g.,
+      // the worker silently moved on without writing the terminal state, or
+      // the page reloaded after the wsManager's in-memory lastEvent cache
+      // was wiped), the periodic poll guarantees the UI settles within ~10s
+      // instead of hanging on a stale "running".
+      const settleFromJobStatus = (job: JobOutput | null | undefined) => {
+        if (!job) return
+        const status = String(job.status ?? "")
+        if (status === "COMPLETED") {
+          setStepState(runId, stepKey, {
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          })
+        } else if (status === "FAILED") {
+          setStepState(runId, stepKey, {
+            status: "failed",
+            error: String(
+              (job as { error_message?: string }).error_message ?? "Failed",
+            ),
+            completedAt: new Date().toISOString(),
+          })
+        } else if (status === "CANCELLED") {
+          setStepState(runId, stepKey, {
+            status: "failed",
+            error: "Cancelled",
+            completedAt: new Date().toISOString(),
+          })
+        }
+      }
+      const pollOnce = () => {
+        JobsService.apiJobsJobIdGetJob({ jobId })
+          .then((job) => settleFromJobStatus(job as JobOutput | null))
+          .catch(() => {
+            // Best-effort — the live WS subscription is the primary path.
+            // Swallowing rather than logging keeps the e2e console-error
+            // guard quiet during transient API hiccups.
+          })
+      }
+      pollOnce()
+      const interval = setInterval(pollOnce, 10_000)
+      activePollsRef.current.set(jobId, interval)
       const unsub = subscribeJobAsRunEvent(jobId, stepKey, (evt) => {
         setEvents((prev) => {
           const next = [...prev, evt]
@@ -930,9 +952,28 @@ export function RunDetail() {
         unsub()
         activeSubsRef.current.delete(jobId)
         closeJobConnection(jobId)
+        const interval = activePollsRef.current.get(jobId)
+        if (interval !== undefined) {
+          clearInterval(interval)
+          activePollsRef.current.delete(jobId)
+        }
       }
     }
   }, [run, runId, queryClient, scope])
+
+  // Stop any in-flight job polls when this page unmounts. WebSocket
+  // subscriptions are torn down by the loop above (driven by `desired`),
+  // but the `setInterval` handles aren't reachable from there once the
+  // component is gone.
+  useEffect(() => {
+    const polls = activePollsRef.current
+    return () => {
+      for (const interval of polls.values()) {
+        clearInterval(interval)
+      }
+      polls.clear()
+    }
+  }, [])
 
   const steps = pipeline?.type === "ground" ? GROUND_STEPS : AERIAL_STEPS
   const stepsState: Record<string, { status: string }> = run?.steps ?? {}
@@ -980,7 +1021,9 @@ export function RunDetail() {
       // Ground stitching: fan-in all raw images. Per-plot fan-out is
       // tracked by PlotMarker (R6 deferred); for MVP we pass every image
       // as one stitch sequence.
-      let stitchingParams: Parameters<typeof executeStep>[0]["stitching"] | undefined
+      let stitchingParams:
+        | Parameters<typeof executeStep>[0]["stitching"]
+        | undefined
       if (stepKey === "stitching") {
         if (!scope) {
           showErrorToast("Pick a flight date, platform, and sensor first.")
@@ -1022,7 +1065,9 @@ export function RunDetail() {
         if (result.jobId) {
           // Register with the bottom ProcessPanel so it streams progress.
           const existing = processes.find(
-            (p) => p.runId === result.jobId && (p.status === "running" || p.status === "pending"),
+            (p) =>
+              p.runId === result.jobId &&
+              (p.status === "running" || p.status === "pending"),
           )
           if (existing) {
             updateProcess(existing.id, {
@@ -1063,6 +1108,7 @@ export function RunDetail() {
       pipeline?.params,
       orthoFiles,
       boundaryVersions,
+      imageFiles.map,
     ],
   )
 
@@ -1072,7 +1118,9 @@ export function RunDetail() {
       try {
         await stopStep(run.id, stepKey)
       } catch (err) {
-        showErrorToast(err instanceof Error ? err.message : "Failed to stop step")
+        showErrorToast(
+          err instanceof Error ? err.message : "Failed to stop step",
+        )
       }
     },
     [run, showErrorToast],
@@ -1150,7 +1198,9 @@ export function RunDetail() {
       setTraitDialogOpen(false)
     } catch (err) {
       showErrorToast(
-        err instanceof Error ? err.message : "Failed to submit trait extraction",
+        err instanceof Error
+          ? err.message
+          : "Failed to submit trait extraction",
       )
     }
   }, [
@@ -1205,8 +1255,8 @@ export function RunDetail() {
             </h1>
             <p className="text-muted-foreground text-sm">
               {pipeline?.name ?? "Pipeline"} ·{" "}
-              <span className="capitalize">{pipeline?.type ?? "?"}</span> · Created{" "}
-              {new Date(run.createdAt).toLocaleString()}
+              <span className="capitalize">{pipeline?.type ?? "?"}</span> ·
+              Created {new Date(run.createdAt).toLocaleString()}
             </p>
           </div>
           <Button
@@ -1308,11 +1358,11 @@ export function RunDetail() {
                             params={orthoParams}
                             onChange={setOrthoParams}
                             onOpenImport={() => setImportDialogOpen(true)}
-                            hasUploadedOrthos={
-                              (uploadedOrthosQuery.data ?? []).some((f) =>
-                                /\.tiff?$/i.test(f.object_name ?? ""),
-                              )
-                            }
+                            hasUploadedOrthos={(
+                              uploadedOrthosQuery.data ?? []
+                            ).some((f) =>
+                              /\.tiff?$/i.test(f.object_name ?? ""),
+                            )}
                           />
                         )
                       ) : step.key === "trait_extraction" ? (

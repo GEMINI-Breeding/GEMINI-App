@@ -8,11 +8,11 @@
  * faster than against the source.
  */
 import type { FileMetadata } from "@/client"
-import type { AerialScope } from "@/features/process/lib/paths"
 import {
   buildOrthoVersions,
   type OrthoVersion,
 } from "@/features/process/lib/orthoVersions"
+import type { AerialScope } from "@/features/process/lib/paths"
 import type { Run } from "@/features/process/lib/runStore"
 
 export function resolveActiveOrtho(
@@ -29,8 +29,20 @@ export function resolveActiveOrtho(
  * Prefer the COG sibling when present.
  */
 export function s3UrlForOrtho(v: OrthoVersion): string {
-  const path = v.hasCog
-    ? v.path.replace(/\.tiff?$/i, "-Pyramid.tif")
-    : v.path
+  const path = v.hasCog ? v.path.replace(/\.tiff?$/i, "-Pyramid.tif") : v.path
   return `s3://${path}`
+}
+
+/**
+ * Build the Leaflet XYZ tile-URL template for a TiTiler-served COG.
+ *
+ * Built explicitly with `encodeURIComponent` rather than reused from
+ * tilejson's `tiles[0]` because TiTiler 2.0.1 emits the s3 URL with `+`
+ * substituted for spaces (form-encoded query convention). When the
+ * browser/proxy round-trip that URL, S3 receives literal `+` rather than
+ * spaces and 404s on object keys with spaces (e.g. "Cowpea MAGIC").
+ * `encodeURIComponent` always uses `%20`, which S3 decodes correctly.
+ */
+export function buildTitilerTileUrl(s3Url: string): string {
+  return `/titiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url=${encodeURIComponent(s3Url)}&tilesize=256`
 }

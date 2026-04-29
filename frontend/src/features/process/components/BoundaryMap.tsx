@@ -7,8 +7,9 @@
  * a saved version or grid generation) are rendered into the editable
  * layer.
  */
-import { useEffect, useRef } from "react"
+
 import L, { type FeatureGroup } from "leaflet"
+import { useEffect, useRef } from "react"
 import "leaflet/dist/leaflet.css"
 import "@geoman-io/leaflet-geoman-free"
 import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css"
@@ -53,15 +54,9 @@ export function BoundaryMap({
   const onChangeRef = useRef(onFeaturesChange)
   // Latest orthoTileUrl available at map-init time. Refs let the one-time
   // init effect read the current prop without depending on it.
-  const orthoTileUrlRef = useRef(orthoTileUrl)
-
   useEffect(() => {
     onChangeRef.current = onFeaturesChange
   }, [onFeaturesChange])
-
-  useEffect(() => {
-    orthoTileUrlRef.current = orthoTileUrl
-  }, [orthoTileUrl])
 
   // One-time map init.
   useEffect(() => {
@@ -70,6 +65,14 @@ export function BoundaryMap({
       center: center ?? DEFAULT_CENTER,
       zoom: zoom ?? DEFAULT_ZOOM,
     })
+
+    // Custom pane for the ortho overlay. Default tilePane has z-index 200;
+    // putting the ortho at 250 keeps it above any basemap regardless of
+    // insertion order, so toggling Esri ↔ OSM via the layers control
+    // doesn't push the ortho underneath the new basemap.
+    map.createPane("orthoPane")
+    const orthoPaneEl = map.getPane("orthoPane")
+    if (orthoPaneEl) orthoPaneEl.style.zIndex = "250"
 
     // OSM serves up to z19; Esri up to z19 reliably and z22 in some areas.
     // Cap each provider at its native limit and let Leaflet upscale via
@@ -84,9 +87,13 @@ export function BoundaryMap({
       maxNativeZoom: 19,
       maxZoom: 24,
     })
-    // When an ortho overlay is available, satellite gives more useful
-    // surrounding context than OSM road labels.
-    ;(orthoTileUrlRef.current ? sat : osm).addTo(map)
+    // Default to Esri satellite. The ortho query hasn't resolved at
+    // map-init time so we can't condition on its presence, and Esri is
+    // the more useful basemap regardless — when an ortho is loaded it
+    // sits on top, and when there isn't one yet the satellite imagery
+    // gives the user real geographic context to draw against. OSM is
+    // one click away via the layers control.
+    sat.addTo(map)
     L.control
       .layers(
         { "Satellite (Esri)": sat, "Streets (OSM)": osm },
@@ -114,7 +121,9 @@ export function BoundaryMap({
     function emit() {
       const out: GeoJSON.Feature[] = []
       editable.eachLayer((layer) => {
-        const gj = (layer as L.Layer & { toGeoJSON?: () => GeoJSON.Feature }).toGeoJSON?.()
+        const gj = (
+          layer as L.Layer & { toGeoJSON?: () => GeoJSON.Feature }
+        ).toGeoJSON?.()
         if (gj && gj.type === "Feature") out.push(gj as GeoJSON.Feature)
       })
       onChangeRef.current(out)
@@ -139,7 +148,7 @@ export function BoundaryMap({
       didFitOrthoRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [center, zoom])
 
   // Manage the ortho tile layer. Re-runs on URL or opacity change.
   useEffect(() => {
@@ -152,25 +161,25 @@ export function BoundaryMap({
     if (!orthoTileUrl) return
     const opts: L.TileLayerOptions = {
       opacity: orthoOpacity ?? 0.85,
+      // Render in the dedicated orthoPane so basemap-toggle reordering
+      // can't push the ortho beneath the new basemap.
+      pane: "orthoPane",
       // TiTiler's tilejson reports the ortho's native max zoom; the geo
       // worker writes overviews so reasonable values around z21-22 are
       // typical for drone orthos. Cap at z22 and let Leaflet upscale.
       maxNativeZoom: 22,
       maxZoom: 24,
-      // TiTiler's default tilesize for /cog/tiles is 512; matches the value
-      // in the tilejson template. Leaflet must agree or tiles misalign.
-      tileSize: 512,
     }
-    if (orthoBounds) {
-      // bounds keep Leaflet from requesting tiles outside the ortho's
-      // footprint — TiTiler 404s on those and they spam the console.
-      const [[s, w], [n, e]] = orthoBounds
-      opts.bounds = L.latLngBounds([s, w], [n, e])
-    }
+    // Note: out-of-footprint tile requests are inevitable — drone orthos
+    // are non-rectangular within their bounding box, and Leaflet's
+    // animated zoom transitions also request buffer tiles around the
+    // viewport. The /titiler proxy in vite.config.ts rewrites TiTiler's
+    // 404s to a 200 transparent PNG so the browser's network log stays
+    // quiet and the e2e console-error guard isn't tripped.
     const layer = L.tileLayer(orthoTileUrl, opts)
     layer.addTo(map)
     orthoLayerRef.current = layer
-  }, [orthoTileUrl, orthoOpacity, orthoBounds])
+  }, [orthoTileUrl, orthoOpacity])
 
   // First-load fit-to-ortho when no features are drawn yet. The
   // fit-to-features effect below wins whenever the user has features.
@@ -181,10 +190,13 @@ export function BoundaryMap({
     if (features.length > 0) return
     if (didFitOrthoRef.current) return
     const [[s, w], [n, e]] = orthoBounds
-    map.fitBounds([
-      [s, w],
-      [n, e],
-    ], { padding: [20, 20] })
+    map.fitBounds(
+      [
+        [s, w],
+        [n, e],
+      ],
+      { padding: [20, 20] },
+    )
     didFitOrthoRef.current = true
   }, [orthoBounds, features.length])
 
@@ -210,5 +222,10 @@ export function BoundaryMap({
     }
   }, [features])
 
-  return <div ref={mapEl} className={className ?? "h-[500px] w-full rounded-md border"} />
+  return (
+    <div
+      ref={mapEl}
+      className={className ?? "h-[500px] w-full rounded-md border"}
+    />
+  )
 }
