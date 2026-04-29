@@ -6,9 +6,10 @@
  *   1. Picking "+ Create new…" for Experiment, Site, Population, Sensor
  *      Platform, and Sensor and uploading a JPG creates each entity in
  *      the DB before the chunked upload starts.
- *   2. After upload, the new experiment shows up in the sidebar
- *      ExperimentSelector dropdown (the bug the user originally hit:
- *      uploads created MinIO objects with no DB rows backing them).
+ *   2. After upload, the new experiment shows up in the upload form's
+ *      experiment dropdown for a second upload (the bug the user
+ *      originally hit: uploads created MinIO objects with no DB rows,
+ *      and a second upload couldn't pick the experiment).
  *   3. A second upload to the same experiment can pick it from the
  *      dropdown instead of re-creating it (search-or-create dedup path).
  *   4. Submitting with a blank dropdown fires the upload-error dialog
@@ -119,29 +120,11 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     const expRows = (await verifyExp.json()) as Array<{ experiment_name?: string }>
     expect(expRows.some((r) => r.experiment_name === experimentName)).toBe(true)
 
-    // 5. Sidebar selector should now show the new experiment as the
-    //    *active* selection (the upload-list switches `experimentId` on
-    //    success), AND the dropdown lists it as a real option (the
-    //    user-association call ran). The user's original complaint was
-    //    that the sidebar said "No experiments available" after upload —
-    //    that empty-state would be visible here if the association call
-    //    didn't run.
-    await expect(
-      page.getByTestId("experiment-selector-empty"),
-    ).toHaveCount(0)
-    await expect(
-      page.getByTestId("experiment-selector"),
-    ).toContainText(experimentName)
-
-    await page.getByTestId("experiment-selector").click()
-    await expect(
-      page.getByRole("option", { name: experimentName }),
-    ).toBeVisible({ timeout: 10_000 })
-    await page.keyboard.press("Escape")
-
-    // 6. Second upload: pick the just-created experiment from the dropdown
-    //    (proves the existing-pick path), then reuse the other entities the
-    //    same way. Use a fresh date so the stored objectPath differs.
+    // 5. Second upload: pick the just-created experiment from the
+    //    upload form's experiment dropdown (proves the existing-pick
+    //    path AND the user-association call ran — without that
+    //    association the dropdown would filter it out and pickExisting
+    //    would fail). Use a fresh date so the stored objectPath differs.
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
     await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()

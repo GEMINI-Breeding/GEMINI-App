@@ -8,7 +8,6 @@ import ReactDOM from "react-dom/client"
 import { OpenAPI } from "./client"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
-import { ExperimentProvider } from "./contexts/ExperimentContext"
 import { ProcessProvider } from "./contexts/ProcessContext"
 import { installAuthInterceptors } from "./lib/auth"
 import "./index.css"
@@ -54,12 +53,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <QueryClientProvider client={queryClient}>
-        <ExperimentProvider>
-          <ProcessProvider>
-            <RouterProvider router={router} />
-            <Toaster richColors closeButton />
-          </ProcessProvider>
-        </ExperimentProvider>
+        <ProcessProvider>
+          <RouterProvider router={router} />
+          <Toaster richColors closeButton />
+        </ProcessProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,

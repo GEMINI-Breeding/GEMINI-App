@@ -1,5 +1,6 @@
 /**
- * Shared queries for the ExperimentSelector + friends.
+ * Shared queries for experiment + child-entity dropdowns (used by the
+ * Process scope picker, the Files upload form, and others).
  *
  * All hooks here are scoped read-only, auth-aware, and safe to call on
  * unauthenticated pages (they return `{ data: undefined, isLoading: false }`

@@ -4,15 +4,9 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
 } from "@/components/ui/sidebar"
 import { sidebarItems } from "@/config/navigation"
-import { CreateExperimentDialog } from "@/features/experiments/components/CreateExperimentDialog"
-import { ExperimentSelector } from "@/features/experiments/components/ExperimentSelector"
-import { ScopeChildSelectors } from "@/features/experiments/components/ScopeChildSelectors"
 import useAuth from "@/hooks/useAuth"
 import { Main } from "./Main"
 import { User } from "./User"
@@ -25,16 +19,6 @@ export function AppSidebar() {
         <Logo variant="responsive" />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel className="flex items-center justify-between">
-            <span>Experiment</span>
-            <CreateExperimentDialog />
-          </SidebarGroupLabel>
-          <SidebarGroupContent className="space-y-2 px-2">
-            <ExperimentSelector />
-            <ScopeChildSelectors />
-          </SidebarGroupContent>
-        </SidebarGroup>
         <Main items={sidebarItems} />
       </SidebarContent>
       <SidebarFooter>

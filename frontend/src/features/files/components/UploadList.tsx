@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { dataTypes } from "@/config/dataTypes"
-import { useExperimentScope } from "@/contexts/ExperimentContext"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import {
   useUploadQueue,
@@ -150,7 +149,6 @@ export function UploadList({
   const { showErrorToastWithCopy } = useCustomToast()
   const { run } = useUploadQueue()
   const { resolveScope } = useResolveScope()
-  const { setExperimentId, setSiteId, setPopulationId } = useExperimentScope()
 
   const acceptAttr = useMemo(() => {
     if (!dataType) return undefined
@@ -280,16 +278,6 @@ export function UploadList({
         const r = resolved[FORM_FIELD_TO_SCOPE_KEY[field]]
         if (r) merged[field] = r.name
       }
-
-      // Switch the sidebar's active scope to whatever we just created
-      // / picked. Without this, a freshly-created experiment + site +
-      // population would land in storage but the sidebar would still
-      // point at the previous selection, and the user would have to
-      // hunt through dropdowns to get the Process pages to find their
-      // upload.
-      if (resolved.experiment?.id) setExperimentId(resolved.experiment.id)
-      if (resolved.site?.id) setSiteId(resolved.site.id)
-      if (resolved.population?.id) setPopulationId(resolved.population.id)
 
       const targetRootDir = buildTargetRootDir(dataType, merged, subDir)
       if (!targetRootDir) {

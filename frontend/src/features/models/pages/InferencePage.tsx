@@ -49,7 +49,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useExperimentScope } from "@/contexts/ExperimentContext"
 import { useProcess } from "@/contexts/ProcessContext"
 import {
   AerialScopePicker,
@@ -92,7 +91,7 @@ function readUserInfo(user: UserOutput | null | undefined): UserInfoShape {
 
 export function InferencePage() {
   const ctx = useAerialScopeContext()
-  const { experimentId } = useExperimentScope()
+  const experimentId = ctx.experimentId
   const { addProcess } = useProcess()
   const { user } = useAuth()
   const submit = useSubmitJob()

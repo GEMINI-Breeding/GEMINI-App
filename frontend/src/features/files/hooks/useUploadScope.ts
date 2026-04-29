@@ -154,9 +154,9 @@ export function useResolveScope() {
       const trimmed = c.name.trim()
       if (!trimmed) throw new Error("New experiment name is empty")
       // Search first. If it already exists globally we still want to ensure
-      // the current user is associated — without that link the sidebar
-      // ExperimentSelector filters it out and the just-created experiment
-      // appears as "no experiments available."
+      // the current user is associated — without that link the experiment
+      // dropdowns filter it out (non-superusers only see their own
+      // experiments) and it would appear as "no experiments available."
       const existing = (await ExperimentsService.apiExperimentsGetExperiments({
         experimentName: trimmed,
       })) as ExperimentOutput[] | null

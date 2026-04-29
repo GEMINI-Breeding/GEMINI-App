@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useExperimentScope } from "@/contexts/ExperimentContext"
 import { getToken } from "@/lib/auth"
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -59,7 +58,6 @@ async function downloadViaBrowser(objectPath: string): Promise<void> {
 export function ManageData() {
   const [section, setSection] = useState<Section>("Raw")
   const [filter, setFilter] = useState("")
-  const { experimentId } = useExperimentScope()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
 
@@ -122,13 +120,6 @@ export function ManageData() {
           <h1 className="text-2xl font-bold tracking-tight">Manage Data</h1>
           <p className="text-muted-foreground">
             Browse files stored under <code className="text-xs">{prefix}/</code>
-            {experimentId && (
-              <>
-                {" "}
-                (active experiment:{" "}
-                <code className="text-xs">{experimentId.slice(0, 8)}</code>)
-              </>
-            )}
           </p>
         </div>
         <LoadingButton

@@ -24,13 +24,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useProcess } from "@/contexts/ProcessContext"
-import { useExperimentScope } from "@/contexts/ExperimentContext"
+import { useProcessScope } from "@/features/process/lib/processScope"
 import { useSubmitJob } from "@/features/process/hooks/useJobs"
 import useCustomToast from "@/hooks/useCustomToast"
 
 export function TrainModelTool() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const { experimentId } = useExperimentScope()
+  const { experimentId } = useProcessScope()
   const { addProcess } = useProcess()
   const submit = useSubmitJob()
   const [submitted, setSubmitted] = useState<string | null>(null)
