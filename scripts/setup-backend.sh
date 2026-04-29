@@ -26,6 +26,19 @@ else
     log "Pipeline .env already exists, leaving as-is"
 fi
 
+# .env.example ships GEMINI_JWT_SECRET= (empty), which puts the REST API
+# into "Auth disabled" mode and 503s every login. That's deliberate for
+# bare-metal first-run, but unworkable in CI where the E2E suite logs in
+# on every test. If the secret is empty (and only then), generate one
+# so the freshly-seeded stack can authenticate without manual editing.
+if grep -qE '^GEMINI_JWT_SECRET=$' "$PIPELINE_ENV"; then
+    log "Generating GEMINI_JWT_SECRET (.env had it empty)"
+    SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '+/=' | head -c 64)"
+    # Use a different sed delimiter so / and + in the secret don't break.
+    sed -i.bak "s|^GEMINI_JWT_SECRET=$|GEMINI_JWT_SECRET=${SECRET}|" "$PIPELINE_ENV"
+    rm -f "${PIPELINE_ENV}.bak"
+fi
+
 UI_ENV_EXAMPLE="$BACKEND_DIR/gemini-ui/.env.example"
 UI_ENV="$BACKEND_DIR/gemini-ui/.env"
 if [[ -f "$UI_ENV_EXAMPLE" && ! -f "$UI_ENV" ]]; then
