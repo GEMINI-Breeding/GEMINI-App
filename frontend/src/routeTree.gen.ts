@@ -17,6 +17,7 @@ import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
+import { Route as LayoutImportRouteImport } from './routes/_layout/import'
 import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
@@ -83,6 +84,11 @@ const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
 const LayoutItemsRoute = LayoutItemsRouteImport.update({
   id: '/items',
   path: '/items',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutImportRoute = LayoutImportRouteImport.update({
+  id: '/import',
+  path: '/import',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutConsoleRoute = LayoutConsoleRouteImport.update({
@@ -239,6 +245,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/admin': typeof LayoutAdminRouteWithChildren
   '/console': typeof LayoutConsoleRoute
+  '/import': typeof LayoutImportRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/console': typeof LayoutConsoleRoute
+  '/import': typeof LayoutImportRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
@@ -313,6 +321,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/_layout/admin': typeof LayoutAdminRouteWithChildren
   '/_layout/console': typeof LayoutConsoleRoute
+  '/_layout/import': typeof LayoutImportRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
@@ -352,6 +361,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/console'
+    | '/import'
     | '/items'
     | '/settings'
     | '/'
@@ -388,6 +398,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/console'
+    | '/import'
     | '/items'
     | '/settings'
     | '/'
@@ -425,6 +436,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/_layout/admin'
     | '/_layout/console'
+    | '/_layout/import'
     | '/_layout/items'
     | '/_layout/settings'
     | '/_layout/'
@@ -520,6 +532,13 @@ declare module '@tanstack/react-router' {
       path: '/items'
       fullPath: '/items'
       preLoaderRoute: typeof LayoutItemsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/import': {
+      id: '/_layout/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof LayoutImportRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/console': {
@@ -784,6 +803,7 @@ const LayoutProcessWorkspaceIdRouteWithChildren =
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRouteWithChildren
   LayoutConsoleRoute: typeof LayoutConsoleRoute
+  LayoutImportRoute: typeof LayoutImportRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
@@ -800,6 +820,7 @@ interface LayoutRouteChildren {
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRouteWithChildren,
   LayoutConsoleRoute: LayoutConsoleRoute,
+  LayoutImportRoute: LayoutImportRoute,
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,

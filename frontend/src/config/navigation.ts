@@ -7,6 +7,7 @@ import {
   Play,
   Settings,
   Terminal,
+  Upload,
 } from "lucide-react"
 
 export type SubItem = {
@@ -35,6 +36,11 @@ export type NavItem = {
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
   { icon: Folder, title: "Files", path: "/files" },
+  // /import is a multi-step wizard ported from gemini-ui that handles fresh
+  // imports of trait CSVs, genomic matrices, and HapMap/VCF files (Phase
+  // 9c–9e). Independent of the Process wizard (which is image-pipeline)
+  // and reachable from the sidebar.
+  { icon: Upload, title: "Import", path: "/import" },
   {
     icon: Play,
     title: "Process",
