@@ -17,6 +17,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { RecordsTab } from "@/features/genotyping/components/RecordsTab"
 import {
   useGenotypingStudy,
   useGenotypingStudyExperiments,
@@ -116,7 +117,7 @@ export function StudyDetail({ studyId }: { studyId: string }) {
           <ExperimentsTab studyId={studyId} />
         </TabsContent>
         <TabsContent value="records">
-          <PlaceholderTab phase="9b" kind="records" />
+          <RecordsTab studyId={studyId} />
         </TabsContent>
         <TabsContent value="variants">
           <PlaceholderTab phase="9c" kind="variants" />
