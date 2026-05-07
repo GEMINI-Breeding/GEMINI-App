@@ -6,8 +6,8 @@
  * miss it by navigating away before a modal would open.
  */
 
-import { useEffect, useState } from "react"
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
 import useCustomToast from "@/hooks/useCustomToast"
 
 function apiUrl(path: string): string {
@@ -17,7 +17,10 @@ function apiUrl(path: string): string {
 
 function authHeaders() {
   const token = localStorage.getItem("access_token") || ""
-  return { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
 }
 
 interface GeoTiffInfo {
@@ -38,7 +41,9 @@ interface GeoTiffValidationCardProps {
   destPath: string
 }
 
-export function GeoTiffValidationCard({ destPath }: GeoTiffValidationCardProps) {
+export function GeoTiffValidationCard({
+  destPath,
+}: GeoTiffValidationCardProps) {
   const { showErrorToast } = useCustomToast()
   const [info, setInfo] = useState<GeoTiffInfo | null>(null)
   const [checkState, setCheckState] = useState<CheckState>("checking")
@@ -50,7 +55,9 @@ export function GeoTiffValidationCard({ destPath }: GeoTiffValidationCardProps) 
       let result: GeoTiffInfo
       try {
         const res = await fetch(
-          apiUrl(`/api/v1/files/check-geotiff?path=${encodeURIComponent(destPath)}`),
+          apiUrl(
+            `/api/v1/files/check-geotiff?path=${encodeURIComponent(destPath)}`,
+          ),
           { headers: authHeaders() },
         )
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -80,26 +87,36 @@ export function GeoTiffValidationCard({ destPath }: GeoTiffValidationCardProps) 
           body: JSON.stringify({ file_path: result.path }),
         })
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: "Conversion failed" }))
+          const err = await res
+            .json()
+            .catch(() => ({ detail: "Conversion failed" }))
           throw new Error(err.detail ?? "Conversion failed")
         }
         setConvertState("done")
-        setInfo((prev) => prev ? { ...prev, is_wgs84: true, crs_epsg: 4326, crs_name: "WGS 84" } : prev)
+        setInfo((prev) =>
+          prev
+            ? { ...prev, is_wgs84: true, crs_epsg: 4326, crs_name: "WGS 84" }
+            : prev,
+        )
         setCheckState("ok")
       } catch (err) {
         setConvertState("failed")
-        showErrorToast(err instanceof Error ? err.message : "Auto-reprojection failed")
+        showErrorToast(
+          err instanceof Error ? err.message : "Auto-reprojection failed",
+        )
       }
     }
     checkAndConvert()
-  }, [destPath])
+  }, [destPath, showErrorToast])
 
   // Checking CRS / reprojecting in progress
   if (checkState === "checking" || convertState === "converting") {
     return (
       <div className="flex items-center gap-2 text-muted-foreground text-xs mt-2">
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        {convertState === "converting" ? "Reprojecting to WGS84…" : "Checking CRS…"}
+        {convertState === "converting"
+          ? "Reprojecting to WGS84…"
+          : "Checking CRS…"}
       </div>
     )
   }
@@ -124,7 +141,8 @@ export function GeoTiffValidationCard({ destPath }: GeoTiffValidationCardProps) 
     <div className="flex items-center gap-2 text-red-600 text-xs mt-2">
       <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
       <span>
-        Auto-reprojection failed — file is not in WGS84. Reproject it externally and re-upload.
+        Auto-reprojection failed — file is not in WGS84. Reproject it externally
+        and re-upload.
       </span>
     </div>
   )

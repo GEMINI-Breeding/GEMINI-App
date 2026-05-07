@@ -1,15 +1,17 @@
 import {
-  DataTypesService,
   type DataTypeInput,
   type DataTypeOutput,
+  DataTypesService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsNumber, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: DataTypeInput): DataTypeInput {
   return {
     ...input,
-    data_type_info: parseInfoField(input.data_type_info) as DataTypeInput["data_type_info"],
+    data_type_info: parseInfoField(
+      input.data_type_info,
+    ) as DataTypeInput["data_type_info"],
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { DataTypesService, type DataTypeInput } from "@/client"
+import { type DataTypeInput, DataTypesService } from "@/client"
 
 import { dataTypesConfig } from "./dataTypes"
 
@@ -39,7 +39,8 @@ describe("dataTypesConfig", () => {
       .mockResolvedValue({ id: 1, data_type_name: "X" } as never)
     const input: DataTypeInput = {
       data_type_name: "X",
-      data_type_info: '{"foo":42}' as unknown as DataTypeInput["data_type_info"],
+      data_type_info:
+        '{"foo":42}' as unknown as DataTypeInput["data_type_info"],
     }
     await dataTypesConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

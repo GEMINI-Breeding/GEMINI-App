@@ -462,12 +462,14 @@ export function getTourSection(pathname: string, step?: string): TourSection {
   if (pathname.startsWith("/files")) return TOUR_SECTIONS["/files"]
   // Tool pages (/process/{id}/tool) — differentiate by step search param
   if (/^\/process\/[^/]+\/tool/.test(pathname)) {
-    if (step === "plot_boundary_prep") return TOUR_SECTIONS["/process/plot-boundary-prep"]
+    if (step === "plot_boundary_prep")
+      return TOUR_SECTIONS["/process/plot-boundary-prep"]
     if (step === "plot_marking") return TOUR_SECTIONS["/process/plot-marking"]
     return TOUR_SECTIONS["/process/gcp"]
   }
   // Workspace detail pages (/process/{id}) get a different tour than the workspace list
-  if (/^\/process\/[^/]+/.test(pathname)) return TOUR_SECTIONS["/process/workspace"]
+  if (/^\/process\/[^/]+/.test(pathname))
+    return TOUR_SECTIONS["/process/workspace"]
   if (pathname.startsWith("/process")) return TOUR_SECTIONS["/process"]
   if (pathname.startsWith("/analyze")) return TOUR_SECTIONS["/analyze"]
   return TOUR_SECTIONS["/"]

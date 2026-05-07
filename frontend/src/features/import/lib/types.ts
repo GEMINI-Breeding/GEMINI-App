@@ -114,6 +114,49 @@ export interface UploadResults {
   studyId?: string | null
 }
 
+/**
+ * Genomic flow's per-step state. The trait flow doesn't use this slot;
+ * the genomic flow does not use `columnMapping` (no spreadsheet → DB
+ * record mapping). Both flows share `metadata` (for experiment) and the
+ * shared `files` / `detection` / `uploadResults` slots.
+ */
+export interface GenomicWizardState {
+  /** Selected genotyping study id, or null if the user is creating a new
+   *  one (in which case `studyName` carries the new name). */
+  studyId: string | null
+  studyName: string
+  createNewStudy: boolean
+  /** Optional. When set, the ingest endpoint links every accession the
+   *  wizard creates (from `createdAccessions` + the .psam sample
+   *  pass) to this population in the chosen experiment, the same way
+   *  the trait wizard does. The Population row + experiment link are
+   *  get-or-created server-side, so picking an existing population or
+   *  creating a new one are both safe. */
+  populationName: string | null
+  /** Filled by StepSampleResolve. */
+  sampleResolution: SampleResolution | null
+  /** Promise of the heavy SheetJS parse, kicked off in parallel with the
+   *  germplasm resolver call so the workbook is in memory by the time
+   *  the user reaches the ingest step. The shape is `unknown` here so
+   *  this types module doesn't have to import the parser's
+   *  `PreparedMatrix` type. The ingest step casts when consuming. */
+  preparedMatrix?: Promise<unknown> | null
+}
+
+/**
+ * Outcome of the sample-resolution step. Records which raw sample column
+ * headers map to which canonical accession names (`canonicalByHeader`),
+ * which headers should be skipped at ingest time, and which canonical
+ * names need fresh accession rows created before ingest.
+ */
+export interface SampleResolution {
+  canonicalByHeader: Record<string, string>
+  skippedHeaders: string[]
+  /** Canonical names that need to be created as accessions before
+   *  ingest. Already deduped. */
+  createdAccessions: string[]
+}
+
 export interface WizardState {
   files: FileWithPath[]
   detection: DetectionResult | null
@@ -121,6 +164,7 @@ export interface WizardState {
   columnMapping: ColumnMapping | null
   germplasmReview: GermplasmReview | null
   uploadResults: UploadResults | null
+  genomic: GenomicWizardState | null
 }
 
 /**

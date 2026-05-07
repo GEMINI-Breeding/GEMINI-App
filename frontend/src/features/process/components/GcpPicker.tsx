@@ -20,6 +20,8 @@
  * collection step that survives client-side and lands in MinIO ready for
  * the worker change.
  */
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChevronLeft,
   ChevronRight,
@@ -30,9 +32,8 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { FilesService, type FileMetadata } from "@/client"
+import { type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -49,13 +50,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  setStepState,
-  type Run,
-  type Workspace,
-} from "@/features/process/lib/runStore"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { rawImagesPrefix } from "@/features/process/lib/paths"
+import {
+  type Run,
+  setStepState,
+  type Workspace,
+} from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -142,7 +143,7 @@ export function serializeGcpList(
       )} ${m.image} ${g.label}`,
     )
   }
-  return lines.join("\n") + "\n"
+  return `${lines.join("\n")}\n`
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -163,8 +164,7 @@ export function GcpPicker({
   useEffect(() => saveCatalog(workspace.id, catalog), [workspace.id, catalog])
 
   const [marks, setMarks] = useState<GcpMark[]>(
-    () =>
-      ((run.steps.gcp_selection?.manualMarks ?? []) as GcpMark[]) ?? [],
+    () => ((run.steps.gcp_selection?.manualMarks ?? []) as GcpMark[]) ?? [],
   )
   // Persist marks on every change so a refresh keeps the work.
   useEffect(() => {
@@ -362,10 +362,7 @@ export function GcpPicker({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          <div
-            className="space-y-2"
-            data-testid="gcp-catalog"
-          >
+          <div className="space-y-2" data-testid="gcp-catalog">
             {catalog.map((g) => (
               <div
                 key={g.id}
@@ -383,7 +380,9 @@ export function GcpPicker({
                 />
                 <Input
                   value={g.label}
-                  onChange={(e) => updateCatalogEntry(g.id, { label: e.target.value })}
+                  onChange={(e) =>
+                    updateCatalogEntry(g.id, { label: e.target.value })
+                  }
                   className="h-8 text-sm"
                   aria-label={`${g.label} label`}
                 />
@@ -392,7 +391,9 @@ export function GcpPicker({
                   step="0.000001"
                   value={g.lon}
                   onChange={(e) =>
-                    updateCatalogEntry(g.id, { lon: parseFloat(e.target.value) || 0 })
+                    updateCatalogEntry(g.id, {
+                      lon: parseFloat(e.target.value) || 0,
+                    })
                   }
                   className="h-8 text-sm"
                   aria-label={`${g.label} lon`}
@@ -403,7 +404,9 @@ export function GcpPicker({
                   step="0.000001"
                   value={g.lat}
                   onChange={(e) =>
-                    updateCatalogEntry(g.id, { lat: parseFloat(e.target.value) || 0 })
+                    updateCatalogEntry(g.id, {
+                      lat: parseFloat(e.target.value) || 0,
+                    })
                   }
                   className="h-8 text-sm"
                   aria-label={`${g.label} lat`}
@@ -414,7 +417,9 @@ export function GcpPicker({
                   step="0.01"
                   value={g.alt}
                   onChange={(e) =>
-                    updateCatalogEntry(g.id, { alt: parseFloat(e.target.value) || 0 })
+                    updateCatalogEntry(g.id, {
+                      alt: parseFloat(e.target.value) || 0,
+                    })
                   }
                   className="h-8 text-sm"
                   aria-label={`${g.label} alt`}
@@ -458,9 +463,9 @@ export function GcpPicker({
             )}
           </CardTitle>
           <CardDescription>
-            Click anywhere on the image to set the active GCP's pixel coordinate.
-            One mark per (GCP × image); clicking again replaces the previous mark
-            on the same pair.
+            Click anywhere on the image to set the active GCP's pixel
+            coordinate. One mark per (GCP × image); clicking again replaces the
+            previous mark on the same pair.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -479,10 +484,7 @@ export function GcpPicker({
                 value={String(imageIndex)}
                 onValueChange={(v) => setImageIndex(Number(v))}
               >
-                <SelectTrigger
-                  data-testid="gcp-image-select"
-                  className="w-72"
-                >
+                <SelectTrigger data-testid="gcp-image-select" className="w-72">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -504,7 +506,9 @@ export function GcpPicker({
               variant="outline"
               size="sm"
               disabled={imageIndex >= images.length - 1}
-              onClick={() => setImageIndex((i) => Math.min(images.length - 1, i + 1))}
+              onClick={() =>
+                setImageIndex((i) => Math.min(images.length - 1, i + 1))
+              }
               aria-label="Next image"
             >
               <ChevronRight className="h-4 w-4" />
@@ -531,40 +535,43 @@ export function GcpPicker({
             )}
             {/* Overlay marks. Coordinates are in image pixels; rescale via
                 the rendered image's bounding rect. */}
-            {imgRef.current && marksForActiveImage.map((m) => {
-              const g = catalog.find((c) => c.id === m.gcpId)
-              if (!g || !imgRef.current) return null
-              const img = imgRef.current
-              const rect = img.getBoundingClientRect()
-              const containerRect = img.parentElement?.getBoundingClientRect()
-              if (!containerRect) return null
-              const scaleX = rect.width / img.naturalWidth
-              const scaleY = rect.height / img.naturalHeight
-              const x = m.pixelX * scaleX + (rect.left - containerRect.left)
-              const y = m.pixelY * scaleY + (rect.top - containerRect.top)
-              return (
-                <button
-                  type="button"
-                  key={m.gcpId}
-                  aria-label={`Remove mark for ${g.label}`}
-                  className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background"
-                  style={{
-                    left: x,
-                    top: y,
-                    borderColor: g.color,
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteMarkAt(m.gcpId)
-                  }}
-                  title={`${g.label} — click to remove`}
-                />
-              )
-            })}
+            {imgRef.current &&
+              marksForActiveImage.map((m) => {
+                const g = catalog.find((c) => c.id === m.gcpId)
+                if (!g || !imgRef.current) return null
+                const img = imgRef.current
+                const rect = img.getBoundingClientRect()
+                const containerRect = img.parentElement?.getBoundingClientRect()
+                if (!containerRect) return null
+                const scaleX = rect.width / img.naturalWidth
+                const scaleY = rect.height / img.naturalHeight
+                const x = m.pixelX * scaleX + (rect.left - containerRect.left)
+                const y = m.pixelY * scaleY + (rect.top - containerRect.top)
+                return (
+                  <button
+                    type="button"
+                    key={m.gcpId}
+                    aria-label={`Remove mark for ${g.label}`}
+                    className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background"
+                    style={{
+                      left: x,
+                      top: y,
+                      borderColor: g.color,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteMarkAt(m.gcpId)
+                    }}
+                    title={`${g.label} — click to remove`}
+                  />
+                )
+              })}
           </div>
           {marksForActiveImage.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Marks on this image:</span>
+              <span className="text-muted-foreground">
+                Marks on this image:
+              </span>
               {marksForActiveImage.map((m) => {
                 const g = catalog.find((c) => c.id === m.gcpId)
                 if (!g) return null
@@ -609,7 +616,11 @@ export function GcpPicker({
           <Button
             data-testid="gcp-save-and-complete"
             onClick={() => saveMutation.mutate()}
-            disabled={catalog.length === 0 || marks.length === 0 || saveMutation.isPending}
+            disabled={
+              catalog.length === 0 ||
+              marks.length === 0 ||
+              saveMutation.isPending
+            }
           >
             {saveMutation.isPending ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

@@ -6,7 +6,8 @@ afterEach(() => {
   localStorage.removeItem("gemini.auth.token")
   localStorage.removeItem("access_token")
   // window-level overrides are wiped per-test where used
-  delete (window as unknown as { __GEMI_BACKEND_URL__?: string }).__GEMI_BACKEND_URL__
+  delete (window as unknown as { __GEMI_BACKEND_URL__?: string })
+    .__GEMI_BACKEND_URL__
 })
 
 describe("objectImageUrl", () => {
@@ -16,8 +17,9 @@ describe("objectImageUrl", () => {
     )
   })
   it("prefixes window.__GEMI_BACKEND_URL__ when set (for Tauri builds)", () => {
-    ;(window as unknown as { __GEMI_BACKEND_URL__: string }).__GEMI_BACKEND_URL__ =
-      "http://example:7777"
+    ;(
+      window as unknown as { __GEMI_BACKEND_URL__: string }
+    ).__GEMI_BACKEND_URL__ = "http://example:7777"
     expect(objectImageUrl("gemini/x/y.png")).toBe(
       "http://example:7777/api/files/download/gemini/x/y.png",
     )

@@ -1,7 +1,7 @@
 import { AxiosError } from "axios"
 import { describe, expect, it, vi } from "vitest"
-import { getInitials, handleError } from "./utils"
 import type { ApiError } from "./client"
+import { getInitials, handleError } from "./utils"
 
 describe("getInitials", () => {
   it("returns the uppercase first letters of the first two words", () => {

@@ -11,8 +11,8 @@
  * path — only the optional ODM worker integration is deferred.
  */
 import { firstSuperuser, firstSuperuserPassword } from "../config"
-import { expect, test } from "../helpers/fixtures"
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -34,18 +34,22 @@ test.describe("R5b: GCP picker MVP", () => {
     page,
     request,
     baseURL,
+    runPrefix,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
 
-    const stamp = Date.now()
-    const experiment = `pw-r5b-${stamp}`
+    // Every entity name uses `runPrefix` so the auto afterEach in
+    // helpers/fixtures can sweep them via DELETE /api/e2e_cleanup. Tests
+    // that roll their own `pw-${Date.now()}` names leak across runs
+    // because the cleanup endpoint matches by prefix.
+    const experiment = `${runPrefix}-r5b-exp`
     const location = "Davis"
     const population = "Cowpea"
     const date = "2022-06-27"
     const platform = "DJI"
     const sensor = "FC6310S"
-    const workspaceName = `R5b Workspace ${stamp}`
-    const pipelineName = `R5b Aerial ${stamp}`
+    const workspaceName = `${runPrefix}-r5b-workspace`
+    const pipelineName = `${runPrefix}-r5b-pipeline`
 
     // 1. Upload 3 drone images.
     await navigateToUpload(page)
@@ -68,26 +72,29 @@ test.describe("R5b: GCP picker MVP", () => {
     await page.goto("/process")
     await page.locator('[data-onboarding="process-new-workspace"]').click()
     await page.getByLabel(/workspace name/i).fill(workspaceName)
-    await page.getByRole("combobox", { name: /experiment/i }).click()
-    await page.getByRole("option", { name: experiment }).click()
     await page.getByRole("button", { name: /create workspace/i }).click()
     await page.getByText(workspaceName, { exact: true }).click()
 
-    await page
-      .getByRole("button", { name: /create aerial pipeline/i })
-      .click()
+    await page.getByRole("button", { name: /create aerial pipeline/i }).click()
     await page.getByLabel(/pipeline name/i).fill(pipelineName)
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
-    await page.getByRole("button", { name: /new run/i }).first().click()
-    await page.getByTestId("aerial-date-select").click()
-    await page.getByRole("option", { name: date }).click()
-    await page.getByTestId("aerial-platform-select").click()
-    await page.getByRole("option", { name: platform }).click()
-    await page.getByTestId("aerial-sensor-select").click()
-    await page.getByRole("option", { name: sensor }).click()
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
+    const uploadRow = page
+      .getByTestId("upload-row")
+      .filter({ hasText: experiment })
+      .filter({ hasText: date })
+      .filter({ hasText: platform })
+      .filter({ hasText: sensor })
+      .first()
+    await expect(uploadRow).toBeVisible({ timeout: 30_000 })
+    await uploadRow.click()
+    await page.getByRole("button", { name: /create run/i }).click()
     await expect(
       page.getByText(new RegExp(`${DRONE_IMAGES.length} images? found`)),
     ).toBeVisible({ timeout: 30_000 })

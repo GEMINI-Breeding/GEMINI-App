@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { DatasetTypesService, type DatasetTypeInput } from "@/client"
+import { type DatasetTypeInput, DatasetTypesService } from "@/client"
 
 import { datasetTypesConfig } from "./datasetTypes"
 
@@ -39,7 +39,8 @@ describe("datasetTypesConfig", () => {
       .mockResolvedValue({ id: 2, dataset_type_name: "X" } as never)
     const input: DatasetTypeInput = {
       dataset_type_name: "X",
-      dataset_type_info: '{"k":1}' as unknown as DatasetTypeInput["dataset_type_info"],
+      dataset_type_info:
+        '{"k":1}' as unknown as DatasetTypeInput["dataset_type_info"],
     }
     await datasetTypesConfig.create(input)
     expect(spy).toHaveBeenCalledWith({
@@ -50,9 +51,15 @@ describe("datasetTypesConfig", () => {
 
   it("delete coerces id to a number for the SDK", async () => {
     const spy = vi
-      .spyOn(DatasetTypesService, "apiDatasetTypesIdDatasetTypeIdDeleteDatasetType")
+      .spyOn(
+        DatasetTypesService,
+        "apiDatasetTypesIdDatasetTypeIdDeleteDatasetType",
+      )
       .mockResolvedValue({} as never)
-    await datasetTypesConfig.delete({ id: "11", dataset_type_name: "Y" } as never)
+    await datasetTypesConfig.delete({
+      id: "11",
+      dataset_type_name: "Y",
+    } as never)
     expect(spy).toHaveBeenCalledWith({ datasetTypeId: 11 })
     spy.mockRestore()
   })

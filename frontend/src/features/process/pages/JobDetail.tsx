@@ -5,24 +5,22 @@
  * lives on each step's own page; this page is intentionally generic so it
  * works for RUN_ODM, SPLIT_ORTHOMOSAIC, EXTRACT_TRAITS, EXTRACT_BINARY, etc.
  */
-import { useEffect, useState } from "react"
+
 import { Link } from "@tanstack/react-router"
 import { ChevronLeft, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useCancelJob, useJob } from "@/features/process/hooks/useJobs"
-import { subscribe, type JobProgressEvent } from "@/lib/wsManager"
+import { type JobProgressEvent, subscribe } from "@/lib/wsManager"
 
 export function JobDetail({ jobId }: { jobId: string }) {
   const { data: job, isLoading } = useJob(jobId)
   const cancel = useCancelJob()
-  const [liveProgress, setLiveProgress] = useState<JobProgressEvent | null>(null)
+  const [liveProgress, setLiveProgress] = useState<JobProgressEvent | null>(
+    null,
+  )
 
   useEffect(() => {
     const unsub = subscribe(jobId, (evt) => setLiveProgress(evt))
@@ -35,8 +33,8 @@ export function JobDetail({ jobId }: { jobId: string }) {
   // stay legible.
   const progress = Math.round(liveProgress?.progress ?? job?.progress ?? 0)
   const stage =
-    (liveProgress?.progress_detail as { stage?: string } | null | undefined)?.stage ??
-    null
+    (liveProgress?.progress_detail as { stage?: string } | null | undefined)
+      ?.stage ?? null
 
   return (
     <div className="container max-w-3xl space-y-4 px-4 py-6">
@@ -95,25 +93,34 @@ export function JobDetail({ jobId }: { jobId: string }) {
               </pre>
             </Row>
           )}
-          {job && status !== "COMPLETED" && status !== "FAILED" && status !== "CANCELLED" && (
-            <div className="pt-2">
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={cancel.isPending}
-                onClick={() => cancel.mutate(jobId)}
-              >
-                Cancel job
-              </Button>
-            </div>
-          )}
+          {job &&
+            status !== "COMPLETED" &&
+            status !== "FAILED" &&
+            status !== "CANCELLED" && (
+              <div className="pt-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={cancel.isPending}
+                  onClick={() => cancel.mutate(jobId)}
+                >
+                  Cancel job
+                </Button>
+              </div>
+            )}
         </CardContent>
       </Card>
     </div>
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
   return (
     <div className="grid grid-cols-[120px_1fr] gap-3">
       <span className="text-muted-foreground text-xs">{label}</span>

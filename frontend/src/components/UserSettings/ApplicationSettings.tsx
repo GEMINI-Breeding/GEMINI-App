@@ -1,10 +1,16 @@
-import { useState, useCallback } from "react"
-
-import { Button } from "@/components/ui/button"
-import { Settings, Server, Info, RefreshCw, CheckCircle, AlertCircle } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle,
+  Info,
+  RefreshCw,
+  Server,
+  Settings,
+} from "lucide-react"
+import { useCallback, useState } from "react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
+import { Button } from "@/components/ui/button"
+import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
-import { checkForUpdates, CURRENT_VERSION } from "@/hooks/useUpdateChecker"
 
 // Phase 12 will rewire data-root + Docker resource limits onto the GEMINIbase
 // `/api/utils/...` surface. Until then the legacy `/api/v1/settings/*` endpoints
@@ -17,10 +23,13 @@ function PendingPanel({ title }: { title: string }) {
       <h2 className="text-lg font-medium">{title}</h2>
       <p className="text-sm text-muted-foreground">
         Application-level settings move to the GEMINIbase backend in a later
-        migration phase. For now, configure data root and Docker resource
-        limits via environment variables in
-        <code className="mx-1 px-1 rounded bg-muted">backend/gemini/pipeline/.env</code>
-        and the root <code className="mx-1 px-1 rounded bg-muted">docker-compose.yaml</code>.
+        migration phase. For now, configure data root and Docker resource limits
+        via environment variables in
+        <code className="mx-1 px-1 rounded bg-muted">
+          backend/gemini/pipeline/.env
+        </code>
+        and the root{" "}
+        <code className="mx-1 px-1 rounded bg-muted">docker-compose.yaml</code>.
       </p>
     </div>
   )
@@ -40,7 +49,11 @@ function AboutSettings() {
     setStatus({ kind: "checking" })
     const result = await checkForUpdates()
     if (result.status === "update_available") {
-      setStatus({ kind: "update_available", version: result.version, downloadUrl: result.downloadUrl })
+      setStatus({
+        kind: "update_available",
+        version: result.version,
+        downloadUrl: result.downloadUrl,
+      })
     } else if (result.status === "up_to_date") {
       setStatus({ kind: "up_to_date", version: result.version })
     } else {
@@ -52,7 +65,9 @@ function AboutSettings() {
     <div className="max-w-xl flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">Version</span>
-        <span className="text-muted-foreground text-sm font-mono">{CURRENT_VERSION}</span>
+        <span className="text-muted-foreground text-sm font-mono">
+          {CURRENT_VERSION}
+        </span>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -62,7 +77,9 @@ function AboutSettings() {
           onClick={handleCheck}
           disabled={status.kind === "checking"}
         >
-          <RefreshCw className={`h-4 w-4 mr-2 ${status.kind === "checking" ? "animate-spin" : ""}`} />
+          <RefreshCw
+            className={`h-4 w-4 mr-2 ${status.kind === "checking" ? "animate-spin" : ""}`}
+          />
           {status.kind === "checking" ? "Checking…" : "Check for Updates"}
         </Button>
 
@@ -99,11 +116,13 @@ function AboutSettings() {
 }
 
 const SETTINGS_NAV_GROUPS = [
-  { items: [
-    { id: "general", label: "General", icon: Settings },
-    { id: "docker",  label: "Docker",  icon: Server  },
-    { id: "about",   label: "About",   icon: Info    },
-  ]},
+  {
+    items: [
+      { id: "general", label: "General", icon: Settings },
+      { id: "docker", label: "Docker", icon: Server },
+      { id: "about", label: "About", icon: Info },
+    ],
+  },
 ] as const
 
 type SettingsSection = "general" | "docker" | "about"
@@ -120,8 +139,8 @@ const ApplicationSettings = () => {
       />
       <div className="flex-1 overflow-auto px-6 py-6">
         {active === "general" && <PendingPanel title="General" />}
-        {active === "docker"  && <PendingPanel title="Docker" />}
-        {active === "about"   && <AboutSettings />}
+        {active === "docker" && <PendingPanel title="Docker" />}
+        {active === "about" && <AboutSettings />}
       </div>
     </div>
   )

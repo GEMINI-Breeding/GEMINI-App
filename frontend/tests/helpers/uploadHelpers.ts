@@ -9,9 +9,7 @@ export async function navigateToUpload(page: Page): Promise<void> {
   // NavSidebar has `data-onboarding="files-tab-upload"`; click it to force
   // the Upload view in case a prior test left Manage active.
   await page.locator('[data-onboarding="files-tab-upload"]').click()
-  await expect(
-    page.getByRole("heading", { name: /^upload$/i }),
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: /^upload$/i })).toBeVisible()
 }
 
 /**
@@ -95,7 +93,11 @@ export async function fillUploadForm(
     await expect(trigger).toBeEnabled()
     await trigger.click()
     // Pick the "+ Create new…" sentinel and then fill the new-name input.
-    await page.getByTestId(`entity-create-${selectTestId.replace("entity-select-", "")}`).click()
+    await page
+      .getByTestId(
+        `entity-create-${selectTestId.replace("entity-select-", "")}`,
+      )
+      .click()
     const newInput = page.getByTestId(newInputTestId)
     await expect(newInput).toBeVisible()
     await newInput.fill(value)
@@ -111,7 +113,10 @@ export async function fillUploadForm(
  * are passed as absolute host paths (e.g. fixtures) because Playwright's
  * setInputFiles reads them from disk.
  */
-export async function dropFiles(page: Page, filePaths: string[]): Promise<void> {
+export async function dropFiles(
+  page: Page,
+  filePaths: string[],
+): Promise<void> {
   await page.locator('[data-testid="upload-input"]').setInputFiles(filePaths)
   await expect(
     page.getByRole("heading", {
@@ -179,9 +184,7 @@ export async function submitUploadAndWait(
     // really finished client-side, not just that some chunks reached
     // MinIO.
     await expect(
-      page.getByText(
-        new RegExp(`^Extracting ${expectedFileCount} file`, "i"),
-      ),
+      page.getByText(new RegExp(`^Extracting ${expectedFileCount} file`, "i")),
     ).toBeVisible({ timeout: opts.timeoutMs ?? 60_000 })
     return
   }
@@ -189,7 +192,7 @@ export async function submitUploadAndWait(
   // Terminal "Done" — set when the process status flips to "completed".
   // For plain uploads this happens the moment chunks land; for extraction
   // it happens when the worker reports COMPLETED via wsManager.
-  await expect(
-    page.getByText(/^Done$/i).first(),
-  ).toBeVisible({ timeout: opts.timeoutMs ?? 120_000 })
+  await expect(page.getByText(/^Done$/i).first()).toBeVisible({
+    timeout: opts.timeoutMs ?? 120_000,
+  })
 }

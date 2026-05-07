@@ -9,8 +9,8 @@ import type { JobProgressEvent } from "@/lib/wsManager"
 
 import {
   closeJobConnection,
-  subscribeJobAsRunEvent,
   type RunProgressEvent,
+  subscribeJobAsRunEvent,
 } from "./runEvents"
 
 // Capture the listener wsManager.subscribe is called with so the test
@@ -95,6 +95,21 @@ describe("subscribeJobAsRunEvent", () => {
     expect(last.event).toBe("error")
     expect(last.message).toBe("AgRowStitch is not importable")
     expect(last.terminal).toBe(true)
+  })
+
+  it("on terminal FAILED prefers error_message over the last-seen stage", () => {
+    const events: RunProgressEvent[] = []
+    subscribeJobAsRunEvent("job-4b", "trait_extraction", (e) => events.push(e))
+    captured[0].listener({
+      status: "FAILED",
+      terminal: true,
+      progress: 5,
+      progress_detail: { stage: "downloading" },
+      error_message: "S3 NoSuchKey: plot-boundaries/v1.geojson",
+    })
+    const last = events[events.length - 1]
+    expect(last.event).toBe("error")
+    expect(last.message).toBe("S3 NoSuchKey: plot-boundaries/v1.geojson")
   })
 
   it("maps terminal CANCELLED → 'cancelled'", () => {

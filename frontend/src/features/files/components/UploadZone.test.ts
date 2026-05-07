@@ -27,7 +27,9 @@ type FakeDirEntry = {
   isFile: false
   isDirectory: true
   name: string
-  createReader: () => { readEntries: (cb: (entries: unknown[]) => void) => void }
+  createReader: () => {
+    readEntries: (cb: (entries: unknown[]) => void) => void
+  }
 }
 
 function fileEntry(name: string, content = "x"): FakeFileEntry {
@@ -41,7 +43,10 @@ function fileEntry(name: string, content = "x"): FakeFileEntry {
   }
 }
 
-function dirEntry(name: string, children: Array<FakeFileEntry | FakeDirEntry>): FakeDirEntry {
+function dirEntry(
+  name: string,
+  children: Array<FakeFileEntry | FakeDirEntry>,
+): FakeDirEntry {
   return {
     isFile: false,
     isDirectory: true,
@@ -62,7 +67,11 @@ function dirEntry(name: string, children: Array<FakeFileEntry | FakeDirEntry>): 
 }
 
 function makeDataTransfer(
-  items: Array<{ kind: "file"; entry?: FakeFileEntry | FakeDirEntry; getAsFile?: () => File | null }>,
+  items: Array<{
+    kind: "file"
+    entry?: FakeFileEntry | FakeDirEntry
+    getAsFile?: () => File | null
+  }>,
   filesFallback: File[] = [],
 ): DataTransfer {
   // jsdom's DataTransfer doesn't support adding items via webkitGetAsEntry,
@@ -106,7 +115,10 @@ describe("filesFromDataTransfer", () => {
         kind: "file",
         entry: dirEntry("subset", [
           fileEntry("top.csv"),
-          dirEntry("date1", [fileEntry("d1-img1.JPG"), fileEntry("d1-img2.JPG")]),
+          dirEntry("date1", [
+            fileEntry("d1-img1.JPG"),
+            fileEntry("d1-img2.JPG"),
+          ]),
           dirEntry("date2", [fileEntry("d2-img1.JPG")]),
         ]),
       },

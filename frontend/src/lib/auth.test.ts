@@ -6,7 +6,7 @@
  * which is a plain axios call under the hood — tested only via a
  * mocked module so we don't talk to a real backend.
  */
-import axios, { AxiosError } from "axios"
+import axios, { type AxiosError } from "axios"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { UsersService } from "@/client"
@@ -85,7 +85,10 @@ describe("login()", () => {
     vi.spyOn(
       UsersService,
       "apiUsersLoginAccessTokenLoginAccessToken",
-    ).mockResolvedValue({ access_token: "fresh-jwt", token_type: "bearer" } as never)
+    ).mockResolvedValue({
+      access_token: "fresh-jwt",
+      token_type: "bearer",
+    } as never)
     const token = await login("user@example.com", "secret")
     expect(token).toBe("fresh-jwt")
     expect(getToken()).toBe("fresh-jwt")
@@ -128,9 +131,9 @@ describe("installAuthInterceptors()", () => {
       response: { status: 401 },
       config: { url: "/api/jobs/all" },
     } as unknown as AxiosError
-    await expect(
-      Promise.resolve().then(() => onRejected!(err)),
-    ).rejects.toBe(err)
+    await expect(Promise.resolve().then(() => onRejected!(err))).rejects.toBe(
+      err,
+    )
     expect(getToken()).toBe("")
   })
 
@@ -140,9 +143,9 @@ describe("installAuthInterceptors()", () => {
       response: { status: 401 },
       config: { url: "/api/users/login/access-token" },
     } as unknown as AxiosError
-    await expect(
-      Promise.resolve().then(() => onRejected!(err)),
-    ).rejects.toBe(err)
+    await expect(Promise.resolve().then(() => onRejected!(err))).rejects.toBe(
+      err,
+    )
     expect(getToken()).toBe("a-token")
   })
 
@@ -152,9 +155,9 @@ describe("installAuthInterceptors()", () => {
       response: { status: 500 },
       config: { url: "/api/jobs/all" },
     } as unknown as AxiosError
-    await expect(
-      Promise.resolve().then(() => onRejected!(err)),
-    ).rejects.toBe(err)
+    await expect(Promise.resolve().then(() => onRejected!(err))).rejects.toBe(
+      err,
+    )
     expect(getToken()).toBe("a-token")
   })
 

@@ -5,10 +5,10 @@
  */
 import { Button } from "@/components/ui/button"
 import {
-  usePlotGeometryVersions,
+  type PlotGeometryVersion,
   useActivatePlotGeometryVersion,
   useDeletePlotGeometryVersion,
-  type PlotGeometryVersion,
+  usePlotGeometryVersions,
 } from "@/features/process/hooks/usePlotGeometry"
 
 export function VersionPicker({
@@ -60,7 +60,9 @@ export function VersionPicker({
                 <div className="flex justify-end gap-2">
                   <Button
                     size="sm"
-                    variant={activeVersion === v.version ? "default" : "outline"}
+                    variant={
+                      activeVersion === v.version ? "default" : "outline"
+                    }
                     onClick={() => onLoad(v.version)}
                   >
                     Load
@@ -69,7 +71,9 @@ export function VersionPicker({
                     size="sm"
                     variant="outline"
                     disabled={v.is_active || activate.isPending}
-                    onClick={() => activate.mutate({ directory, version: v.version })}
+                    onClick={() =>
+                      activate.mutate({ directory, version: v.version })
+                    }
                   >
                     Activate
                   </Button>
@@ -79,7 +83,9 @@ export function VersionPicker({
                     disabled={remove.isPending}
                     onClick={() => {
                       if (
-                        confirm(`Delete version ${v.version}${v.name ? ` (${v.name})` : ""}?`)
+                        confirm(
+                          `Delete version ${v.version}${v.name ? ` (${v.name})` : ""}?`,
+                        )
                       ) {
                         remove.mutate({ directory, version: v.version })
                       }

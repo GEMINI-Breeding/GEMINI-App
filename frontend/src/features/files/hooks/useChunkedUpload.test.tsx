@@ -18,8 +18,8 @@ vi.mock("@/lib/wsManager", () => ({
 }))
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { ProcessProvider, useProcess } from "@/contexts/ProcessContext"
+import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { useChunkedUpload } from "./useChunkedUpload"
 
 const mockedUpload = uploadFileChunked as unknown as ReturnType<typeof vi.fn>

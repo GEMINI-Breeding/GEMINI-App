@@ -209,5 +209,9 @@ export interface WidgetTemplate {
   iconName: string
   defaultSpan: WidgetSpan
   category: "Metrics" | "Charts" | "Tables" | "Visual"
-  defaultConfig: Partial<KpiConfig> | Partial<ChartConfig> | Partial<TableConfig> | Partial<PlotViewerConfig>
+  defaultConfig:
+    | Partial<KpiConfig>
+    | Partial<ChartConfig>
+    | Partial<TableConfig>
+    | Partial<PlotViewerConfig>
 }

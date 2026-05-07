@@ -1,23 +1,32 @@
+import { useQuery } from "@tanstack/react-query"
 import {
-  TraitLevelsService,
-  TraitsService,
   type TraitInput,
   type TraitLevelOutput,
+  TraitLevelsService,
   type TraitOutput,
+  TraitsService,
 } from "@/client"
+import {
+  idAsNumber,
+  idAsString,
+  parseInfoField,
+} from "@/features/admin/lib/ids"
 import type { EntityConfig, EntityField } from "@/features/admin/lib/types"
-import { idAsNumber, idAsString, parseInfoField } from "@/features/admin/lib/ids"
-import { useQuery } from "@tanstack/react-query"
 
 function normalize(input: TraitInput): TraitInput {
   return {
     ...input,
     trait_info: parseInfoField(input.trait_info) as TraitInput["trait_info"],
-    trait_metrics: parseInfoField(input.trait_metrics) as TraitInput["trait_metrics"],
+    trait_metrics: parseInfoField(
+      input.trait_metrics,
+    ) as TraitInput["trait_metrics"],
   }
 }
 
-function useTraitLevelOptions(): Array<{ value: string | number; label: string }> {
+function useTraitLevelOptions(): Array<{
+  value: string | number
+  label: string
+}> {
   const { data } = useQuery<TraitLevelOutput[], Error>({
     queryKey: ["admin", "trait_levels", "options"],
     queryFn: async () =>
@@ -43,7 +52,12 @@ const fields: EntityField<TraitInput>[] = [
     type: "select",
     optionsHook: useTraitLevelOptions,
   },
-  { key: "trait_metrics", label: "Metrics (JSON)", type: "json", tableHidden: true },
+  {
+    key: "trait_metrics",
+    label: "Metrics (JSON)",
+    type: "json",
+    tableHidden: true,
+  },
   { key: "trait_info", label: "Info (JSON)", type: "json", tableHidden: true },
 ]
 
@@ -68,7 +82,9 @@ export const traitsConfig: EntityConfig<TraitOutput, TraitInput> = {
       requestBody: normalize(input),
     })) as TraitOutput,
   delete: async (row) =>
-    TraitsService.apiTraitsIdTraitIdDeleteTrait({ traitId: idAsString(row.id) }),
+    TraitsService.apiTraitsIdTraitIdDeleteTrait({
+      traitId: idAsString(row.id),
+    }),
   fields,
   emptyInput: () => ({ trait_name: "" }),
   toInput: (row) => ({

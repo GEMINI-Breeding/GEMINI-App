@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { LinesService, type LineInput } from "@/client"
+import { type LineInput, LinesService } from "@/client"
 
 import { linesConfig } from "./lines"
 

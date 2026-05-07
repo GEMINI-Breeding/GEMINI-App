@@ -32,7 +32,9 @@ const DeleteConfirmation = () => {
       // GEMINIbase has no dedicated /me delete — use the admin endpoint
       // against the caller's own id. The backend's self-delete guard only
       // blocks superusers; regular users can delete themselves.
-      return UsersService.apiUsersIdUserIdDeleteUser({ userId: String(user.id) })
+      return UsersService.apiUsersIdUserIdDeleteUser({
+        userId: String(user.id),
+      })
     },
     onSuccess: () => {
       showSuccessToast("Your account has been successfully deleted")

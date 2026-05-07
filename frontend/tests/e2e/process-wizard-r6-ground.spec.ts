@@ -14,8 +14,8 @@
  * and have their own R5a / R5c specs.
  */
 import { firstSuperuser, firstSuperuserPassword } from "../config"
-import { expect, test } from "../helpers/fixtures"
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -36,11 +36,13 @@ test.describe("R6: ground pipeline wiring (what's possible)", () => {
     page,
     request,
     baseURL,
+    runPrefix,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
 
-    const stamp = Date.now()
-    const experiment = `pw-r6-${stamp}`
+    const experiment = `${runPrefix}-r6-exp`
+    const workspaceName = `${runPrefix}-r6-workspace`
+    const pipelineName = `${runPrefix}-r6-pipeline`
     const location = "Davis"
     const population = "Cowpea"
     const date = "2022-06-27"
@@ -68,29 +70,32 @@ test.describe("R6: ground pipeline wiring (what's possible)", () => {
     // Workspace.
     await page.goto("/process")
     await page.locator('[data-onboarding="process-new-workspace"]').click()
-    await page.getByLabel(/workspace name/i).fill(`R6 Workspace ${stamp}`)
-    await page.getByRole("combobox", { name: /experiment/i }).click()
-    await page.getByRole("option", { name: experiment }).click()
+    await page.getByLabel(/workspace name/i).fill(workspaceName)
     await page.getByRole("button", { name: /create workspace/i }).click()
-    await page.getByText(`R6 Workspace ${stamp}`, { exact: true }).click()
+    await page.getByText(workspaceName, { exact: true }).click()
 
     // Ground pipeline + walk wizard with all defaults.
-    await page
-      .getByRole("button", { name: /create ground pipeline/i })
-      .click()
-    await page.getByLabel(/pipeline name/i).fill(`R6 Ground ${stamp}`)
+    await page.getByRole("button", { name: /create ground pipeline/i }).click()
+    await page.getByLabel(/pipeline name/i).fill(pipelineName)
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
-    // Create run + pick scope.
-    await page.getByRole("button", { name: /new run/i }).first().click()
-    await page.getByTestId("aerial-date-select").click()
-    await page.getByRole("option", { name: date }).click()
-    await page.getByTestId("aerial-platform-select").click()
-    await page.getByRole("option", { name: platform }).click()
-    await page.getByTestId("aerial-sensor-select").click()
-    await page.getByRole("option", { name: sensor }).click()
+    // Create run by picking the uploaded dataset row.
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
+    const uploadRow = page
+      .getByTestId("upload-row")
+      .filter({ hasText: experiment })
+      .filter({ hasText: date })
+      .filter({ hasText: platform })
+      .filter({ hasText: sensor })
+      .first()
+    await expect(uploadRow).toBeVisible({ timeout: 30_000 })
+    await uploadRow.click()
+    await page.getByRole("button", { name: /create run/i }).click()
 
     // Ground steps: data_sync → plot_marking → stitching → plot_boundary_prep
     // → associate_boundaries → inference. Run data_sync first.
@@ -127,9 +132,7 @@ test.describe("R6: ground pipeline wiring (what's possible)", () => {
     const url = page.url()
     const wsId = url.split("/process/")[1].split("/")[0]
     const runId = url.split("/run/")[1]
-    await page.goto(
-      `/process/${wsId}/tool?runId=${runId}&step=edge_crop`,
-    )
+    await page.goto(`/process/${wsId}/tool?runId=${runId}&step=edge_crop`)
     await expect(
       page.getByRole("heading", { name: /edge crop/i }),
     ).toBeVisible()
@@ -157,10 +160,7 @@ test.describe("R6: ground pipeline wiring (what's possible)", () => {
     expect(tokenRes.ok()).toBe(true)
     const { access_token } = (await tokenRes.json()) as { access_token: string }
     const checkRes = await request.post(
-      new URL(
-        "/api/plot_geometry/stitch_mask/check",
-        baseURL,
-      ).toString(),
+      new URL("/api/plot_geometry/stitch_mask/check", baseURL).toString(),
       {
         data: {
           year: "2022",

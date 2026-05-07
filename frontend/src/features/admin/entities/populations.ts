@@ -1,19 +1,24 @@
 import {
-  PopulationsService,
   type PopulationInput,
   type PopulationOutput,
+  PopulationsService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: PopulationInput): PopulationInput {
   return {
     ...input,
-    population_info: parseInfoField(input.population_info) as PopulationInput["population_info"],
+    population_info: parseInfoField(
+      input.population_info,
+    ) as PopulationInput["population_info"],
   }
 }
 
-export const populationsConfig: EntityConfig<PopulationOutput, PopulationInput> = {
+export const populationsConfig: EntityConfig<
+  PopulationOutput,
+  PopulationInput
+> = {
   slug: "populations",
   singular: "Population",
   plural: "Populations",
@@ -48,7 +53,12 @@ export const populationsConfig: EntityConfig<PopulationOutput, PopulationInput> 
       placeholder: "(experiment name)",
       description: "Free-text reference to an existing experiment.",
     },
-    { key: "population_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "population_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ population_name: "" }),
   toInput: (row) => ({

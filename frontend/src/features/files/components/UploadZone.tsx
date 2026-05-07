@@ -11,20 +11,34 @@
  *     (the previous misleading failure mode the user hit on
  *     `Subset Drone Data/`).
  */
+
+import { Image, Upload } from "lucide-react"
 import { useRef, useState } from "react"
-import { Upload, Image } from "lucide-react"
 
 interface UploadZoneProps {
   onFilesAdded?: (files: File[]) => void
   /** Hint for the native file picker. Examples: "image/*", ".csv,.xlsx" */
   accept?: string
+  /** When true, the dropzone is visibly inert: clicking does not open the
+   *  picker, and dropping is ignored. Used by the Files page to gate the
+   *  upload affordance behind required scope fields (data type and
+   *  experiment) so files can't be staged into an undefined target. */
+  disabled?: boolean
+  /** Short human-readable reason shown inside the disabled dropzone.
+   *  Required when `disabled` is true so the user understands why. */
+  disabledReason?: string
 }
 
 interface FileSystemDirectoryEntryLike {
   isDirectory: true
   isFile: false
   name: string
-  createReader(): { readEntries(cb: (entries: FileSystemEntryLike[]) => void, err?: (e: unknown) => void): void }
+  createReader(): {
+    readEntries(
+      cb: (entries: FileSystemEntryLike[]) => void,
+      err?: (e: unknown) => void,
+    ): void
+  }
 }
 interface FileSystemFileEntryLike {
   isDirectory: false
@@ -33,7 +47,9 @@ interface FileSystemFileEntryLike {
   fullPath: string
   file(cb: (f: File) => void, err?: (e: unknown) => void): void
 }
-type FileSystemEntryLike = FileSystemDirectoryEntryLike | FileSystemFileEntryLike
+type FileSystemEntryLike =
+  | FileSystemDirectoryEntryLike
+  | FileSystemFileEntryLike
 
 async function readAllEntries(
   reader: ReturnType<FileSystemDirectoryEntryLike["createReader"]>,
@@ -72,7 +88,9 @@ async function entryToFiles(entry: FileSystemEntryLike): Promise<File[]> {
 export async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
   const items = Array.from(dt.items ?? [])
   const hasGetEntry = items.some(
-    (it) => typeof (it as DataTransferItem & { webkitGetAsEntry?: unknown }).webkitGetAsEntry === "function",
+    (it) =>
+      typeof (it as DataTransferItem & { webkitGetAsEntry?: unknown })
+        .webkitGetAsEntry === "function",
   )
   if (!hasGetEntry) {
     return Array.from(dt.files)
@@ -81,9 +99,11 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
   const results = await Promise.all(
     items.map(async (item) => {
       if (item.kind !== "file") return [] as File[]
-      const rawEntry = (item as DataTransferItem & {
-        webkitGetAsEntry?: () => unknown
-      }).webkitGetAsEntry?.()
+      const rawEntry = (
+        item as DataTransferItem & {
+          webkitGetAsEntry?: () => unknown
+        }
+      ).webkitGetAsEntry?.()
       if (!rawEntry) {
         const f = item.getAsFile()
         return f ? [f] : []
@@ -94,17 +114,24 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
   return results.flat()
 }
 
-export function UploadZone({ onFilesAdded, accept }: UploadZoneProps) {
+export function UploadZone({
+  onFilesAdded,
+  accept,
+  disabled = false,
+  disabledReason,
+}: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isExpanding, setIsExpanding] = useState(false)
   const dragCountRef = useRef(0)
 
   const handleClick = () => {
+    if (disabled) return
     inputRef.current?.click()
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return
     const files = Array.from(e.target.files ?? [])
     if (files.length > 0) onFilesAdded?.(files)
     // Reset so picking the same file twice still triggers onChange.
@@ -112,14 +139,17 @@ export function UploadZone({ onFilesAdded, accept }: UploadZoneProps) {
   }
 
   const handleDragEnter = (e: React.DragEvent) => {
+    if (disabled) return
     e.preventDefault()
     dragCountRef.current++
     setIsDragOver(true)
   }
   const handleDragOver = (e: React.DragEvent) => {
+    if (disabled) return
     e.preventDefault() // required to allow drop
   }
   const handleDragLeave = (e: React.DragEvent) => {
+    if (disabled) return
     e.preventDefault()
     dragCountRef.current--
     if (dragCountRef.current <= 0) {
@@ -128,6 +158,7 @@ export function UploadZone({ onFilesAdded, accept }: UploadZoneProps) {
     }
   }
   const handleDrop = async (e: React.DragEvent) => {
+    if (disabled) return
     e.preventDefault()
     dragCountRef.current = 0
     setIsDragOver(false)
@@ -164,6 +195,7 @@ export function UploadZone({ onFilesAdded, accept }: UploadZoneProps) {
       <div
         onClick={handleClick}
         onKeyDown={(e) => {
+          if (disabled) return
           if (e.key === "Enter" || e.key === " ") handleClick()
         }}
         onDragEnter={handleDragEnter}
@@ -171,25 +203,43 @@ export function UploadZone({ onFilesAdded, accept }: UploadZoneProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
         data-testid="upload-dropzone"
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-          isDragOver
-            ? "border-primary bg-primary/10"
-            : "border-border hover:border-muted-foreground hover:bg-muted"
+        data-disabled={disabled || undefined}
+        className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+          disabled
+            ? "cursor-not-allowed border-border bg-muted/30 opacity-60"
+            : isDragOver
+              ? "cursor-pointer border-primary bg-primary/10"
+              : "cursor-pointer border-border hover:border-muted-foreground hover:bg-muted"
         }`}
       >
         <Upload className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-        <p className="mb-1 text-foreground">
-          {isExpanding
-            ? "Reading folder…"
-            : isDragOver
-              ? "Drop files or folders here"
-              : "Click to browse, or drag & drop files or folders"}
-        </p>
-        <p className="text-muted-foreground">
-          Folders are walked recursively; subfolders included.
-        </p>
+        {disabled ? (
+          <>
+            <p className="mb-1 text-foreground">Upload is locked</p>
+            <p
+              className="text-muted-foreground"
+              data-testid="upload-dropzone-disabled-reason"
+            >
+              {disabledReason ?? "Required fields are missing."}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mb-1 text-foreground">
+              {isExpanding
+                ? "Reading folder…"
+                : isDragOver
+                  ? "Drop files or folders here"
+                  : "Click to browse, or drag & drop files or folders"}
+            </p>
+            <p className="text-muted-foreground">
+              Folders are walked recursively; subfolders included.
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

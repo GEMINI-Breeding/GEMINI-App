@@ -55,15 +55,15 @@ export function PlotMarker({ onCancel }: PlotMarkerProps) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">
-          Once the endpoints land, this tool will replace the placeholder
-          with the full image-slider + frame-marking UI restored from
-          <code className="mx-1">main</code>'s 1,039-LOC PlotMarker. The
-          rest of the ground pipeline (boundaries, edge crop, stitching
-          submission) is wired and works.
+          Once the endpoints land, this tool will replace the placeholder with
+          the full image-slider + frame-marking UI restored from
+          <code className="mx-1">main</code>'s 1,039-LOC PlotMarker. The rest of
+          the ground pipeline (boundaries, edge crop, stitching submission) is
+          wired and works.
         </p>
         <p className="text-muted-foreground">
-          <strong>Workaround:</strong> if you have frame-range data already,
-          you can submit a RUN_STITCH job directly with an explicit{" "}
+          <strong>Workaround:</strong> if you have frame-range data already, you
+          can submit a RUN_STITCH job directly with an explicit{" "}
           <code>image_paths</code> array — bypasses this UI but unblocks
           stitching while we wait.
         </p>

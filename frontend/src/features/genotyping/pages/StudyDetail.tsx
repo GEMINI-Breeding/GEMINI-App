@@ -60,8 +60,16 @@ function ExperimentsTab({ studyId }: { studyId: string }) {
   }
   const rows = experiments.data ?? []
   if (rows.length === 0) {
+    // Empty state has its own testid so an E2E spec asserting
+    // "experiment X is associated" can distinguish "list rendered but
+    // empty" from "still loading" — the previous shape only had a
+    // testid on the populated list, so a missing-association bug
+    // looked indistinguishable from a slow render.
     return (
-      <p className="text-muted-foreground text-sm">
+      <p
+        className="text-muted-foreground text-sm"
+        data-testid="genotyping-study-experiments-empty"
+      >
         No experiments associated with this study yet.
       </p>
     )

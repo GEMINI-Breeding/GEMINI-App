@@ -1,15 +1,17 @@
 import {
-  AccessionsService,
   type AccessionInput,
   type AccessionOutput,
+  AccessionsService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: AccessionInput): AccessionInput {
   return {
     ...input,
-    accession_info: parseInfoField(input.accession_info) as AccessionInput["accession_info"],
+    accession_info: parseInfoField(
+      input.accession_info,
+    ) as AccessionInput["accession_info"],
   }
 }
 
@@ -47,7 +49,12 @@ export const accessionsConfig: EntityConfig<AccessionOutput, AccessionInput> = {
       type: "text",
       placeholder: "(population name)",
     },
-    { key: "accession_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "accession_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ accession_name: "" }),
   toInput: (row) => ({

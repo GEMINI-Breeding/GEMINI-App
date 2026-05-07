@@ -42,9 +42,7 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     await page.getByTestId("genotyping-add-study").click()
     await expect(page.getByRole("dialog")).toBeVisible()
 
-    await page
-      .locator("#entity-field-study_name")
-      .fill(initialName)
+    await page.locator("#entity-field-study_name").fill(initialName)
 
     const createReq = page.waitForResponse(
       (r) =>
@@ -68,17 +66,17 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     // ── Navigate to detail page ────────────────────────────────────────
     const linkRow = page.locator("tr", { hasText: initialName })
     await linkRow.getByTestId("genotyping-study-link").click()
-    await expect(
-      page.getByTestId("genotyping-study-title"),
-    ).toContainText(initialName, { timeout: 10_000 })
+    await expect(page.getByTestId("genotyping-study-title")).toContainText(
+      initialName,
+      { timeout: 10_000 },
+    )
 
-    // The placeholders for Phase 9b/9c/9d aren't all rendered until the
-    // user clicks the corresponding tab (Radix lazy-renders TabsContent).
-    // Clicking Records / Variants / GWAS asserts each placeholder shows.
+    // Records pane now renders the bcftools-backed records table; for an
+    // empty study the empty-state hint is what we assert. Variants and
+    // GWAS panes still render Phase-9f/9g placeholders. Radix lazy-renders
+    // TabsContent so we have to click each tab before asserting.
     await page.getByRole("tab", { name: /records/i }).click()
-    await expect(
-      page.getByTestId("genotyping-study-records-placeholder"),
-    ).toBeVisible()
+    await expect(page.getByTestId("records-empty")).toBeVisible()
 
     await page.getByRole("tab", { name: /variants/i }).click()
     await expect(
@@ -105,7 +103,9 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
 
     const updateReq = page.waitForResponse(
       (r) =>
-        /\/api\/genotyping_studies\/id\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        /\/api\/genotyping_studies\/id\/[^/]+$/.test(
+          new URL(r.url()).pathname,
+        ) &&
         r.request().method() === "PATCH" &&
         r.status() < 400,
     )
@@ -117,11 +117,17 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     })
     // The original-name row must be gone (optimistic UI dropping the wrong
     // row would leave it visible until a refetch — caught by reload).
+    // Exact-match regex (not substring) because renamedName contains
+    // initialName, so a `hasText: initialName` substring match would also
+    // hit the renamed row.
+    const initialNameExact = new RegExp(`^${initialName}$`)
     await page.reload()
     await expect(page.locator("tr", { hasText: renamedName })).toBeVisible({
       timeout: 10_000,
     })
-    await expect(page.locator("tr", { hasText: initialName })).toHaveCount(0)
+    await expect(
+      page.locator("tr").filter({ has: page.getByText(initialNameExact) }),
+    ).toHaveCount(0)
 
     // ── Delete (cancel first, then confirm) ────────────────────────────
     const renamedRow = page.locator("tr", { hasText: renamedName })
@@ -135,7 +141,9 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     await renamedRow.getByTestId("genotyping-study-delete").click()
     const deleteReq = page.waitForResponse(
       (r) =>
-        /\/api\/genotyping_studies\/id\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        /\/api\/genotyping_studies\/id\/[^/]+$/.test(
+          new URL(r.url()).pathname,
+        ) &&
         r.request().method() === "DELETE" &&
         r.status() < 400,
     )

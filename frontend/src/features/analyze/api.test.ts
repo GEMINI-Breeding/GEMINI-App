@@ -25,7 +25,9 @@ describe("analyzeApi", () => {
     localStorage.clear()
     fetchMock.mockReset()
     vi.stubGlobal("fetch", fetchMock)
-    ;(window as unknown as { __GEMI_BACKEND_URL__?: string }).__GEMI_BACKEND_URL__ = ""
+    ;(
+      window as unknown as { __GEMI_BACKEND_URL__?: string }
+    ).__GEMI_BACKEND_URL__ = ""
   })
 
   afterEach(() => {
@@ -57,16 +59,21 @@ describe("analyzeApi", () => {
     fetchMock.mockReturnValueOnce(ok([]))
     await analyzeApi.listRuns()
     const [, init] = fetchMock.mock.calls[0]
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer " })
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer ",
+    })
   })
 
   it("prefixes the path with __GEMI_BACKEND_URL__ when set", async () => {
-    ;(window as unknown as { __GEMI_BACKEND_URL__?: string }).__GEMI_BACKEND_URL__ =
-      "http://backend.test"
+    ;(
+      window as unknown as { __GEMI_BACKEND_URL__?: string }
+    ).__GEMI_BACKEND_URL__ = "http://backend.test"
     fetchMock.mockReturnValueOnce(ok([]))
 
     await analyzeApi.listRuns()
-    expect(fetchMock.mock.calls[0][0]).toBe("http://backend.test/api/v1/analyze/runs")
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://backend.test/api/v1/analyze/runs",
+    )
   })
 
   it("builds the right URLs for each endpoint", async () => {
@@ -102,7 +109,9 @@ describe("analyzeApi", () => {
       } as unknown as Response),
     )
 
-    await expect(analyzeApi.listRuns()).rejects.toThrow("trait extraction failed")
+    await expect(analyzeApi.listRuns()).rejects.toThrow(
+      "trait extraction failed",
+    )
   })
 
   it("falls back to 'HTTP <status>' when the error body has no detail field", async () => {

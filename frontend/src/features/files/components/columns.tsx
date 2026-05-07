@@ -19,7 +19,9 @@ const arrayIncludesFilter: FilterFn<FileUploadPublic> = (
 const colDataType: ColumnDef<FileUploadPublic> = {
   accessorKey: "data_type",
   header: "Data Type",
-  cell: ({ row }) => <span className="font-medium">{row.original.data_type}</span>,
+  cell: ({ row }) => (
+    <span className="font-medium">{row.original.data_type}</span>
+  ),
 }
 
 const colExperiment: ColumnDef<FileUploadPublic> = {
@@ -51,7 +53,9 @@ const colPlatform: ColumnDef<FileUploadPublic> = {
   header: ({ column }) => <ColumnFilter column={column} title="Platform" />,
   filterFn: arrayIncludesFilter,
   cell: ({ row }) => (
-    <span className="text-muted-foreground">{row.original.platform || "—"}</span>
+    <span className="text-muted-foreground">
+      {row.original.platform || "—"}
+    </span>
   ),
 }
 
@@ -67,7 +71,9 @@ const colSensor: ColumnDef<FileUploadPublic> = {
 const colFiles: ColumnDef<FileUploadPublic> = {
   accessorKey: "file_count",
   header: "Files",
-  cell: ({ row }) => <span className="tabular-nums">{row.original.file_count}</span>,
+  cell: ({ row }) => (
+    <span className="tabular-nums">{row.original.file_count}</span>
+  ),
 }
 
 const colStatus: ColumnDef<FileUploadPublic> = {
@@ -77,7 +83,11 @@ const colStatus: ColumnDef<FileUploadPublic> = {
   cell: ({ row }) => {
     const status = row.original.status
     const variant =
-      status === "completed" ? "default" : status === "missing" ? "destructive" : "secondary"
+      status === "completed"
+        ? "default"
+        : status === "missing"
+          ? "destructive"
+          : "secondary"
     return <Badge variant={variant}>{status}</Badge>
   },
 }
@@ -105,7 +115,12 @@ const colActions: ColumnDef<FileUploadPublic> = {
 // ── Columns per data type ──────────────────────────────────────────────────────
 
 // Fields that have platform + sensor
-const WITH_PLATFORM_SENSOR = ["Image Data", "Orthomosaic", "Orthomosaic DEM", "Farm-ng Binary File"]
+const WITH_PLATFORM_SENSOR = [
+  "Image Data",
+  "Orthomosaic",
+  "Orthomosaic DEM",
+  "Farm-ng Binary File",
+]
 // Fields that have platform but not sensor
 const WITH_PLATFORM_ONLY = ["Ardupilot Logs", "Synced Metadata"]
 // Fields that have no date/platform/sensor (population-level data)
@@ -118,16 +133,40 @@ export function getColumnsForDataType(
 ): ColumnDef<FileUploadPublic>[] {
   if (!dataType) {
     // "All" — show data type column + all fields
-    return [colDataType, colExperiment, colLocation, colPopulation, colDate, colPlatform, colSensor, ...TAIL]
+    return [
+      colDataType,
+      colExperiment,
+      colLocation,
+      colPopulation,
+      colDate,
+      colPlatform,
+      colSensor,
+      ...TAIL,
+    ]
   }
   if (POP_LEVEL_ONLY.includes(dataType)) {
     return [colExperiment, colLocation, colPopulation, ...TAIL]
   }
   if (WITH_PLATFORM_SENSOR.includes(dataType)) {
-    return [colExperiment, colLocation, colPopulation, colDate, colPlatform, colSensor, ...TAIL]
+    return [
+      colExperiment,
+      colLocation,
+      colPopulation,
+      colDate,
+      colPlatform,
+      colSensor,
+      ...TAIL,
+    ]
   }
   if (WITH_PLATFORM_ONLY.includes(dataType)) {
-    return [colExperiment, colLocation, colPopulation, colDate, colPlatform, ...TAIL]
+    return [
+      colExperiment,
+      colLocation,
+      colPopulation,
+      colDate,
+      colPlatform,
+      ...TAIL,
+    ]
   }
   // Farm-ng Binary File, Weather Data, and anything else: no platform/sensor
   return [colExperiment, colLocation, colPopulation, colDate, ...TAIL]

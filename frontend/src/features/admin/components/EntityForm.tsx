@@ -94,10 +94,16 @@ export function EntityForm<TInput extends Record<string, unknown>>({
                   type="number"
                   required={f.required}
                   placeholder={f.placeholder}
-                  value={typeof v === "number" || typeof v === "string" ? String(v) : ""}
+                  value={
+                    typeof v === "number" || typeof v === "string"
+                      ? String(v)
+                      : ""
+                  }
                   onChange={(e: ChangeEvent<HTMLInputElement>) => {
                     const raw = e.target.value
-                    onChange(setField(value, f.key, raw === "" ? null : Number(raw)))
+                    onChange(
+                      setField(value, f.key, raw === "" ? null : Number(raw)),
+                    )
                   }}
                 />
               )}
@@ -122,7 +128,10 @@ export function EntityForm<TInput extends Record<string, unknown>>({
                     }
                   />
                   {f.placeholder && (
-                    <Label htmlFor={inputId} className="text-muted-foreground text-xs">
+                    <Label
+                      htmlFor={inputId}
+                      className="text-muted-foreground text-xs"
+                    >
                       {f.placeholder}
                     </Label>
                   )}
@@ -149,13 +158,7 @@ export function EntityForm<TInput extends Record<string, unknown>>({
                 <Select
                   value={v == null ? "" : String(v)}
                   onValueChange={(next) =>
-                    onChange(
-                      setField(
-                        value,
-                        f.key,
-                        next === "" ? null : next,
-                      ),
-                    )
+                    onChange(setField(value, f.key, next === "" ? null : next))
                   }
                 >
                   <SelectTrigger id={inputId}>
@@ -163,7 +166,10 @@ export function EntityForm<TInput extends Record<string, unknown>>({
                   </SelectTrigger>
                   <SelectContent>
                     {(f.options ?? []).map((opt) => (
-                      <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                      <SelectItem
+                        key={String(opt.value)}
+                        value={String(opt.value)}
+                      >
                         {opt.label}
                       </SelectItem>
                     ))}

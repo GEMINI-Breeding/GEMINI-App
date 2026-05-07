@@ -1,16 +1,20 @@
 /**
- * Phase 9c shell E2E: confirm `/import` loads, accepts a file via the
- * native input, runs detection, and shows the right stub branch for the
- * file type detected.
+ * Phase 9c shell E2E (post-consolidation): the import wizard now lives
+ * inside Files → Upload. The user picks "Trait Data" or "Genomic Data"
+ * from the type dropdown, drops a file, and the wizard opens as a
+ * dialog. The standalone /import route was removed in this session;
+ * detection-engine + StepDetect are kept in tree for the future
+ * unify-into-auto-detect task.
  *
- * No backend mutation happens in 9c — every "Next" lands on a clearly
- * labelled placeholder for 9d (genomic) or 9e (trait). The spec proves:
- *   - Sidebar entry routes to /import.
- *   - Detect step renders + accepts a CSV via the hidden file input.
- *   - Detection summary appears with the right category badge.
- *   - For a tabular CSV, "Continue" advances to the Metadata stub.
- *   - For a genomic CSV (variant_name + IUPAC calls), the GenomicWizard
- *     stub renders.
+ * The spec proves:
+ *   - Files → Upload exposes the new "Trait Data" / "Genomic Data" types.
+ *   - Picking "Trait Data" + dropping a CSV opens the wizard dialog with
+ *     the Detect step removed from the stepper. Without an experiment
+ *     picked, it falls back to the Phase-9e Metadata stub. With an
+ *     experiment picked on the Files page first, it skips Metadata and
+ *     lands directly on the Map Columns stub.
+ *   - Picking "Genomic Data" + dropping a CSV opens the wizard dialog
+ *     and lands on the Phase-9d Genomic stub.
  *
  * Console-error guard auto-attached via tests/helpers/fixtures (per
  * CLAUDE.md strict-E2E).
@@ -24,67 +28,79 @@ const TRAIT_CSV = [
   "3,1,3,137,3.9",
 ].join("\n")
 
-const GENOMIC_CSV = [
-  "variant_name,chromosome,position,LINE_A,LINE_B,LINE_C",
-  "SNP_001,1,100,AA,AG,GG",
-  "SNP_002,1,200,CC,CT,TT",
-  "SNP_003,2,300,AA,AG,GG",
-].join("\n")
+async function selectDataType(
+  page: import("@playwright/test").Page,
+  label: string,
+) {
+  await page.getByTestId("files-data-type-selector").click()
+  await page.getByRole("menuitem", { name: label }).click()
+}
 
-test.describe("Phase 9c: Import wizard shell", () => {
+test.describe("Phase 9c: Import wizard inside Files", () => {
   test.setTimeout(60_000)
 
-  test("trait CSV → Detect → Metadata stub", async ({ page }) => {
-    await page.goto("/import")
+  test("Files page locks the upload dropzone until both data type and experiment are picked", async ({
+    page,
+    runPrefix,
+  }) => {
+    await page.goto("/files")
     await expect(
-      page.getByRole("heading", { name: /import data/i, level: 1 }),
+      page.getByRole("heading", { name: /^files$/i, level: 1 }),
     ).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId("import-step-detect")).toBeVisible()
 
-    // Drop the CSV via the hidden file input. UploadZone exposes the
-    // input under data-testid="upload-input".
+    // No data type selected → dropzone shows the data-type reason and
+    // file selection through the input is a no-op (UploadZone's input
+    // change handler short-circuits when disabled). Asserting the
+    // disabled-reason text is what proves the gate is wired.
+    const dropzoneReason = page.getByTestId("upload-dropzone-disabled-reason")
+    await expect(dropzoneReason).toContainText(/select a data type/i)
+
+    // Picking a data type swaps the reason to the experiment gate.
+    await selectDataType(page, "Trait Data")
+    await expect(page.getByTestId("import-wizard-dropzone")).toBeVisible()
+    await expect(dropzoneReason).toContainText(/experiment/i)
+
+    // Once an experiment is chosen via the EntitySelectField, the
+    // dropzone unlocks and the disabled-reason element disappears.
+    await page.getByTestId("entity-select-experiment").click()
+    await page.getByTestId("entity-create-experiment").click()
+    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
+    await page.keyboard.press("Escape")
+    await expect(dropzoneReason).not.toBeVisible()
+  })
+
+  test("Trait Data with experiment picked first → skips Metadata, lands on Map Columns", async ({
+    page,
+    runPrefix,
+  }) => {
+    await page.goto("/files")
+    await selectDataType(page, "Trait Data")
+
+    // Pick "+ Create new…" experiment so initialMetadata is populated
+    // before the file is dropped. The wizard then skips its own
+    // Metadata step and lands directly on Map Columns. The experiment
+    // name is `runPrefix`-prefixed so the auto afterEach can sweep it.
+    await page.getByTestId("entity-select-experiment").click()
+    await page.getByTestId("entity-create-experiment").click()
+    await page
+      .getByTestId("entity-new-experiment")
+      .fill(`${runPrefix}-trait-exp`)
+
     await page.getByTestId("upload-input").setInputFiles({
       name: "traits.csv",
       mimeType: "text/csv",
       buffer: Buffer.from(TRAIT_CSV, "utf8"),
     })
 
-    // Detection summary renders with the CSV / Tabular badge.
-    const summary = page.getByTestId("detection-summary")
-    await expect(summary).toBeVisible({ timeout: 10_000 })
-    await expect(summary).toContainText(/CSV \/ Tabular/i)
+    const dialog = page.getByTestId("import-wizard-dialog")
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
 
-    // Continue → Metadata stub for the tabular path.
-    await page.getByTestId("detect-continue").click()
-    await expect(page.getByTestId("import-stub-Metadata")).toBeVisible()
-  })
+    // Stepper drops both Detect and Metadata when seeded.
+    const stepper = page.getByTestId("import-stepper")
+    await expect(stepper).not.toContainText(/Detect/i)
+    await expect(stepper).not.toContainText(/^Metadata/i)
 
-  test("genomic-shaped CSV → GenomicWizard stub", async ({ page }) => {
-    await page.goto("/import")
-    await page.getByTestId("upload-input").setInputFiles({
-      name: "genotypes.csv",
-      mimeType: "text/csv",
-      buffer: Buffer.from(GENOMIC_CSV, "utf8"),
-    })
-
-    // Detection short-circuits to the genomic wizard immediately —
-    // the GenomicWizardStub renders without an explicit Continue click
-    // because WizardShell branches on the detection result.
-    const summary = page.getByTestId("detection-summary")
-    await expect(summary).toBeVisible({ timeout: 10_000 })
-    await expect(summary).toContainText(/Genomic/i)
-
-    await page.getByTestId("detect-continue").click()
-    await expect(page.getByTestId("import-stub-Genomic wizard")).toBeVisible()
-  })
-
-  test("Sidebar 'Import' entry routes to /import", async ({ page }) => {
-    await page.goto("/")
-    // Sidebar uses anchor-or-button with the title text.
-    const importLink = page.getByRole("link", { name: /import/i }).first()
-    await expect(importLink).toBeVisible({ timeout: 10_000 })
-    await importLink.click()
-    await expect(page).toHaveURL(/\/import$/, { timeout: 10_000 })
-    await expect(page.getByTestId("import-step-detect")).toBeVisible()
+    // 9e.2 replaced the Map Columns stub with the real step component.
+    await expect(page.getByTestId("step-column-mapping")).toBeVisible()
   })
 })

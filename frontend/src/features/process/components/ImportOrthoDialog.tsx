@@ -16,11 +16,12 @@
  * we don't *copy* the file into Processed/ — we just register the Raw/
  * path. Downstream workers handle either prefix.
  */
-import { useState } from "react"
+
 import { useQuery } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
+import { useState } from "react"
 
-import { FilesService, type FileMetadata } from "@/client"
+import { type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -40,14 +41,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  readOrthoOutputs,
   type OrthoVersionMeta,
+  readOrthoOutputs,
 } from "@/features/process/lib/orthoVersions"
 import type { AerialScope } from "@/features/process/lib/paths"
-import {
-  setStepState,
-  type Run,
-} from "@/features/process/lib/runStore"
+import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -65,7 +63,9 @@ function uploadedDemsPrefix(scope: AerialScope): string {
   return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/Orthomosaic-DEM/`
 }
 
-function tifFilesIn(files: FileMetadata[]): { filename: string; path: string }[] {
+function tifFilesIn(
+  files: FileMetadata[],
+): { filename: string; path: string }[] {
   return files
     .map((f) => f.object_name ?? "")
     .filter((n) => /\.tiff?$/i.test(n))
@@ -89,7 +89,12 @@ export function ImportOrthoDialog({
   const [name, setName] = useState("")
 
   const orthosQuery = useQuery<FileMetadata[], Error>({
-    queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null, "import-orthos"],
+    queryKey: [
+      "files",
+      "list",
+      scope ? uploadedOrthosPrefix(scope) : null,
+      "import-orthos",
+    ],
     queryFn: async () => {
       if (!scope) return []
       const res = await FilesService.apiFilesListFilePathListFiles({
@@ -101,7 +106,12 @@ export function ImportOrthoDialog({
   })
 
   const demsQuery = useQuery<FileMetadata[], Error>({
-    queryKey: ["files", "list", scope ? uploadedDemsPrefix(scope) : null, "import-dems"],
+    queryKey: [
+      "files",
+      "list",
+      scope ? uploadedDemsPrefix(scope) : null,
+      "import-dems",
+    ],
     queryFn: async () => {
       if (!scope) return []
       const res = await FilesService.apiFilesListFilePathListFiles({
@@ -157,7 +167,9 @@ export function ImportOrthoDialog({
           <DialogTitle>Import existing orthomosaic</DialogTitle>
           <DialogDescription>
             Use a GeoTIFF you've already uploaded to this scope's
-            <code className="bg-muted mx-1 rounded px-1 text-xs">Orthomosaic/</code>
+            <code className="bg-muted mx-1 rounded px-1 text-xs">
+              Orthomosaic/
+            </code>
             folder instead of running ODM.
           </DialogDescription>
         </DialogHeader>
@@ -195,7 +207,10 @@ export function ImportOrthoDialog({
             <div className="space-y-2">
               <Label htmlFor="import-dem-file">DEM (optional)</Label>
               <Select value={selectedDem} onValueChange={setSelectedDem}>
-                <SelectTrigger id="import-dem-file" data-testid="import-dem-file">
+                <SelectTrigger
+                  id="import-dem-file"
+                  data-testid="import-dem-file"
+                >
                   <SelectValue
                     placeholder={
                       dems.length === 0

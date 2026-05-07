@@ -11,9 +11,8 @@
  * server already has.
  */
 import { useCallback } from "react"
-
-import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { useProcess } from "@/contexts/ProcessContext"
+import { uploadFileChunked } from "@/lib/chunkedUpload"
 
 export type ChunkedUploadItemResult = {
   file: File
@@ -29,6 +28,14 @@ export type ChunkedUploadOpts = {
   processId: string
   /** Process-item id whose progress/status reflects this file. */
   itemId: string
+  /**
+   * UUID of the experiment this upload is scoped to. Forwarded to
+   * `uploadFileChunked` so the backend can write a `experiment_files`
+   * pointer row at finalize time. Required by the Files page UI gate
+   * for every chunked upload, but typed optional so legacy callers
+   * compile while we migrate.
+   */
+  experimentId?: string
   /** Optional abort signal — aborts the per-file chunk loop. */
   signal?: AbortSignal
 }
@@ -53,7 +60,7 @@ export function useChunkedUpload() {
       file: File,
       opts: ChunkedUploadOpts,
     ): Promise<ChunkedUploadItemResult> => {
-      const { objectPath, processId, itemId, signal } = opts
+      const { objectPath, processId, itemId, experimentId, signal } = opts
       const fileIdentifier = computeFileIdentifier(file)
 
       updateProcessItem(processId, itemId, {
@@ -65,6 +72,7 @@ export function useChunkedUpload() {
         file,
         fileIdentifier,
         objectName: objectPath,
+        experimentId,
         signal,
         onProgress: (p) => {
           const pct = Math.round(p.fraction * 100)

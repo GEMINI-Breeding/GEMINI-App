@@ -22,13 +22,19 @@ describe("polygonCentroid", () => {
     expect(lat).toBeCloseTo(38.55, 4)
   })
   it("returns [0,0] for an empty ring", () => {
-    expect(polygonCentroid({ type: "Polygon", coordinates: [[]] })).toEqual([0, 0])
+    expect(polygonCentroid({ type: "Polygon", coordinates: [[]] })).toEqual([
+      0, 0,
+    ])
   })
 })
 
 describe("generateGridFeatures", () => {
   it("emits rows × cols rectangles inscribed in the bbox", () => {
-    const features = generateGridFeatures(OUTER, { rows: 2, cols: 3, angleDeg: 0 })
+    const features = generateGridFeatures(OUTER, {
+      rows: 2,
+      cols: 3,
+      angleDeg: 0,
+    })
     expect(features).toHaveLength(6)
     expect(features[0].properties).toMatchObject({ plot: 1, row: 1, col: 1 })
     expect(features[5].properties).toMatchObject({ plot: 6, row: 2, col: 3 })
@@ -40,7 +46,11 @@ describe("generateGridFeatures", () => {
   })
   it("rotates the grid when angleDeg ≠ 0", () => {
     const flat = generateGridFeatures(OUTER, { rows: 1, cols: 1, angleDeg: 0 })
-    const rotated = generateGridFeatures(OUTER, { rows: 1, cols: 1, angleDeg: 30 })
+    const rotated = generateGridFeatures(OUTER, {
+      rows: 1,
+      cols: 1,
+      angleDeg: 30,
+    })
     const f0 = (flat[0].geometry as GeoJSON.Polygon).coordinates[0][0]
     const r0 = (rotated[0].geometry as GeoJSON.Polygon).coordinates[0][0]
     expect(r0[0]).not.toBeCloseTo(f0[0], 6)

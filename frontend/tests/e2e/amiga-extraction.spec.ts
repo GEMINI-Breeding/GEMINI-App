@@ -14,8 +14,9 @@
  *     Manage, AND report.txt content proves the per-file decode loop
  *     was actually entered (not just the up-front skeleton).
  */
-import { expect, test } from "../helpers/fixtures"
+
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -35,11 +36,11 @@ test.describe("Amiga .bin full extraction", () => {
     page,
     request,
     baseURL,
+    runPrefix,
   }) => {
-    const stamp = Date.now()
-    const experiment = `pw-extract-${stamp}`
-    const location = `loc-${stamp}`
-    const population = `pop-${stamp}`
+    const experiment = `${runPrefix}-exp`
+    const location = `${runPrefix}-loc`
+    const population = `${runPrefix}-pop`
     const date = "2026-04-24"
     const binName = "test_amiga.0000.bin"
 
@@ -69,9 +70,13 @@ test.describe("Amiga .bin full extraction", () => {
     //   3. The original .bin is GONE — confirms the worker's MinIO cleanup
     //      step ran (worker removes processed inputs to avoid re-extraction).
     await page.locator('[data-onboarding="files-tab-manage"]').click()
-    await page
-      .locator('[data-testid="manage-data-filter"]')
-      .fill(experiment)
+    await page.locator('[data-testid="manage-data-filter"]').fill(experiment)
+    // Manage tab now lists experiments; expand the row to see its files.
+    const expRow = page.locator(
+      `[data-testid="manage-data-experiment-${experiment}"]`,
+    )
+    await expect(expRow).toBeVisible({ timeout: 30_000 })
+    await expRow.getByRole("button", { name: "Expand" }).click()
 
     // FileRow encodes the full object_name in `data-testid="download-<obj>"`,
     // so the button matching `…/report.txt` for our experiment slug uniquely
@@ -99,10 +104,7 @@ test.describe("Amiga .bin full extraction", () => {
 
     if (!baseURL) throw new Error("baseURL is not configured")
     const reportResp = await request.get(
-      new URL(
-        `/api/files/download/gemini/${objectName}`,
-        baseURL,
-      ).toString(),
+      new URL(`/api/files/download/gemini/${objectName}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${token}` } },
     )
     expect(reportResp.status()).toBe(200)
@@ -116,9 +118,7 @@ test.describe("Amiga .bin full extraction", () => {
     expect(reportBody).toContain(binName)
 
     await expect(
-      page
-        .locator('[data-testid="manage-data-list"]')
-        .getByText(binName),
+      page.locator('[data-testid="manage-data-list"]').getByText(binName),
     ).toHaveCount(0)
   })
 })

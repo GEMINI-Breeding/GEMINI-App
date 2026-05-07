@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { TraitRecord, TraitsResponse } from "@/features/analyze/api"
 import {
   applyFilters,
   buildTemporalSeries,
@@ -7,7 +8,6 @@ import {
   groupBy,
   groupByMulti,
 } from "./useTraitData"
-import type { TraitRecord, TraitsResponse } from "@/features/analyze/api"
 
 function feat(props: Record<string, unknown>): GeoJSON.Feature {
   return {
@@ -239,18 +239,26 @@ describe("buildTemporalSeries", () => {
   it("honours a non-default aggregation (min/max/sum/median)", () => {
     const vals = [resp([feat({ y: 1 }), feat({ y: 3 }), feat({ y: 5 })])]
     const records = [rec("1", "2024-01-01")]
-    expect(buildTemporalSeries(records, vals, "y", null, undefined, { aggregation: "min" })).toEqual([
-      { date: "2024-01-01", y: 1 },
-    ])
-    expect(buildTemporalSeries(records, vals, "y", null, undefined, { aggregation: "max" })).toEqual([
-      { date: "2024-01-01", y: 5 },
-    ])
-    expect(buildTemporalSeries(records, vals, "y", null, undefined, { aggregation: "sum" })).toEqual([
-      { date: "2024-01-01", y: 9 },
-    ])
-    expect(buildTemporalSeries(records, vals, "y", null, undefined, { aggregation: "median" })).toEqual([
-      { date: "2024-01-01", y: 3 },
-    ])
+    expect(
+      buildTemporalSeries(records, vals, "y", null, undefined, {
+        aggregation: "min",
+      }),
+    ).toEqual([{ date: "2024-01-01", y: 1 }])
+    expect(
+      buildTemporalSeries(records, vals, "y", null, undefined, {
+        aggregation: "max",
+      }),
+    ).toEqual([{ date: "2024-01-01", y: 5 }])
+    expect(
+      buildTemporalSeries(records, vals, "y", null, undefined, {
+        aggregation: "sum",
+      }),
+    ).toEqual([{ date: "2024-01-01", y: 9 }])
+    expect(
+      buildTemporalSeries(records, vals, "y", null, undefined, {
+        aggregation: "median",
+      }),
+    ).toEqual([{ date: "2024-01-01", y: 3 }])
   })
 
   it("computes an even-length median as the mean of the two central values", () => {
@@ -307,7 +315,12 @@ describe("buildTemporalSeries", () => {
   it("applies filters before aggregation", () => {
     const out = buildTemporalSeries(
       [rec("1", "2024-01-01")],
-      [resp([feat({ accession: "A", y: 10 }), feat({ accession: "B", y: 90 })])],
+      [
+        resp([
+          feat({ accession: "A", y: 10 }),
+          feat({ accession: "B", y: 90 }),
+        ]),
+      ],
       "y",
       null,
       { accession: ["A"] },
@@ -322,7 +335,11 @@ describe("buildTemporalSeries", () => {
       "y",
       null,
     )
-    expect(out.map((r) => r.date)).toEqual(["2024-01-10", "02-28-2024", "03-15-2024"])
+    expect(out.map((r) => r.date)).toEqual([
+      "2024-01-10",
+      "02-28-2024",
+      "03-15-2024",
+    ])
   })
 
   it("returns 0 for groups with no numeric samples in groupByMulti paths", () => {

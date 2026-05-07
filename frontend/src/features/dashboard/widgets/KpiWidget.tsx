@@ -1,10 +1,15 @@
-import { ArrowUpRight, ArrowDownRight, Minus, Loader2 } from "lucide-react"
-import { useTraitRecordGeojson, computeAggregate, applyFilters } from "../hooks/useTraitData"
+import { ArrowDownRight, ArrowUpRight, Loader2, Minus } from "lucide-react"
+import {
+  applyFilters,
+  computeAggregate,
+  useTraitRecordGeojson,
+} from "../hooks/useTraitData"
 import type { KpiConfig } from "../types"
 
 function fmt(val: number, aggregation: string): string {
   if (aggregation === "count") return val.toLocaleString()
-  if (Math.abs(val) >= 1000) return val.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  if (Math.abs(val) >= 1000)
+    return val.toLocaleString(undefined, { maximumFractionDigits: 1 })
   return val.toFixed(3).replace(/\.?0+$/, "")
 }
 
@@ -13,7 +18,8 @@ interface KpiWidgetProps {
 }
 
 export function KpiWidget({ config }: KpiWidgetProps) {
-  const { traitRecordId, metric, aggregation, compareRecordId, filters } = config
+  const { traitRecordId, metric, aggregation, compareRecordId, filters } =
+    config
 
   const primary = useTraitRecordGeojson(traitRecordId)
   const compare = useTraitRecordGeojson(compareRecordId)
@@ -45,7 +51,9 @@ export function KpiWidget({ config }: KpiWidgetProps) {
   }
   const value = computeAggregate(filteredGeojson, metric, aggregation)
   if (value === null) {
-    return <p className="text-sm text-muted-foreground">No data for "{metric}".</p>
+    return (
+      <p className="text-sm text-muted-foreground">No data for "{metric}".</p>
+    )
   }
 
   // Compute % change vs compare record
@@ -61,7 +69,9 @@ export function KpiWidget({ config }: KpiWidgetProps) {
     }
   }
 
-  const label = metric.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  const label = metric
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
   const aggLabel = aggregation === "count" ? "count" : `${aggregation}.`
 
   return (
@@ -70,15 +80,17 @@ export function KpiWidget({ config }: KpiWidgetProps) {
         {label} <span className="normal-case">({aggLabel})</span>
       </span>
       <div className="flex items-baseline gap-3">
-        <span className="text-3xl font-bold text-foreground">{fmt(value, aggregation)}</span>
+        <span className="text-3xl font-bold text-foreground">
+          {fmt(value, aggregation)}
+        </span>
         {changeLabel && (
           <span
             className={`flex items-center text-sm font-semibold ${
               trend === "up"
                 ? "text-emerald-600"
                 : trend === "down"
-                ? "text-rose-600"
-                : "text-muted-foreground"
+                  ? "text-rose-600"
+                  : "text-muted-foreground"
             }`}
           >
             {trend === "up" && <ArrowUpRight className="w-4 h-4" />}

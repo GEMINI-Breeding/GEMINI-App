@@ -2163,6 +2163,78 @@ export const GenotypeMatrixVariantRowSchema = {
     title: 'GenotypeMatrixVariantRow'
 } as const;
 
+export const GenotypePgenIngestRequestSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            contentMediaType: 'application/octet-stream'
+        },
+        sample_canonical_map_json: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        skipped_headers_json: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        created_accessions_json: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'GenotypePgenIngestRequest'
+} as const;
+
+export const GenotypePgenIngestResultSchema = {
+    properties: {
+        variants_inserted: {
+            type: 'integer'
+        },
+        records_inserted: {
+            type: 'integer'
+        },
+        samples_inserted: {
+            type: 'integer',
+            default: 0
+        },
+        files: {
+            type: 'object',
+            default: {}
+        },
+        errors: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['records_inserted', 'variants_inserted'],
+    title: 'GenotypePgenIngestResult'
+} as const;
+
 export const GenotypeRecordBulkInputSchema = {
     properties: {
         records: {

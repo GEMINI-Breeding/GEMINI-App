@@ -2,16 +2,16 @@
  * Records tab on the StudyDetail page.
  *
  * Shows a paginated table of GenotypeRecordOutput rows for the current
- * study. The "Upload matrix" button opens IngestMatrixDialog; on a
- * successful ingest the dialog's onSuccess invalidates the records cache,
- * so this table refetches automatically.
+ * study. New ingest happens through `/files` → "Genomic Data" → import
+ * wizard (Phase 9d); the standalone "Upload matrix" button + dialog were
+ * removed when the wizard shipped end-to-end.
  *
  * Pagination is simple `limit/offset` — the SDK exposes both as query
  * params and the backend caps `limit` at 500. Using 50 here keeps the
  * table responsive at typical breeding-study sizes (~10k records would
  * fit in 200 pages).
  */
-import { Upload } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { IngestMatrixDialog } from "@/features/genotyping/components/IngestMatrixDialog"
 import { useGenotypeRecords } from "@/features/genotyping/hooks/useGenotypeRecords"
 
 const PAGE_SIZE = 50
@@ -33,7 +32,6 @@ export function RecordsTab({ studyId }: { studyId: string }) {
   const [page, setPage] = useState(0)
   const [variantFilter, setVariantFilter] = useState("")
   const [accessionFilter, setAccessionFilter] = useState("")
-  const [uploadOpen, setUploadOpen] = useState(false)
 
   const records = useGenotypeRecords({
     studyId,
@@ -92,11 +90,8 @@ export function RecordsTab({ studyId }: { studyId: string }) {
             />
           </div>
         </div>
-        <Button
-          data-testid="records-upload-matrix"
-          onClick={() => setUploadOpen(true)}
-        >
-          <Upload className="mr-1.5 h-4 w-4" /> Upload matrix
+        <Button asChild data-testid="records-upload-link">
+          <Link to="/files">Import wizard →</Link>
         </Button>
       </div>
 
@@ -128,8 +123,11 @@ export function RecordsTab({ studyId }: { studyId: string }) {
                   className="text-muted-foreground py-6 text-center text-sm"
                   data-testid="records-empty"
                 >
-                  No records yet. Click <strong>Upload matrix</strong> to ingest
-                  a genotype file.
+                  No records yet. Use the <strong>Import wizard</strong> at{" "}
+                  <Link to="/files" className="underline">
+                    /files
+                  </Link>{" "}
+                  → "Genomic Data" to ingest a genotype file.
                 </TableCell>
               </TableRow>
             ) : (
@@ -176,12 +174,6 @@ export function RecordsTab({ studyId }: { studyId: string }) {
           </Button>
         </div>
       </div>
-
-      <IngestMatrixDialog
-        studyId={studyId}
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-      />
     </div>
   )
 }

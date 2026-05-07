@@ -100,11 +100,17 @@ const setExperimentId = (id: Id | null) => {
   // Cascade-clear children so the picker doesn't render a stale season /
   // site / population that no longer belongs to the chosen experiment.
   if (current.experimentId === id) return
-  setScope({ experimentId: id, seasonId: null, siteId: null, populationId: null })
+  setScope({
+    experimentId: id,
+    seasonId: null,
+    siteId: null,
+    populationId: null,
+  })
 }
 const setSeasonId = (id: Id | null) => setScope({ ...current, seasonId: id })
 const setSiteId = (id: Id | null) => setScope({ ...current, siteId: id })
-const setPopulationId = (id: Id | null) => setScope({ ...current, populationId: id })
+const setPopulationId = (id: Id | null) =>
+  setScope({ ...current, populationId: id })
 const reset = () => setScope(empty)
 
 export function useProcessScope(): ProcessScopeValue {

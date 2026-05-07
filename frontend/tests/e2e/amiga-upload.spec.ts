@@ -8,8 +8,9 @@
  *   - asserts user-visible outcomes: the file lands under Raw/ in Manage
  *     Data after the upload completes.
  */
-import { expect, test } from "../helpers/fixtures"
+
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -21,11 +22,11 @@ import {
 test.describe("Amiga .bin upload", () => {
   test("upload a .bin, see it land under Raw/ in Manage Data", async ({
     page,
+    runPrefix,
   }) => {
-    const stamp = Date.now()
-    const experiment = `pw-exp-${stamp}`
-    const location = `loc-${stamp}`
-    const population = `pop-${stamp}`
+    const experiment = `${runPrefix}-exp`
+    const location = `${runPrefix}-loc`
+    const population = `${runPrefix}-pop`
     const date = "2026-04-24"
 
     await navigateToUpload(page)
@@ -40,13 +41,14 @@ test.describe("Amiga .bin upload", () => {
     // Here we only care that the upload itself reaches MinIO.
     await submitUploadAndWait(page, 1, { waitForDone: false })
 
-    // Manage tab should list the uploaded file under its generated Raw/ path.
-    // Match by the FileRow's `data-testid="download-<object_name>"` (full
-    // MinIO path scoped to our experiment slug) rather than fuzzy text.
+    // Manage tab now lists experiments; expand the row to see files.
     await page.locator('[data-onboarding="files-tab-manage"]').click()
-    await page
-      .locator('[data-testid="manage-data-filter"]')
-      .fill(experiment)
+    await page.locator('[data-testid="manage-data-filter"]').fill(experiment)
+    const expRow = page.locator(
+      `[data-testid="manage-data-experiment-${experiment}"]`,
+    )
+    await expect(expRow).toBeVisible({ timeout: 30_000 })
+    await expRow.getByRole("button", { name: "Expand" }).click()
 
     await expect(
       page

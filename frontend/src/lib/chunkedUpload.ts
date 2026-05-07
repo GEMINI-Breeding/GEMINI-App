@@ -52,6 +52,15 @@ export type ChunkedUploadOptions = {
   objectName: string
   /** MinIO bucket; defaults to the stack's GEMINI_STORAGE_BUCKET_NAME. */
   bucketName?: string
+  /**
+   * UUID of the experiment this upload is scoped to. The Files page UI
+   * gate now requires an experiment for every chunked upload; the
+   * backend's upload-finalize handler writes a `experiment_files` row
+   * keyed on this id, which is what makes the experiment-delete cascade
+   * able to sweep this object. Forwarded as the `experiment_id`
+   * multipart field on every chunk POST.
+   */
+  experimentId?: string
   /** Bytes per chunk. Defaults to 8 MiB; must be >= 5 MiB for S3 multipart. */
   chunkSize?: number
   /** Max chunks of this file in flight at once. Defaults to 4. */
@@ -127,6 +136,7 @@ async function uploadOneChunk({
   fileIdentifier,
   objectName,
   bucketName,
+  experimentId,
   signal,
 }: {
   chunk: Blob
@@ -135,6 +145,7 @@ async function uploadOneChunk({
   fileIdentifier: string
   objectName: string
   bucketName?: string
+  experimentId?: string
   signal?: AbortSignal
 }): Promise<void> {
   const form = new FormData()
@@ -144,6 +155,7 @@ async function uploadOneChunk({
   form.append("file_identifier", fileIdentifier)
   form.append("object_name", objectName)
   if (bucketName) form.append("bucket_name", bucketName)
+  if (experimentId) form.append("experiment_id", experimentId)
 
   const token = getToken()
   const resp = await fetch(resolveApiUrl("/api/files/upload_chunk"), {
@@ -175,6 +187,7 @@ export async function uploadFileChunked(
     fileIdentifier,
     objectName,
     bucketName,
+    experimentId,
     chunkSize = DEFAULT_CHUNK_SIZE,
     parallelParts = DEFAULT_PARALLEL_PARTS,
     onProgress,
@@ -183,7 +196,10 @@ export async function uploadFileChunked(
 
   const total = file.size
   const totalChunks = Math.max(1, Math.ceil(total / chunkSize))
-  const alreadyUploaded = await checkUploadedPartNumbers(fileIdentifier, totalChunks)
+  const alreadyUploaded = await checkUploadedPartNumbers(
+    fileIdentifier,
+    totalChunks,
+  )
 
   let uploaded = 0
   for (const partNumber of alreadyUploaded) {
@@ -220,6 +236,7 @@ export async function uploadFileChunked(
           fileIdentifier,
           objectName,
           bucketName,
+          experimentId,
           signal,
         })
       } catch (err) {

@@ -11,8 +11,9 @@
  * useUploadQueue.ts — a regression that only affected plain uploads
  * would silently break everything except the Amiga flow otherwise.
  */
-import { expect, test } from "../helpers/fixtures"
+
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -28,11 +29,11 @@ test.describe("Image upload (non-bin path)", () => {
 
   test("upload two JPGs, see them appear under Raw/ in Manage Data", async ({
     page,
+    runPrefix,
   }) => {
-    const stamp = Date.now()
-    const experiment = `pw-img-${stamp}`
-    const location = `loc-${stamp}`
-    const population = `pop-${stamp}`
+    const experiment = `${runPrefix}-exp`
+    const location = `${runPrefix}-loc`
+    const population = `${runPrefix}-pop`
     const date = "2026-04-24"
     const platform = "drone"
     const sensor = "rgb"
@@ -54,15 +55,19 @@ test.describe("Image upload (non-bin path)", () => {
 
     await submitUploadAndWait(page, 2, { timeoutMs: 120_000 })
 
-    // Manage tab should list both files under their Raw/ prefix. Match
-    // the FileRow by its `data-testid="download-<object_name>"` attribute
-    // (which carries the full MinIO path scoped to our experiment slug)
-    // rather than fuzzy text-match — protects against the filename
-    // appearing as a substring in any other column or path crumb.
+    // Manage tab now lists experiments (DB-entity browser). Expand the
+    // experiment row to see its files. Match each FileRow by its
+    // `data-testid="download-<object_name>"` attribute (carrying the
+    // full MinIO path scoped to our experiment slug) rather than
+    // fuzzy text — guards against the filename appearing as a
+    // substring elsewhere.
     await page.locator('[data-onboarding="files-tab-manage"]').click()
-    await page
-      .locator('[data-testid="manage-data-filter"]')
-      .fill(experiment)
+    await page.locator('[data-testid="manage-data-filter"]').fill(experiment)
+    const expRow = page.locator(
+      `[data-testid="manage-data-experiment-${experiment}"]`,
+    )
+    await expect(expRow).toBeVisible({ timeout: 30_000 })
+    await expRow.getByRole("button", { name: "Expand" }).click()
 
     const list = page.locator('[data-testid="manage-data-list"]')
     await expect(

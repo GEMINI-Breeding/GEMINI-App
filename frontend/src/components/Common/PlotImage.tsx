@@ -16,8 +16,8 @@
  *   sizing this component (it fills w-full h-full of its container)
  */
 
-import { useState, useEffect, useRef } from "react"
-import { Loader2, ImageOff } from "lucide-react"
+import { ImageOff, Loader2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 // ── Public types ───────────────────────────────────────────────────────────────
 
@@ -35,8 +35,16 @@ export interface Prediction {
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
 const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#14b8a6",
+  "#6366f1",
 ]
 
 export function classColour(cls: string): string {
@@ -124,7 +132,10 @@ export function PlotImage({
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [errored, setErrored] = useState(false)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
+  const [containerSize, setContainerSize] = useState<{
+    w: number
+    h: number
+  } | null>(null)
   const [rotateOverride, setRotateOverride] = useState<boolean | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -132,7 +143,9 @@ export function PlotImage({
   const shouldRotate = rotateOverride !== null ? rotateOverride : rotate
 
   // Reset per-image override whenever the rotate prop changes
-  useEffect(() => { setRotateOverride(null) }, [rotate])
+  useEffect(() => {
+    setRotateOverride(null)
+  }, [])
 
   // Track container dimensions for both rotation math and canvas sizing
   useEffect(() => {
@@ -140,7 +153,8 @@ export function PlotImage({
     if (!el) return
     const obs = new ResizeObserver((entries) => {
       const e = entries[0]
-      if (e) setContainerSize({ w: e.contentRect.width, h: e.contentRect.height })
+      if (e)
+        setContainerSize({ w: e.contentRect.width, h: e.contentRect.height })
     })
     obs.observe(el)
     return () => obs.disconnect()
@@ -150,27 +164,39 @@ export function PlotImage({
   // the legacy (recordId, plotId) pair (Phase 10 — currently non-functional
   // until those callsites are rewritten).
   useEffect(() => {
-    setBlobUrl(null); setErrored(false); setDims(null)
+    setBlobUrl(null)
+    setErrored(false)
+    setDims(null)
     const url = objectPath
       ? objectImageUrl(objectPath)
       : recordId && plotId
         ? plotImageUrl(recordId, plotId)
         : ""
-    if (!url) { setErrored(true); return }
+    if (!url) {
+      setErrored(true)
+      return
+    }
 
-    let revoked = false; let createdObjectUrl: string | null = null
+    let revoked = false
+    let createdObjectUrl: string | null = null
     fetch(url, { headers: authHeaders() })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.blob()
       })
       .then((blob) => {
-        if (!revoked) { createdObjectUrl = URL.createObjectURL(blob); setBlobUrl(createdObjectUrl) }
+        if (!revoked) {
+          createdObjectUrl = URL.createObjectURL(blob)
+          setBlobUrl(createdObjectUrl)
+        }
       })
       .catch(() => {
         if (!revoked) setErrored(true)
       })
-    return () => { revoked = true; if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl) }
+    return () => {
+      revoked = true
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl)
+    }
   }, [recordId, plotId, objectPath])
 
   // Draw detection overlay — correct coordinate math for both orientations
@@ -199,11 +225,11 @@ export function PlotImage({
       // Full mapping (element at top:50%,left:50% + translate(-50%,-50%)):
       //   screen_x = cw - css_y
       //   screen_y = css_x
-      const cssBoxW = ch  // CSS box width  = container height
-      const cssBoxH = cw  // CSS box height = container width
+      const cssBoxW = ch // CSS box width  = container height
+      const cssBoxH = cw // CSS box height = container width
       const scale = Math.min(cssBoxW / W, cssBoxH / H)
-      const offX = (cssBoxW - W * scale) / 2  // horizontal offset in CSS box
-      const offY = (cssBoxH - H * scale) / 2  // vertical offset in CSS box
+      const offX = (cssBoxW - W * scale) / 2 // horizontal offset in CSS box
+      const offY = (cssBoxH - H * scale) / 2 // vertical offset in CSS box
 
       for (const p of activePreds) {
         const color = classColour(p.class)
@@ -220,7 +246,8 @@ export function PlotImage({
         const sh = p.width * scale
         // Skip if completely outside canvas
         if (sx + sw < 0 || sx > cw || sy + sh < 0 || sy > ch) continue
-        ctx.strokeStyle = color; ctx.lineWidth = 2
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
         ctx.strokeRect(sx, sy, sw, sh)
         if (showLabels) {
           const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
@@ -228,8 +255,10 @@ export function PlotImage({
           const tw = ctx.measureText(label).width
           const lx = Math.max(0, sx)
           const ly = Math.max(14, sy)
-          ctx.fillStyle = color; ctx.fillRect(lx, ly - 14, tw + 6, 14)
-          ctx.fillStyle = "#fff"; ctx.fillText(label, lx + 3, ly - 2)
+          ctx.fillStyle = color
+          ctx.fillRect(lx, ly - 14, tw + 6, 14)
+          ctx.fillStyle = "#fff"
+          ctx.fillText(label, lx + 3, ly - 2)
         }
       }
     } else {
@@ -241,8 +270,10 @@ export function PlotImage({
         const color = classColour(p.class)
         const x = (p.x - p.width / 2) * scale + offX
         const y = (p.y - p.height / 2) * scale + offY
-        const w = p.width * scale; const h = p.height * scale
-        ctx.strokeStyle = color; ctx.lineWidth = 2
+        const w = p.width * scale
+        const h = p.height * scale
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
         ctx.strokeRect(x, y, w, h)
         if (showLabels) {
           const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
@@ -250,31 +281,42 @@ export function PlotImage({
           const tw = ctx.measureText(label).width
           const lx = Math.max(offX, x)
           const ly = Math.max(offY + 14, y)
-          ctx.fillStyle = color; ctx.fillRect(lx, ly - 14, tw + 6, 14)
-          ctx.fillStyle = "#fff"; ctx.fillText(label, lx + 3, ly - 2)
+          ctx.fillStyle = color
+          ctx.fillRect(lx, ly - 14, tw + 6, 14)
+          ctx.fillStyle = "#fff"
+          ctx.fillText(label, lx + 3, ly - 2)
         }
       }
     }
-  }, [dims, predictions, showDetections, showLabels, activeClass, shouldRotate, containerSize])
+  }, [
+    dims,
+    predictions,
+    showDetections,
+    showLabels,
+    activeClass,
+    shouldRotate,
+    containerSize,
+  ])
 
   // Image CSS style — swapped dims + object-cover for ground, contain for aerial
-  const imgStyle: React.CSSProperties = shouldRotate && containerSize
-    ? {
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%) rotate(90deg)",
-        width: `${containerSize.h}px`,   // CSS box width  = container height
-        height: `${containerSize.w}px`,  // CSS box height = container width
-        objectFit: "contain",
-      }
-    : {
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        objectFit: "contain",
-      }
+  const imgStyle: React.CSSProperties =
+    shouldRotate && containerSize
+      ? {
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%) rotate(90deg)",
+          width: `${containerSize.h}px`, // CSS box width  = container height
+          height: `${containerSize.w}px`, // CSS box height = container width
+          objectFit: "contain",
+        }
+      : {
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+        }
 
   return (
     <div
@@ -297,7 +339,10 @@ export function PlotImage({
             alt={`plot ${plotId ?? objectPath ?? ""}`}
             style={imgStyle}
             onLoad={(e) =>
-              setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+              setDims({
+                w: e.currentTarget.naturalWidth,
+                h: e.currentTarget.naturalHeight,
+              })
             }
           />
           <canvas
@@ -310,8 +355,17 @@ export function PlotImage({
             title={shouldRotate ? "Reset orientation" : "Rotate 90°"}
             className="absolute top-1 right-1 z-10 bg-black/40 hover:bg-black/60 text-white rounded p-1 transition-colors"
           >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" strokeOpacity=".3" />
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
+                strokeOpacity=".3"
+              />
               <path d="M17 8l-5-5-5 5M12 3v9" />
             </svg>
           </button>

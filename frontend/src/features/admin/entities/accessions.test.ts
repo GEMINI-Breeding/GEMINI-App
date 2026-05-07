@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { AccessionsService, type AccessionInput } from "@/client"
+import { type AccessionInput, AccessionsService } from "@/client"
 
 import { accessionsConfig } from "./accessions"
 
@@ -46,7 +46,8 @@ describe("accessionsConfig", () => {
       .mockResolvedValue({ id: "x", accession_name: "X" } as never)
     const input: AccessionInput = {
       accession_name: "X",
-      accession_info: '{"foo":42}' as unknown as AccessionInput["accession_info"],
+      accession_info:
+        '{"foo":42}' as unknown as AccessionInput["accession_info"],
     }
     await accessionsConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

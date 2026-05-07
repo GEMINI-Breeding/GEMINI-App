@@ -1,19 +1,24 @@
 import {
-  SensorTypesService,
   type SensorTypeInput,
   type SensorTypeOutput,
+  SensorTypesService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsNumber, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: SensorTypeInput): SensorTypeInput {
   return {
     ...input,
-    sensor_type_info: parseInfoField(input.sensor_type_info) as SensorTypeInput["sensor_type_info"],
+    sensor_type_info: parseInfoField(
+      input.sensor_type_info,
+    ) as SensorTypeInput["sensor_type_info"],
   }
 }
 
-export const sensorTypesConfig: EntityConfig<SensorTypeOutput, SensorTypeInput> = {
+export const sensorTypesConfig: EntityConfig<
+  SensorTypeOutput,
+  SensorTypeInput
+> = {
   slug: "sensor-types",
   singular: "Sensor type",
   plural: "Sensor types",
@@ -39,7 +44,12 @@ export const sensorTypesConfig: EntityConfig<SensorTypeOutput, SensorTypeInput> 
     }),
   fields: [
     { key: "sensor_type_name", label: "Name", type: "text", required: true },
-    { key: "sensor_type_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "sensor_type_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ sensor_type_name: "" }),
   toInput: (row) => ({

@@ -1,11 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 
-import { JobsService, type JobOutput } from "@/client"
+import { type JobOutput, JobsService } from "@/client"
 import { useProcessScope } from "@/features/process/lib/processScope"
 import { findRunByJobId } from "@/features/process/lib/runStore"
 import useAuth from "@/hooks/useAuth"
-import type { Process, ProcessItem } from "@/types/process"
+import type { JobProgressEvent } from "@/lib/wsManager"
 // Phase 6: ProcessContext subscribes over the new WebSocket-based manager
 // (/api/jobs/{id}/progress) instead of the pre-migration SSE channel.
 // The `runId` field on Process is now any subscription key — typically a
@@ -13,7 +20,7 @@ import type { Process, ProcessItem } from "@/types/process"
 // Phase 12 so any Phase-7+ feature still importing it fails loudly rather
 // than silently; every new subscriber must go through wsManager.
 import { closeJob, subscribe } from "@/lib/wsManager"
-import type { JobProgressEvent } from "@/lib/wsManager"
+import type { Process, ProcessItem } from "@/types/process"
 
 type ProcessContextState = {
   processes: Process[]
@@ -51,14 +58,11 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
-  const updateProcess = useCallback(
-    (id: string, updates: Partial<Process>) => {
-      setProcesses((prev) =>
-        prev.map((p) => (p.id !== id ? p : { ...p, ...updates })),
-      )
-    },
-    [],
-  )
+  const updateProcess = useCallback((id: string, updates: Partial<Process>) => {
+    setProcesses((prev) =>
+      prev.map((p) => (p.id !== id ? p : { ...p, ...updates })),
+    )
+  }, [])
 
   const updateProcessItem = useCallback(
     (processId: string, itemId: string, updates: Partial<ProcessItem>) => {
@@ -80,21 +84,26 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
   const removeProcess = useCallback((id: string) => {
     setProcesses((prev) => {
       const process = prev.find((p) => p.id === id)
-      if (process) setHistory((h) => (h.some((hp) => hp.id === id) ? h : [process, ...h]))
+      if (process)
+        setHistory((h) => (h.some((hp) => hp.id === id) ? h : [process, ...h]))
       return prev.filter((p) => p.id !== id)
     })
   }, [])
 
   const clearCompleted = useCallback(() => {
     setProcesses((prev) => {
-      const completed = prev.filter((p) => p.status === "completed" || p.status === "error")
+      const completed = prev.filter(
+        (p) => p.status === "completed" || p.status === "error",
+      )
       if (completed.length > 0) {
         setHistory((h) => {
           const existingIds = new Set(h.map((hp) => hp.id))
           return [...completed.filter((c) => !existingIds.has(c.id)), ...h]
         })
       }
-      return prev.filter((p) => p.status !== "completed" && p.status !== "error")
+      return prev.filter(
+        (p) => p.status !== "completed" && p.status !== "error",
+      )
     })
   }, [])
 
@@ -124,13 +133,17 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
   const { data: liveBackendJobs } = useQuery<JobOutput[], Error>({
     queryKey: ["process-rehydrate", "running-jobs", experimentId],
     queryFn: async () => {
-      const all = (await JobsService.apiJobsAllGetAllJobs({})) as JobOutput[] | null
+      const all = (await JobsService.apiJobsAllGetAllJobs({})) as
+        | JobOutput[]
+        | null
       const list = all ?? []
       const live = list.filter(
         (j) => j.status === "RUNNING" || j.status === "PENDING",
       )
       if (!experimentId) return live
-      return live.filter((j) => (j as { experiment_id?: string }).experiment_id === experimentId)
+      return live.filter(
+        (j) => (j as { experiment_id?: string }).experiment_id === experimentId,
+      )
     },
     enabled: Boolean(user),
     refetchOnMount: "always",
@@ -181,7 +194,9 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const activeRunIds = new Set(
       processes
-        .filter((p) => p.runId && (p.status === "running" || p.status === "pending"))
+        .filter(
+          (p) => p.runId && (p.status === "running" || p.status === "pending"),
+        )
         .map((p) => p.runId!),
     )
 
@@ -199,7 +214,12 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
 
             if (evt.terminal) {
               if (evt.status === "COMPLETED") {
-                return { ...p, status: "completed", progress: 100, message: "Done" }
+                return {
+                  ...p,
+                  status: "completed",
+                  progress: 100,
+                  message: "Done",
+                }
               }
               if (evt.status === "FAILED") {
                 return {

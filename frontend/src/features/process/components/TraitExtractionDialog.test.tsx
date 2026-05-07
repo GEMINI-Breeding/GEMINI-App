@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vitest"
 import type { OrthoVersion } from "@/features/process/lib/orthoVersions"
 
 import {
-  TraitExtractionDialog,
   type TraitDialogState,
+  TraitExtractionDialog,
 } from "./TraitExtractionDialog"
 
 function makeOrtho(n: number, label?: string): OrthoVersion {
@@ -55,9 +55,7 @@ describe("TraitExtractionDialog", () => {
         onSubmit={() => {}}
       />,
     )
-    expect(
-      screen.getByText(/no plot-boundary versions saved/i),
-    ).toBeTruthy()
+    expect(screen.getByText(/no plot-boundary versions saved/i)).toBeTruthy()
     const submit = screen.getByRole("button", {
       name: /run trait extraction/i,
     }) as HTMLButtonElement

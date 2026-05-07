@@ -1,14 +1,23 @@
 /**
- * Final step of the /import wizard — surface created entities and an
- * "Import more" exit. Ported from
+ * Final step of the /import wizard — surface created entities and the
+ * exit affordances. Ported from
  * `backend/gemini-ui/src/components/import-wizard/step-confirm.tsx`.
+ *
+ * Two exits:
+ *   - **Import More** (`onDone`): reset the wizard so the user can run
+ *     another import without leaving the page. From the Files-page
+ *     dialog entry this closes the dialog (the user re-opens it by
+ *     re-selecting a data type and dropping another file); from the
+ *     standalone /import route it clears the wizard state in place.
+ *   - **Finish** (`onFinish`): the user is done — close the wizard /
+ *     dialog. When `onFinish` isn't provided we fall back to `onDone`
+ *     so older entry points still work.
  *
  * The "Go to experiment" button in gemini-ui pointed at `/experiments/$id`,
  * which doesn't exist in our app. We map it to the most useful destination
  * for each flow:
  *   - Genomic: `/genotyping/$studyId` if `results.studyId` was set.
- *   - Trait:   stays inside the wizard's "Import more" until Phase 9e
- *              wires a real experiment-detail page.
+ *   - Trait:   "Finish" exits the dialog; "Import More" resets.
  */
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle, RotateCcw, XCircle } from "lucide-react"
@@ -19,9 +28,10 @@ import type { UploadResults } from "@/features/import/lib/types"
 interface StepConfirmProps {
   results: UploadResults
   onDone: () => void
+  onFinish?: () => void
 }
 
-export function StepConfirm({ results, onDone }: StepConfirmProps) {
+export function StepConfirm({ results, onDone, onFinish }: StepConfirmProps) {
   const navigate = useNavigate()
 
   const hasErrors = results.failedFiles > 0
@@ -89,8 +99,12 @@ export function StepConfirm({ results, onDone }: StepConfirmProps) {
           <RotateCcw className="mr-1.5 h-4 w-4" />
           Import More
         </Button>
+        <Button onClick={onFinish ?? onDone} data-testid="import-finish">
+          Finish
+        </Button>
         {results.studyId && (
           <Button
+            variant="outline"
             data-testid="go-to-study"
             onClick={() =>
               navigate({

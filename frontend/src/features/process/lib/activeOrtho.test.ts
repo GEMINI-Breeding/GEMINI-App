@@ -6,6 +6,7 @@ import {
   buildTitilerTileUrl,
   resolveActiveOrtho,
   s3UrlForOrtho,
+  tilejsonBoundsToLeaflet,
 } from "./activeOrtho"
 import type { OrthoVersion } from "./orthoVersions"
 import type { Run } from "./runStore"
@@ -150,5 +151,14 @@ describe("buildTitilerTileUrl", () => {
     // # would terminate URL parsing; & would split the query.
     expect(url).toContain(encodeURIComponent("#"))
     expect(url).toContain(encodeURIComponent("&"))
+  })
+})
+
+describe("tilejsonBoundsToLeaflet", () => {
+  it("reshapes [w,s,e,n] into [[s,w],[n,e]]", () => {
+    expect(tilejsonBoundsToLeaflet([-121.7, 38.4, -121.6, 38.5])).toEqual([
+      [38.4, -121.7],
+      [38.5, -121.6],
+    ])
   })
 })

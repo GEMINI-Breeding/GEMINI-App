@@ -7,6 +7,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router"
 import { AxiosError } from "axios"
+import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
@@ -29,9 +30,7 @@ import { login } from "@/lib/auth"
 
 const formSchema = z.object({
   username: z.email(),
-  password: z
-    .string()
-    .min(1, { message: "Password is required" }),
+  password: z.string().min(1, { message: "Password is required" }),
 })
 
 type FormData = z.infer<typeof formSchema>
@@ -48,9 +47,60 @@ export const Route = createFileRoute("/login")({
   }),
 })
 
+interface LoginError {
+  title: string
+  hint?: string
+}
+
+function describeLoginError(err: unknown): LoginError {
+  let status: number | undefined
+  let detail: string | undefined
+  if (err instanceof ApiError) {
+    status = err.status
+    detail = typeof err.body === "string" ? err.body : undefined
+  } else if (err instanceof AxiosError && err.response) {
+    status = err.response.status
+    detail =
+      typeof err.response.data === "string"
+        ? err.response.data
+        : err.response.data?.detail
+  }
+  if (status === 400 || status === 401) {
+    return { title: "Incorrect email or password." }
+  }
+  if (status === 404) {
+    return {
+      title:
+        "Login endpoint not found on the backend (HTTP 404 at /api/users/login/access-token).",
+      hint:
+        "The running REST API doesn't have the JWT auth controller. " +
+        "Make sure the backend you're running was built from the migration submodule " +
+        "(GEMINIbase dev/gemini-app-migration branch); older images don't ship this endpoint.",
+    }
+  }
+  if (status === 503) {
+    return {
+      title: "Auth is disabled on the backend.",
+      hint: "Set GEMINI_JWT_SECRET on the backend's .env and restart the REST API container.",
+    }
+  }
+  if (status !== undefined) {
+    return {
+      title: `Login failed (HTTP ${status}).${detail ? ` ${detail}` : ""}`,
+    }
+  }
+  // No status → likely a network error (fetch threw) or a logic bug.
+  const message = err instanceof Error ? err.message : String(err)
+  return {
+    title: "Login failed — could not reach the backend.",
+    hint: message ? `Underlying error: ${message}` : undefined,
+  }
+}
+
 function Login() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [loginError, setLoginError] = useState<LoginError | null>(null)
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -64,31 +114,23 @@ function Login() {
   const loginMutation = useMutation({
     mutationFn: ({ username, password }: FormData) => login(username, password),
     onSuccess: async () => {
+      setLoginError(null)
       await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
       navigate({ to: "/" })
     },
     onError: (err: unknown) => {
-      // The backend returns 400 for bad creds and 503 for "auth disabled".
-      // Map both into a single user-visible error to avoid leaking details.
-      // The SDK throws ApiError for fetch-based calls; AxiosError applies
-      // to the (rare) axios paths.
-      let message = "Login failed. Please try again."
-      let status: number | undefined
-      if (err instanceof ApiError) {
-        status = err.status
-      } else if (err instanceof AxiosError && err.response) {
-        status = err.response.status
-      }
-      if (status === 400) message = "Incorrect email or password."
-      else if (status === 503)
-        message = "Auth is disabled on the backend (GEMINI_JWT_SECRET unset)."
-      toast.error(message)
+      const described = describeLoginError(err)
+      setLoginError(described)
+      toast.error(described.title)
     },
   })
 
   const isPending = loginMutation.isPending
 
-  const onSubmit = (data: FormData) => loginMutation.mutate(data)
+  const onSubmit = (data: FormData) => {
+    setLoginError(null)
+    loginMutation.mutate(data)
+  }
 
   return (
     <AuthLayout>
@@ -146,6 +188,23 @@ function Login() {
                 </FormItem>
               )}
             />
+
+            {loginError && (
+              <div
+                role="alert"
+                data-testid="login-error"
+                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-left text-sm"
+              >
+                <p className="font-medium text-destructive">
+                  {loginError.title}
+                </p>
+                {loginError.hint && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {loginError.hint}
+                  </p>
+                )}
+              </div>
+            )}
 
             <LoadingButton type="submit" loading={isPending}>
               Log In

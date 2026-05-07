@@ -6,8 +6,8 @@
  *   - CSV / JSON / TXT: raw text shown in a monospace pane
  */
 
-import { useEffect, useState } from "react"
 import { X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { isTauri } from "@/lib/platform"
 
 interface FilePreviewDialogProps {
@@ -15,8 +15,17 @@ interface FilePreviewDialogProps {
   onClose: () => void
 }
 
-const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"])
-const TEXT_EXTS  = new Set(["csv", "json", "txt", "log", "md"])
+const IMAGE_EXTS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "bmp",
+  "tif",
+  "tiff",
+])
+const TEXT_EXTS = new Set(["csv", "json", "txt", "log", "md"])
 
 function ext(path: string): string {
   return (path.split(".").pop() ?? "").toLowerCase()
@@ -48,10 +57,13 @@ async function imageUrl(filePath: string): Promise<string> {
   return filePath
 }
 
-export function FilePreviewDialog({ filePath, onClose }: FilePreviewDialogProps) {
+export function FilePreviewDialog({
+  filePath,
+  onClose,
+}: FilePreviewDialogProps) {
   const fileExt = ext(filePath)
   const isImage = IMAGE_EXTS.has(fileExt)
-  const isText  = TEXT_EXTS.has(fileExt)
+  const isText = TEXT_EXTS.has(fileExt)
 
   const [imgSrc, setImgSrc] = useState<string | null>(null)
   const [text, setText] = useState<string | null>(null)
@@ -59,7 +71,9 @@ export function FilePreviewDialog({ filePath, onClose }: FilePreviewDialogProps)
 
   useEffect(() => {
     if (isImage) {
-      imageUrl(filePath).then(setImgSrc).catch((e) => setError(String(e)))
+      imageUrl(filePath)
+        .then(setImgSrc)
+        .catch((e) => setError(String(e)))
     } else if (isText) {
       loadText(filePath)
         .then((t) => setText(t.slice(0, 50_000))) // cap at 50 k chars
@@ -69,21 +83,31 @@ export function FilePreviewDialog({ filePath, onClose }: FilePreviewDialogProps)
 
   // Close on Escape
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
       <div
         className="bg-background relative flex h-[85vh] w-[85vw] max-w-4xl flex-col rounded-lg overflow-hidden shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3 shrink-0">
-          <p className="font-medium text-sm truncate">{fileNameFromPath(filePath)}</p>
-          <button className="text-muted-foreground hover:text-foreground ml-4" onClick={onClose}>
+          <p className="font-medium text-sm truncate">
+            {fileNameFromPath(filePath)}
+          </p>
+          <button
+            className="text-muted-foreground hover:text-foreground ml-4"
+            onClick={onClose}
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -97,7 +121,11 @@ export function FilePreviewDialog({ filePath, onClose }: FilePreviewDialogProps)
             <p className="text-muted-foreground text-sm">Loading…</p>
           )}
           {!error && isImage && imgSrc && (
-            <img src={imgSrc} alt={fileNameFromPath(filePath)} className="max-h-full max-w-full object-contain" />
+            <img
+              src={imgSrc}
+              alt={fileNameFromPath(filePath)}
+              className="max-h-full max-w-full object-contain"
+            />
           )}
           {!error && isText && text === null && (
             <p className="text-muted-foreground text-sm">Loading…</p>

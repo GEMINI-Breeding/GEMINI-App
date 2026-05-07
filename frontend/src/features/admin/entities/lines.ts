@@ -1,10 +1,6 @@
-import {
-  LinesService,
-  type LineInput,
-  type LineOutput,
-} from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
+import { type LineInput, type LineOutput, LinesService } from "@/client"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: LineInput): LineInput {
   return {

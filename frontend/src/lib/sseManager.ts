@@ -30,8 +30,9 @@ interface SseDiagnostics {
 }
 const diagnostics: SseDiagnostics = { errorCount: 0, lastErrorTs: null }
 if (typeof window !== "undefined" && import.meta.env.MODE !== "production") {
-  ;(window as unknown as { __gemiSseDiagnostics?: SseDiagnostics }).__gemiSseDiagnostics =
-    diagnostics
+  ;(
+    window as unknown as { __gemiSseDiagnostics?: SseDiagnostics }
+  ).__gemiSseDiagnostics = diagnostics
 }
 
 function open(runId: string) {
@@ -41,8 +42,15 @@ function open(runId: string) {
   // Close stale connection before reopening
   existing?.es.close()
 
-  const es = new EventSource(apiUrl(`/api/v1/pipeline-runs/${runId}/progress?offset=${offset}`))
-  const entry: SseEntry = { es, listeners: existing?.listeners ?? new Set(), offset, retryTimer: null }
+  const es = new EventSource(
+    apiUrl(`/api/v1/pipeline-runs/${runId}/progress?offset=${offset}`),
+  )
+  const entry: SseEntry = {
+    es,
+    listeners: existing?.listeners ?? new Set(),
+    offset,
+    retryTimer: null,
+  }
   connections.set(runId, entry)
 
   es.onmessage = (e) => {
@@ -50,7 +58,9 @@ function open(runId: string) {
       const evt = JSON.parse(e.data) as Record<string, any>
 
       if (evt.event === "waiting") {
-        console.log(`[sseManager] ${runId.slice(0,8)} waiting — retrying in 1s`)
+        console.log(
+          `[sseManager] ${runId.slice(0, 8)} waiting — retrying in 1s`,
+        )
         es.close()
         entry.retryTimer = setTimeout(() => {
           if (entry.listeners.size > 0) open(runId)
@@ -59,10 +69,16 @@ function open(runId: string) {
       }
 
       entry.offset += 1
-      console.log(`[sseManager] ${runId.slice(0,8)} event=${evt.event} progress=${evt.progress ?? '-'} listeners=${entry.listeners.size}`)
+      console.log(
+        `[sseManager] ${runId.slice(0, 8)} event=${evt.event} progress=${evt.progress ?? "-"} listeners=${entry.listeners.size}`,
+      )
       entry.listeners.forEach((fn) => fn(evt))
 
-      if (evt.event === "complete" || evt.event === "error" || evt.event === "cancelled") {
+      if (
+        evt.event === "complete" ||
+        evt.event === "error" ||
+        evt.event === "cancelled"
+      ) {
         es.close()
         // Keep entry alive so late subscribers can still see final state
       }
@@ -76,11 +92,15 @@ function open(runId: string) {
     diagnostics.lastErrorTs = Date.now()
     es.close()
     if (entry.listeners.size === 0) {
-      console.log(`[sseManager] ${runId.slice(0,8)} connection error — no listeners, stopping`)
+      console.log(
+        `[sseManager] ${runId.slice(0, 8)} connection error — no listeners, stopping`,
+      )
       connections.delete(runId)
       return
     }
-    console.log(`[sseManager] ${runId.slice(0,8)} connection error — retrying in 2s`)
+    console.log(
+      `[sseManager] ${runId.slice(0, 8)} connection error — retrying in 2s`,
+    )
     entry.retryTimer = setTimeout(() => {
       if (entry.listeners.size > 0) open(runId)
     }, 2000)

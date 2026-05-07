@@ -18,6 +18,7 @@ import { useCallback } from "react"
 
 import { JobsService } from "@/client"
 import { useProcess } from "@/contexts/ProcessContext"
+import { runWithConcurrency } from "@/lib/concurrency"
 import { useChunkedUpload } from "./useChunkedUpload"
 
 const MAX_CONCURRENCY = 3
@@ -27,9 +28,7 @@ export type UploadTask = {
   /** Full MinIO object path (bucket-relative) that this file should land at. */
   objectPath: string
   /** Optional: submit this job-type on completion (chains extraction onto the upload). */
-  followUpJob?:
-    | { kind: "extract_binary" }
-    | { kind: "none" }
+  followUpJob?: { kind: "extract_binary" } | { kind: "none" }
 }
 
 export type UploadQueueResult = {
@@ -42,30 +41,6 @@ function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || path
 }
 
-/**
- * Run `limit` tasks at a time; resolve when all have settled. Rejections
- * propagate as the first observed error so one bad file doesn't silently
- * stall the whole queue.
- */
-async function runWithConcurrency<T>(
-  tasks: (() => Promise<T>)[],
-  limit: number,
-): Promise<T[]> {
-  const results: T[] = []
-  let cursor = 0
-  async function worker() {
-    while (cursor < tasks.length) {
-      const idx = cursor++
-      results[idx] = await tasks[idx]()
-    }
-  }
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () =>
-    worker(),
-  )
-  await Promise.all(workers)
-  return results
-}
-
 export function useUploadQueue() {
   const { addProcess, updateProcess } = useProcess()
   const { uploadOne } = useChunkedUpload()
@@ -73,7 +48,7 @@ export function useUploadQueue() {
   const run = useCallback(
     async (
       tasks: UploadTask[],
-      opts: { title?: string } = {},
+      opts: { title?: string; experimentId?: string } = {},
     ): Promise<UploadQueueResult> => {
       const abort = new AbortController()
 
@@ -100,6 +75,7 @@ export function useUploadQueue() {
             objectPath: task.objectPath,
             processId,
             itemId: String(i),
+            experimentId: opts.experimentId,
             signal: abort.signal,
           })
           uploaded.push({ file: task.file, objectPath: result.objectPath })
@@ -123,6 +99,11 @@ export function useUploadQueue() {
                   files: [filename],
                   localDirPath,
                 },
+                // Without this the job row lands with experiment_id=NULL
+                // and the experiment-cascade delete leaves it behind as
+                // an orphan (its FK is not set, so the cleanup loop in
+                // `Experiment.delete()` never matches it).
+                experiment_id: opts.experimentId,
               },
             })
             if (job?.id) {

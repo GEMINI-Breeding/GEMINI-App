@@ -2,10 +2,11 @@
  * React Query hooks for reference dataset access in dashboard widgets.
  */
 
-import { useQuery, useQueries } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 
 function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
+  const base =
+    (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
   return base ? `${base}${path}` : path
 }
 
@@ -75,7 +76,8 @@ export function useReferenceDatasets(options: { enabled?: boolean } = {}) {
     queryFn: () => get<ReferenceDataset[]>("/api/v1/reference-data/"),
     enabled: options.enabled ?? false,
     staleTime: 5 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -85,11 +87,12 @@ export function useReferencePlots(datasetId: string | null) {
     queryKey: ["reference-plots-all", datasetId],
     queryFn: () =>
       get<{ data: ReferencePlotRow[]; count: number }>(
-        `/api/v1/reference-data/${datasetId}/plots-all`
+        `/api/v1/reference-data/${datasetId}/plots-all`,
       ).then((r) => r.data),
     enabled: !!datasetId,
     staleTime: 10 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -97,33 +100,39 @@ export function useReferencePlots(datasetId: string | null) {
 export function useReferenceAggregate(
   datasetId: string | null,
   metric: string | null,
-  aggregation: "avg" | "min" | "max" = "avg"
+  aggregation: "avg" | "min" | "max" = "avg",
 ) {
   return useQuery<ReferenceAggregate>({
     queryKey: ["reference-aggregate", datasetId, metric, aggregation],
     queryFn: () =>
       get<ReferenceAggregate>(
-        `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`
+        `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`,
       ),
     enabled: !!datasetId && !!metric,
     staleTime: 10 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
 /** Batch-fetch aggregates for multiple (datasetId, metric, aggregation) combos. */
 export function useMultiReferenceAggregates(
-  requests: Array<{ datasetId: string; metric: string; aggregation: "avg" | "min" | "max" }>
+  requests: Array<{
+    datasetId: string
+    metric: string
+    aggregation: "avg" | "min" | "max"
+  }>,
 ) {
   return useQueries({
     queries: requests.map(({ datasetId, metric, aggregation }) => ({
       queryKey: ["reference-aggregate", datasetId, metric, aggregation],
       queryFn: () =>
         get<ReferenceAggregate>(
-          `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`
+          `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
         ),
       staleTime: 10 * 60_000,
-      retry: (failureCount: number, error: any) => error?.status !== 404 && failureCount < 2,
+      retry: (failureCount: number, error: any) =>
+        error?.status !== 404 && failureCount < 2,
     })),
   })
 }

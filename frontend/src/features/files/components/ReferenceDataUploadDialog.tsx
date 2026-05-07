@@ -10,12 +10,11 @@
  * the column-mapping table.
  */
 
-import { useEffect, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 
 import { ReferenceDataService } from "@/client"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import useCustomToast from "@/hooks/useCustomToast"
 
 // ---------------------------------------------------------------------------
@@ -61,8 +61,14 @@ function parseCSVHeaders(text: string): string[] {
   for (let i = 0; i < firstLine.length; i++) {
     const ch = firstLine[i]
     if (ch === '"') {
-      if (inQ && firstLine[i + 1] === '"') { cur += '"'; i++ } else inQ = !inQ
-    } else if (ch === "," && !inQ) { headers.push(cur.trim()); cur = "" } else cur += ch
+      if (inQ && firstLine[i + 1] === '"') {
+        cur += '"'
+        i++
+      } else inQ = !inQ
+    } else if (ch === "," && !inQ) {
+      headers.push(cur.trim())
+      cur = ""
+    } else cur += ch
   }
   headers.push(cur.trim())
   return headers.filter(Boolean)
@@ -73,7 +79,8 @@ function autoIdentify(header: string): string {
   if (h === "plot_id" || h === "plot" || h === "plotid") return "plot_id"
   if (h === "col" || h === "column" || h === "bed") return "col"
   if (h === "row" || h === "tier") return "row"
-  if (h === "accession" || h === "acc" || h === "genotype" || h === "entry") return "accession"
+  if (h === "accession" || h === "acc" || h === "genotype" || h === "entry")
+    return "accession"
   return header // default: use as trait name
 }
 
@@ -88,7 +95,12 @@ interface Props {
   formValues: Record<string, string>
 }
 
-export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: Props) {
+export function ReferenceDataUploadDialog({
+  open,
+  onClose,
+  file,
+  formValues,
+}: Props) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const [headers, setHeaders] = useState<string[]>([])
@@ -128,7 +140,7 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
     return () => {
       cancelled = true
     }
-  }, [file])
+  }, [file, initMapping, onClose, showErrorToast])
 
   function initMapping(hdrs: string[]) {
     setHeaders(hdrs)
@@ -156,9 +168,7 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
       const plots = report
         ? `${report.matched}/${report.total}`
         : String(data.plot_count ?? 0)
-      showSuccessToast(
-        `"${data.name ?? "dataset"}" uploaded — ${plots} plots.`,
-      )
+      showSuccessToast(`"${data.name ?? "dataset"}" uploaded — ${plots} plots.`)
       onClose()
     },
     onError: (err: Error) => showErrorToast(err.message),
@@ -166,7 +176,8 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
 
   const mappingValues = Object.values(mapping).filter((v) => v !== IGNORE)
   const hasPlotId = mappingValues.includes("plot_id")
-  const hasColRow = mappingValues.includes("col") && mappingValues.includes("row")
+  const hasColRow =
+    mappingValues.includes("col") && mappingValues.includes("row")
   const mappingValid = hasPlotId || hasColRow
 
   return (
@@ -182,7 +193,9 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
         </DialogHeader>
 
         {isParsing ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">Reading file…</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            Reading file…
+          </div>
         ) : (
           <div className="space-y-4 overflow-y-auto min-h-0 flex-1">
             <table className="w-full text-sm">
@@ -196,14 +209,18 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
                 {headers.map((h) => (
                   <tr key={h}>
                     <td className="py-2 pr-4">
-                      <code className="bg-muted rounded px-1 py-0.5 text-xs">{h}</code>
+                      <code className="bg-muted rounded px-1 py-0.5 text-xs">
+                        {h}
+                      </code>
                     </td>
                     <td className="py-2">
                       <div className="flex gap-2">
                         <select
                           className="bg-background flex-1 rounded border px-2 py-1 text-sm"
                           value={
-                            IDENTITY_FIELDS.includes(mapping[h] as typeof IDENTITY_FIELDS[number])
+                            IDENTITY_FIELDS.includes(
+                              mapping[h] as (typeof IDENTITY_FIELDS)[number],
+                            )
                               ? mapping[h]
                               : mapping[h] === IGNORE
                                 ? IGNORE
@@ -211,25 +228,39 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
                           }
                           onChange={(e) => {
                             const v = e.target.value
-                            setMapping((m) => ({ ...m, [h]: v === "__trait__" ? h : v }))
+                            setMapping((m) => ({
+                              ...m,
+                              [h]: v === "__trait__" ? h : v,
+                            }))
                           }}
                         >
-                          <option value="plot_id">plot_id — plot identifier</option>
+                          <option value="plot_id">
+                            plot_id — plot identifier
+                          </option>
                           <option value="col">col — column / bed number</option>
                           <option value="row">row — row / tier number</option>
-                          <option value="accession">accession — genotype / entry</option>
-                          <option value="__trait__">trait — numeric measurement</option>
+                          <option value="accession">
+                            accession — genotype / entry
+                          </option>
+                          <option value="__trait__">
+                            trait — numeric measurement
+                          </option>
                           <option value={IGNORE}>— ignore —</option>
                         </select>
                         {/* Trait name input */}
                         {mapping[h] !== IGNORE &&
-                          !IDENTITY_FIELDS.includes(mapping[h] as typeof IDENTITY_FIELDS[number]) && (
+                          !IDENTITY_FIELDS.includes(
+                            mapping[h] as (typeof IDENTITY_FIELDS)[number],
+                          ) && (
                             <Input
                               className="w-36 text-sm h-8"
                               value={mapping[h]}
                               placeholder="trait name"
                               onChange={(e) =>
-                                setMapping((m) => ({ ...m, [h]: e.target.value }))
+                                setMapping((m) => ({
+                                  ...m,
+                                  [h]: e.target.value,
+                                }))
                               }
                             />
                           )}
@@ -242,7 +273,8 @@ export function ReferenceDataUploadDialog({ open, onClose, file, formValues }: P
 
             {!mappingValid && headers.length > 0 && (
               <p className="text-destructive text-xs">
-                Map at least <code>plot_id</code>, or both <code>col</code> and <code>row</code>.
+                Map at least <code>plot_id</code>, or both <code>col</code> and{" "}
+                <code>row</code>.
               </p>
             )}
           </div>

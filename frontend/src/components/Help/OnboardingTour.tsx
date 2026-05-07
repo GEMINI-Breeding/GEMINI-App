@@ -10,12 +10,17 @@
  * the OnboardingContext.
  */
 
-import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, X } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
+import { ChevronLeft, ChevronRight, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import type { TourStep } from "./tourSteps"
 
-interface Rect { x: number; y: number; w: number; h: number }
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 interface Props {
   steps: TourStep[]
@@ -28,7 +33,13 @@ interface Props {
 const PAD = 10 // padding around the highlighted element
 const TOOLTIP_W = 320
 
-export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) {
+export function OnboardingTour({
+  steps,
+  step,
+  onNext,
+  onBack,
+  onClose,
+}: Props) {
   const navigate = useNavigate()
   const data = steps[step]
   const [rect, setRect] = useState<Rect | null>(null)
@@ -38,7 +49,10 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
 
   // Keep viewport size in sync
   useEffect(() => {
-    const onResize = () => { setVw(window.innerWidth); setVh(window.innerHeight) }
+    const onResize = () => {
+      setVw(window.innerWidth)
+      setVh(window.innerHeight)
+    }
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
   }, [])
@@ -77,7 +91,7 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
       cancelled = true
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
     }
-  }, [step, data, navigate])
+  }, [data, navigate])
 
   const isFirst = step === 0
   const isLast = step === steps.length - 1
@@ -101,9 +115,7 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
     tooltipX = Math.min(Math.max(spotX, 12), vw - TOOLTIP_W - 12)
     const belowY = spotY + spotH + 12
     tooltipY =
-      belowY + tooltipH > vh - 12
-        ? Math.max(spotY - tooltipH - 12, 12)
-        : belowY
+      belowY + tooltipH > vh - 12 ? Math.max(spotY - tooltipH - 12, 12) : belowY
   }
 
   return (

@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-
-import { UsersService } from "@/client"
 import type { UserOutput } from "@/client"
+import { UsersService } from "@/client"
 import {
   isLoggedIn as _isLoggedIn,
   logout as _logout,

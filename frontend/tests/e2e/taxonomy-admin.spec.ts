@@ -17,7 +17,9 @@ import { expect, test } from "../helpers/fixtures"
 test.describe("Taxonomy admin: sensor types CRUD", () => {
   test.setTimeout(60_000)
 
-  test("add → edit → delete a sensor type via the real UI", async ({ page }) => {
+  test("add → edit → delete a sensor type via the real UI", async ({
+    page,
+  }) => {
     const stamp = Date.now()
     const initialName = `pw-st-${stamp}`
     const renamedName = `pw-st-${stamp}-renamed`

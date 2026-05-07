@@ -13,12 +13,12 @@ import {
   Loader2,
   MoreVertical,
   Navigation,
-  Play,
   Plane,
+  Play,
   Plus,
   Trash2,
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,17 +43,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useAllExperiments } from "@/features/experiments/hooks/useExperimentData"
-import { useProcessScope } from "@/features/process/lib/processScope"
+import { NewRunDialog } from "@/features/process/components/NewRunDialog"
 import {
-  createRun,
   deletePipeline,
   deleteRun,
+  type Pipeline,
+  type Run,
   usePipelines,
   useRuns,
   useWorkspace,
-  type Pipeline,
-  type Run,
 } from "@/features/process/lib/runStore"
 
 function statusBadgeClass(status: string) {
@@ -69,33 +67,21 @@ function statusBadgeClass(status: string) {
   }
 }
 
-function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspaceId: string }) {
+function PipelineCard({
+  pipeline,
+  workspaceId,
+}: {
+  pipeline: Pipeline
+  workspaceId: string
+}) {
   const navigate = useNavigate()
   const runs = useRuns(pipeline.id)
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false)
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<Run | null>(null)
+  const [newRunOpen, setNewRunOpen] = useState(false)
 
   const isAerial = pipeline.type === "aerial"
   const Icon = isAerial ? Plane : Navigation
-
-  const handleNewRun = () => {
-    // Phase R3 ships a minimal "create draft run" so the user can step into
-    // RunDetail. R4 will replace this with a richer "select uploaded data"
-    // dialog matching main's NewRunDialog.
-    const run = createRun({
-      pipelineId: pipeline.id,
-      scope: {
-        experimentId: pipeline.workspaceId,
-        seasonId: null,
-        siteId: null,
-        populationId: null,
-      },
-    })
-    navigate({
-      to: "/process/$workspaceId/run/$runId",
-      params: { workspaceId, runId: run.id },
-    })
-  }
 
   return (
     <>
@@ -133,7 +119,11 @@ function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspace
               >
                 Settings
               </Button>
-              <Button size="sm" data-onboarding="process-new-run" onClick={handleNewRun}>
+              <Button
+                size="sm"
+                data-onboarding="process-new-run"
+                onClick={() => setNewRunOpen(true)}
+              >
                 <Plus className="mr-1 h-4 w-4" />
                 New Run
               </Button>
@@ -187,7 +177,10 @@ function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspace
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge className={statusBadgeClass(run.status)} variant="secondary">
+                    <Badge
+                      className={statusBadgeClass(run.status)}
+                      variant="secondary"
+                    >
                       {run.status}
                     </Badge>
                     <DropdownMenu>
@@ -226,6 +219,13 @@ function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspace
         )}
       </Card>
 
+      <NewRunDialog
+        pipeline={pipeline}
+        workspaceId={workspaceId}
+        open={newRunOpen}
+        onClose={() => setNewRunOpen(false)}
+      />
+
       <Dialog
         open={confirmDeletePipeline}
         onOpenChange={(v) => !v && setConfirmDeletePipeline(false)}
@@ -234,11 +234,15 @@ function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspace
           <DialogHeader>
             <DialogTitle>Delete Pipeline</DialogTitle>
             <DialogDescription>
-              Delete <strong>{pipeline.name}</strong>? All its runs will be lost.
+              Delete <strong>{pipeline.name}</strong>? All its runs will be
+              lost.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDeletePipeline(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeletePipeline(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -262,8 +266,8 @@ function PipelineCard({ pipeline, workspaceId }: { pipeline: Pipeline; workspace
           <DialogHeader>
             <DialogTitle>Delete Run</DialogTitle>
             <DialogDescription>
-              Delete this run? Its job records on the backend stay; only the wizard's
-              run record is removed.
+              Delete this run? Its job records on the backend stay; only the
+              wizard's run record is removed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -291,20 +295,6 @@ export function WorkspaceDetail() {
   const navigate = useNavigate()
   const workspace = useWorkspace(workspaceId)
   const pipelines = usePipelines(workspaceId)
-  const { data: experiments = [] } = useAllExperiments()
-  const { experimentId: scopedExperimentId, setExperimentId: setScopedExperimentId } =
-    useProcessScope()
-
-  // Entering a workspace makes it the active Process scope so the
-  // experiment-driven dropdowns elsewhere (RunDetail's AerialScopePicker,
-  // any other Process-feature page) target this workspace's experiment
-  // instead of inheriting the previously-selected one.
-  useEffect(() => {
-    if (!workspace) return
-    if (scopedExperimentId !== workspace.experimentId) {
-      setScopedExperimentId(workspace.experimentId)
-    }
-  }, [workspace, scopedExperimentId, setScopedExperimentId])
 
   if (!workspace) {
     return (
@@ -314,7 +304,10 @@ export function WorkspaceDetail() {
           <p className="text-muted-foreground text-sm">
             Workspace not found. It may have been deleted on this browser.
           </p>
-          <Button variant="outline" onClick={() => navigate({ to: "/process" })}>
+          <Button
+            variant="outline"
+            onClick={() => navigate({ to: "/process" })}
+          >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to workspaces
           </Button>
@@ -323,10 +316,7 @@ export function WorkspaceDetail() {
     )
   }
 
-  const experiment = experiments.find((e) => String(e.id) === workspace.experimentId)
-  const description =
-    workspace.description ??
-    (experiment ? `Experiment: ${experiment.experiment_name}` : undefined)
+  const description = workspace.description
 
   return (
     <div className="bg-background min-h-screen">

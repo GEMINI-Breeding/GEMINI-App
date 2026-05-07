@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Trash2, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 
 interface ImageViewerDialogProps {
@@ -16,7 +16,7 @@ async function authHeader(): Promise<string> {
   const token =
     typeof OpenAPI.TOKEN === "function"
       ? await (OpenAPI.TOKEN as () => Promise<string>)()
-      : OpenAPI.TOKEN ?? ""
+      : (OpenAPI.TOKEN ?? "")
   return token ? `Bearer ${token}` : ""
 }
 
@@ -24,7 +24,11 @@ function serveUrl(path: string): string {
   return `${apiBase()}/api/v1/files/serve?path=${encodeURIComponent(path)}`
 }
 
-export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialogProps) {
+export function ImageViewerDialog({
+  uploadId,
+  title,
+  onClose,
+}: ImageViewerDialogProps) {
   const [subfolderMap, setSubfolderMap] = useState<Record<string, string[]>>({})
   const [subfolders, setSubfolders] = useState<string[]>([])
   const [activeFolder, setActiveFolder] = useState<string | null>(null)
@@ -37,7 +41,9 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
 
   const blobUrlRef = useRef<string | null>(null)
   const onCloseRef = useRef(onClose)
-  useEffect(() => { onCloseRef.current = onClose })
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -58,16 +64,22 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
             setLoading(false)
           }
         })
-        .catch(() => { if (!cancelled) setLoading(false) })
+        .catch(() => {
+          if (!cancelled) setLoading(false)
+        })
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [uploadId])
 
   // Images for the active subfolder
   const images = activeFolder ? (subfolderMap[activeFolder] ?? []) : []
 
   // Reset to first image when switching subfolder
-  useEffect(() => { setIndex(0) }, [activeFolder])
+  useEffect(() => {
+    setIndex(0)
+  }, [])
 
   // Load image — debounced 150 ms, revoke old blob URLs
   useEffect(() => {
@@ -90,18 +102,29 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
               setImgLoading(false)
             }
           })
-          .catch(() => { if (!cancelled) setImgLoading(false) })
+          .catch(() => {
+            if (!cancelled) setImgLoading(false)
+          })
       })
     }, 150)
 
-    return () => { cancelled = true; clearTimeout(timer) }
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [images, index])
 
   // Keyboard navigation
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft")  { e.preventDefault(); setIndex((i) => Math.max(0, i - 1)) }
-      if (e.key === "ArrowRight") { e.preventDefault(); setIndex((i) => Math.min(images.length - 1, i + 1)) }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault()
+        setIndex((i) => Math.max(0, i - 1))
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault()
+        setIndex((i) => Math.min(images.length - 1, i + 1))
+      }
       if (e.key === "Escape") onCloseRef.current()
     }
     window.addEventListener("keydown", onKey)
@@ -143,7 +166,10 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
       <div
         className="bg-background relative flex h-[90vh] w-[90vw] max-w-5xl flex-col rounded-lg overflow-hidden shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -153,7 +179,9 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
           <div className="min-w-0 flex-1">
             <p className="font-medium text-sm truncate">{title}</p>
             {!loading && images.length > 0 && (
-              <p className="text-muted-foreground text-xs truncate">{filename}</p>
+              <p className="text-muted-foreground text-xs truncate">
+                {filename}
+              </p>
             )}
           </div>
           <div className="flex items-center gap-3 shrink-0 ml-4">
@@ -165,7 +193,9 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
                 className="border-input bg-background text-foreground rounded border px-2 py-1 text-xs focus:outline-none"
               >
                 {subfolders.map((f) => (
-                  <option key={f} value={f}>{f}</option>
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
                 ))}
               </select>
             )}
@@ -202,7 +232,10 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
                 </button>
               </div>
             )}
-            <button className="text-muted-foreground hover:text-foreground" onClick={onClose}>
+            <button
+              className="text-muted-foreground hover:text-foreground"
+              onClick={onClose}
+            >
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -214,19 +247,26 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
             <p className="text-muted-foreground text-sm">Loading images…</p>
           )}
           {!loading && images.length === 0 && (
-            <p className="text-muted-foreground text-sm">No images found in this upload.</p>
+            <p className="text-muted-foreground text-sm">
+              No images found in this upload.
+            </p>
           )}
           {!loading && images.length > 0 && (
             <>
               {imgLoading && (
-                <p className="text-muted-foreground text-sm absolute">Loading…</p>
+                <p className="text-muted-foreground text-sm absolute">
+                  Loading…
+                </p>
               )}
               {imgSrc && (
                 <img
                   src={imgSrc}
                   alt={filename}
                   className="max-h-full max-w-full object-contain"
-                  style={{ opacity: imgLoading ? 0 : 1, transition: "opacity 0.15s" }}
+                  style={{
+                    opacity: imgLoading ? 0 : 1,
+                    transition: "opacity 0.15s",
+                  }}
                   onLoad={() => setImgLoading(false)}
                 />
               )}
@@ -243,7 +283,9 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
               {/* Next */}
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-1.5 text-white hover:bg-black/60 disabled:opacity-20"
-                onClick={() => setIndex((i) => Math.min(images.length - 1, i + 1))}
+                onClick={() =>
+                  setIndex((i) => Math.min(images.length - 1, i + 1))
+                }
                 disabled={index === images.length - 1}
               >
                 <ChevronRight className="h-6 w-6" />

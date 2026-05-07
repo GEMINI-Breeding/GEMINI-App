@@ -14,16 +14,16 @@
  * R4a wires data_sync, gcp_selection, orthomosaic. R4b/R4c/R5/R6 add the
  * remaining step types in this same file.
  */
-import { JobsService, type JobOutput } from "@/client"
+import { type JobOutput, JobsService } from "@/client"
 
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
   appendStepJobId,
   getRun,
-  setStepState,
-  updateRun,
   type Id,
   type RunStepStatus,
+  setStepState,
+  updateRun,
 } from "@/features/process/lib/runStore"
 
 export interface OrthomosaicParams {
@@ -95,7 +95,9 @@ export interface ExecuteStepResult {
  * Submit (or virtually-execute) a step. Updates the runStore in place.
  * Throws if the step type is unknown — callers should pre-check kind.
  */
-export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepResult> {
+export async function executeStep(
+  input: ExecuteStepInput,
+): Promise<ExecuteStepResult> {
   const { runId, stepKey, scope, experimentId, orthomosaic } = input
 
   switch (stepKey) {
@@ -143,7 +145,9 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
           job_type: "RUN_ODM",
           parameters: params,
           experiment_id: experimentId,
-        } as Parameters<typeof JobsService.apiJobsSubmitSubmitJob>[0]["requestBody"],
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
       })) as JobOutput
       const jobId = String(job?.id ?? "")
       if (!jobId) throw new Error("RUN_ODM submitted but no job id returned")
@@ -157,9 +161,7 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
 
     case "trait_extraction": {
       if (!input.traitExtraction) {
-        throw new Error(
-          "trait_extraction requires ortho + boundary inputs",
-        )
+        throw new Error("trait_extraction requires ortho + boundary inputs")
       }
       const t = input.traitExtraction
       const params: Record<string, unknown> = {
@@ -176,7 +178,9 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
           job_type: "EXTRACT_TRAITS",
           parameters: params,
           experiment_id: experimentId,
-        } as Parameters<typeof JobsService.apiJobsSubmitSubmitJob>[0]["requestBody"],
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
       })) as JobOutput
       const jobId = String(job?.id ?? "")
       if (!jobId) {
@@ -207,7 +211,9 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
           job_type: "RUN_STITCH",
           parameters: params,
           experiment_id: experimentId,
-        } as Parameters<typeof JobsService.apiJobsSubmitSubmitJob>[0]["requestBody"],
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
       })) as JobOutput
       const jobId = String(job?.id ?? "")
       if (!jobId) throw new Error("RUN_STITCH submitted but no job id returned")
@@ -229,8 +235,7 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
         outputs: {
           ...(getRun(runId)?.steps.associate_boundaries?.outputs ?? {}),
           synthetic: true,
-          note:
-            "Client-side no-op until ASSOCIATE_BOUNDARIES JobType + geo-worker handler land. See findings.md Ground pipeline gaps.",
+          note: "Client-side no-op until ASSOCIATE_BOUNDARIES JobType + geo-worker handler land. See findings.md Ground pipeline gaps.",
         },
       })
       return { jobId: null, done: true }
@@ -258,7 +263,9 @@ export async function executeStep(input: ExecuteStepInput): Promise<ExecuteStepR
           job_type: "LOCATE_PLANTS",
           parameters: params,
           experiment_id: experimentId,
-        } as Parameters<typeof JobsService.apiJobsSubmitSubmitJob>[0]["requestBody"],
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
       })) as JobOutput
       const jobId = String(job?.id ?? "")
       if (!jobId) {

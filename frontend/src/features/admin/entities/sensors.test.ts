@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { SensorsService, type SensorInput } from "@/client"
+import { type SensorInput, SensorsService } from "@/client"
 
 import { sensorsConfig } from "./sensors"
 

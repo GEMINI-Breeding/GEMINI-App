@@ -26,11 +26,19 @@ test.describe("UploadZone: folder drop", () => {
 
   test("dropping a folder walks its files and populates the Selected list", async ({
     page,
+    runPrefix,
   }) => {
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
+    // Files page gate: picking an experiment unlocks the dropzone.
+    await page.getByTestId("entity-select-experiment").click()
+    await page.getByTestId("entity-create-experiment").click()
+    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
+    await page.keyboard.press("Escape")
 
     // Synthesize a DataTransfer whose only item is a DirectoryEntry-like
     // object containing two FileEntry-like children. This exercises the
@@ -85,9 +93,15 @@ test.describe("UploadZone: folder drop", () => {
       ] as unknown as DataTransferItemList
       Object.defineProperty(dt, "items", { value: items, writable: false })
 
-      el.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt }))
+      el.dispatchEvent(
+        new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("dragover", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("drop", { bubbles: true, dataTransfer: dt }),
+      )
     })
 
     // The Selected Files list should now show two files. This is the
@@ -97,16 +111,26 @@ test.describe("UploadZone: folder drop", () => {
       page.getByRole("heading", { name: /^Selected Files \(2\)$/ }),
     ).toBeVisible({ timeout: 5_000 })
     // The error dialog must NOT appear — files were valid.
-    await expect(page.locator('[data-testid="upload-error-dialog"]')).toHaveCount(0)
+    await expect(
+      page.locator('[data-testid="upload-error-dialog"]'),
+    ).toHaveCount(0)
   })
 
   test("dropping a 0-byte folder artifact shows an actionable error DIALOG (not a fleeting toast)", async ({
     page,
+    runPrefix,
   }) => {
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
+    // Files page gate: picking an experiment unlocks the dropzone.
+    await page.getByTestId("entity-select-experiment").click()
+    await page.getByTestId("entity-create-experiment").click()
+    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
+    await page.keyboard.press("Escape")
 
     // Older browsers / permission-blocked folders surface as a single
     // 0-byte File. Simulate that by adding to a real DataTransfer (no
@@ -114,9 +138,15 @@ test.describe("UploadZone: folder drop", () => {
     await page.locator('[data-testid="upload-dropzone"]').evaluate((el) => {
       const dt = new DataTransfer()
       dt.items.add(new File([], "Subset Drone Data", { type: "" }))
-      el.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt }))
+      el.dispatchEvent(
+        new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("dragover", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("drop", { bubbles: true, dataTransfer: dt }),
+      )
     })
 
     // The error dialog must appear and stay open (not auto-dismiss).
@@ -133,21 +163,39 @@ test.describe("UploadZone: folder drop", () => {
 
   test("dropping a CSV when 'Image Data' is selected shows wrong-type DIALOG with file names", async ({
     page,
+    runPrefix,
   }) => {
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
+    // Files page gate: picking an experiment unlocks the dropzone.
+    await page.getByTestId("entity-select-experiment").click()
+    await page.getByTestId("entity-create-experiment").click()
+    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
+    await page.keyboard.press("Escape")
 
     // Drop two CSVs and one valid JPG to test the partial-rejection branch.
     await page.locator('[data-testid="upload-dropzone"]').evaluate((el) => {
       const dt = new DataTransfer()
-      dt.items.add(new File(["a,b\n1,2"], "field_design.csv", { type: "text/csv" }))
-      dt.items.add(new File(["x,y\n3,4"], "gcp_locations.csv", { type: "text/csv" }))
+      dt.items.add(
+        new File(["a,b\n1,2"], "field_design.csv", { type: "text/csv" }),
+      )
+      dt.items.add(
+        new File(["x,y\n3,4"], "gcp_locations.csv", { type: "text/csv" }),
+      )
       dt.items.add(new File(["jpgbytes"], "photo.jpg", { type: "image/jpeg" }))
-      el.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt }))
-      el.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt }))
+      el.dispatchEvent(
+        new DragEvent("dragenter", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("dragover", { bubbles: true, dataTransfer: dt }),
+      )
+      el.dispatchEvent(
+        new DragEvent("drop", { bubbles: true, dataTransfer: dt }),
+      )
     })
 
     const dialog = page.locator('[data-testid="upload-error-dialog"]')
@@ -167,29 +215,34 @@ test.describe("UploadZone: folder drop", () => {
 test.describe("UploadList: blocked-submit dialogs", () => {
   test.setTimeout(60_000)
 
-  test("submitting without scope fields shows a 'fields blank' DIALOG", async ({
+  test("blank scope fields lock the upload dropzone (no file can even be staged)", async ({
     page,
   }) => {
+    // The Files page gate now locks the dropzone before any file can
+    // be selected, so the old "fields blank" submit-time dialog is no
+    // longer reachable. Assert the gate behavior at the dropzone
+    // instead — that's where the user now sees the message.
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
-    await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    const reason = page.getByTestId("upload-dropzone-disabled-reason")
+    await expect(reason).toContainText(/select a data type/i)
 
-    // Add one file but DO NOT fill the form fields.
+    await page.locator('[data-onboarding="files-data-type-selector"]').click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
+    await expect(reason).toContainText(/experiment/i)
+
+    // Confirm the dropzone is genuinely inert: the input change
+    // handler short-circuits when disabled, so files added via the
+    // hidden input must NOT populate the Selected list.
     await page.locator('[data-testid="upload-input"]').setInputFiles({
       name: "photo.jpg",
       mimeType: "image/jpeg",
       buffer: Buffer.from("jpgbytes", "utf-8"),
     })
     await expect(
-      page.getByRole("heading", { name: /^Selected Files \(1\)$/ }),
-    ).toBeVisible()
-    await page.getByTestId("upload-submit").click()
-
-    const dialog = page.locator('[data-testid="upload-error-dialog"]')
-    await expect(dialog).toBeVisible({ timeout: 5_000 })
-    await expect(dialog).toContainText(/required fields are blank/i)
-    // Should call out at least one of the path components by name.
-    await expect(dialog).toContainText(/(experiment|location|date|platform|sensor)/i)
+      page.getByRole("heading", { name: /^Selected Files/i }),
+    ).toHaveCount(0)
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { SeasonsService, type SeasonInput } from "@/client"
+import { type SeasonInput, SeasonsService } from "@/client"
 
 import { seasonsConfig } from "./seasons"
 

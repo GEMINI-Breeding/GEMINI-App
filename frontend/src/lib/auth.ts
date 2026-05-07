@@ -13,7 +13,7 @@
  * in gemini/rest_api/guards.py). When GEMINI_JWT_SECRET is empty on the
  * backend the guard is a no-op; calls still work without a token.
  */
-import axios, { AxiosError } from "axios"
+import axios, { type AxiosError } from "axios"
 
 import { UsersService } from "@/client"
 import { OpenAPI } from "@/client/core/OpenAPI"

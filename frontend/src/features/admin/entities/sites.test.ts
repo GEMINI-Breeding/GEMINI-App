@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { SitesService, type SiteInput } from "@/client"
+import { type SiteInput, SitesService } from "@/client"
 
 import { sitesConfig } from "./sites"
 

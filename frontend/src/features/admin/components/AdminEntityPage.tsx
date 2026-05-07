@@ -50,11 +50,10 @@ function defaultFormatCell(value: unknown): string {
   return String(value)
 }
 
-export function AdminEntityPage<TOutput extends object, TInput extends Record<string, unknown>>({
-  config,
-}: {
-  config: EntityConfig<TOutput, TInput>
-}) {
+export function AdminEntityPage<
+  TOutput extends object,
+  TInput extends Record<string, unknown>,
+>({ config }: { config: EntityConfig<TOutput, TInput> }) {
   const qc = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -164,11 +163,15 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
             Create, edit, and delete {config.plural.toLowerCase()}.
           </p>
         </div>
-        <Button data-testid="entity-add" onClick={() => {
-          setFormValue(config.emptyInput())
-          setIsAddOpen(true)
-        }}>
-          <Plus className="mr-1.5 h-4 w-4" /> Add {config.singular.toLowerCase()}
+        <Button
+          data-testid="entity-add"
+          onClick={() => {
+            setFormValue(config.emptyInput())
+            setIsAddOpen(true)
+          }}
+        >
+          <Plus className="mr-1.5 h-4 w-4" /> Add{" "}
+          {config.singular.toLowerCase()}
         </Button>
       </header>
 
@@ -190,13 +193,19 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
           <TableBody>
             {list.isLoading ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-muted-foreground py-6 text-center text-sm">
+                <TableCell
+                  colSpan={columns.length}
+                  className="text-muted-foreground py-6 text-center text-sm"
+                >
                   Loading…
                 </TableCell>
               </TableRow>
             ) : (list.data ?? []).length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-muted-foreground py-6 text-center text-sm">
+                <TableCell
+                  colSpan={columns.length}
+                  className="text-muted-foreground py-6 text-center text-sm"
+                >
                   No {config.plural.toLowerCase()} yet.
                 </TableCell>
               </TableRow>
@@ -205,7 +214,10 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -235,7 +247,11 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
             <Button variant="outline" onClick={() => setIsAddOpen(false)}>
               Cancel
             </Button>
-            <Button form="entity-add-form" type="submit" disabled={createMutation.isPending}>
+            <Button
+              form="entity-add-form"
+              type="submit"
+              disabled={createMutation.isPending}
+            >
               {createMutation.isPending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
@@ -243,7 +259,10 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
       </Dialog>
 
       {/* Edit dialog */}
-      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => !open && setEditing(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit {config.singular.toLowerCase()}</DialogTitle>
@@ -275,13 +294,14 @@ export function AdminEntityPage<TOutput extends object, TInput extends Record<st
       </Dialog>
 
       {/* Delete confirm */}
-      <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+      <Dialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {config.singular.toLowerCase()}?</DialogTitle>
-            <DialogDescription>
-              This cannot be undone.
-            </DialogDescription>
+            <DialogDescription>This cannot be undone.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleting(null)}>

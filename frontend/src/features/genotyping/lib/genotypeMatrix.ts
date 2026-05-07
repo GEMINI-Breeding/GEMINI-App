@@ -97,7 +97,18 @@ export class GenotypeMatrixParseError extends Error {
   }
 }
 
-export function parseGenotypeMatrix(text: string): GenotypeMatrixParseResult {
+interface ParsedHeader {
+  delim: string
+  lines: string[]
+  headers: string[]
+  variantNameIdx: number
+  metaIdx: Record<string, number>
+  sampleIndices: number[]
+  sampleHeaders: string[]
+  metaHeaders: string[]
+}
+
+function parseHeader(text: string): ParsedHeader {
   const stripped = text.replace(/^﻿/, "")
   const rawLines = stripped
     .replace(/\r\n/g, "\n")
@@ -123,14 +134,12 @@ export function parseGenotypeMatrix(text: string): GenotypeMatrixParseResult {
     )
   }
 
-  // Map known metadata column names → header index.
   const metaIdx: Record<string, number> = {}
   for (const meta of META_COLUMNS) {
     const idx = headers.findIndex((h) => h.toLowerCase() === meta)
     if (idx !== -1) metaIdx[meta] = idx
   }
 
-  // Anything that's not a known metadata column counts as a sample.
   const sampleIndices: number[] = []
   for (let i = 0; i < headers.length; i++) {
     const name = headers[i].toLowerCase()
@@ -144,42 +153,65 @@ export function parseGenotypeMatrix(text: string): GenotypeMatrixParseResult {
   }
 
   const sampleHeaders = sampleIndices.map((i) => headers[i])
-  const metaHeaders = META_COLUMNS.filter((m) => m in metaIdx)
+  const metaHeaders = META_COLUMNS.filter((m) => m in metaIdx) as string[]
 
+  return {
+    delim,
+    lines,
+    headers,
+    variantNameIdx,
+    metaIdx,
+    sampleIndices,
+    sampleHeaders,
+    metaHeaders,
+  }
+}
+
+function parseRow(
+  fields: string[],
+  variantNameIdx: number,
+  metaIdx: Record<string, number>,
+  sampleIndices: number[],
+): GenotypeMatrixVariantRow | null {
+  const variantName = (fields[variantNameIdx] ?? "").trim()
+  if (!variantName) return null
+  const chromosome =
+    "chromosome" in metaIdx
+      ? toNumberOrNull(fields[metaIdx.chromosome] ?? "")
+      : null
+  const position =
+    "position" in metaIdx
+      ? toNumberOrNull(fields[metaIdx.position] ?? "")
+      : null
+  const alleles =
+    "alleles" in metaIdx ? (fields[metaIdx.alleles] ?? "").trim() || null : null
+  const design_sequence =
+    "design_sequence" in metaIdx
+      ? (fields[metaIdx.design_sequence] ?? "").trim() || null
+      : null
+  const calls = sampleIndices.map((i) => normaliseCall(fields[i] ?? ""))
+  return {
+    variant_name: variantName,
+    chromosome,
+    position,
+    alleles,
+    design_sequence,
+    calls,
+  }
+}
+
+export function parseGenotypeMatrix(text: string): GenotypeMatrixParseResult {
+  const h = parseHeader(text)
   const warnings: string[] = []
   const variant_rows: GenotypeMatrixVariantRow[] = []
-  for (let li = 1; li < lines.length; li++) {
-    const fields = splitLine(lines[li], delim)
-    const variantName = (fields[variantNameIdx] ?? "").trim()
-    if (!variantName) {
+  for (let li = 1; li < h.lines.length; li++) {
+    const fields = splitLine(h.lines[li], h.delim)
+    const row = parseRow(fields, h.variantNameIdx, h.metaIdx, h.sampleIndices)
+    if (!row) {
       warnings.push(`Row ${li + 1}: missing variant_name; skipped.`)
       continue
     }
-    const chromosome =
-      "chromosome" in metaIdx
-        ? toNumberOrNull(fields[metaIdx.chromosome] ?? "")
-        : null
-    const position =
-      "position" in metaIdx
-        ? toNumberOrNull(fields[metaIdx.position] ?? "")
-        : null
-    const alleles =
-      "alleles" in metaIdx
-        ? (fields[metaIdx.alleles] ?? "").trim() || null
-        : null
-    const design_sequence =
-      "design_sequence" in metaIdx
-        ? (fields[metaIdx.design_sequence] ?? "").trim() || null
-        : null
-    const calls = sampleIndices.map((i) => normaliseCall(fields[i] ?? ""))
-    variant_rows.push({
-      variant_name: variantName,
-      chromosome,
-      position,
-      alleles,
-      design_sequence,
-      calls,
-    })
+    variant_rows.push(row)
   }
 
   if (variant_rows.length === 0) {
@@ -190,12 +222,91 @@ export function parseGenotypeMatrix(text: string): GenotypeMatrixParseResult {
 
   return {
     batch: {
-      sample_headers: sampleHeaders,
+      sample_headers: h.sampleHeaders,
       variant_rows,
     },
-    sampleHeaders,
-    metaHeaders: metaHeaders as string[],
+    sampleHeaders: h.sampleHeaders,
+    metaHeaders: h.metaHeaders,
     variantCount: variant_rows.length,
     warnings,
+  }
+}
+
+/**
+ * Streaming variant of {@link parseGenotypeMatrix} that yields batches of
+ * variant rows. Used by Phase 9d's `StepIngestGenomic` so a 50k-row matrix
+ * doesn't hold the entire `variant_rows` array in memory while POSTing.
+ *
+ * Each yield carries the same `sample_headers` (pinned at the header row),
+ * the slice of variant rows for that batch, the batch index, and the
+ * accumulated row count + warnings so far. Callers POST each batch
+ * directly to the ingest endpoint without re-batching.
+ *
+ * Empty matrices throw the same `GenotypeMatrixParseError` as the
+ * non-streaming path; callers don't need to special-case "no rows".
+ */
+export type GenotypeMatrixBatchYield = {
+  batch: GenotypeMatrixBatchInput
+  /** 0-indexed batch number. */
+  batchIndex: number
+  /** Total rows yielded across all batches so far (including this one). */
+  totalRows: number
+  /** Cumulative warnings for skipped rows. New entries each yield. */
+  warnings: string[]
+  sampleHeaders: string[]
+  metaHeaders: string[]
+}
+
+export function* parseGenotypeMatrixBatches(
+  text: string,
+  batchSize = 500,
+): Generator<GenotypeMatrixBatchYield, void, void> {
+  if (batchSize <= 0) {
+    throw new GenotypeMatrixParseError("batchSize must be > 0")
+  }
+  const h = parseHeader(text)
+  const warnings: string[] = []
+  let buffer: GenotypeMatrixVariantRow[] = []
+  let batchIndex = 0
+  let totalRows = 0
+
+  for (let li = 1; li < h.lines.length; li++) {
+    const fields = splitLine(h.lines[li], h.delim)
+    const row = parseRow(fields, h.variantNameIdx, h.metaIdx, h.sampleIndices)
+    if (!row) {
+      warnings.push(`Row ${li + 1}: missing variant_name; skipped.`)
+      continue
+    }
+    buffer.push(row)
+    totalRows++
+    if (buffer.length >= batchSize) {
+      yield {
+        batch: { sample_headers: h.sampleHeaders, variant_rows: buffer },
+        batchIndex: batchIndex++,
+        totalRows,
+        warnings: [...warnings],
+        sampleHeaders: h.sampleHeaders,
+        metaHeaders: h.metaHeaders,
+      }
+      buffer = []
+    }
+  }
+
+  if (buffer.length > 0) {
+    yield {
+      batch: { sample_headers: h.sampleHeaders, variant_rows: buffer },
+      batchIndex: batchIndex++,
+      totalRows,
+      warnings: [...warnings],
+      sampleHeaders: h.sampleHeaders,
+      metaHeaders: h.metaHeaders,
+    }
+    return
+  }
+
+  if (totalRows === 0) {
+    throw new GenotypeMatrixParseError(
+      "No variant rows after header — file appears to contain only a header.",
+    )
   }
 }

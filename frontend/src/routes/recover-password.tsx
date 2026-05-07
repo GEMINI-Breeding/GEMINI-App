@@ -1,4 +1,8 @@
-import { createFileRoute, Link as RouterLink, redirect } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link as RouterLink,
+  redirect,
+} from "@tanstack/react-router"
 
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import { isLoggedIn } from "@/hooks/useAuth"
@@ -37,8 +41,8 @@ function RecoverPassword() {
           <p className="mb-2 font-medium">Not available in this deployment.</p>
           <p className="text-muted-foreground">
             This GEMINI instance does not send password-reset emails. Ask an
-            administrator to update your password from the Admin page, or
-            create a new account.
+            administrator to update your password from the Admin page, or create
+            a new account.
           </p>
         </div>
 

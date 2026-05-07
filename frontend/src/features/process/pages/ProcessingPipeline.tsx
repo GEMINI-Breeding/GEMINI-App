@@ -44,7 +44,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   createPipeline,
   updatePipeline,
@@ -57,10 +61,15 @@ function InfoTooltip({ text }: { text: ReactNode }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <sup className="cursor-help inline-flex items-center ml-0.5 align-super">
-          <Info className="text-muted-foreground hover:text-foreground" size={11} />
+          <Info
+            className="text-muted-foreground hover:text-foreground"
+            size={11}
+          />
         </sup>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs whitespace-normal">{text}</TooltipContent>
+      <TooltipContent className="max-w-xs whitespace-normal">
+        {text}
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -96,7 +105,10 @@ interface AgrowstitchParams {
   min_inliers: number
 }
 
-const PLATFORM_PRESETS: Record<Exclude<GroundPlatform, "custom">, AgrowstitchParams> = {
+const PLATFORM_PRESETS: Record<
+  Exclude<GroundPlatform, "custom">,
+  AgrowstitchParams
+> = {
   amiga: {
     forward_limit: 4,
     max_reprojection_error: 1.0,
@@ -213,7 +225,9 @@ export function ProcessingPipeline() {
   const [pipelineName, setPipelineName] = useState("")
   const [groundConfig, setGroundConfig] = useState(GROUND_DEFAULT_CONFIG)
   const [aerialConfig, setAerialConfig] = useState(AERIAL_DEFAULT_CONFIG)
-  const [roboflowModels, setRoboflowModels] = useState<RoboflowModel[]>([EMPTY_MODEL()])
+  const [roboflowModels, setRoboflowModels] = useState<RoboflowModel[]>([
+    EMPTY_MODEL(),
+  ])
   const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud")
   const [localServerUrl, setLocalServerUrl] = useState("http://localhost:9002")
 
@@ -230,13 +244,15 @@ export function ProcessingPipeline() {
     const cfg = existingPipeline.params
     setPipelineName(existingPipeline.name)
     if (existingPipeline.type === "ground") {
-      const savedParams = (cfg.agrowstitch_params as Partial<AgrowstitchParams>) ?? {}
+      const savedParams =
+        (cfg.agrowstitch_params as Partial<AgrowstitchParams>) ?? {}
       setGroundConfig({
         device: (cfg.device as "cpu" | "gpu" | "multiprocessing") ?? "cpu",
         num_cpu: (cfg.num_cpu as number) ?? 0,
         platform: (cfg.platform as GroundPlatform) ?? "custom",
         agrowstitch_params: { ...DEFAULT_AGROWSTITCH_PARAMS, ...savedParams },
-        custom_agrowstitch_options: (cfg.custom_agrowstitch_options as string) ?? "",
+        custom_agrowstitch_options:
+          (cfg.custom_agrowstitch_options as string) ?? "",
       })
     } else {
       // Migrate legacy {odm_preset: "standard", dem_resolution, ...} shapes
@@ -271,7 +287,9 @@ export function ProcessingPipeline() {
       )
     }
     setInferenceMode((cfg.inference_mode as "cloud" | "local") ?? "cloud")
-    setLocalServerUrl((cfg.local_server_url as string) ?? "http://localhost:9002")
+    setLocalServerUrl(
+      (cfg.local_server_url as string) ?? "http://localhost:9002",
+    )
   }, [existingPipeline])
 
   const steps = [
@@ -349,7 +367,8 @@ export function ProcessingPipeline() {
   const isStepComplete = (step: number) => {
     if (step === 1) return !!pipelineName.trim()
     if (step === 2) {
-      if (pipelineType === "aerial") return !!aerialConfig.reconstruction_quality
+      if (pipelineType === "aerial")
+        return !!aerialConfig.reconstruction_quality
       return !!groundConfig.device
     }
     return true
@@ -417,7 +436,9 @@ export function ProcessingPipeline() {
                 {index < steps.length - 1 && (
                   <div
                     className={`mx-4 h-0.5 flex-1 transition-colors ${
-                      completedSteps.has(step.number) ? "bg-primary" : "bg-border"
+                      completedSteps.has(step.number)
+                        ? "bg-primary"
+                        : "bg-border"
                     }`}
                   />
                 )}
@@ -432,7 +453,9 @@ export function ProcessingPipeline() {
             <CardTitle>
               Step {currentStep}: {steps[currentStep - 1].title}
             </CardTitle>
-            <CardDescription>{steps[currentStep - 1].description}</CardDescription>
+            <CardDescription>
+              {steps[currentStep - 1].description}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {currentStep === 1 && (
@@ -443,11 +466,13 @@ export function ProcessingPipeline() {
                   placeholder="e.g., North Field Spring Survey"
                   value={pipelineName}
                   onChange={(e) => setPipelineName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && isStepComplete(1) && handleNext()}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && isStepComplete(1) && handleNext()
+                  }
                 />
                 <p className="text-muted-foreground text-xs">
-                  Plot boundaries and settings defined here will be reused when you run
-                  this pipeline on new dates.
+                  Plot boundaries and settings defined here will be reused when
+                  you run this pipeline on new dates.
                 </p>
               </div>
             )}
@@ -505,8 +530,9 @@ export function ProcessingPipeline() {
                       }
                     />
                     <p className="text-muted-foreground text-xs">
-                      Forwarded as-is to NodeODM. Drop a <code>gcp_list.txt</code>{" "}
-                      alongside your raw images for ground-control points.
+                      Forwarded as-is to NodeODM. Drop a{" "}
+                      <code>gcp_list.txt</code> alongside your raw images for
+                      ground-control points.
                     </p>
                   </div>
                 )}
@@ -518,44 +544,49 @@ export function ProcessingPipeline() {
                 <div className="space-y-2">
                   <Label>Platform</Label>
                   <div className="grid grid-cols-3 gap-2">
-                    {(["amiga", "monopod", "custom"] as GroundPlatform[]).map((p) => {
-                      const labels: Record<GroundPlatform, [string, string]> = {
-                        amiga: ["Amiga", "Farm-ng ground robot"],
-                        monopod: ["Monopod", "Handheld / rolling"],
-                        custom: ["Custom", "Configure manually"],
-                      }
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => {
-                            const preset =
-                              p !== "custom"
-                                ? PLATFORM_PRESETS[p]
-                                : groundConfig.agrowstitch_params
-                            setGroundConfig({
-                              ...groundConfig,
-                              platform: p,
-                              agrowstitch_params: preset,
-                            })
-                          }}
-                          className={`text-left rounded-lg border p-3 transition-colors ${
-                            groundConfig.platform === p
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/50"
-                          }`}
-                        >
-                          <p className="text-sm font-medium">{labels[p][0]}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {labels[p][1]}
-                          </p>
-                        </button>
-                      )
-                    })}
+                    {(["amiga", "monopod", "custom"] as GroundPlatform[]).map(
+                      (p) => {
+                        const labels: Record<GroundPlatform, [string, string]> =
+                          {
+                            amiga: ["Amiga", "Farm-ng ground robot"],
+                            monopod: ["Monopod", "Handheld / rolling"],
+                            custom: ["Custom", "Configure manually"],
+                          }
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                              const preset =
+                                p !== "custom"
+                                  ? PLATFORM_PRESETS[p]
+                                  : groundConfig.agrowstitch_params
+                              setGroundConfig({
+                                ...groundConfig,
+                                platform: p,
+                                agrowstitch_params: preset,
+                              })
+                            }}
+                            className={`text-left rounded-lg border p-3 transition-colors ${
+                              groundConfig.platform === p
+                                ? "border-primary bg-primary/5"
+                                : "border-border hover:border-primary/50"
+                            }`}
+                          >
+                            <p className="text-sm font-medium">
+                              {labels[p][0]}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {labels[p][1]}
+                            </p>
+                          </button>
+                        )
+                      },
+                    )}
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    Selecting a platform fills in recommended defaults below. You can
-                    adjust any value afterward.
+                    Selecting a platform fills in recommended defaults below.
+                    You can adjust any value afterward.
                   </p>
                 </div>
 
@@ -609,12 +640,14 @@ export function ProcessingPipeline() {
                           ? `0 = auto (${Math.max(1, systemCpuCount - 1)} cores)`
                           : "0 = auto"
                       }
-                      value={groundConfig.num_cpu === 0 ? "" : groundConfig.num_cpu}
+                      value={
+                        groundConfig.num_cpu === 0 ? "" : groundConfig.num_cpu
+                      }
                       onChange={(e) => {
                         const v = parseInt(e.target.value, 10)
                         setGroundConfig({
                           ...groundConfig,
-                          num_cpu: isNaN(v) ? 0 : Math.max(0, v),
+                          num_cpu: Number.isNaN(v) ? 0 : Math.max(0, v),
                         })
                       }}
                     />
@@ -646,7 +679,7 @@ export function ProcessingPipeline() {
                           platform: "custom",
                           agrowstitch_params: {
                             ...groundConfig.agrowstitch_params,
-                            forward_limit: isNaN(v) ? 4 : v,
+                            forward_limit: Number.isNaN(v) ? 4 : v,
                           },
                         })
                       }}
@@ -675,7 +708,9 @@ export function ProcessingPipeline() {
                       min={0.1}
                       max={10}
                       step={0.25}
-                      value={groundConfig.agrowstitch_params.max_reprojection_error}
+                      value={
+                        groundConfig.agrowstitch_params.max_reprojection_error
+                      }
                       onChange={(e) => {
                         const v = parseFloat(e.target.value)
                         setGroundConfig({
@@ -683,12 +718,13 @@ export function ProcessingPipeline() {
                           platform: "custom",
                           agrowstitch_params: {
                             ...groundConfig.agrowstitch_params,
-                            max_reprojection_error: isNaN(v) ? 1.0 : v,
+                            max_reprojection_error: Number.isNaN(v) ? 1.0 : v,
                           },
                         })
                       }}
                     />
-                    {groundConfig.agrowstitch_params.max_reprojection_error > 5 && (
+                    {groundConfig.agrowstitch_params.max_reprojection_error >
+                      5 && (
                       <p className="text-amber-600 dark:text-amber-400 text-xs">
                         ⚠ Very high tolerance — may allow poor image alignments.
                       </p>
@@ -704,7 +740,12 @@ export function ProcessingPipeline() {
                     </div>
                     <div className="grid grid-cols-4 gap-2 mt-1">
                       {(
-                        ["mask_left", "mask_right", "mask_top", "mask_bottom"] as const
+                        [
+                          "mask_left",
+                          "mask_right",
+                          "mask_top",
+                          "mask_bottom",
+                        ] as const
                       ).map((side) => (
                         <div key={side} className="space-y-1">
                           <p className="text-[11px] text-muted-foreground capitalize">
@@ -721,7 +762,7 @@ export function ProcessingPipeline() {
                                 platform: "custom",
                                 agrowstitch_params: {
                                   ...groundConfig.agrowstitch_params,
-                                  [side]: isNaN(v) ? 0 : Math.max(0, v),
+                                  [side]: Number.isNaN(v) ? 0 : Math.max(0, v),
                                 },
                               })
                             }}
@@ -756,14 +797,15 @@ export function ProcessingPipeline() {
                               platform: "custom",
                               agrowstitch_params: {
                                 ...groundConfig.agrowstitch_params,
-                                batch_size: isNaN(v) ? 10 : v,
+                                batch_size: Number.isNaN(v) ? 10 : v,
                               },
                             })
                           }}
                         />
                         {groundConfig.agrowstitch_params.batch_size > 20 && (
                           <p className="text-amber-600 dark:text-amber-400 text-xs">
-                            ⚠ Large batch size may exhaust memory on some systems.
+                            ⚠ Large batch size may exhaust memory on some
+                            systems.
                           </p>
                         )}
                       </div>
@@ -785,7 +827,7 @@ export function ProcessingPipeline() {
                               platform: "custom",
                               agrowstitch_params: {
                                 ...groundConfig.agrowstitch_params,
-                                min_inliers: isNaN(v) ? 20 : v,
+                                min_inliers: Number.isNaN(v) ? 20 : v,
                               },
                             })
                           }}
@@ -798,7 +840,9 @@ export function ProcessingPipeline() {
                 <div className="space-y-1.5 border-t pt-4">
                   <Label>
                     Additional Overrides{" "}
-                    <span className="font-normal text-muted-foreground">(optional)</span>
+                    <span className="font-normal text-muted-foreground">
+                      (optional)
+                    </span>
                     <InfoTooltip text="Raw YAML key-value pairs that override any AgRowStitch setting not exposed above. Applied last — takes precedence over everything else." />
                   </Label>
                   <Input
@@ -828,9 +872,9 @@ export function ProcessingPipeline() {
             {currentStep === 3 && (
               <>
                 <p className="text-muted-foreground text-sm">
-                  Add one or more Roboflow models for inference on your plot images.
-                  Leave empty to skip — you can configure and run inference later from
-                  the run view.
+                  Add one or more Roboflow models for inference on your plot
+                  images. Leave empty to skip — you can configure and run
+                  inference later from the run view.
                 </p>
 
                 <div className="space-y-3">
@@ -841,7 +885,9 @@ export function ProcessingPipeline() {
                     >
                       <div className="space-y-1">
                         {idx === 0 && (
-                          <Label className="text-muted-foreground text-xs">Name</Label>
+                          <Label className="text-muted-foreground text-xs">
+                            Name
+                          </Label>
                         )}
                         <Input
                           placeholder="e.g. Wheat Detection"
@@ -898,7 +944,9 @@ export function ProcessingPipeline() {
                       </div>
                       <div className="space-y-1">
                         {idx === 0 && (
-                          <Label className="text-muted-foreground text-xs">Task</Label>
+                          <Label className="text-muted-foreground text-xs">
+                            Task
+                          </Label>
                         )}
                         <Select
                           value={model.task_type}
@@ -915,7 +963,9 @@ export function ProcessingPipeline() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="detection">Detection</SelectItem>
-                            <SelectItem value="segmentation">Segmentation</SelectItem>
+                            <SelectItem value="segmentation">
+                              Segmentation
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -924,7 +974,9 @@ export function ProcessingPipeline() {
                         size="icon"
                         className="mb-0.5"
                         onClick={() =>
-                          setRoboflowModels((prev) => prev.filter((_, i) => i !== idx))
+                          setRoboflowModels((prev) =>
+                            prev.filter((_, i) => i !== idx),
+                          )
                         }
                         disabled={roboflowModels.length === 1}
                       >
@@ -994,7 +1046,9 @@ export function ProcessingPipeline() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Type:</span>
-                      <span className="font-medium capitalize">{pipelineType}</span>
+                      <span className="font-medium capitalize">
+                        {pipelineType}
+                      </span>
                     </div>
                     {pipelineType === "aerial" && (
                       <div className="flex justify-between">
@@ -1002,7 +1056,10 @@ export function ProcessingPipeline() {
                           Default quality:
                         </span>
                         <span className="font-medium">
-                          {ODM_PRESETS[aerialConfig.reconstruction_quality].label}
+                          {
+                            ODM_PRESETS[aerialConfig.reconstruction_quality]
+                              .label
+                          }
                         </span>
                       </div>
                     )}
@@ -1021,7 +1078,9 @@ export function ProcessingPipeline() {
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Stitch config:</span>
+                          <span className="text-muted-foreground">
+                            Stitch config:
+                          </span>
                           <span className="font-medium capitalize">
                             {groundConfig.platform}
                           </span>
@@ -1029,10 +1088,13 @@ export function ProcessingPipeline() {
                       </>
                     )}
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Roboflow models:</span>
+                      <span className="text-muted-foreground">
+                        Roboflow models:
+                      </span>
                       <span className="font-medium">
-                        {roboflowModels.filter((m) => m.roboflow_model_id.trim())
-                          .length > 0
+                        {roboflowModels.filter((m) =>
+                          m.roboflow_model_id.trim(),
+                        ).length > 0
                           ? roboflowModels
                               .filter((m) => m.roboflow_model_id.trim())
                               .map((m) => m.label || m.roboflow_model_id)
@@ -1041,9 +1103,13 @@ export function ProcessingPipeline() {
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Inference mode:</span>
+                      <span className="text-muted-foreground">
+                        Inference mode:
+                      </span>
                       <span className="font-medium capitalize">
-                        {inferenceMode === "local" ? `Local (${localServerUrl})` : "Cloud"}
+                        {inferenceMode === "local"
+                          ? `Local (${localServerUrl})`
+                          : "Cloud"}
                       </span>
                     </div>
                   </div>

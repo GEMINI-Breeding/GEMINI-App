@@ -1,17 +1,32 @@
+import { ArrowUpDown, Download, ListFilter, Loader2 } from "lucide-react"
 import { useMemo, useState } from "react"
-import { Loader2, ArrowUpDown, Download, ListFilter } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table"
-import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { useTraitRecordGeojson, useMultiTraitGeojson, applyFilters, formatDashboardValue } from "../hooks/useTraitData"
-import { useTraitRecords } from "../hooks/useTraitData"
 import { deduplicateKeys } from "@/features/analyze/utils/traitAliases"
+import {
+  applyFilters,
+  formatDashboardValue,
+  useMultiTraitGeojson,
+  useTraitRecordGeojson,
+  useTraitRecords,
+} from "../hooks/useTraitData"
 import type { TableConfig } from "../types"
 
 type SortDir = "asc" | "desc" | null
@@ -21,7 +36,9 @@ function formatVal(v: unknown, col?: string): string {
 }
 
 function downloadCsv(rows: string[][], filename: string) {
-  const content = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+  const content = rows
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
   const blob = new Blob([content], { type: "text/csv" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
@@ -34,7 +51,10 @@ function downloadCsv(rows: string[][], filename: string) {
 // ── Column filter dropdown ────────────────────────────────────────────────────
 
 function ColFilterDropdown({
-  col, uniqueValues, selected, onChange,
+  col,
+  uniqueValues,
+  selected,
+  onChange,
 }: {
   col: string
   uniqueValues: string[]
@@ -53,11 +73,15 @@ function ColFilterDropdown({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
-        <DropdownMenuLabel className="text-xs">{col.replace(/_/g, " ")}</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs">
+          {col.replace(/_/g, " ")}
+        </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {isActive && (
           <>
-            <DropdownMenuItem className="text-xs" onClick={() => onChange([])}>Clear filter</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs" onClick={() => onChange([])}>
+              Clear filter
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
         )}
@@ -67,7 +91,11 @@ function ColFilterDropdown({
             className="text-xs"
             checked={selected.includes(v)}
             onCheckedChange={() =>
-              onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
+              onChange(
+                selected.includes(v)
+                  ? selected.filter((x) => x !== v)
+                  : [...selected, v],
+              )
             }
             onSelect={(e) => e.preventDefault()}
           >
@@ -104,17 +132,24 @@ export function TableWidget({ config }: TableWidgetProps) {
   const isMultiSource = activeIds.length > 1
 
   // Single-source path (existing query)
-  const singleQuery = useTraitRecordGeojson(activeIds.length === 1 ? activeIds[0] : null)
+  const singleQuery = useTraitRecordGeojson(
+    activeIds.length === 1 ? activeIds[0] : null,
+  )
 
   // Multi-source path
   const multiQuery = useMultiTraitGeojson(activeIds.length > 1 ? activeIds : [])
 
-  const isLoading = activeIds.length === 1 ? singleQuery.isLoading : multiQuery.loading
+  const isLoading =
+    activeIds.length === 1 ? singleQuery.isLoading : multiQuery.loading
   const isError = activeIds.length === 1 ? singleQuery.isError : false
 
   // Build merged feature list with optional _source column
   const { cols, rows: rawFeatures } = useMemo(() => {
-    if (activeIds.length === 0) return { cols: [] as string[], rows: [] as { props: Record<string, unknown> }[] }
+    if (activeIds.length === 0)
+      return {
+        cols: [] as string[],
+        rows: [] as { props: Record<string, unknown> }[],
+      }
 
     let mergedFeatures: { props: Record<string, unknown> }[] = []
     let allKeys: string[] = []
@@ -122,9 +157,14 @@ export function TableWidget({ config }: TableWidgetProps) {
     if (activeIds.length === 1) {
       const geoData = singleQuery.data
       if (!geoData) return { cols: [], rows: [] }
-      mergedFeatures = applyFilters(geoData.geojson.features, filters)
-        .map((f) => ({ props: f.properties ?? {} }))
-      allKeys = deduplicateKeys(geoData.geojson.features.flatMap((f) => Object.keys(f.properties ?? {})))
+      mergedFeatures = applyFilters(geoData.geojson.features, filters).map(
+        (f) => ({ props: f.properties ?? {} }),
+      )
+      allKeys = deduplicateKeys(
+        geoData.geojson.features.flatMap((f) =>
+          Object.keys(f.properties ?? {}),
+        ),
+      )
     } else {
       // Multi-source: union columns, add _source
       const keySet = new Set<string>()
@@ -132,14 +172,16 @@ export function TableWidget({ config }: TableWidgetProps) {
         if (!geoData) return
         const recordId = activeIds[i]
         const record = allRecords?.find((r) => r.id === recordId)
-        const label = record ? `${record.pipeline_name} · ${record.date}` : recordId
+        const label = record
+          ? `${record.pipeline_name} · ${record.date}`
+          : recordId
         applyFilters(geoData.geojson.features, filters).forEach((f) => {
           const props = { ...(f.properties ?? {}), _source: label }
           mergedFeatures.push({ props })
           Object.keys(props).forEach((k) => keySet.add(k))
         })
         geoData.geojson.features.forEach((f) =>
-          Object.keys(f.properties ?? {}).forEach((k) => keySet.add(k))
+          Object.keys(f.properties ?? {}).forEach((k) => keySet.add(k)),
         )
       })
       // _source first, then deduplicated rest
@@ -147,18 +189,36 @@ export function TableWidget({ config }: TableWidgetProps) {
       allKeys = ["_source", ...rest]
     }
 
-    const resolvedCols = columns.length > 0
-      ? (isMultiSource ? ["_source", ...columns.filter((c) => allKeys.includes(c) && c !== "_source")] : columns.filter((c) => allKeys.includes(c)))
-      : allKeys
+    const resolvedCols =
+      columns.length > 0
+        ? isMultiSource
+          ? [
+              "_source",
+              ...columns.filter((c) => allKeys.includes(c) && c !== "_source"),
+            ]
+          : columns.filter((c) => allKeys.includes(c))
+        : allKeys
 
     return { cols: resolvedCols, rows: mergedFeatures }
-  }, [activeIds, singleQuery.data, multiQuery.data, filters, columns, allRecords, isMultiSource])
+  }, [
+    activeIds,
+    singleQuery.data,
+    multiQuery.data,
+    filters,
+    columns,
+    allRecords,
+    isMultiSource,
+  ])
 
   // Unique values per column (for column filter dropdowns)
   const uniqueByCol = useMemo(() => {
     const out: Record<string, string[]> = {}
     cols.forEach((col) => {
-      const vals = [...new Set(rawFeatures.map((r) => String(r.props[col] ?? "")).filter(Boolean))].sort()
+      const vals = [
+        ...new Set(
+          rawFeatures.map((r) => String(r.props[col] ?? "")).filter(Boolean),
+        ),
+      ].sort()
       if (vals.length > 0 && vals.length <= 200) out[col] = vals
     })
     return out
@@ -170,14 +230,22 @@ export function TableWidget({ config }: TableWidgetProps) {
     if (search.trim()) {
       const q = search.toLowerCase()
       features = features.filter((r) =>
-        cols.some((c) => String(r.props[c] ?? "").toLowerCase().includes(q))
+        cols.some((c) =>
+          String(r.props[c] ?? "")
+            .toLowerCase()
+            .includes(q),
+        ),
       )
     }
     // Column filters
-    const activeColFilters = Object.entries(colFilters).filter(([, vals]) => vals.length > 0)
+    const activeColFilters = Object.entries(colFilters).filter(
+      ([, vals]) => vals.length > 0,
+    )
     if (activeColFilters.length > 0) {
       features = features.filter((r) =>
-        activeColFilters.every(([col, vals]) => vals.includes(String(r.props[col] ?? "")))
+        activeColFilters.every(([col, vals]) =>
+          vals.includes(String(r.props[col] ?? "")),
+        ),
       )
     }
     // Sort
@@ -187,7 +255,8 @@ export function TableWidget({ config }: TableWidgetProps) {
         const bv = b.props[sortCol]
         const an = typeof av === "number" ? av : NaN
         const bn = typeof bv === "number" ? bv : NaN
-        if (!isNaN(an) && !isNaN(bn)) return sortDir === "asc" ? an - bn : bn - an
+        if (!Number.isNaN(an) && !Number.isNaN(bn))
+          return sortDir === "asc" ? an - bn : bn - an
         return sortDir === "asc"
           ? String(av ?? "").localeCompare(String(bv ?? ""))
           : String(bv ?? "").localeCompare(String(av ?? ""))
@@ -198,9 +267,14 @@ export function TableWidget({ config }: TableWidgetProps) {
   }, [rawFeatures, search, colFilters, sortCol, sortDir, cols, maxRows])
 
   function toggleSort(col: string) {
-    if (sortCol !== col) { setSortCol(col); setSortDir("asc") }
-    else if (sortDir === "asc") setSortDir("desc")
-    else { setSortCol(null); setSortDir(null) }
+    if (sortCol !== col) {
+      setSortCol(col)
+      setSortDir("asc")
+    } else if (sortDir === "asc") setSortDir("desc")
+    else {
+      setSortCol(null)
+      setSortDir(null)
+    }
   }
 
   function handleExport() {
@@ -208,7 +282,9 @@ export function TableWidget({ config }: TableWidgetProps) {
     downloadCsv([cols, ...data], `traits-export.csv`)
   }
 
-  const activeColFilterCount = Object.values(colFilters).filter((v) => v.length > 0).length
+  const activeColFilterCount = Object.values(colFilters).filter(
+    (v) => v.length > 0,
+  ).length
 
   if (activeIds.length === 0) {
     return (
@@ -226,7 +302,8 @@ export function TableWidget({ config }: TableWidgetProps) {
     )
   }
 
-  if (isError) return <p className="text-sm text-destructive">Failed to load data.</p>
+  if (isError)
+    return <p className="text-sm text-destructive">Failed to load data.</p>
 
   return (
     <div className="flex flex-col h-full gap-2">
@@ -242,10 +319,16 @@ export function TableWidget({ config }: TableWidgetProps) {
             className="text-xs text-primary hover:underline whitespace-nowrap"
             onClick={() => setColFilters({})}
           >
-            Clear {activeColFilterCount} col filter{activeColFilterCount > 1 ? "s" : ""}
+            Clear {activeColFilterCount} col filter
+            {activeColFilterCount > 1 ? "s" : ""}
           </button>
         )}
-        <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExport}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs gap-1"
+          onClick={handleExport}
+        >
           <Download className="w-3 h-3" /> CSV
         </Button>
         <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -275,7 +358,9 @@ export function TableWidget({ config }: TableWidgetProps) {
                         col={col}
                         uniqueValues={uniqueByCol[col]}
                         selected={colFilters[col] ?? []}
-                        onChange={(vals) => setColFilters((prev) => ({ ...prev, [col]: vals }))}
+                        onChange={(vals) =>
+                          setColFilters((prev) => ({ ...prev, [col]: vals }))
+                        }
                       />
                     )}
                   </span>
@@ -287,7 +372,10 @@ export function TableWidget({ config }: TableWidgetProps) {
             {rows.map((r, i) => (
               <TableRow key={i}>
                 {cols.map((col) => (
-                  <TableCell key={col} className="text-xs py-1.5 whitespace-nowrap">
+                  <TableCell
+                    key={col}
+                    className="text-xs py-1.5 whitespace-nowrap"
+                  >
                     {formatVal(r.props[col], col)}
                   </TableCell>
                 ))}

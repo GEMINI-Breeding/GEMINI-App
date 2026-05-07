@@ -7,8 +7,9 @@
  * submit a LOCATE_PLANTS job because real submission requires a working
  * Roboflow API key; the e2e environment doesn't carry one.
  */
-import { expect, test } from "../helpers/fixtures"
+
 import { fixturePath } from "../helpers/fixturePath"
+import { expect, test } from "../helpers/fixtures"
 import {
   dropFiles,
   fillUploadForm,
@@ -27,16 +28,16 @@ test.describe("R5c: InferenceTool MVP", () => {
 
   test("upload → workspace → pipeline (with model) → run → inference tool dispatches", async ({
     page,
+    runPrefix,
   }) => {
-    const stamp = Date.now()
-    const experiment = `pw-r5c-${stamp}`
+    const experiment = `${runPrefix}-r5c-exp`
     const location = "Davis"
     const population = "Cowpea"
     const date = "2022-06-27"
     const platform = "DJI"
     const sensor = "FC6310S"
-    const workspaceName = `R5c Workspace ${stamp}`
-    const pipelineName = `R5c Aerial ${stamp}`
+    const workspaceName = `${runPrefix}-r5c-workspace`
+    const pipelineName = `${runPrefix}-r5c-pipeline`
 
     // 1. Upload images so the run-scope picker has something to find.
     await navigateToUpload(page)
@@ -59,8 +60,6 @@ test.describe("R5c: InferenceTool MVP", () => {
     await page.goto("/process")
     await page.locator('[data-onboarding="process-new-workspace"]').click()
     await page.getByLabel(/workspace name/i).fill(workspaceName)
-    await page.getByRole("combobox", { name: /experiment/i }).click()
-    await page.getByRole("option", { name: experiment }).click()
     await page.getByRole("button", { name: /create workspace/i }).click()
     await page.getByText(workspaceName, { exact: true }).click()
 
@@ -77,14 +76,21 @@ test.describe("R5c: InferenceTool MVP", () => {
     await page.getByPlaceholder(/my-project\/3/i).fill("smoke/model/1")
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
-    // 4. Run + scope.
-    await page.getByRole("button", { name: /new run/i }).first().click()
-    await page.getByTestId("aerial-date-select").click()
-    await page.getByRole("option", { name: date }).click()
-    await page.getByTestId("aerial-platform-select").click()
-    await page.getByRole("option", { name: platform }).click()
-    await page.getByTestId("aerial-sensor-select").click()
-    await page.getByRole("option", { name: sensor }).click()
+    // 4. Run from upload-driven NewRunDialog.
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
+    const uploadRow = page
+      .getByTestId("upload-row")
+      .filter({ hasText: experiment })
+      .filter({ hasText: date })
+      .filter({ hasText: platform })
+      .filter({ hasText: sensor })
+      .first()
+    await expect(uploadRow).toBeVisible({ timeout: 30_000 })
+    await uploadRow.click()
+    await page.getByRole("button", { name: /create run/i }).click()
     await expect(
       page.getByText(new RegExp(`${DRONE_IMAGES.length} images? found`)),
     ).toBeVisible({ timeout: 30_000 })
@@ -97,9 +103,7 @@ test.describe("R5c: InferenceTool MVP", () => {
     expect(runId).toBeTruthy()
     // Replace "/run/{runId}" with "/tool?runId={runId}&step=inference".
     const wsId = wsCardLink.split("/process/")[1].split("/")[0]
-    await page.goto(
-      `/process/${wsId}/tool?runId=${runId}&step=inference`,
-    )
+    await page.goto(`/process/${wsId}/tool?runId=${runId}&step=inference`)
 
     await expect(
       page.getByRole("heading", { name: /^inference$/i }),

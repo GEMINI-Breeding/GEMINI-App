@@ -13,11 +13,17 @@
  *   - Past inference jobs for this run + image are listed below the
  *     viewer using runStore's step jobIds.
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, Loader2, Play } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
-import { FilesService, JobsService, type FileMetadata, type JobOutput } from "@/client"
+import {
+  type FileMetadata,
+  FilesService,
+  type JobOutput,
+  JobsService,
+} from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -35,17 +41,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { executeStep } from "@/features/process/lib/runApi"
-import {
-  type Pipeline,
-  type Run,
-  type Workspace,
-} from "@/features/process/lib/runStore"
 import type { AerialScope } from "@/features/process/lib/paths"
-import {
-  plotImagesPrefix,
-  rawImagesPrefix,
-} from "@/features/process/lib/paths"
+import { plotImagesPrefix, rawImagesPrefix } from "@/features/process/lib/paths"
+import { executeStep } from "@/features/process/lib/runApi"
+import type { Pipeline, Run } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -70,13 +69,22 @@ export interface Prediction {
 }
 
 const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#14b8a6",
+  "#6366f1",
 ]
 
 function classColour(cls: string): string {
   let hash = 0
-  for (let i = 0; i < cls.length; i += 1) hash = (hash * 31 + cls.charCodeAt(i)) | 0
+  for (let i = 0; i < cls.length; i += 1)
+    hash = (hash * 31 + cls.charCodeAt(i)) | 0
   return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
 }
 
@@ -112,7 +120,6 @@ function useAuthedBlobUrl(path: string | null): string | null {
 }
 
 interface InferenceToolProps {
-  workspace: Workspace
   pipeline: Pipeline
   run: Run
   scope: AerialScope
@@ -121,7 +128,6 @@ interface InferenceToolProps {
 }
 
 export function InferenceTool({
-  workspace,
   pipeline,
   run,
   scope,
@@ -176,7 +182,7 @@ export function InferenceTool({
   )
 
   // Reset image index when source flips so we don't try to render a stale index.
-  useEffect(() => setImageIdx(0), [sourceIdx])
+  useEffect(() => setImageIdx(0), [])
 
   // Submit + polling.
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null)
@@ -184,15 +190,22 @@ export function InferenceTool({
     mutationFn: async () => {
       if (!activeModel) throw new Error("Pick a Roboflow model first")
       if (!activeImage) throw new Error("Pick an image first")
+      const experimentId = run.uploadScope?.experimentId
+      if (!experimentId) {
+        throw new Error(
+          "This run is missing its experiment binding. Re-create it from the workspace page.",
+        )
+      }
       const imagePath = activeImage.object_name ?? ""
-      const outputPath = `${plotImagesPrefix(scope)}inference/${
-        activeImageName.replace(/\.[^.]+$/, "")
-      }-${activeModelIdx}-${Date.now()}.json`
+      const outputPath = `${plotImagesPrefix(scope)}inference/${activeImageName.replace(
+        /\.[^.]+$/,
+        "",
+      )}-${activeModelIdx}-${Date.now()}.json`
       const result = await executeStep({
         runId: run.id,
         stepKey: "inference",
         scope,
-        experimentId: workspace.experimentId,
+        experimentId,
         inference: {
           imagePath,
           apiKey: activeModel.roboflow_api_key,
@@ -212,7 +225,11 @@ export function InferenceTool({
             const j = (await JobsService.apiJobsJobIdGetJob({
               jobId,
             })) as JobOutput
-            if (j?.status === "COMPLETED" || j?.status === "FAILED" || j?.status === "CANCELLED") {
+            if (
+              j?.status === "COMPLETED" ||
+              j?.status === "FAILED" ||
+              j?.status === "CANCELLED"
+            ) {
               clearInterval(tick)
               queryClient.invalidateQueries({ queryKey: ["jobs", jobId] })
             }
@@ -250,10 +267,13 @@ export function InferenceTool({
         : 2_000,
   })
 
-  const predictionsPath = (jobQuery.data?.parameters as
-    | { output_predictions_path?: string }
-    | null
-    | undefined)?.output_predictions_path ?? null
+  const predictionsPath =
+    (
+      jobQuery.data?.parameters as
+        | { output_predictions_path?: string }
+        | null
+        | undefined
+    )?.output_predictions_path ?? null
 
   // Download predictions JSON once the job is COMPLETED and we know the path.
   const [predictions, setPredictions] = useState<Prediction[] | null>(null)
@@ -282,8 +302,7 @@ export function InferenceTool({
 
   const [confThreshold, setConfThreshold] = useState(0.5)
   const filteredPredictions = useMemo(
-    () =>
-      (predictions ?? []).filter((p) => p.confidence >= confThreshold),
+    () => (predictions ?? []).filter((p) => p.confidence >= confThreshold),
     [predictions, confThreshold],
   )
 
@@ -291,7 +310,9 @@ export function InferenceTool({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">No Roboflow models configured</CardTitle>
+          <CardTitle className="text-base">
+            No Roboflow models configured
+          </CardTitle>
           <CardDescription>
             Open the pipeline settings (Step 3 of the wizard) and add at least
             one Roboflow model entry. Then return here to run inference.

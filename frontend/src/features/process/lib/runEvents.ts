@@ -14,8 +14,8 @@
  */
 import {
   closeJob,
-  subscribe as subscribeJob,
   type JobProgressEvent,
+  subscribe as subscribeJob,
 } from "@/lib/wsManager"
 
 export interface RunProgressEvent {
@@ -64,10 +64,17 @@ export function subscribeJobAsRunEvent(
     const stage =
       (evt.progress_detail as { stage?: string } | null | undefined)?.stage ??
       undefined
+    const isFailedTerminal = evt.terminal && evt.status === "FAILED"
+    // On terminal-FAILED frames, the actual exception is in error_message;
+    // the last-seen stage label ("downloading") is misleading. Prefer
+    // error_message there. On all other frames, stage is the right hint.
+    const message = isFailedTerminal
+      ? (evt.error_message ?? stage ?? undefined)
+      : (stage ?? evt.error_message ?? undefined)
     onEvent({
       event: mapStatus(evt),
       step,
-      message: stage ?? evt.error_message ?? undefined,
+      message,
       progress: typeof evt.progress === "number" ? evt.progress : undefined,
       timestamp: now,
       terminal: Boolean(evt.terminal),

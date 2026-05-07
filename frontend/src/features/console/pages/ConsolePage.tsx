@@ -1,8 +1,8 @@
+import { invoke } from "@tauri-apps/api/core"
+import { Check, Copy } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
-import { Copy, Check } from "lucide-react"
-import { invoke } from "@tauri-apps/api/core"
 
 interface LogLine {
   level: string
@@ -24,7 +24,9 @@ export function ConsolePage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [filter, setFilter] = useState("")
   const [copied, setCopied] = useState(false)
-  const [status, setStatus] = useState<"connecting" | "ok" | "error">("connecting")
+  const [status, setStatus] = useState<"connecting" | "ok" | "error">(
+    "connecting",
+  )
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -77,7 +79,7 @@ export function ConsolePage() {
     if (autoScroll) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" })
     }
-  }, [lines, autoScroll])
+  }, [autoScroll])
 
   const handleScroll = () => {
     const el = containerRef.current
@@ -87,7 +89,9 @@ export function ConsolePage() {
   }
 
   const filtered = filter
-    ? lines.filter((l) => l.message.toLowerCase().includes(filter.toLowerCase()))
+    ? lines.filter((l) =>
+        l.message.toLowerCase().includes(filter.toLowerCase()),
+      )
     : lines
 
   const handleCopy = () => {
@@ -105,14 +109,25 @@ export function ConsolePage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Console</h1>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${
-            status === "ok" ? "bg-green-900/40 text-green-400" :
-            status === "error" ? "bg-red-900/40 text-red-400" :
-            "bg-zinc-800 text-zinc-400"
-          }`}>
-            {status === "ok" ? "connected" : status === "error" ? "unreachable" : "connecting…"}
+          <span
+            className={`text-xs px-2 py-0.5 rounded-full font-mono ${
+              status === "ok"
+                ? "bg-green-900/40 text-green-400"
+                : status === "error"
+                  ? "bg-red-900/40 text-red-400"
+                  : "bg-zinc-800 text-zinc-400"
+            }`}
+          >
+            {status === "ok"
+              ? "connected"
+              : status === "error"
+                ? "unreachable"
+                : "connecting…"}
           </span>
-          <span className="text-xs text-zinc-500 font-mono truncate max-w-xs" title={backendUrl}>
+          <span
+            className="text-xs text-zinc-500 font-mono truncate max-w-xs"
+            title={backendUrl}
+          >
             {backendUrl}
           </span>
         </div>
@@ -131,7 +146,11 @@ export function ConsolePage() {
             onClick={handleCopy}
             disabled={filtered.length === 0}
           >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? (
+              <Check className="h-3 w-3" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
             {copied ? "Copied" : "Copy"}
           </Button>
           <Button
@@ -160,14 +179,21 @@ export function ConsolePage() {
       >
         {status === "error" && sidecarLog ? (
           <div>
-            <p className="text-yellow-500 italic mb-2">Backend unreachable — showing sidecar startup log:</p>
-            <pre className="text-zinc-300 whitespace-pre-wrap break-all">{sidecarLog}</pre>
+            <p className="text-yellow-500 italic mb-2">
+              Backend unreachable — showing sidecar startup log:
+            </p>
+            <pre className="text-zinc-300 whitespace-pre-wrap break-all">
+              {sidecarLog}
+            </pre>
           </div>
         ) : filtered.length === 0 ? (
           <p className="text-zinc-500 italic">No log output yet…</p>
         ) : (
           filtered.map((line, i) => (
-            <div key={i} className={`leading-5 whitespace-pre-wrap break-all ${LEVEL_COLOR[line.level] ?? "text-zinc-300"}`}>
+            <div
+              key={i}
+              className={`leading-5 whitespace-pre-wrap break-all ${LEVEL_COLOR[line.level] ?? "text-zinc-300"}`}
+            >
               {line.message}
             </div>
           ))

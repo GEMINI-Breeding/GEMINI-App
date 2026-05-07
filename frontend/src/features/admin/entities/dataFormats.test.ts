@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { DataFormatsService, type DataFormatInput } from "@/client"
+import { type DataFormatInput, DataFormatsService } from "@/client"
 
 import { dataFormatsConfig } from "./dataFormats"
 
@@ -42,7 +42,8 @@ describe("dataFormatsConfig", () => {
       .mockResolvedValue({ id: 1, data_format_name: "X" } as never)
     const input: DataFormatInput = {
       data_format_name: "X",
-      data_format_info: '{"compression":"LZW"}' as unknown as DataFormatInput["data_format_info"],
+      data_format_info:
+        '{"compression":"LZW"}' as unknown as DataFormatInput["data_format_info"],
     }
     await dataFormatsConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

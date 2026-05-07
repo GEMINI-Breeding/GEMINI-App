@@ -4,14 +4,19 @@
  */
 import { describe, expect, it, vi } from "vitest"
 
-import { resolveOrCreateEntity, type EntityResolver } from "./uploadScopeHelpers"
+import {
+  type EntityResolver,
+  resolveOrCreateEntity,
+} from "./uploadScopeHelpers"
 
 interface Row {
   id: string | number | null
   name: string
 }
 
-function makeResolver(overrides: Partial<EntityResolver<Row>> = {}): EntityResolver<Row> {
+function makeResolver(
+  overrides: Partial<EntityResolver<Row>> = {},
+): EntityResolver<Row> {
   return {
     entityLabel: "site",
     search: vi.fn().mockResolvedValue([]),
@@ -85,9 +90,9 @@ describe("resolveOrCreateEntity", () => {
 
   it("rejects 'none' with a label-aware error", async () => {
     const r = makeResolver({ entityLabel: "experiment" })
-    await expect(
-      resolveOrCreateEntity({ kind: "none" }, r),
-    ).rejects.toThrow(/experiment is required/i)
+    await expect(resolveOrCreateEntity({ kind: "none" }, r)).rejects.toThrow(
+      /experiment is required/i,
+    )
     expect(r.search).not.toHaveBeenCalled()
     expect(r.create).not.toHaveBeenCalled()
   })

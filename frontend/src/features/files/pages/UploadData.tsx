@@ -15,8 +15,19 @@ import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
 import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
+import {
+  type ImportDataKind,
+  ImportWizardDialog,
+} from "../components/ImportWizardDialog"
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
+import { UploadZone } from "../components/UploadZone"
+import { useResolveScope } from "../hooks/useUploadScope"
+
+const WIZARD_DATA_KINDS: Record<string, ImportDataKind> = {
+  "Trait Data": "trait",
+  "Genomic Data": "genomic",
+}
 
 function apiUrl(path: string): string {
   const base = (OpenAPI.BASE ?? "").replace(/\/$/, "")
@@ -56,6 +67,77 @@ export function UploadData() {
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null)
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null)
   const [refDataFile, setRefDataFile] = useState<File | null>(null)
+  const [wizardFiles, setWizardFiles] = useState<File[] | null>(null)
+  const [wizardScopeError, setWizardScopeError] = useState<string | null>(null)
+
+  const wizardKind = selectedFileType
+    ? WIZARD_DATA_KINDS[selectedFileType]
+    : undefined
+
+  /**
+   * Both gates required for any upload affordance on this page:
+   *   1. A data type must be selected (so the path builder, dropzone
+   *      hint, and wizard kind are all defined).
+   *   2. An experiment must be picked or named (every entity in this
+   *      app is scoped to an experiment; uploads with no experiment
+   *      get orphaned in MinIO and the trait/genomic flows produce
+   *      records that can never be reached from the UI).
+   * The gate is enforced at the dropzone, not at form submit, so the
+   * user can't even stage files into an undefined target.
+   */
+  const expChoice = scope.experiment
+  const hasExperiment =
+    !!expChoice &&
+    (expChoice.kind === "existing" ||
+      (expChoice.kind === "new" && expChoice.name.trim().length > 0))
+  const uploadDisabled = !selectedFileType || !hasExperiment
+  const uploadDisabledReason = !selectedFileType
+    ? "Select a data type to continue."
+    : !hasExperiment
+      ? "Select or create an experiment to continue."
+      : undefined
+
+  const { resolveScope } = useResolveScope()
+
+  /**
+   * On wizard-dropzone file drop, materialise any "create new" entries
+   * in `scope` (in particular the experiment) so the wizard always
+   * sees a real DB-backed `experimentId`. Without this, dropping a
+   * file with an unsaved "+ Create new" experiment choice opens the
+   * wizard with `experimentId === null`, the create-study POST gets
+   * `experiment_name="GEMINI"` but `Experiment.get(name="GEMINI")`
+   * returns None, and the study is created with no association — the
+   * detail page then says "No experiments associated".
+   */
+  const handleWizardFilesDropped = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return
+      try {
+        const resolved = await resolveScope({
+          experiment: scope.experiment,
+        })
+        if (resolved.experiment) {
+          setScope((prev) => ({
+            ...prev,
+            experiment: {
+              kind: "existing",
+              id: resolved.experiment!.id,
+              name: resolved.experiment!.name,
+            },
+          }))
+        }
+        setWizardScopeError(null)
+        setWizardFiles(files)
+      } catch (err) {
+        setWizardScopeError(
+          err instanceof Error
+            ? err.message
+            : "Failed to resolve experiment before opening wizard.",
+        )
+      }
+    },
+    [resolveScope, scope.experiment],
+  )
 
   const handleValueChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }))
@@ -86,7 +168,8 @@ export function UploadData() {
       const next = { ...prev, [field]: name }
       if (field === "experiment") {
         // Wipe the dependent fields' mirrored names too.
-        for (const k of ["location", "population", "platform", "sensor"]) delete next[k]
+        for (const k of ["location", "population", "platform", "sensor"])
+          delete next[k]
       }
       return next
     })
@@ -158,6 +241,7 @@ export function UploadData() {
                 setSelectedFileType(t)
                 setRgbTifPath(null)
                 setDemTifPath(null)
+                setWizardFiles(null)
               }}
             />
             <DataStructureForm
@@ -179,6 +263,8 @@ export function UploadData() {
                   onFilesSelected={handleFilesSelected}
                   onUploadComplete={handleRgbUploadComplete}
                   label="RGB Orthomosaic (.tif) — required"
+                  disabled={uploadDisabled}
+                  disabledReason={uploadDisabledReason}
                 />
                 {rgbTifPath && (
                   <GeoTiffValidationCard
@@ -194,6 +280,8 @@ export function UploadData() {
                   scope={scope}
                   onUploadComplete={handleDemUploadComplete}
                   label="DEM (.tif) — optional (required for plant height)"
+                  disabled={uploadDisabled}
+                  disabledReason={uploadDisabledReason}
                 />
                 {demTifPath && (
                   <GeoTiffValidationCard
@@ -203,6 +291,25 @@ export function UploadData() {
                 )}
               </div>
             </div>
+          ) : wizardKind ? (
+            <div className="space-y-3" data-testid="import-wizard-dropzone">
+              <p className="text-muted-foreground text-sm">
+                Drop a file to launch the import wizard.
+              </p>
+              <UploadZone
+                onFilesAdded={handleWizardFilesDropped}
+                disabled={uploadDisabled}
+                disabledReason={uploadDisabledReason}
+              />
+              {wizardScopeError && (
+                <p
+                  className="text-destructive text-sm"
+                  data-testid="wizard-scope-error"
+                >
+                  {wizardScopeError}
+                </p>
+              )}
+            </div>
           ) : (
             <UploadList
               dataType={selectedFileType}
@@ -210,6 +317,8 @@ export function UploadData() {
               scope={scope}
               onFilesSelected={handleFilesSelected}
               onUploadComplete={handleUploadComplete}
+              disabled={uploadDisabled}
+              disabledReason={uploadDisabledReason}
             />
           )}
         </div>
@@ -221,6 +330,17 @@ export function UploadData() {
           file={refDataFile}
           formValues={formValues}
           onClose={() => setRefDataFile(null)}
+        />
+      )}
+
+      {wizardKind && wizardFiles && (
+        <ImportWizardDialog
+          open
+          dataKind={wizardKind}
+          files={wizardFiles}
+          scope={scope}
+          formValues={formValues}
+          onClose={() => setWizardFiles(null)}
         />
       )}
 
@@ -252,8 +372,9 @@ export function UploadData() {
             <DialogDescription asChild>
               <div className="text-muted-foreground space-y-3 text-sm">
                 <p>
-                  Extracting <strong className="text-foreground">.bin files</strong>{" "}
-                  on Windows requires Docker Desktop to run the extraction tool
+                  Extracting{" "}
+                  <strong className="text-foreground">.bin files</strong> on
+                  Windows requires Docker Desktop to run the extraction tool
                   inside a Linux container.
                 </p>
                 {dockerErrorMsg?.toLowerCase().includes("not running") ||

@@ -16,10 +16,11 @@
  * tuples that exist. Sets are returned ordered, deduped, and ready to
  * feed a Select component.
  */
-import { useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
 
-import { FilesService, type FileMetadata } from "@/client"
+import { useQuery } from "@tanstack/react-query"
+import { useMemo } from "react"
+
+import { type FileMetadata, FilesService } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"
@@ -69,11 +70,7 @@ function parseRawObjectName(
   // ["Raw", year, exp, site, pop, date, platform, sensor, ..., file]
   if (parts.length < 9) return null
   const [, year, exp, site, pop, date, platform, sensor] = parts
-  if (
-    exp !== experiment ||
-    site !== location ||
-    pop !== population
-  ) {
+  if (exp !== experiment || site !== location || pop !== population) {
     return null
   }
   if (!year || !date || !platform || !sensor) return null
@@ -102,7 +99,13 @@ export function useAvailableScopeOptions(
   const complete = isCompleteRoot(root)
 
   const listing = useQuery<FileMetadata[], Error>({
-    queryKey: ["files", "list-raw-tree", root.experiment, root.location, root.population],
+    queryKey: [
+      "files",
+      "list-raw-tree",
+      root.experiment,
+      root.location,
+      root.population,
+    ],
     queryFn: async () => {
       if (!complete) return []
       try {
@@ -176,5 +179,14 @@ export function useAvailableScopeOptions(
       scopeIncomplete: false,
       empty: matchesUnderScope === 0,
     }
-  }, [complete, listing.data, listing.isLoading, root.experiment, root.location, root.population, pickedDate, pickedPlatform])
+  }, [
+    complete,
+    listing.data,
+    listing.isLoading,
+    root.experiment,
+    root.location,
+    root.population,
+    pickedDate,
+    pickedPlatform,
+  ])
 }

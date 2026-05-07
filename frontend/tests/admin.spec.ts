@@ -58,7 +58,9 @@ async function dismissToasts(page: Page): Promise<void> {
     // pointer-events:none in our config but sets data-mounted on a child
     // section that can still wrap a hit area.
     document
-      .querySelectorAll<HTMLElement>("[data-sonner-toaster], section[aria-label*='Notifications' i]")
+      .querySelectorAll<HTMLElement>(
+        "[data-sonner-toaster], section[aria-label*='Notifications' i]",
+      )
       .forEach((el) => {
         el.style.pointerEvents = "none"
       })
@@ -71,7 +73,11 @@ async function dismissToasts(page: Page): Promise<void> {
   })
 }
 
-async function logIn(page: Page, email: string, password: string): Promise<void> {
+async function logIn(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<void> {
   await page.goto("/login")
   await page.getByTestId("email-input").fill(email)
   await page.getByTestId("password-input").fill(password)
@@ -86,7 +92,9 @@ async function logOutViaMenu(page: Page): Promise<void> {
   // menuitem inside it. Same pattern as deleteUserViaRow — open via
   // pointerdown, fire the menuitem via click event so we don't wait
   // for the CDP ack that Radix's focus shift never delivers.
-  await page.getByTestId("user-menu").dispatchEvent("pointerdown", { button: 0 })
+  await page
+    .getByTestId("user-menu")
+    .dispatchEvent("pointerdown", { button: 0 })
   await page.getByTestId("logout-menu-item").dispatchEvent("click")
   await page.waitForURL("/login")
 }
@@ -123,9 +131,10 @@ async function createUserViaAdminDialog(
   // otherwise its close animation + Radix's body-style cleanup races
   // with the next click and stalls Playwright. The role="dialog" /
   // data-state="open" content is the canonical "modal still up" signal.
-  await expect(
-    page.locator('[role="dialog"][data-state="open"]'),
-  ).toHaveCount(0, { timeout: 10_000 })
+  await expect(page.locator('[role="dialog"][data-state="open"]')).toHaveCount(
+    0,
+    { timeout: 10_000 },
+  )
   // Then assert the created row exists.
   await expect(page.getByText(email).first()).toBeVisible()
 }
@@ -158,9 +167,7 @@ async function deleteUserViaRow(page: Page, email: string): Promise<void> {
   await page
     .getByRole("menuitem", { name: /delete user/i })
     .dispatchEvent("click")
-  await page
-    .getByRole("button", { name: "Delete" })
-    .dispatchEvent("click")
+  await page.getByRole("button", { name: "Delete" }).dispatchEvent("click")
   await expect(page.getByText(email)).not.toBeVisible()
 }
 

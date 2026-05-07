@@ -47,9 +47,12 @@ describe("useReferenceDatasets", () => {
 
   it("fetches the datasets list", async () => {
     fetchMock.mockReturnValueOnce(okJson([{ id: "d1", name: "Test" }]))
-    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
-      wrapper: makeWrapper(),
-    })
+    const { result } = renderHook(
+      () => useReferenceDatasets({ enabled: true }),
+      {
+        wrapper: makeWrapper(),
+      },
+    )
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([{ id: "d1", name: "Test" }])
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/reference-data/")
@@ -58,9 +61,12 @@ describe("useReferenceDatasets", () => {
   it("passes the Authorization header from localStorage", async () => {
     localStorage.setItem("access_token", "tok-xyz")
     fetchMock.mockReturnValueOnce(okJson([]))
-    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
-      wrapper: makeWrapper(),
-    })
+    const { result } = renderHook(
+      () => useReferenceDatasets({ enabled: true }),
+      {
+        wrapper: makeWrapper(),
+      },
+    )
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
       Authorization: "Bearer tok-xyz",
@@ -70,18 +76,24 @@ describe("useReferenceDatasets", () => {
   it("surfaces the server-provided detail on error", async () => {
     // Hook's custom retry() retries non-404s up to 2×; return 404 so we fail fast.
     fetchMock.mockReturnValue(errJson(404, "boom"))
-    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
-      wrapper: makeWrapper(),
-    })
+    const { result } = renderHook(
+      () => useReferenceDatasets({ enabled: true }),
+      {
+        wrapper: makeWrapper(),
+      },
+    )
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect((result.current.error as Error).message).toBe("boom")
   })
 
   it("falls back to 'HTTP <status>' when the error body has no detail", async () => {
     fetchMock.mockReturnValue(errJson(404))
-    const { result } = renderHook(() => useReferenceDatasets({ enabled: true }), {
-      wrapper: makeWrapper(),
-    })
+    const { result } = renderHook(
+      () => useReferenceDatasets({ enabled: true }),
+      {
+        wrapper: makeWrapper(),
+      },
+    )
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect((result.current.error as Error).message).toBe("HTTP 404")
   })
@@ -124,7 +136,9 @@ describe("useReferencePlots", () => {
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([{ id: "p1", plot_id: "A1" }])
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/reference-data/ds1/plots-all")
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/reference-data/ds1/plots-all",
+    )
   })
 })
 
@@ -152,7 +166,13 @@ describe("useReferenceAggregate", () => {
 
   it("URL-encodes the metric and forwards the aggregation param", async () => {
     fetchMock.mockReturnValueOnce(
-      okJson({ dataset_id: "ds1", metric: "plant height", aggregation: "max", value: 2, count: 10 }),
+      okJson({
+        dataset_id: "ds1",
+        metric: "plant height",
+        aggregation: "max",
+        value: 2,
+        count: 10,
+      }),
     )
     renderHook(() => useReferenceAggregate("ds1", "plant height", "max"), {
       wrapper: makeWrapper(),

@@ -6,8 +6,8 @@
  * the onboarding spotlight.
  */
 
-import { BookOpen, ExternalLink, PlayCircle, X } from "lucide-react"
 import { useLocation } from "@tanstack/react-router"
+import { BookOpen, ExternalLink, PlayCircle, X } from "lucide-react"
 import { openUrl } from "@/lib/platform"
 import { getTourSection } from "./tourSteps"
 
@@ -85,17 +85,17 @@ interface HelpSidebarProps {
 export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
   const location = useLocation()
   const section = getSectionForPath(location.pathname)
-  const tourLabel = getTourSection(location.pathname, (location.search as any)?.step).label
+  const tourLabel = getTourSection(
+    location.pathname,
+    (location.search as any)?.step,
+  ).label
 
   if (!open) return null
 
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40" onClick={onClose} />
 
       {/* Panel */}
       <aside
@@ -124,7 +124,10 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
             <h2 className="font-semibold text-sm mb-3">{section.title}</h2>
             <ul className="space-y-2">
               {section.bullets.map((bullet) => (
-                <li key={bullet} className="flex items-start gap-2 text-xs text-muted-foreground">
+                <li
+                  key={bullet}
+                  className="flex items-start gap-2 text-xs text-muted-foreground"
+                >
                   <span className="mt-1 shrink-0 h-1.5 w-1.5 rounded-full bg-primary/60" />
                   {bullet}
                 </li>
@@ -170,7 +173,10 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
         <div className="border-t px-4 py-4">
           <button
             type="button"
-            onClick={() => { onClose(); onStartTour() }}
+            onClick={() => {
+              onClose()
+              onStartTour()
+            }}
             className="flex items-center justify-center gap-2 w-full rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted transition-colors"
           >
             <PlayCircle className="h-4 w-4 text-primary" />

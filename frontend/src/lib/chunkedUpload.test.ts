@@ -19,17 +19,21 @@ type FetchCall = {
   body: FormData | string | undefined
 }
 
-function mockFetch(impl: (call: FetchCall) => Promise<Response> | Response): FetchCall[] {
+function mockFetch(
+  impl: (call: FetchCall) => Promise<Response> | Response,
+): FetchCall[] {
   const calls: FetchCall[] = []
-  global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const call: FetchCall = {
-      url: String(input),
-      method: init?.method ?? "GET",
-      body: init?.body as FormData | string | undefined,
-    }
-    calls.push(call)
-    return impl(call)
-  }) as unknown as typeof fetch
+  global.fetch = vi.fn(
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const call: FetchCall = {
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body as FormData | string | undefined,
+      }
+      calls.push(call)
+      return impl(call)
+    },
+  ) as unknown as typeof fetch
   return calls
 }
 
@@ -52,7 +56,11 @@ describe("uploadFileChunked", () => {
     const calls = mockFetch((c) => {
       if (c.url.includes("check_uploaded_chunks")) {
         return new Response(
-          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 3, complete: false }),
+          JSON.stringify({
+            uploaded_part_numbers: [],
+            total_chunks: 3,
+            complete: false,
+          }),
           { status: 200 },
         )
       }
@@ -90,7 +98,11 @@ describe("uploadFileChunked", () => {
       if (c.url.includes("check_uploaded_chunks")) {
         // Server already has parts 1 and 3 (1-indexed). Only part 2 (chunk_index 1) should be re-sent.
         return new Response(
-          JSON.stringify({ uploaded_part_numbers: [1, 3], total_chunks: 3, complete: false }),
+          JSON.stringify({
+            uploaded_part_numbers: [1, 3],
+            total_chunks: 3,
+            complete: false,
+          }),
           { status: 200 },
         )
       }
@@ -117,7 +129,11 @@ describe("uploadFileChunked", () => {
     const calls = mockFetch(async (c) => {
       if (c.url.includes("check_uploaded_chunks")) {
         return new Response(
-          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 4, complete: false }),
+          JSON.stringify({
+            uploaded_part_numbers: [],
+            total_chunks: 4,
+            complete: false,
+          }),
           { status: 200 },
         )
       }

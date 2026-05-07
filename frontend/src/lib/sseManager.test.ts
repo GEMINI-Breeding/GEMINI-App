@@ -37,7 +37,6 @@ class FakeEventSource {
   addEventListener() {}
   removeEventListener() {}
 }
-
 // The module under test reads `EventSource` off the global at call time.
 ;(globalThis as unknown as { EventSource: unknown }).EventSource =
   FakeEventSource as unknown
@@ -75,7 +74,9 @@ describe("sseManager", () => {
     const unsub = subscribe("run-1", fn)
 
     expect(instances).toHaveLength(1)
-    expect(latest().url).toContain("/api/v1/pipeline-runs/run-1/progress?offset=0")
+    expect(latest().url).toContain(
+      "/api/v1/pipeline-runs/run-1/progress?offset=0",
+    )
 
     emit({ event: "progress", progress: 10 })
     emit({ event: "progress", progress: 20 })
@@ -138,9 +139,14 @@ describe("sseManager", () => {
   it("onerror with active listeners retries after 2s and bumps diagnostics", async () => {
     const { subscribe } = await loadFresh()
     subscribe("run-1", vi.fn())
-    const diag = (window as unknown as {
-      __gemiSseDiagnostics?: { errorCount: number; lastErrorTs: number | null }
-    }).__gemiSseDiagnostics
+    const diag = (
+      window as unknown as {
+        __gemiSseDiagnostics?: {
+          errorCount: number
+          lastErrorTs: number | null
+        }
+      }
+    ).__gemiSseDiagnostics
     expect(diag?.errorCount).toBe(0)
 
     latest().onerror?.(new Event("error"))

@@ -11,6 +11,8 @@ CLAUDE.md
 task_plan.md
 findings.md
 progress.md
+orphan-audit-report.md
+orphan-cleanup-handoff.md
 .claude/
 
 # Frontend test coverage output

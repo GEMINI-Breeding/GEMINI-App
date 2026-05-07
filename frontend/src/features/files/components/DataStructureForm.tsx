@@ -4,8 +4,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { dataTypes } from "@/config/dataTypes"
 import {
-  EntitySelectField,
   type EntityChoice,
+  EntitySelectField,
 } from "@/features/files/components/EntitySelectField"
 import { useScopeOptions } from "@/features/files/hooks/useUploadScope"
 
@@ -132,9 +132,7 @@ export function DataStructureForm({
               required
               disabled={disabled}
               description={
-                disabled
-                  ? "Pick or create an experiment first."
-                  : undefined
+                disabled ? "Pick or create an experiment first." : undefined
               }
             />
           )

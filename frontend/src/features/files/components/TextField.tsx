@@ -1,12 +1,12 @@
 interface TextFieldProps {
-  id: string;
-  label: string;
-  type?: "text" | "date";
-  placeholder?: string;
-  value?: string;
-  onChange?: (value: string) => void;
-  disabled?: boolean;
-  suggestions?: string[];
+  id: string
+  label: string
+  type?: "text" | "date"
+  placeholder?: string
+  value?: string
+  onChange?: (value: string) => void
+  disabled?: boolean
+  suggestions?: string[]
 }
 
 export function TextField({
@@ -19,7 +19,7 @@ export function TextField({
   disabled,
   suggestions,
 }: TextFieldProps) {
-  const listId = suggestions?.length ? `${id}-suggestions` : undefined;
+  const listId = suggestions?.length ? `${id}-suggestions` : undefined
 
   return (
     <div>
@@ -44,5 +44,5 @@ export function TextField({
         </datalist>
       )}
     </div>
-  );
+  )
 }

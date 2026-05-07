@@ -3,11 +3,11 @@ import { renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { FilesService, type FileMetadata } from "@/client"
+import { type FileMetadata, FilesService } from "@/client"
 
 import {
-  useAvailableScopeOptions,
   type ScopeRoot,
+  useAvailableScopeOptions,
 } from "./useAvailableScopeOptions"
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -90,7 +90,9 @@ describe("useAvailableScopeOptions", () => {
       fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/Images/a.jpg"),
       fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Amiga/RGB/Images/b.jpg"),
       // Different date — platforms should not include this row's "Phantom".
-      fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-03-15/Phantom/RGB/Images/c.jpg"),
+      fileObj(
+        "Raw/2026/GEMINI/Davis/Cowpea/2026-03-15/Phantom/RGB/Images/c.jpg",
+      ),
     ] as never)
     const { result } = renderHook(
       () => useAvailableScopeOptions(ROOT, "2026-04-28", null),
@@ -105,9 +107,13 @@ describe("useAvailableScopeOptions", () => {
   it("yields sensors when both date and platform are picked", async () => {
     vi.spyOn(FilesService, "apiFilesListFilePathListFiles").mockResolvedValue([
       fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/Images/a.jpg"),
-      fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/Thermal/Images/b.jpg"),
+      fileObj(
+        "Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/Thermal/Images/b.jpg",
+      ),
       // Different platform — sensors should not include this row's "FLIR".
-      fileObj("Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Amiga/FLIR/Images/c.jpg"),
+      fileObj(
+        "Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Amiga/FLIR/Images/c.jpg",
+      ),
     ] as never)
     const { result } = renderHook(
       () => useAvailableScopeOptions(ROOT, "2026-04-28", "Drone"),

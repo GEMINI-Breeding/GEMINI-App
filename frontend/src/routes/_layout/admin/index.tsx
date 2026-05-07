@@ -7,12 +7,12 @@
  * unchanged.
  */
 import { useSuspenseQuery } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
 import {
   getCoreRowModel,
   getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
 
 import { type UserOutput, UsersService } from "@/client"
@@ -24,7 +24,8 @@ import useAuth from "@/hooks/useAuth"
 
 function getUsersQueryOptions() {
   return {
-    queryFn: () => UsersService.apiUsersAllGetAllUsers({ limit: 100, offset: 0 }),
+    queryFn: () =>
+      UsersService.apiUsersAllGetAllUsers({ limit: 100, offset: 0 }),
     queryKey: ["users"],
   }
 }

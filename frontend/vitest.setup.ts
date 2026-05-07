@@ -3,8 +3,10 @@ import { vi } from "vitest"
 
 // Keep OpenAPI.BASE empty so generated client never contacts a real backend.
 // Must be set before any src/ module import that reads main.tsx-equivalent setup.
-;(globalThis as unknown as { window: Window }).window = globalThis.window ?? ({} as Window)
-;(window as unknown as { __GEMI_BACKEND_URL__: string }).__GEMI_BACKEND_URL__ = ""
+;(globalThis as unknown as { window: Window }).window =
+  globalThis.window ?? ({} as Window)
+;(window as unknown as { __GEMI_BACKEND_URL__: string }).__GEMI_BACKEND_URL__ =
+  ""
 
 // matchMedia — Radix + next-themes probe this on mount.
 if (!window.matchMedia) {
@@ -30,7 +32,8 @@ class ResizeObserverShim {
   disconnect() {}
 }
 if (!globalThis.ResizeObserver) {
-  globalThis.ResizeObserver = ResizeObserverShim as unknown as typeof ResizeObserver
+  globalThis.ResizeObserver =
+    ResizeObserverShim as unknown as typeof ResizeObserver
 }
 
 // Minimal EventSource stub — tests that exercise SSE override per-test.

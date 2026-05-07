@@ -76,7 +76,11 @@ describe("runStore", () => {
     it("updateWorkspace patches in place", () => {
       let id = ""
       act(() => {
-        id = createWorkspace({ name: "old", experimentId: "e", defaultScope: scope }).id
+        id = createWorkspace({
+          name: "old",
+          experimentId: "e",
+          defaultScope: scope,
+        }).id
         updateWorkspace(id, { name: "new", description: "d" })
       })
       const { result } = renderHook(() => useWorkspace(id))
@@ -88,7 +92,11 @@ describe("runStore", () => {
       let wsId = ""
       let pipelineId = ""
       act(() => {
-        wsId = createWorkspace({ name: "ws", experimentId: "e", defaultScope: scope }).id
+        wsId = createWorkspace({
+          name: "ws",
+          experimentId: "e",
+          defaultScope: scope,
+        }).id
         pipelineId = createPipeline({
           workspaceId: wsId,
           name: "p",
@@ -113,7 +121,11 @@ describe("runStore", () => {
     it("createPipeline links to a workspace", () => {
       let wsId = ""
       act(() => {
-        wsId = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope }).id
+        wsId = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        }).id
         createPipeline({
           workspaceId: wsId,
           name: "Aerial pipeline",
@@ -136,7 +148,11 @@ describe("runStore", () => {
       let wsId = ""
       let pId = ""
       act(() => {
-        wsId = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope }).id
+        wsId = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        }).id
         pId = createPipeline({
           workspaceId: wsId,
           name: "p",
@@ -154,8 +170,17 @@ describe("runStore", () => {
     it("deletePipeline drops associated runs", () => {
       let pId = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        pId = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} }).id
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        pId = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        }).id
         createRun({ pipelineId: pId, scope })
         deletePipeline(pId)
       })
@@ -169,9 +194,18 @@ describe("runStore", () => {
       let wsId = ""
       let runId = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
         wsId = w.id
-        const p = createPipeline({ workspaceId: wsId, name: "p", type: "aerial", params: {} })
+        const p = createPipeline({
+          workspaceId: wsId,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runId = createRun({ pipelineId: p.id, scope }).id
       })
       const { result } = renderHook(() => useRun(runId))
@@ -187,10 +221,22 @@ describe("runStore", () => {
     it("setStepState seeds a step that didn't exist yet", () => {
       let runId = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        const p = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runId = createRun({ pipelineId: p.id, scope }).id
-        setStepState(runId, "orthomosaic", { status: "running", jobIds: ["job-1"] })
+        setStepState(runId, "orthomosaic", {
+          status: "running",
+          jobIds: ["job-1"],
+        })
       })
       const r = getRun(runId)
       expect(r?.steps.orthomosaic?.status).toBe("running")
@@ -200,8 +246,17 @@ describe("runStore", () => {
     it("appendStepJobId is idempotent and flips pending → running", () => {
       let runId = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        const p = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runId = createRun({ pipelineId: p.id, scope }).id
         appendStepJobId(runId, "orthomosaic", "job-1")
         appendStepJobId(runId, "orthomosaic", "job-1") // dedupe
@@ -213,12 +268,51 @@ describe("runStore", () => {
       expect(r?.steps.orthomosaic?.startedAt).toBeTruthy()
     })
 
+    it("appendStepJobId on a failed step resets it to running for retry", () => {
+      let runId = ""
+      act(() => {
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
+        runId = createRun({ pipelineId: p.id, scope }).id
+        appendStepJobId(runId, "trait_extraction", "job-1")
+        setStepState(runId, "trait_extraction", {
+          status: "failed",
+          error: "S3 NoSuchKey",
+          completedAt: "2026-05-06T14:00:00Z",
+        })
+        appendStepJobId(runId, "trait_extraction", "job-2")
+      })
+      const r = getRun(runId)
+      expect(r?.steps.trait_extraction?.status).toBe("running")
+      expect(r?.steps.trait_extraction?.jobIds).toEqual(["job-1", "job-2"])
+      expect(r?.steps.trait_extraction?.error).toBeUndefined()
+      expect(r?.steps.trait_extraction?.completedAt).toBeUndefined()
+    })
+
     it("updateRun bumps updatedAt", async () => {
       let runId = ""
       let firstUpdated = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        const p = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runId = createRun({ pipelineId: p.id, scope }).id
         firstUpdated = getRun(runId)!.updatedAt
       })
@@ -235,8 +329,17 @@ describe("runStore", () => {
       let runA = ""
       let runB = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        const p = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runA = createRun({ pipelineId: p.id, scope }).id
         runB = createRun({ pipelineId: p.id, scope }).id
         deleteRun(runA)
@@ -250,8 +353,17 @@ describe("runStore", () => {
     it("returns the run owning a job, or undefined", () => {
       let runId = ""
       act(() => {
-        const w = createWorkspace({ name: "w", experimentId: "e", defaultScope: scope })
-        const p = createPipeline({ workspaceId: w.id, name: "p", type: "aerial", params: {} })
+        const w = createWorkspace({
+          name: "w",
+          experimentId: "e",
+          defaultScope: scope,
+        })
+        const p = createPipeline({
+          workspaceId: w.id,
+          name: "p",
+          type: "aerial",
+          params: {},
+        })
         runId = createRun({ pipelineId: p.id, scope }).id
         appendStepJobId(runId, "orthomosaic", "job-abc")
         appendStepJobId(runId, "inference", "job-def")
@@ -267,7 +379,11 @@ describe("runStore", () => {
       const a = renderHook(() => useWorkspaces())
       const b = renderHook(() => useWorkspaces())
       act(() => {
-        createWorkspace({ name: "shared", experimentId: "e", defaultScope: scope })
+        createWorkspace({
+          name: "shared",
+          experimentId: "e",
+          defaultScope: scope,
+        })
       })
       expect(a.result.current).toHaveLength(1)
       expect(b.result.current).toHaveLength(1)

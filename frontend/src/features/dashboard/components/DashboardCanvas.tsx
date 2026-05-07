@@ -5,19 +5,32 @@
  * The parent DashboardBuilder tracks dragging state and passes isOver + canvasRef.
  */
 
-import { forwardRef } from "react"
 import {
-  Hash, TrendingUp, BarChart3, ScatterChart, Table2, Image, Activity, Plus,
+  Activity,
+  BarChart3,
+  Hash,
+  Image,
+  Plus,
+  ScatterChart,
+  Table2,
+  TrendingUp,
 } from "lucide-react"
-import { WidgetCard } from "./WidgetCard"
+import { forwardRef } from "react"
+import type { DashboardTab, DashboardWidget, WidgetSpan } from "../types"
 import { SPAN_CLASSES } from "../types"
+import { WidgetCard } from "./WidgetCard"
 import { WIDGET_TEMPLATES } from "./WidgetToolbox"
-import type { DashboardWidget, DashboardTab, WidgetSpan } from "../types"
 
 // ── Ghost widget preview ──────────────────────────────────────────────────────
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
-  Hash, TrendingUp, BarChart3, ScatterChart, Table2, Image, Activity,
+  Hash,
+  TrendingUp,
+  BarChart3,
+  ScatterChart,
+  Table2,
+  Image,
+  Activity,
 }
 
 function GhostWidget({ templateId }: { templateId: string }) {
@@ -59,8 +72,15 @@ interface DashboardCanvasProps {
 
 export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
   function DashboardCanvas(
-    { tab, draggingTemplateId, isOver, onUpdateWidget, onRemoveWidget, onReorderWidget },
-    ref
+    {
+      tab,
+      draggingTemplateId,
+      isOver,
+      onUpdateWidget,
+      onRemoveWidget,
+      onReorderWidget,
+    },
+    ref,
   ) {
     const isDragging = draggingTemplateId !== null
     const showGhost = isDragging && isOver
@@ -92,7 +112,9 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
               <div className="w-14 h-14 bg-card rounded-full border border-border flex items-center justify-center mb-4 text-muted-foreground">
                 <Plus className="w-7 h-7" />
               </div>
-              <h3 className="text-base font-semibold text-foreground mb-1">Canvas is empty</h3>
+              <h3 className="text-base font-semibold text-foreground mb-1">
+                Canvas is empty
+              </h3>
               <p className="text-sm text-muted-foreground max-w-xs text-center">
                 Drag a widget from the sidebar and drop it here.
               </p>
@@ -106,10 +128,20 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
                 >
                   <WidgetCard
                     widget={widget}
-                    onUpdate={(updated) => onUpdateWidget(widget.instanceId, updated)}
+                    onUpdate={(updated) =>
+                      onUpdateWidget(widget.instanceId, updated)
+                    }
                     onRemove={() => onRemoveWidget(widget.instanceId)}
-                    onMoveLeft={idx > 0 ? () => onReorderWidget(widget.instanceId, "left") : undefined}
-                    onMoveRight={idx < tab.widgets.length - 1 ? () => onReorderWidget(widget.instanceId, "right") : undefined}
+                    onMoveLeft={
+                      idx > 0
+                        ? () => onReorderWidget(widget.instanceId, "left")
+                        : undefined
+                    }
+                    onMoveRight={
+                      idx < tab.widgets.length - 1
+                        ? () => onReorderWidget(widget.instanceId, "right")
+                        : undefined
+                    }
                   />
                 </div>
               ))}
@@ -125,5 +157,5 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
         </div>
       </div>
     )
-  }
+  },
 )

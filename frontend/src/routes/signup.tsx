@@ -197,11 +197,7 @@ function SignUp() {
               )}
             />
 
-            <LoadingButton
-              type="submit"
-              className="w-full"
-              loading={isPending}
-            >
+            <LoadingButton type="submit" className="w-full" loading={isPending}>
               Sign Up
             </LoadingButton>
           </div>

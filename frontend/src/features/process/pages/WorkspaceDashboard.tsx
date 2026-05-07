@@ -1,10 +1,10 @@
 /**
  * WorkspaceDashboard — Process feature landing page.
  *
- * Restored from `main`'s wizard-style UI, rewired to the local runStore
- * instead of the deleted `WorkspacesService` REST routes. A Workspace is
- * now a localStorage-backed bundle of (experimentId, defaultScope) plus a
- * name and description.
+ * Mirrors `main`'s wizard-style UI: a Workspace is a name + description,
+ * with no experiment binding. Experiment / site / population / date /
+ * platform / sensor are all picked at run-creation time from an uploaded
+ * dataset (see NewRunDialog). Backed by the local runStore.
  *
  * Card thumbnails: previously fetched from `/api/v1/workspaces/{id}/card-images`
  * which doesn't exist on GEMINIbase. For now cards show a placeholder; once
@@ -12,7 +12,14 @@
  * pull first-N from `/api/files/list/{rawImagesPrefix}`.
  */
 import { useNavigate } from "@tanstack/react-router"
-import { FolderOpen, Layers, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react"
+import {
+  FolderOpen,
+  Layers,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -34,14 +41,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { useAllExperiments } from "@/features/experiments/hooks/useExperimentData"
-import {
   createWorkspace,
   deleteWorkspace,
   updateWorkspace,
@@ -50,7 +49,6 @@ import {
   useWorkspaces,
   type Workspace,
 } from "@/features/process/lib/runStore"
-import useCustomToast from "@/hooks/useCustomToast"
 
 interface WorkspaceStats {
   aerial: number
@@ -90,7 +88,10 @@ function WorkspaceCard({
     <div
       className="relative rounded-lg border bg-card cursor-pointer transition-all hover:border-primary/60 hover:shadow-md group overflow-hidden flex flex-col"
       onClick={() =>
-        navigate({ to: "/process/$workspaceId", params: { workspaceId: workspace.id } })
+        navigate({
+          to: "/process/$workspaceId",
+          params: { workspaceId: workspace.id },
+        })
       }
     >
       <div className="h-28 w-full rounded-t-lg bg-muted flex items-center justify-center">
@@ -113,7 +114,10 @@ function WorkspaceCard({
               <Pencil className="w-4 h-4 mr-2" />
               Edit
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-red-600" onClick={() => onDelete(workspace)}>
+            <DropdownMenuItem
+              className="text-red-600"
+              onClick={() => onDelete(workspace)}
+            >
               <Trash2 className="w-4 h-4 mr-2" />
               Delete
             </DropdownMenuItem>
@@ -122,17 +126,25 @@ function WorkspaceCard({
       </div>
 
       <div className="p-4 flex flex-col gap-1.5 flex-1">
-        <p className="font-medium text-sm leading-tight truncate pr-6">{workspace.name}</p>
+        <p className="font-medium text-sm leading-tight truncate pr-6">
+          {workspace.name}
+        </p>
         {workspace.description && (
-          <p className="text-muted-foreground text-xs truncate">{workspace.description}</p>
+          <p className="text-muted-foreground text-xs truncate">
+            {workspace.description}
+          </p>
         )}
         <div className="mt-1 space-y-0.5">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/70">Aerial Pipeline:</span>{" "}
+            <span className="font-medium text-foreground/70">
+              Aerial Pipeline:
+            </span>{" "}
             {stats.aerial} dataset{stats.aerial !== 1 ? "s" : ""}
           </p>
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/70">Ground Pipeline:</span>{" "}
+            <span className="font-medium text-foreground/70">
+              Ground Pipeline:
+            </span>{" "}
             {stats.ground} dataset{stats.ground !== 1 ? "s" : ""}
           </p>
         </div>
@@ -142,15 +154,12 @@ function WorkspaceCard({
 }
 
 export function WorkspaceDashboard() {
-  const { showErrorToast } = useCustomToast()
   const workspaces = useWorkspaces()
-  const { data: experiments = [], isLoading: experimentsLoading } = useAllExperiments()
 
   const [open, setOpen] = useState(false)
   const [newWorkspace, setNewWorkspace] = useState({
     name: "",
     description: "",
-    experimentId: "",
   })
   const [editWorkspace, setEditWorkspace] = useState<Workspace | null>(null)
   const [editForm, setEditForm] = useState({ name: "", description: "" })
@@ -158,22 +167,11 @@ export function WorkspaceDashboard() {
 
   const handleCreate = () => {
     if (!newWorkspace.name.trim()) return
-    if (!newWorkspace.experimentId) {
-      showErrorToast("Pick an experiment to attach this workspace to")
-      return
-    }
     createWorkspace({
       name: newWorkspace.name.trim(),
       description: newWorkspace.description.trim() || undefined,
-      experimentId: newWorkspace.experimentId,
-      defaultScope: {
-        experimentId: newWorkspace.experimentId,
-        seasonId: null,
-        siteId: null,
-        populationId: null,
-      },
     })
-    setNewWorkspace({ name: "", description: "", experimentId: "" })
+    setNewWorkspace({ name: "", description: "" })
     setOpen(false)
   }
 
@@ -208,8 +206,9 @@ export function WorkspaceDashboard() {
                 <DialogHeader>
                   <DialogTitle>Create New Workspace</DialogTitle>
                   <DialogDescription>
-                    A workspace bundles an experiment with its processing pipelines. Pick the
-                    experiment that holds the field data you want to process.
+                    Create a workspace to organize your phenotyping projects.
+                    You can add aerial and ground processing pipelines inside
+                    each workspace.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -220,7 +219,10 @@ export function WorkspaceDashboard() {
                       placeholder="e.g., Corn Field Study 2026"
                       value={newWorkspace.name}
                       onChange={(e) =>
-                        setNewWorkspace({ ...newWorkspace, name: e.target.value })
+                        setNewWorkspace({
+                          ...newWorkspace,
+                          name: e.target.value,
+                        })
                       }
                       onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                     />
@@ -232,35 +234,12 @@ export function WorkspaceDashboard() {
                       placeholder="Brief description of your project"
                       value={newWorkspace.description}
                       onChange={(e) =>
-                        setNewWorkspace({ ...newWorkspace, description: e.target.value })
+                        setNewWorkspace({
+                          ...newWorkspace,
+                          description: e.target.value,
+                        })
                       }
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="experiment">Experiment</Label>
-                    <Select
-                      value={newWorkspace.experimentId}
-                      onValueChange={(v) =>
-                        setNewWorkspace({ ...newWorkspace, experimentId: v })
-                      }
-                    >
-                      <SelectTrigger id="experiment">
-                        <SelectValue
-                          placeholder={
-                            experimentsLoading
-                              ? "Loading experiments…"
-                              : "Pick an experiment"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {experiments.map((exp) => (
-                          <SelectItem key={String(exp.id)} value={String(exp.id)}>
-                            {exp.experiment_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
                 <DialogFooter>
@@ -269,7 +248,7 @@ export function WorkspaceDashboard() {
                   </Button>
                   <Button
                     onClick={handleCreate}
-                    disabled={!newWorkspace.name.trim() || !newWorkspace.experimentId}
+                    disabled={!newWorkspace.name.trim()}
                   >
                     Create Workspace
                   </Button>
@@ -297,14 +276,20 @@ export function WorkspaceDashboard() {
                 onDelete={setConfirmDelete}
                 onEdit={(ws) => {
                   setEditWorkspace(ws)
-                  setEditForm({ name: ws.name, description: ws.description ?? "" })
+                  setEditForm({
+                    name: ws.name,
+                    description: ws.description ?? "",
+                  })
                 }}
               />
             ))}
           </div>
         )}
 
-        <Dialog open={!!editWorkspace} onOpenChange={(v) => !v && setEditWorkspace(null)}>
+        <Dialog
+          open={!!editWorkspace}
+          onOpenChange={(v) => !v && setEditWorkspace(null)}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Edit Workspace</DialogTitle>
@@ -315,8 +300,12 @@ export function WorkspaceDashboard() {
                 <Input
                   id="edit-name"
                   value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && editForm.name.trim() && handleEdit()}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, name: e.target.value })
+                  }
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && editForm.name.trim() && handleEdit()
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -342,13 +331,17 @@ export function WorkspaceDashboard() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={!!confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(null)}>
+        <Dialog
+          open={!!confirmDelete}
+          onOpenChange={(v) => !v && setConfirmDelete(null)}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete <strong>{confirmDelete?.name}</strong>? This
-                will permanently remove the workspace and all its pipelines and runs.
+                Are you sure you want to delete{" "}
+                <strong>{confirmDelete?.name}</strong>? This will permanently
+                remove the workspace and all its pipelines and runs.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

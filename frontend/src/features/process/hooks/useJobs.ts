@@ -9,7 +9,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { JobsService, type JobOutput } from "@/client"
+import { type JobOutput, JobsService } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
 
 export type SubmitJobInput = {
@@ -59,14 +59,23 @@ export function useJobs(opts: {
 }) {
   const enabled = opts.enabled !== false && isLoggedIn()
   return useQuery<JobOutput[], Error>({
-    queryKey: ["jobs", { jobType: opts.jobType ?? null, experimentId: opts.experimentId ?? null }],
+    queryKey: [
+      "jobs",
+      {
+        jobType: opts.jobType ?? null,
+        experimentId: opts.experimentId ?? null,
+      },
+    ],
     queryFn: async () => {
       const res = await JobsService.apiJobsAllGetAllJobs(
         opts.jobType ? { jobType: opts.jobType } : {},
       )
       const list = (res as JobOutput[] | null) ?? []
       if (!opts.experimentId) return list
-      return list.filter((j) => (j as { experiment_id?: string }).experiment_id === opts.experimentId)
+      return list.filter(
+        (j) =>
+          (j as { experiment_id?: string }).experiment_id === opts.experimentId,
+      )
     },
     enabled,
     refetchInterval: opts.refetchIntervalMs,

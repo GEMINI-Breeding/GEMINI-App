@@ -63,7 +63,10 @@ describe("useResolveScope.resolveScope", () => {
       .mockResolvedValue([] as never)
     const createSpy = vi
       .spyOn(ExperimentsService, "apiExperimentsCreateExperiment")
-      .mockResolvedValue({ id: "new-exp", experiment_name: "TomatoMAGIC" } as never)
+      .mockResolvedValue({
+        id: "new-exp",
+        experiment_name: "TomatoMAGIC",
+      } as never)
     const associateSpy = vi
       .spyOn(UsersService, "apiUsersMeExperimentsAssociateMyExperiment")
       .mockResolvedValue({} as never)
@@ -88,19 +91,23 @@ describe("useResolveScope.resolveScope", () => {
     const sitesCreate = vi
       .spyOn(SitesService, "apiSitesCreateSite")
       .mockResolvedValue({ id: 11, site_name: "Davis" } as never)
-    vi.spyOn(PopulationsService, "apiPopulationsGetPopulations").mockResolvedValue(
-      [] as never,
-    )
+    vi.spyOn(
+      PopulationsService,
+      "apiPopulationsGetPopulations",
+    ).mockResolvedValue([] as never)
     const popsCreate = vi
       .spyOn(PopulationsService, "apiPopulationsCreatePopulation")
       .mockResolvedValue({ id: 22, population_name: "Cowpea" } as never)
-    vi.spyOn(SensorPlatformsService, "apiSensorPlatformsGetSensorPlatforms").mockResolvedValue(
-      [] as never,
-    )
+    vi.spyOn(
+      SensorPlatformsService,
+      "apiSensorPlatformsGetSensorPlatforms",
+    ).mockResolvedValue([] as never)
     const platsCreate = vi
       .spyOn(SensorPlatformsService, "apiSensorPlatformsCreateSensorPlatform")
       .mockResolvedValue({ id: 33, sensor_platform_name: "Drone" } as never)
-    vi.spyOn(SensorsService, "apiSensorsGetSensors").mockResolvedValue([] as never)
+    vi.spyOn(SensorsService, "apiSensorsGetSensors").mockResolvedValue(
+      [] as never,
+    )
     const sensorsCreate = vi
       .spyOn(SensorsService, "apiSensorsCreateSensor")
       .mockResolvedValue({ id: 44, sensor_name: "RGB" } as never)

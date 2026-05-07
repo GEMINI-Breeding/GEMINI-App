@@ -5,4 +5,4 @@ export const workspaceTypes = {
   Processed: {
     directory: ["workspace_id", "workspace_name", "Processed"],
   },
-};
+}

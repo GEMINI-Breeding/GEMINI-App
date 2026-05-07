@@ -1,19 +1,24 @@
 import {
-  DataFormatsService,
   type DataFormatInput,
   type DataFormatOutput,
+  DataFormatsService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsNumber, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: DataFormatInput): DataFormatInput {
   return {
     ...input,
-    data_format_info: parseInfoField(input.data_format_info) as DataFormatInput["data_format_info"],
+    data_format_info: parseInfoField(
+      input.data_format_info,
+    ) as DataFormatInput["data_format_info"],
   }
 }
 
-export const dataFormatsConfig: EntityConfig<DataFormatOutput, DataFormatInput> = {
+export const dataFormatsConfig: EntityConfig<
+  DataFormatOutput,
+  DataFormatInput
+> = {
   slug: "data-formats",
   singular: "Data format",
   plural: "Data formats",
@@ -45,7 +50,12 @@ export const dataFormatsConfig: EntityConfig<DataFormatOutput, DataFormatInput> 
       type: "text",
       placeholder: "image/tiff",
     },
-    { key: "data_format_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "data_format_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ data_format_name: "" }),
   toInput: (row) => ({

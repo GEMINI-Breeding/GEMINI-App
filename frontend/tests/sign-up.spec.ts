@@ -98,7 +98,8 @@ test("Sign up with existing email", async ({ page, consoleErrorGuard }) => {
   await page.goto("/signup")
   await fillForm(page, fullName, email, password, password)
   const firstSignupResponse = page.waitForResponse(
-    (r) => r.url().includes("/api/users/signup") && r.request().method() === "POST",
+    (r) =>
+      r.url().includes("/api/users/signup") && r.request().method() === "POST",
   )
   await page.getByRole("button", { name: "Sign Up" }).click()
   await firstSignupResponse

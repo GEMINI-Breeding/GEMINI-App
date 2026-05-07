@@ -8,8 +8,8 @@
  * precision.
  */
 
-import { useEffect, useState } from "react"
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,7 +28,10 @@ function apiUrl(path: string): string {
 
 function authHeaders() {
   const token = localStorage.getItem("access_token") || ""
-  return { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
 }
 
 interface GeoTiffInfo {
@@ -50,11 +53,16 @@ interface GeoTiffValidationDialogProps {
 type CheckState = "checking" | "ok" | "needs_conversion" | "error"
 type ConvertState = "idle" | "converting" | "done" | "failed"
 
-export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidationDialogProps) {
+export function GeoTiffValidationDialog({
+  destPaths,
+  onClose,
+}: GeoTiffValidationDialogProps) {
   const { showErrorToast } = useCustomToast()
   const [infos, setInfos] = useState<GeoTiffInfo[]>([])
   const [checkState, setCheckState] = useState<CheckState>("checking")
-  const [convertStates, setConvertStates] = useState<Record<string, ConvertState>>({})
+  const [convertStates, setConvertStates] = useState<
+    Record<string, ConvertState>
+  >({})
 
   // Check all uploaded TIFs on mount
   useEffect(() => {
@@ -102,12 +110,18 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
         body: JSON.stringify({ file_path: info.path }),
       })
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Conversion failed" }))
+        const err = await res
+          .json()
+          .catch(() => ({ detail: "Conversion failed" }))
         throw new Error(err.detail ?? "Conversion failed")
       }
       setConvertStates((prev) => ({ ...prev, [info.path]: "done" }))
       setInfos((prev) =>
-        prev.map((i) => (i.path === info.path ? { ...i, is_wgs84: true, crs_epsg: 4326, crs_name: "WGS 84" } : i)),
+        prev.map((i) =>
+          i.path === info.path
+            ? { ...i, is_wgs84: true, crs_epsg: 4326, crs_name: "WGS 84" }
+            : i,
+        ),
       )
     } catch (err) {
       setConvertStates((prev) => ({ ...prev, [info.path]: "failed" }))
@@ -124,7 +138,12 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
   const open = checkState !== "ok" || !allConverted
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+    >
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Orthomosaic Validation</DialogTitle>
@@ -151,10 +170,7 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
             const cState = convertStates[info.path] ?? "idle"
             const converted = cState === "done"
             return (
-              <div
-                key={info.path}
-                className="rounded-md border p-3 space-y-2"
-              >
+              <div key={info.path} className="rounded-md border p-3 space-y-2">
                 <div className="flex items-start gap-2">
                   {info.is_wgs84 || converted ? (
                     <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
@@ -162,7 +178,9 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
                     <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{info.filename}</p>
+                    <p className="text-sm font-medium truncate">
+                      {info.filename}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {converted
                         ? "Converted to WGS84 (EPSG:4326)"
@@ -177,9 +195,13 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
                 {!info.is_wgs84 && !converted && (
                   <div className="ml-6 space-y-2">
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                      <strong>Warning:</strong> Reprojection to WGS84 may slightly alter pixel values
-                      and geometry due to resampling. The original will be backed up as{" "}
-                      <code className="font-mono">{info.filename.replace(/\.tif(f)?$/i, ".original.tif")}</code>.
+                      <strong>Warning:</strong> Reprojection to WGS84 may
+                      slightly alter pixel values and geometry due to
+                      resampling. The original will be backed up as{" "}
+                      <code className="font-mono">
+                        {info.filename.replace(/\.tif(f)?$/i, ".original.tif")}
+                      </code>
+                      .
                     </p>
                     <Button
                       size="sm"
@@ -187,11 +209,17 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
                       disabled={cState === "converting"}
                       onClick={() => handleConvert(info)}
                     >
-                      {cState === "converting" && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-                      {cState === "converting" ? "Converting…" : "Convert to WGS84"}
+                      {cState === "converting" && (
+                        <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                      )}
+                      {cState === "converting"
+                        ? "Converting…"
+                        : "Convert to WGS84"}
                     </Button>
                     {cState === "failed" && (
-                      <p className="text-xs text-red-600">Conversion failed — see error above.</p>
+                      <p className="text-xs text-red-600">
+                        Conversion failed — see error above.
+                      </p>
                     )}
                   </div>
                 )}
@@ -202,7 +230,9 @@ export function GeoTiffValidationDialog({ destPaths, onClose }: GeoTiffValidatio
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            {allConverted || checkState === "ok" ? "Close" : "Keep Original (skip conversion)"}
+            {allConverted || checkState === "ok"
+              ? "Close"
+              : "Keep Original (skip conversion)"}
           </Button>
         </DialogFooter>
       </DialogContent>

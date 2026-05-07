@@ -36,7 +36,11 @@ describe("useSubmitJob", () => {
       experimentId: "exp-1",
     })
     expect(submitMock).toHaveBeenCalledWith({
-      requestBody: { job_type: "RUN_ODM", parameters: { foo: "bar" }, experiment_id: "exp-1" },
+      requestBody: {
+        job_type: "RUN_ODM",
+        parameters: { foo: "bar" },
+        experiment_id: "exp-1",
+      },
     })
     expect(job).toEqual({ id: "job-1", job_type: "RUN_ODM" })
   })
@@ -58,14 +62,19 @@ describe("useJobs", () => {
       { id: "2", job_type: "RUN_ODM", experiment_id: "B" },
       { id: "3", job_type: "RUN_ODM" },
     ] as never)
-    const { result } = renderHook(() => useJobs({ experimentId: "A" }), { wrapper })
+    const { result } = renderHook(() => useJobs({ experimentId: "A" }), {
+      wrapper,
+    })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
     expect(result.current.data?.[0].id).toBe("1")
   })
   it("forwards jobType to the SDK call", async () => {
     allMock.mockResolvedValue([] as never)
-    const { result } = renderHook(() => useJobs({ jobType: "EXTRACT_TRAITS" }), { wrapper })
+    const { result } = renderHook(
+      () => useJobs({ jobType: "EXTRACT_TRAITS" }),
+      { wrapper },
+    )
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(allMock).toHaveBeenCalledWith({ jobType: "EXTRACT_TRAITS" })
   })

@@ -59,4 +59,12 @@ if [[ -f "$UI_ENV_EXAMPLE" && ! -f "$UI_ENV" ]]; then
     cp "$UI_ENV_EXAMPLE" "$UI_ENV"
 fi
 
-log "Done. Next: docker compose up -d"
+log "Done."
+log ""
+log "Next steps from the GEMINI-App repo root:"
+log "  • One-shot:       docker compose up -d"
+log "  • Dev loop (live sync + auto-rebuild on dep/Dockerfile change):"
+log "                    docker compose watch"
+log ""
+log "The dev-loop block lives in docker-compose.override.yaml and is"
+log "auto-loaded — no extra flags needed."

@@ -72,9 +72,9 @@ export function TraitExtractionDialog({
         <DialogHeader>
           <DialogTitle>Configure Trait Extraction</DialogTitle>
           <DialogDescription>
-            Compute per-plot vegetation fraction (and canopy height when a DEM is
-            present) using the chosen orthomosaic and the active plot-boundary
-            version.
+            Compute per-plot vegetation fraction (and canopy height when a DEM
+            is present) using the chosen orthomosaic and the active
+            plot-boundary version.
           </DialogDescription>
         </DialogHeader>
 
@@ -101,7 +101,9 @@ export function TraitExtractionDialog({
                 <SelectContent>
                   {orthoVersions.map((ov) => (
                     <SelectItem key={ov.version} value={String(ov.version)}>
-                      {ov.label ? `${ov.label} (v${ov.version})` : `v${ov.version}`}
+                      {ov.label
+                        ? `${ov.label} (v${ov.version})`
+                        : `v${ov.version}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -138,7 +140,9 @@ export function TraitExtractionDialog({
                 <SelectContent>
                   {boundaryVersions.map((bv) => (
                     <SelectItem key={bv.version} value={String(bv.version)}>
-                      {bv.name ? `${bv.name} (v${bv.version})` : `v${bv.version}`}
+                      {bv.name
+                        ? `${bv.name} (v${bv.version})`
+                        : `v${bv.version}`}
                       {bv.is_active ? " · active" : ""}
                     </SelectItem>
                   ))}

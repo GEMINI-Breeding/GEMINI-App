@@ -10,11 +10,11 @@ import type { JobOutput } from "@/client"
 import type { AerialScope } from "@/features/process/lib/paths"
 
 import {
+  type ExecuteStepInput,
   executeStep,
   markStepComplete,
   markStepSkipped,
   stopStep,
-  type ExecuteStepInput,
 } from "./runApi"
 import {
   __resetRunStoreForTests,
@@ -64,7 +64,12 @@ function seedRun(): Run {
   })
   const r = createRun({
     pipelineId: p.id,
-    scope: ws.defaultScope,
+    scope: ws.defaultScope ?? {
+      experimentId: "exp-uuid",
+      seasonId: null,
+      siteId: null,
+      populationId: null,
+    },
   })
   return r
 }
@@ -109,13 +114,20 @@ describe("executeStep", () => {
   describe("orthomosaic", () => {
     it("submits RUN_ODM with the scope flattened into parameters", async () => {
       const run = seedRun()
-      submitMock.mockResolvedValue({ id: "ortho-job-1" } as unknown as JobOutput)
+      submitMock.mockResolvedValue({
+        id: "ortho-job-1",
+      } as unknown as JobOutput)
       const result = await executeStep({
         ...baseInput(run, "orthomosaic"),
-        orthomosaic: { reconstruction_quality: "High", custom_options: "--fast" },
+        orthomosaic: {
+          reconstruction_quality: "High",
+          custom_options: "--fast",
+        },
       })
       expect(submitMock).toHaveBeenCalledOnce()
-      const call = submitMock.mock.calls[0][0] as { requestBody: { parameters: Record<string, unknown> } }
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
       expect(call.requestBody.parameters).toMatchObject({
         year: "2026",
         experiment: "GEMINI",
@@ -135,10 +147,16 @@ describe("executeStep", () => {
 
     it("omits optional knobs when not provided", async () => {
       const run = seedRun()
-      submitMock.mockResolvedValue({ id: "ortho-job-2" } as unknown as JobOutput)
+      submitMock.mockResolvedValue({
+        id: "ortho-job-2",
+      } as unknown as JobOutput)
       await executeStep(baseInput(run, "orthomosaic"))
-      const call = submitMock.mock.calls[0][0] as { requestBody: { parameters: Record<string, unknown> } }
-      expect(call.requestBody.parameters).not.toHaveProperty("reconstruction_quality")
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters).not.toHaveProperty(
+        "reconstruction_quality",
+      )
       expect(call.requestBody.parameters).not.toHaveProperty("custom_options")
     })
 
@@ -161,7 +179,9 @@ describe("executeStep", () => {
 
     it("submits EXTRACT_TRAITS with the chosen ortho + boundary paths", async () => {
       const run = seedRun()
-      submitMock.mockResolvedValue({ id: "trait-job-1" } as unknown as JobOutput)
+      submitMock.mockResolvedValue({
+        id: "trait-job-1",
+      } as unknown as JobOutput)
       await executeStep({
         ...baseInput(run, "trait_extraction"),
         traitExtraction: {
@@ -172,7 +192,9 @@ describe("executeStep", () => {
           exgThreshold: 0.18,
         },
       })
-      const call = submitMock.mock.calls[0][0] as { requestBody: { job_type: string; parameters: Record<string, unknown> } }
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { job_type: string; parameters: Record<string, unknown> }
+      }
       expect(call.requestBody.job_type).toBe("EXTRACT_TRAITS")
       expect(call.requestBody.parameters).toEqual({
         orthomosaic_path: "Processed/.../odm.tif",
@@ -181,7 +203,9 @@ describe("executeStep", () => {
         dem_path: "Processed/.../dem.tif",
         exg_threshold: 0.18,
       })
-      expect(getRun(run.id)?.steps.trait_extraction?.jobIds).toEqual(["trait-job-1"])
+      expect(getRun(run.id)?.steps.trait_extraction?.jobIds).toEqual([
+        "trait-job-1",
+      ])
     })
   })
 
@@ -208,7 +232,9 @@ describe("executeStep", () => {
 
     it("submits RUN_STITCH with config + cpu_count when supplied", async () => {
       const run = seedRun()
-      submitMock.mockResolvedValue({ id: "stitch-job-1" } as unknown as JobOutput)
+      submitMock.mockResolvedValue({
+        id: "stitch-job-1",
+      } as unknown as JobOutput)
       await executeStep({
         ...baseInput(run, "stitching"),
         stitching: {
@@ -218,7 +244,9 @@ describe("executeStep", () => {
           cpuCount: 4,
         },
       })
-      const call = submitMock.mock.calls[0][0] as { requestBody: { parameters: Record<string, unknown> } }
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
       expect(call.requestBody.parameters).toMatchObject({
         image_paths: ["a.jpg", "b.jpg", "c.jpg"],
         output_mosaic_path: "Processed/mosaic.tif",
@@ -250,7 +278,9 @@ describe("executeStep", () => {
 
     it("submits LOCATE_PLANTS with thresholds when supplied", async () => {
       const run = seedRun()
-      submitMock.mockResolvedValue({ id: "infer-job-1" } as unknown as JobOutput)
+      submitMock.mockResolvedValue({
+        id: "infer-job-1",
+      } as unknown as JobOutput)
       await executeStep({
         ...baseInput(run, "inference"),
         inference: {
@@ -262,7 +292,9 @@ describe("executeStep", () => {
           iouThreshold: 0.6,
         },
       })
-      const call = submitMock.mock.calls[0][0] as { requestBody: { job_type: string; parameters: Record<string, unknown> } }
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { job_type: string; parameters: Record<string, unknown> }
+      }
       expect(call.requestBody.job_type).toBe("LOCATE_PLANTS")
       expect(call.requestBody.parameters).toEqual({
         image_path: "Processed/img.png",
@@ -278,9 +310,9 @@ describe("executeStep", () => {
   describe("unknown step", () => {
     it("throws a not-yet-wired error", async () => {
       const run = seedRun()
-      await expect(
-        executeStep(baseInput(run, "made_up_step")),
-      ).rejects.toThrow(/not yet wired/i)
+      await expect(executeStep(baseInput(run, "made_up_step"))).rejects.toThrow(
+        /not yet wired/i,
+      )
     })
   })
 })

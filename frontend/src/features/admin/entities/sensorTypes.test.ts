@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest"
 
-import { SensorTypesService, type SensorTypeInput } from "@/client"
+import { type SensorTypeInput, SensorTypesService } from "@/client"
 
 import { sensorTypesConfig } from "./sensorTypes"
 
@@ -46,7 +46,8 @@ describe("sensorTypesConfig", () => {
       .mockResolvedValue({ id: 1, sensor_type_name: "X" } as never)
     const input: SensorTypeInput = {
       sensor_type_name: "X",
-      sensor_type_info: '{"foo":42}' as unknown as SensorTypeInput["sensor_type_info"],
+      sensor_type_info:
+        '{"foo":42}' as unknown as SensorTypeInput["sensor_type_info"],
     }
     await sensorTypesConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

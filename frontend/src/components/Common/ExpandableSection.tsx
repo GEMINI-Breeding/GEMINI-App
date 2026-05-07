@@ -23,9 +23,9 @@
  * component tree, so they share state with the parent component.
  */
 
+import { Expand, X } from "lucide-react"
 import { useState } from "react"
 import { createPortal } from "react-dom"
-import { Expand, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -48,7 +48,11 @@ interface ExpandButtonProps {
   className?: string
 }
 
-export function ExpandButton({ onClick, title = "Expand to fullscreen", className }: ExpandButtonProps) {
+export function ExpandButton({
+  onClick,
+  title = "Expand to fullscreen",
+  className,
+}: ExpandButtonProps) {
   return (
     <Button
       type="button"
@@ -107,9 +111,7 @@ export function FullscreenModal({
       </div>
 
       {/* Scrollable content area */}
-      <div className="flex-1 min-h-0 overflow-auto">
-        {children}
-      </div>
+      <div className="flex-1 min-h-0 overflow-auto">{children}</div>
     </div>,
     document.body,
   )

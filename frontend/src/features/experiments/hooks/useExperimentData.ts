@@ -9,12 +9,12 @@
 import { useQuery } from "@tanstack/react-query"
 
 import {
-  ExperimentsService,
-  UsersService,
   type ExperimentOutput,
+  ExperimentsService,
   type PopulationOutput,
   type SeasonOutput,
   type SiteOutput,
+  UsersService,
 } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -34,9 +34,10 @@ export function useAllExperiments() {
   return useQuery<ExperimentOutput[], Error>({
     queryKey: ["experiments", "all"],
     queryFn: async () => {
-      const res = await ExperimentsService.apiExperimentsAllGetAllExperiments(
-        { limit: 500, offset: 0 },
-      )
+      const res = await ExperimentsService.apiExperimentsAllGetAllExperiments({
+        limit: 500,
+        offset: 0,
+      })
       return (res as ExperimentOutput[] | null) ?? []
     },
     enabled: isLoggedIn(),

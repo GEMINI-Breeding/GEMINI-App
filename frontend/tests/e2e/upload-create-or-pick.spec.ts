@@ -18,10 +18,6 @@
  */
 import { expect, test } from "../helpers/fixtures"
 
-function uniqueStamp(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-}
-
 async function pickCreateNew(
   page: import("@playwright/test").Page,
   fieldKey: string,
@@ -55,19 +51,22 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
   test("create-new for every entity → backend rows exist + sidebar selector populates + second upload reuses", async ({
     page,
     request,
+    runPrefix,
   }) => {
-    const stamp = uniqueStamp()
-    const experimentName = `pw-exp-${stamp}`
-    const siteName = `pw-site-${stamp}`
-    const populationName = `pw-pop-${stamp}`
-    const platformName = `pw-platform-${stamp}`
-    const sensorName = `pw-sensor-${stamp}`
+    const stamp = runPrefix
+    const experimentName = `${stamp}-exp`
+    const siteName = `${stamp}-site`
+    const populationName = `${stamp}-pop`
+    const platformName = `${stamp}-platform`
+    const sensorName = `${stamp}-sensor`
     const date = "2024-06-01"
 
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
 
     // 1. Pick Create-new for every entity field.
     await pickCreateNew(page, "experiment", experimentName)
@@ -110,14 +109,18 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     await expect(page.getByText(/^Done$/)).toBeVisible({ timeout: 60_000 })
 
     // 4. Verify backend has the experiment via direct GET.
-    const token = await page.evaluate(() => localStorage.getItem("gemini.auth.token"))
+    const token = await page.evaluate(() =>
+      localStorage.getItem("gemini.auth.token"),
+    )
     const headers = { Authorization: `Bearer ${token}` }
     const verifyExp = await request.get(
       `/api/experiments?experiment_name=${encodeURIComponent(experimentName)}`,
       { headers },
     )
     expect(verifyExp.ok()).toBe(true)
-    const expRows = (await verifyExp.json()) as Array<{ experiment_name?: string }>
+    const expRows = (await verifyExp.json()) as Array<{
+      experiment_name?: string
+    }>
     expect(expRows.some((r) => r.experiment_name === experimentName)).toBe(true)
 
     // 5. Second upload: pick the just-created experiment from the
@@ -127,7 +130,9 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     //    would fail). Use a fresh date so the stored objectPath differs.
     await page.locator('[data-onboarding="files-tab-upload"]').click()
     await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
 
     await pickExisting(page, "experiment", experimentName)
     await pickExisting(page, "site", siteName)
@@ -166,7 +171,9 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     )
     await page.locator('[data-testid="upload-submit"]').click()
     await secondChunk
-    await expect(page.getByText(/^Done$/).first()).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByText(/^Done$/).first()).toBeVisible({
+      timeout: 60_000,
+    })
     page.off("response", onResp)
     expect(
       unwantedCreate,
@@ -174,34 +181,40 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
     ).toBe(false)
   })
 
-  test("blank dropdown blocks submit with a dialog (not a fleeting toast)", async ({
+  test("blank dropdown locks the upload dropzone before any file can be staged", async ({
     page,
   }) => {
+    // The Files page now gates the dropzone behind two required
+    // fields: a data type AND an experiment. With nothing picked, the
+    // dropzone is inert and surfaces a `data-type` reason. Picking a
+    // data type swaps the reason to the experiment gate. The
+    // submit-time "required fields are blank" dialog is no longer
+    // reachable because you can't even stage files into the upload
+    // list without scope — so the assertion has moved one step
+    // earlier in the flow, where the user can actually see why
+    // they're stuck.
     await page.goto("/files")
     await page.locator('[data-onboarding="files-tab-upload"]').click()
-    await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
 
-    // Pick a file but leave the dropdowns alone.
+    const reason = page.getByTestId("upload-dropzone-disabled-reason")
+    await expect(reason).toContainText(/select a data type/i)
+
+    await page.locator('[data-onboarding="files-data-type-selector"]').click()
+    await page
+      .getByRole("menuitem", { name: "Image Data", exact: true })
+      .click()
+    await expect(reason).toContainText(/experiment/i)
+
+    // Confirm the dropzone is genuinely inert: setting files on the
+    // hidden input should NOT populate the Selected list because the
+    // input's change handler short-circuits when disabled.
     await page.locator('[data-testid="upload-input"]').setInputFiles({
       name: "photo.jpg",
       mimeType: "image/jpeg",
       buffer: Buffer.from("jpgbytes"),
     })
     await expect(
-      page.getByRole("heading", { name: /^Selected Files \(1\)$/ }),
-    ).toBeVisible()
-    await page.locator('[data-testid="upload-submit"]').click()
-
-    const dialog = page.locator('[data-testid="upload-error-dialog"]')
-    await expect(dialog).toBeVisible({ timeout: 5_000 })
-    await expect(dialog).toContainText(/required fields are blank/i)
-    // Should call out at least one of the scope fields by name.
-    await expect(dialog).toContainText(
-      /(experiment|location|population|date|platform|sensor)/i,
-    )
-    // Wait past sonner's autodismiss to prove the dialog stays.
-    await page.waitForTimeout(5_000)
-    await expect(dialog).toBeVisible()
+      page.getByRole("heading", { name: /^Selected Files/i }),
+    ).toHaveCount(0)
   })
 })

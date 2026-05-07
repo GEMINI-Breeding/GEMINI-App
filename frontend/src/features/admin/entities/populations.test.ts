@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { PopulationsService, type PopulationInput } from "@/client"
+import { type PopulationInput, PopulationsService } from "@/client"
 
 import { populationsConfig } from "./populations"
 
@@ -46,7 +46,8 @@ describe("populationsConfig", () => {
       .mockResolvedValue({ id: "x", population_name: "X" } as never)
     const input: PopulationInput = {
       population_name: "X",
-      population_info: '{"foo":42}' as unknown as PopulationInput["population_info"],
+      population_info:
+        '{"foo":42}' as unknown as PopulationInput["population_info"],
     }
     await populationsConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

@@ -31,12 +31,16 @@ async function logIn(page: import("@playwright/test").Page): Promise<void> {
 test.describe("authenticated shell", () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test("/settings is gated behind /login for anonymous visitors", async ({ page }) => {
+  test("/settings is gated behind /login for anonymous visitors", async ({
+    page,
+  }) => {
     await page.goto("/settings")
     await page.waitForURL("/login")
   })
 
-  test("logged-in user reaches /settings and the user menu shows their email", async ({ page }) => {
+  test("logged-in user reaches /settings and the user menu shows their email", async ({
+    page,
+  }) => {
     await logIn(page)
     await page.goto("/settings")
     await expect(page).toHaveURL("/settings")
@@ -57,33 +61,11 @@ test.describe("authenticated shell", () => {
     await page.waitForURL("/login")
   })
 
-  test("sidebar Experiment selector is populated and switches on choice", async ({
-    page,
-  }) => {
-    await logIn(page)
-
-    // Create two experiments via the dialog so there's something to switch
-    // between. This is the only reliable way to seed state without a
-    // private-API call — CLAUDE.md forbids API seeding.
-    const name1 = `pw-exp-${Date.now()}-a`
-    const name2 = `pw-exp-${Date.now()}-b`
-
-    for (const name of [name1, name2]) {
-      await page.getByTestId("create-experiment-button").click()
-      await page.getByPlaceholder(/e\.g\.|name/i).fill(name)
-      await page.getByRole("button", { name: /create/i }).click()
-      // Dialog closes on success.
-      await expect(page.getByRole("dialog")).toBeHidden()
-    }
-
-    // Selector must be populated (never the empty-state fallback).
-    const selector = page.getByTestId("experiment-selector")
-    await expect(selector).toBeVisible()
-    await expect(selector).toContainText(name2)
-
-    // Switch selection back to the first created experiment.
-    await selector.click()
-    await page.getByRole("option", { name: name1 }).click()
-    await expect(selector).toContainText(name1)
-  })
+  // The standalone sidebar "Experiment selector" UI from the Phase-5
+  // shell was replaced by per-page upload-scope dropdowns
+  // (`useUploadScope` + `EntitySelectField`). The `create-experiment-button`
+  // / `experiment-selector` test IDs no longer exist anywhere in the
+  // source tree. Re-add a coverage spec for the new pickers (e.g. the
+  // FilesPage upload form) instead of resurrecting this one.
+  test.skip("sidebar Experiment selector is populated and switches on choice", async () => {})
 })

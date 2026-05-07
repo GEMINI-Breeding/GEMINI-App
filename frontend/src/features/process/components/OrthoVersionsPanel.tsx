@@ -12,8 +12,8 @@
  *   - Preview shows download buttons; an embedded raster preview would
  *     need TiTiler integration which is deferred.
  */
-import { useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Check,
   Download,
@@ -24,8 +24,10 @@ import {
   Upload,
   X,
 } from "lucide-react"
-
+import { useMemo, useState } from "react"
+import type { FileMetadata } from "@/client"
 import { FilesService } from "@/client"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -44,19 +46,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { OrthoMapView } from "@/features/process/components/OrthoMapView"
+import {
+  buildTitilerTileUrl,
+  s3UrlForOrtho,
+  tilejsonBoundsToLeaflet,
+} from "@/features/process/lib/activeOrtho"
 import {
   buildOrthoVersions,
-  readOrthoOutputs,
   type OrthoVersion,
   type OrthoVersionMeta,
+  readOrthoOutputs,
 } from "@/features/process/lib/orthoVersions"
-import {
-  setStepState,
-  type Run,
-} from "@/features/process/lib/runStore"
-import useCustomToast from "@/hooks/useCustomToast"
-import type { FileMetadata } from "@/client"
 import type { AerialScope } from "@/features/process/lib/paths"
+import { type Run, setStepState } from "@/features/process/lib/runStore"
+import useCustomToast from "@/hooks/useCustomToast"
 
 const COG_SUFFIX = "-Pyramid.tif"
 const DEFAULT_BUCKET = "gemini"
@@ -95,12 +99,42 @@ function OrthoViewerDialog({
   onClose: () => void
   version: OrthoVersion | null
 }) {
-  if (!version) return null
   const v = version
+  const s3Url = useMemo(() => (v ? s3UrlForOrtho(v) : null), [v])
+
+  // TiTiler 2.0.1 tilejson endpoint. Same query key shape as
+  // PlotBoundaryPrep so a user who already opened the boundary editor for
+  // this ortho gets a cache hit when they re-open the viewer dialog.
+  const tilejsonQuery = useQuery({
+    queryKey: ["titiler", "tilejson", s3Url],
+    queryFn: async () => {
+      const res = await fetch(
+        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
+      )
+      if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
+      return res.json() as Promise<{
+        tiles: string[]
+        bounds: [number, number, number, number]
+      }>
+    },
+    enabled: !!s3Url && open,
+    staleTime: 5 * 60_000,
+  })
+
+  const orthoTileUrl = s3Url ? buildTitilerTileUrl(s3Url) : undefined
+  const orthoBounds = useMemo(
+    () =>
+      tilejsonQuery.data?.bounds
+        ? tilejsonBoundsToLeaflet(tilejsonQuery.data.bounds)
+        : undefined,
+    [tilejsonQuery.data],
+  )
+
+  if (!v) return null
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>
             {v.label ?? `Orthomosaic v${v.version}`}
@@ -119,15 +153,35 @@ function OrthoViewerDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="bg-muted/40 rounded border p-4 text-xs">
-            <p className="text-muted-foreground">
-              Inline preview of GeoTIFFs is not yet wired in this build. Download
-              the file or open the workspace's processed prefix in a GIS viewer.
-            </p>
-            <code className="bg-background mt-2 block break-all rounded px-2 py-1">
-              {v.path}
-            </code>
-          </div>
+          {tilejsonQuery.isPending ? (
+            <div
+              className="bg-muted/30 flex h-[480px] w-full items-center justify-center rounded border text-sm"
+              data-testid="ortho-viewer-loading"
+            >
+              <Loader2 className="text-muted-foreground mr-2 h-4 w-4 animate-spin" />
+              <span className="text-muted-foreground">
+                Building tile preview…
+              </span>
+            </div>
+          ) : tilejsonQuery.isError ? (
+            <Alert variant="destructive" data-testid="ortho-viewer-error">
+              <AlertTitle>Couldn't load preview</AlertTitle>
+              <AlertDescription>
+                {tilejsonQuery.error instanceof Error
+                  ? tilejsonQuery.error.message
+                  : "Unknown error"}
+                . The Download buttons below still work.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <OrthoMapView
+              orthoTileUrl={orthoTileUrl}
+              orthoBounds={orthoBounds}
+            />
+          )}
+          <code className="bg-muted/40 block break-all rounded px-2 py-1 text-xs">
+            {v.path}
+          </code>
         </div>
 
         <DialogFooter>
@@ -186,7 +240,9 @@ export function OrthoVersionsPanel({
       setEditingVersion(null)
       return
     }
-    const meta: OrthoVersionMeta[] = readOrthoOutputs(run).map((m) => ({ ...m }))
+    const meta: OrthoVersionMeta[] = readOrthoOutputs(run).map((m) => ({
+      ...m,
+    }))
     const idx = meta.findIndex((m) => m.filename === target.filename)
     const trimmed = editingName.trim()
     if (idx >= 0) {
@@ -229,7 +285,9 @@ export function OrthoVersionsPanel({
     onSuccess: (_, v) => {
       // Drop the metadata entry (if any) so we don't keep a dangling
       // label after the file is gone.
-      const meta = readOrthoOutputs(run).filter((m) => m.filename !== v.filename)
+      const meta = readOrthoOutputs(run).filter(
+        (m) => m.filename !== v.filename,
+      )
       setStepState(run.id, "orthomosaic", {
         outputs: { ...(run.steps.orthomosaic?.outputs ?? {}), versions: meta },
         // If we just deleted the last version, flip the step back to pending
@@ -242,7 +300,9 @@ export function OrthoVersionsPanel({
         queryKey: [
           "files",
           "list",
-          scope ? `${DEFAULT_BUCKET}/${v.path.split("/").slice(1, -1).join("/")}/` : null,
+          scope
+            ? `${DEFAULT_BUCKET}/${v.path.split("/").slice(1, -1).join("/")}/`
+            : null,
         ],
       })
       showSuccessToast(`Deleted ${v.label ?? v.filename}`)
@@ -273,7 +333,10 @@ export function OrthoVersionsPanel({
 
   return (
     <>
-      <div className="mt-2 rounded-lg border" data-testid="ortho-versions-panel">
+      <div
+        className="mt-2 rounded-lg border"
+        data-testid="ortho-versions-panel"
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -413,7 +476,10 @@ export function OrthoVersionsPanel({
           <DialogHeader>
             <DialogTitle>Delete orthomosaic version</DialogTitle>
             <DialogDescription>
-              This will remove <strong>{confirmDelete?.label ?? `v${confirmDelete?.version}`}</strong>{" "}
+              This will remove{" "}
+              <strong>
+                {confirmDelete?.label ?? `v${confirmDelete?.version}`}
+              </strong>{" "}
               ({confirmDelete?.filename}) from MinIO. The COG sibling will be
               removed too. This cannot be undone.
             </DialogDescription>
@@ -425,7 +491,9 @@ export function OrthoVersionsPanel({
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}
-              onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete)}
+              onClick={() =>
+                confirmDelete && deleteMutation.mutate(confirmDelete)
+              }
             >
               {deleteMutation.isPending ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

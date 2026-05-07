@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react"
-import { ChevronDown, ChevronUp, ExternalLink, X, Ban } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
-import { useProcess } from "@/contexts/ProcessContext"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Ban, ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { useProcess } from "@/contexts/ProcessContext"
 import type { Process } from "@/types/process"
 
 function processProgress(process: Process): number {
@@ -111,7 +111,13 @@ function ProcessItem({
 }
 
 export function ProcessPanel() {
-  const { processes, hasBeenActive, removeProcess, clearCompleted, updateProcess } = useProcess()
+  const {
+    processes,
+    hasBeenActive,
+    removeProcess,
+    clearCompleted,
+    updateProcess,
+  } = useProcess()
   const [isOpen, setIsOpen] = useState(true)
 
   useEffect(() => {
@@ -134,7 +140,9 @@ export function ProcessPanel() {
           onClick={() => setIsOpen(true)}
         >
           <ChevronUp className="mr-1.5 h-4 w-4" />
-          {runningCount > 0 ? `${runningCount} running` : `${processes.length} processes`}
+          {runningCount > 0
+            ? `${runningCount} running`
+            : `${processes.length} processes`}
         </Button>
       </div>
     )
@@ -148,7 +156,9 @@ export function ProcessPanel() {
             <p className="text-foreground flex-1 text-sm font-medium">
               {runningCount > 0 ? `${runningCount} running` : "Processes"}
             </p>
-            {processes.some((p) => p.status === "completed" || p.status === "error") && (
+            {processes.some(
+              (p) => p.status === "completed" || p.status === "error",
+            ) && (
               <Button
                 variant="ghost"
                 size="sm"

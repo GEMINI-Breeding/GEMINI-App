@@ -53,8 +53,16 @@ export interface Workspace {
   id: Id
   name: string
   description?: string
-  experimentId: Id
-  defaultScope: ProcessScope
+  /**
+   * Legacy field from an earlier draft of this UI where the workspace owned
+   * an experiment. The current flow (mirrors `main`'s) puts experiment +
+   * scope on the *Run* — picked from an uploaded dataset at run-creation
+   * time — so a workspace is just a folder of pipelines now. Kept optional
+   * to read existing localStorage records without crashing.
+   */
+  experimentId?: Id
+  /** Same legacy reasoning as `experimentId`. */
+  defaultScope?: ProcessScope
   createdAt: IsoDate
 }
 
@@ -72,6 +80,26 @@ export interface Pipeline {
   createdAt: IsoDate
 }
 
+/**
+ * Scope captured at run-creation time from a single uploaded dataset row.
+ * The MinIO path is `Raw/{year}/{experiment}/{location}/{population}/
+ * {date}/{platform}/{sensor}/Images/...` — every field here is a verbatim
+ * path component. The experiment / site / population *names* are what's
+ * stored on disk; `experimentId` is the GEMINIbase Experiment.id resolved
+ * once at pick time so step submissions don't have to re-resolve it.
+ */
+export interface RunUploadScope {
+  year: string
+  experiment: string
+  location: string
+  population: string
+  date: string
+  platform: string
+  sensor: string
+  /** GEMINIbase Experiment.id; required by the job-submit endpoint. */
+  experimentId?: Id
+}
+
 export interface Run {
   id: Id
   pipelineId: Id
@@ -80,10 +108,18 @@ export interface Run {
   /** Resolved scope at run-creation time (may differ from workspace default). */
   scope: ProcessScope
   /**
+   * Snapshot of the upload the run was created from. Source of truth for
+   * the MinIO paths the workers read/write — no re-derivation from
+   * useProcessScope. Optional to allow legacy localStorage records (created
+   * before the upload-driven flow) to load without a crash; UIs treat its
+   * absence as "this run was never wired to an upload, prompt the user".
+   */
+  uploadScope?: RunUploadScope
+  /**
    * Aerial path-component fields (date, platform, sensor + name overrides).
-   * Required before the user can submit any compute step that targets MinIO
-   * paths (RUN_ODM, SPLIT_ORTHOMOSAIC, EXTRACT_TRAITS). Optional to allow a
-   * draft Run to be created before the user picks a flight date.
+   * @deprecated Superseded by `uploadScope` once a run is created via the
+   * NewRunDialog. Read existing records for back-compat only; new code
+   * should use `uploadScope`.
    */
   aerialFields?: AerialScopeFields
   status: "draft" | "running" | "completed" | "failed"
@@ -164,8 +200,8 @@ function newId(): Id {
 export function createWorkspace(input: {
   name: string
   description?: string
-  experimentId: Id
-  defaultScope: ProcessScope
+  experimentId?: Id
+  defaultScope?: ProcessScope
 }): Workspace {
   const ws: Workspace = {
     id: newId(),
@@ -179,10 +215,15 @@ export function createWorkspace(input: {
   return ws
 }
 
-export function updateWorkspace(id: Id, patch: Partial<Omit<Workspace, "id" | "createdAt">>): void {
+export function updateWorkspace(
+  id: Id,
+  patch: Partial<Omit<Workspace, "id" | "createdAt">>,
+): void {
   setState({
     ...current,
-    workspaces: current.workspaces.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+    workspaces: current.workspaces.map((w) =>
+      w.id === id ? { ...w, ...patch } : w,
+    ),
   })
 }
 
@@ -216,10 +257,15 @@ export function createPipeline(input: {
   return p
 }
 
-export function updatePipeline(id: Id, patch: Partial<Omit<Pipeline, "id" | "createdAt" | "workspaceId">>): void {
+export function updatePipeline(
+  id: Id,
+  patch: Partial<Omit<Pipeline, "id" | "createdAt" | "workspaceId">>,
+): void {
   setState({
     ...current,
-    pipelines: current.pipelines.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    pipelines: current.pipelines.map((p) =>
+      p.id === id ? { ...p, ...patch } : p,
+    ),
   })
 }
 
@@ -235,6 +281,7 @@ export function createRun(input: {
   pipelineId: Id
   name?: string
   scope: ProcessScope
+  uploadScope?: RunUploadScope
 }): Run {
   const pipeline = current.pipelines.find((p) => p.id === input.pipelineId)
   if (!pipeline) {
@@ -246,6 +293,7 @@ export function createRun(input: {
     workspaceId: pipeline.workspaceId,
     name: input.name,
     scope: input.scope,
+    uploadScope: input.uploadScope,
     status: "draft",
     steps: {},
     createdAt: nowIso(),
@@ -289,15 +337,30 @@ export function setStepState(
   })
 }
 
-export function appendStepJobId(runId: Id, stepKey: string, jobId: string): void {
+export function appendStepJobId(
+  runId: Id,
+  stepKey: string,
+  jobId: string,
+): void {
   const run = current.runs.find((r) => r.id === runId)
   if (!run) return
-  const prev: RunStepState = run.steps[stepKey] ?? { status: "pending", jobIds: [] }
+  const prev: RunStepState = run.steps[stepKey] ?? {
+    status: "pending",
+    jobIds: [],
+  }
   if (prev.jobIds.includes(jobId)) return
+  // A new job arriving on a step that already finished (failed, completed,
+  // skipped) means the user is retrying. Reset to "running" and clear the
+  // prior outcome — without this the WS subscription loop in RunDetail never
+  // re-attaches (it only subscribes to running steps), and the step row stays
+  // pinned to the previous failure's red icon and log.
+  const isTerminal = prev.status !== "pending" && prev.status !== "running"
   setStepState(runId, stepKey, {
     jobIds: [...prev.jobIds, jobId],
-    status: prev.status === "pending" ? "running" : prev.status,
-    startedAt: prev.startedAt ?? nowIso(),
+    status: "running",
+    startedAt: isTerminal ? nowIso() : (prev.startedAt ?? nowIso()),
+    completedAt: undefined,
+    error: undefined,
   })
 }
 

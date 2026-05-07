@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   isAerialScopeComplete,
   orthomosaicPath,
+  plotBoundariesPath,
   plotImagesPrefix,
   processedPrefix,
   rawImagesPrefix,
@@ -58,6 +59,17 @@ describe("orthomosaicPath", () => {
   it("appends odm_orthophoto.tif to the processed prefix", () => {
     expect(orthomosaicPath(SCOPE)).toBe(
       "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/odm_orthophoto.tif",
+    )
+  })
+})
+
+describe("plotBoundariesPath", () => {
+  it("groups versioned boundary GeoJSONs under the processed prefix", () => {
+    expect(plotBoundariesPath(SCOPE, 1)).toBe(
+      "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/plot-boundaries/v1.geojson",
+    )
+    expect(plotBoundariesPath(SCOPE, 7)).toBe(
+      "Processed/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/plot-boundaries/v7.geojson",
     )
   })
 })

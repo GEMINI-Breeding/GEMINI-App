@@ -1,0 +1,116 @@
+# Dev-loop overrides for the GEMINI-App backend stack.
+#
+# This file is auto-loaded by `docker compose` whenever you run from
+# the GEMINI-App repo root, on top of the included submodule compose.
+# It adds `develop.watch` rules so `docker compose watch` does the
+# right thing on every kind of change:
+#
+#   • Python source under `backend/gemini/`
+#       - rest-api: already bind-mounted with `--reload`; live edits
+#         take effect without watch (left as-is).
+#       - workers (ml, geo, flir, odm, gwas): synced into the container
+#         AND the worker process is restarted (sync+restart), since
+#         worker scripts have no reload mechanism of their own.
+#   • Dependency / Dockerfile changes
+#       - `pyproject.toml`, `poetry.lock`, or any per-service
+#         Dockerfile triggers a full image rebuild for that service.
+#         No more stale-image footguns when the submodule pointer bumps.
+#
+# Usage:
+#   docker compose watch       # dev mode — live sync + auto-rebuild
+#   docker compose up -d       # normal mode — `develop:` is a no-op
+#
+# Compose `develop.watch` requires Docker Compose v2.22+ (you have v5+).
+#
+# Notes:
+#   - Synced changes live in the container's writable layer. After
+#     `docker compose down`, the next `up` recreates the container from
+#     the image, so any synced edits not yet in the image are lost.
+#     Run `--build` when you want them baked in.
+#   - The override only adds `develop:` blocks; existing service
+#     definitions in the submodule's compose are untouched.
+
+services:
+  rest-api:
+    develop:
+      watch:
+        # rest-api Python source is already bind-mounted at
+        # backend/gemini → /geminibase/gemini and reloaded by
+        # `litestar run --reload`. Watch only needs to handle the
+        # cases that bind-mount + reload don't cover: dependency
+        # and Dockerfile changes that require a fresh image.
+        - action: rebuild
+          path: ./backend/gemini/rest_api/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-ml:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/ml/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-geo:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/geo/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-flir:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/flir/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-odm:
+    develop:
+      watch:
+        # odm worker already has a bind mount, but no reload — restart
+        # is what propagates code changes to a running worker.
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/odm/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-gwas:
+    develop:
+      watch:
+        # gwas Dockerfile uses /geminibase as WORKDIR (different from
+        # the other workers' /app), so the sync target differs.
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /geminibase/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/gwas/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock

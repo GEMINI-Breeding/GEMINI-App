@@ -6,9 +6,10 @@
  * pointed at OpenStreetMap tiles. The deck.gl overlay renders polygon
  * fills + thin outlines.
  */
-import { useMemo } from "react"
-import DeckGL from "@deck.gl/react"
+
 import { GeoJsonLayer } from "@deck.gl/layers"
+import DeckGL from "@deck.gl/react"
+import { useMemo } from "react"
 import { Map as MaplibreMap, NavigationControl } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 
@@ -53,8 +54,13 @@ function viridis(t: number): Color {
   return stops[stops.length - 1][1]
 }
 
-function bboxOf(fc: GeoJSON.FeatureCollection): [number, number, number, number] | null {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+function bboxOf(
+  fc: GeoJSON.FeatureCollection,
+): [number, number, number, number] | null {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity
   let any = false
   function visit(coords: unknown): void {
     if (!Array.isArray(coords)) return
@@ -70,7 +76,8 @@ function bboxOf(fc: GeoJSON.FeatureCollection): [number, number, number, number]
     }
     for (const c of coords) visit(c)
   }
-  for (const f of fc.features) visit((f.geometry as { coordinates?: unknown })?.coordinates)
+  for (const f of fc.features)
+    visit((f.geometry as { coordinates?: unknown })?.coordinates)
   return any ? [minX, minY, maxX, maxY] : null
 }
 
@@ -117,7 +124,8 @@ export function TraitMap({
     getFillColor: (f: GeoJSON.Feature) => {
       const props = (f.properties ?? {}) as Record<string, unknown>
       const v = props[traitColumn]
-      if (typeof v !== "number" || !Number.isFinite(v)) return [200, 200, 200, 120]
+      if (typeof v !== "number" || !Number.isFinite(v))
+        return [200, 200, 200, 120]
       const [lo, hi] = range
       const t = hi === lo ? 0.5 : (v - lo) / (hi - lo)
       return viridis(t)
@@ -132,7 +140,13 @@ export function TraitMap({
         initialViewState={viewState}
         controller={true}
         layers={[layer]}
-        style={{ position: "absolute", top: "0", right: "0", bottom: "0", left: "0" }}
+        style={{
+          position: "absolute",
+          top: "0",
+          right: "0",
+          bottom: "0",
+          left: "0",
+        }}
         getTooltip={(info) => {
           const object = (info as { object?: GeoJSON.Feature | null }).object
           if (!object) return null

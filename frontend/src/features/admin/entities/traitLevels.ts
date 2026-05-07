@@ -1,19 +1,24 @@
 import {
-  TraitLevelsService,
   type TraitLevelInput,
   type TraitLevelOutput,
+  TraitLevelsService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsNumber, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: TraitLevelInput): TraitLevelInput {
   return {
     ...input,
-    trait_level_info: parseInfoField(input.trait_level_info) as TraitLevelInput["trait_level_info"],
+    trait_level_info: parseInfoField(
+      input.trait_level_info,
+    ) as TraitLevelInput["trait_level_info"],
   }
 }
 
-export const traitLevelsConfig: EntityConfig<TraitLevelOutput, TraitLevelInput> = {
+export const traitLevelsConfig: EntityConfig<
+  TraitLevelOutput,
+  TraitLevelInput
+> = {
   slug: "trait-levels",
   singular: "Trait level",
   plural: "Trait levels",
@@ -39,7 +44,12 @@ export const traitLevelsConfig: EntityConfig<TraitLevelOutput, TraitLevelInput> 
     }),
   fields: [
     { key: "trait_level_name", label: "Name", type: "text", required: true },
-    { key: "trait_level_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "trait_level_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ trait_level_name: "" }),
   toInput: (row) => ({

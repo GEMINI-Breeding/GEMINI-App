@@ -65,9 +65,7 @@ describe("useDashboardStore", () => {
     localStorage.setItem(
       "gemini-dashboard",
       JSON.stringify({
-        tabs: [
-          { id: "t1", name: "Saved", widgets: [kpiWidget("w1")] },
-        ],
+        tabs: [{ id: "t1", name: "Saved", widgets: [kpiWidget("w1")] }],
         activeTabId: "t1",
       }),
     )
@@ -125,7 +123,9 @@ describe("useDashboardStore", () => {
     act(() => result.current.addTab("Analysis"))
     const newId = result.current.activeTab.id
     act(() => result.current.renameTab(newId, "Renamed"))
-    expect(result.current.state.tabs.find((t) => t.id === newId)?.name).toBe("Renamed")
+    expect(result.current.state.tabs.find((t) => t.id === newId)?.name).toBe(
+      "Renamed",
+    )
   })
 
   it("deleteTab drops the tab and falls back to the first remaining one", () => {
@@ -174,7 +174,9 @@ describe("useDashboardStore", () => {
     act(() => result.current.addWidget("tab-default", kpiWidget("w1")))
     act(() => result.current.addWidget("tab-default", kpiWidget("w2")))
     act(() => result.current.removeWidget("tab-default", "w1"))
-    expect(result.current.activeTab.widgets.map((w) => w.instanceId)).toEqual(["w2"])
+    expect(result.current.activeTab.widgets.map((w) => w.instanceId)).toEqual([
+      "w2",
+    ])
   })
 
   it("reorderWidget swaps adjacent widgets; ignores out-of-range moves", () => {

@@ -1,4 +1,4 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router"
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router"
 
 import { AdminTabs } from "@/features/admin/components/AdminTabs"
 import { isLoggedIn } from "@/hooks/useAuth"

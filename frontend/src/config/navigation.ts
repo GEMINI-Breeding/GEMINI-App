@@ -7,7 +7,6 @@ import {
   Play,
   Settings,
   Terminal,
-  Upload,
 } from "lucide-react"
 
 export type SubItem = {
@@ -33,14 +32,14 @@ export type NavItem = {
 // main, but the GEMINIbase backend ships GenotypingStudies / Variants /
 // GWAS controllers, and the data flow has zero orthomosaic / pipeline
 // coupling, so it lives outside the Process wizard.
+//
+// Trait/genomic import is reached from /files (Upload tab → "Trait Data" or
+// "Genomic Data" type → drop file → wizard dialog). The auto-detect entry
+// point at /import was retired; detection-engine + StepDetect are still
+// present in `features/import/` for the future unification task.
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
   { icon: Folder, title: "Files", path: "/files" },
-  // /import is a multi-step wizard ported from gemini-ui that handles fresh
-  // imports of trait CSVs, genomic matrices, and HapMap/VCF files (Phase
-  // 9c–9e). Independent of the Process wizard (which is image-pipeline)
-  // and reachable from the sidebar.
-  { icon: Upload, title: "Import", path: "/import" },
   {
     icon: Play,
     title: "Process",

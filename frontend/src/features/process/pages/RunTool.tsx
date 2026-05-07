@@ -6,23 +6,18 @@
  * plot_marking (R6) are still placeholders until their phases land.
  */
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { useEffect, useMemo } from "react"
 import { ArrowLeft } from "lucide-react"
+import { useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
-import {
-  buildAerialScope,
-  useAerialScopeContext,
-} from "@/features/process/components/AerialScopePicker"
 import { EdgeCropTool } from "@/features/process/components/EdgeCropTool"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
 import { InferenceTool } from "@/features/process/components/InferenceTool"
 import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
 import { PlotMarker } from "@/features/process/components/PlotMarker"
-import { useProcessScope } from "@/features/process/lib/processScope"
 import {
-  isAerialScopeComplete,
   type AerialScope,
+  isAerialScopeComplete,
 } from "@/features/process/lib/paths"
 import {
   usePipeline,
@@ -76,35 +71,25 @@ export function RunTool() {
   const run = useRun(runId)
   const workspace = useWorkspace(workspaceId)
   const pipeline = usePipeline(run?.pipelineId)
-  const ctx = useAerialScopeContext()
-  const {
-    experimentId: scopedExperimentId,
-    setExperimentId: setScopedExperimentId,
-  } = useProcessScope()
 
-  // Mirror RunDetail's behavior: entering a tool for a workspace pushes
-  // that workspace's experimentId into the global Process scope so the
-  // path-listing queries inside the tool target the right experiment.
-  useEffect(() => {
-    if (!workspace) return
-    if (scopedExperimentId !== workspace.experimentId) {
-      setScopedExperimentId(workspace.experimentId)
-    }
-  }, [workspace, scopedExperimentId, setScopedExperimentId])
-
-  // Resolve the run's aerial scope to MinIO path components.
+  // The run's scope is locked to the uploaded dataset picked at
+  // run-creation time (see NewRunDialog + RunUploadScope). All path
+  // listings the interactive tools drive read from this snapshot —
+  // no global useProcessScope plumbing.
   const scope: AerialScope | null = useMemo(() => {
-    if (!run?.aerialFields) return null
-    if (
-      !run.aerialFields.date ||
-      !run.aerialFields.platform ||
-      !run.aerialFields.sensor
-    ) {
-      return null
+    const u = run?.uploadScope
+    if (!u) return null
+    const built: AerialScope = {
+      year: u.year,
+      experiment: u.experiment,
+      location: u.location,
+      population: u.population,
+      date: u.date,
+      platform: u.platform,
+      sensor: u.sensor,
     }
-    const built = buildAerialScope(ctx, run.aerialFields)
     return isAerialScopeComplete(built) ? built : null
-  }, [ctx, run?.aerialFields])
+  }, [run?.uploadScope])
 
   function goBack() {
     navigate({
@@ -131,7 +116,9 @@ export function RunTool() {
           <div>
             <h1 className="text-xl font-semibold">{label}</h1>
             {description && (
-              <p className="text-muted-foreground text-sm mt-0.5">{description}</p>
+              <p className="text-muted-foreground text-sm mt-0.5">
+                {description}
+              </p>
             )}
           </div>
         </div>
@@ -145,8 +132,8 @@ export function RunTool() {
         ) : !scope ? (
           <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
             <p className="text-muted-foreground text-sm">
-              The run is missing a flight date / platform / sensor. Pick those in
-              the Run Setup card on the run page first.
+              The run is missing a flight date / platform / sensor. Pick those
+              in the Run Setup card on the run page first.
             </p>
             <Button variant="outline" onClick={goBack}>
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -154,7 +141,12 @@ export function RunTool() {
             </Button>
           </div>
         ) : step === "plot_boundary_prep" ? (
-          <PlotBoundaryPrep run={run} scope={scope} onSaved={goBack} onCancel={goBack} />
+          <PlotBoundaryPrep
+            run={run}
+            scope={scope}
+            onSaved={goBack}
+            onCancel={goBack}
+          />
         ) : step === "gcp_selection" && workspace ? (
           <GcpPicker
             workspace={workspace}
@@ -165,7 +157,6 @@ export function RunTool() {
           />
         ) : step === "inference" && workspace && pipeline ? (
           <InferenceTool
-            workspace={workspace}
             pipeline={pipeline}
             run={run}
             scope={scope}
@@ -173,7 +164,12 @@ export function RunTool() {
             onCancel={goBack}
           />
         ) : step === "edge_crop" ? (
-          <EdgeCropTool run={run} scope={scope} onSaved={goBack} onCancel={goBack} />
+          <EdgeCropTool
+            run={run}
+            scope={scope}
+            onSaved={goBack}
+            onCancel={goBack}
+          />
         ) : step === "plot_marking" ? (
           <PlotMarker onCancel={goBack} />
         ) : (

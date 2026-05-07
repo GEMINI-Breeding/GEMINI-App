@@ -31,12 +31,14 @@ export function yearFromDate(date: string | null | undefined): string {
  * Matches `_build_output_prefix` in `backend/gemini/workers/odm/worker.py`.
  */
 export function processedPrefix(scope: AerialScope): string {
-  const { year, experiment, location, population, date, platform, sensor } = scope
+  const { year, experiment, location, population, date, platform, sensor } =
+    scope
   return `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
 }
 
 export function rawImagesPrefix(scope: AerialScope): string {
-  const { year, experiment, location, population, date, platform, sensor } = scope
+  const { year, experiment, location, population, date, platform, sensor } =
+    scope
   return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/Images/`
 }
 
@@ -46,6 +48,19 @@ export function plotImagesPrefix(scope: AerialScope): string {
 
 export function orthomosaicPath(scope: AerialScope): string {
   return `${processedPrefix(scope)}odm_orthophoto.tif`
+}
+
+/**
+ * MinIO object path for a materialized plot-boundary GeoJSON. Boundaries are
+ * authoritatively stored as PlotGeometryService versions (Postgres snapshots);
+ * the EXTRACT_TRAITS worker reads from MinIO, so the frontend writes the chosen
+ * version's FeatureCollection here right before submitting the job.
+ */
+export function plotBoundariesPath(
+  scope: AerialScope,
+  version: number,
+): string {
+  return `${processedPrefix(scope)}plot-boundaries/v${version}.geojson`
 }
 
 export function isAerialScopeComplete(

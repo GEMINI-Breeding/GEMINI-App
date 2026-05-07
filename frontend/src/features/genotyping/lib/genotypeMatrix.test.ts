@@ -15,7 +15,11 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { GenotypeMatrixParseError, parseGenotypeMatrix } from "./genotypeMatrix"
+import {
+  GenotypeMatrixParseError,
+  parseGenotypeMatrix,
+  parseGenotypeMatrixBatches,
+} from "./genotypeMatrix"
 
 describe("parseGenotypeMatrix", () => {
   it("parses a simple 2-variant × 3-sample CSV", () => {
@@ -114,5 +118,72 @@ describe("parseGenotypeMatrix", () => {
   it("throws when only a header is provided (no rows)", () => {
     const csv = "variant_name,LINE_A,LINE_B"
     expect(() => parseGenotypeMatrix(csv)).toThrow(/No variant rows/i)
+  })
+})
+
+describe("parseGenotypeMatrixBatches", () => {
+  function buildCsv(variantCount: number): string {
+    const header = "variant_name,chromosome,position,LINE_A,LINE_B"
+    const rows = Array.from({ length: variantCount }, (_, i) => {
+      const v = `SNP_${String(i + 1).padStart(4, "0")}`
+      return `${v},1,${(i + 1) * 100},A/A,A/G`
+    })
+    return [header, ...rows].join("\n")
+  }
+
+  it("yields a single batch when rows fit", () => {
+    const csv = buildCsv(3)
+    const batches = Array.from(parseGenotypeMatrixBatches(csv, 500))
+    expect(batches).toHaveLength(1)
+    expect(batches[0].batch.variant_rows).toHaveLength(3)
+    expect(batches[0].batch.sample_headers).toEqual(["LINE_A", "LINE_B"])
+    expect(batches[0].batchIndex).toBe(0)
+    expect(batches[0].totalRows).toBe(3)
+  })
+
+  it("splits across batches at the configured size", () => {
+    const csv = buildCsv(5)
+    const batches = Array.from(parseGenotypeMatrixBatches(csv, 2))
+    expect(batches.map((b) => b.batch.variant_rows.length)).toEqual([2, 2, 1])
+    expect(batches.map((b) => b.batchIndex)).toEqual([0, 1, 2])
+    expect(batches.map((b) => b.totalRows)).toEqual([2, 4, 5])
+    // Sample headers stay pinned across every batch.
+    for (const b of batches) {
+      expect(b.batch.sample_headers).toEqual(["LINE_A", "LINE_B"])
+    }
+  })
+
+  it("preserves warnings cumulatively across batches", () => {
+    const csv = [
+      "variant_name,LINE_A,LINE_B",
+      "SNP_1,A/A,A/G",
+      ",A/A,A/G", // missing variant_name → warning, skipped
+      "SNP_2,A/A,A/G",
+      "SNP_3,A/A,A/G",
+    ].join("\n")
+    const batches = Array.from(parseGenotypeMatrixBatches(csv, 2))
+    expect(batches).toHaveLength(2)
+    expect(batches[0].warnings).toEqual([
+      "Row 3: missing variant_name; skipped.",
+    ])
+    // Second batch carries the same warning forward (cumulative).
+    expect(batches[1].warnings).toEqual([
+      "Row 3: missing variant_name; skipped.",
+    ])
+    // Three real rows total split as 2 + 1.
+    expect(batches.map((b) => b.batch.variant_rows.length)).toEqual([2, 1])
+  })
+
+  it("throws on header-only matrix even in streaming mode", () => {
+    const csv = "variant_name,LINE_A,LINE_B"
+    expect(() => Array.from(parseGenotypeMatrixBatches(csv, 500))).toThrow(
+      /No variant rows/i,
+    )
+  })
+
+  it("rejects non-positive batchSize", () => {
+    expect(() =>
+      Array.from(parseGenotypeMatrixBatches("variant_name,L\nSNP_1,A", 0)),
+    ).toThrow(GenotypeMatrixParseError)
   })
 })

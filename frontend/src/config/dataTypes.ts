@@ -1,13 +1,13 @@
 type DataTypeConfig = {
-  fields: string[];
-  fileType: string;
-  directory: string[];
-  defaultPlatform?: string;
-  defaultSensor?: string;
-  hidden?: true;
+  fields: string[]
+  fileType: string
+  directory: string[]
+  defaultPlatform?: string
+  defaultSensor?: string
+  hidden?: true
   /** When true, UploadData renders a custom upload dialog instead of the standard UploadList. */
-  customUpload?: true;
-};
+  customUpload?: true
+}
 
 export const dataTypes: Record<string, DataTypeConfig> = {
   "Image Data": {
@@ -33,7 +33,14 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Ardupilot Logs": {
-    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fields: [
+      "experiment",
+      "location",
+      "population",
+      "date",
+      "platform",
+      "sensor",
+    ],
     fileType: "*",
     directory: [
       "Raw",
@@ -48,7 +55,14 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Synced Metadata": {
-    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fields: [
+      "experiment",
+      "location",
+      "population",
+      "date",
+      "platform",
+      "sensor",
+    ],
     fileType: ".csv",
     directory: [
       "Raw",
@@ -154,4 +168,21 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".csv,.xlsx,.xls",
     directory: ["ReferenceData"],
   },
-};
+  "Trait Data": {
+    // Only experiment lives at the page level — site, season, population,
+    // and collection date can be invariant for the file or come from per-
+    // sheet columns. Those decisions are made in the wizard's Map Columns
+    // step (`SheetMapping.{siteMode,seasonMode,collectionDateMode}`), not
+    // here.
+    fields: ["experiment"],
+    fileType: ".csv,.tsv,.xlsx,.xls",
+    directory: ["Traits"],
+    customUpload: true,
+  },
+  "Genomic Data": {
+    fields: ["experiment"],
+    fileType: ".csv,.tsv,.txt,.vcf,.hmp,.hapmap",
+    directory: ["Genotyping"],
+    customUpload: true,
+  },
+}

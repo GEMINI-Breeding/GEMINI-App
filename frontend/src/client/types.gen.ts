@@ -421,6 +421,23 @@ export type GenotypeMatrixVariantRow = {
     calls: Array<(string | null)>;
 };
 
+export type GenotypePgenIngestRequest = {
+    file: (Blob | File);
+    sample_canonical_map_json?: (string | null);
+    skipped_headers_json?: (string | null);
+    created_accessions_json?: (string | null);
+};
+
+export type GenotypePgenIngestResult = {
+    variants_inserted: number;
+    records_inserted: number;
+    samples_inserted?: number;
+    files?: {
+        [key: string]: unknown;
+    };
+    errors?: Array<(string)>;
+};
+
 export type GenotypeRecordBulkInput = {
     records: Array<{
         [key: string]: unknown;
@@ -2300,6 +2317,13 @@ export type ApiGenotypingStudiesIdStudyIdIngestMatrixIngestMatrixData = {
 };
 
 export type ApiGenotypingStudiesIdStudyIdIngestMatrixIngestMatrixResponse = (GenotypeMatrixBatchResult);
+
+export type ApiGenotypingStudiesIdStudyIdIngestPgenIngestPgenData = {
+    formData: GenotypePgenIngestRequest;
+    studyId: string;
+};
+
+export type ApiGenotypingStudiesIdStudyIdIngestPgenIngestPgenResponse = (GenotypePgenIngestResult);
 
 export type ApiGeojsonLoadLoadGeojsonData = {
     requestBody: GeoJsonLoadRequest;

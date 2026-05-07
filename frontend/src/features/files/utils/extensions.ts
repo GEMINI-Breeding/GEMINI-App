@@ -18,10 +18,16 @@ export const IMAGE_EXTS = new Set([
  *  - Anything else  → comma-separated list of extensions (".csv,.xlsx,.xls")
  *                     matched case-insensitively. `.tif` also accepts `.tiff`.
  */
-export function isExtensionAllowed(filePath: string, fileType: string): boolean {
+export function isExtensionAllowed(
+  filePath: string,
+  fileType: string,
+): boolean {
   const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
   if (fileType === "*") return true
   if (fileType === "image/*") return IMAGE_EXTS.has(ext)
   const allowed = fileType.split(",").map((s) => s.trim().toLowerCase())
-  return allowed.some((a) => ext === a) || (allowed.includes(".tif") && ext === ".tiff")
+  return (
+    allowed.some((a) => ext === a) ||
+    (allowed.includes(".tif") && ext === ".tiff")
+  )
 }

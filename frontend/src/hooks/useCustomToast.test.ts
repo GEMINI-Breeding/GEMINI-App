@@ -26,7 +26,9 @@ describe("useCustomToast", () => {
   it("showSuccessToast forwards the description under the 'Success!' title", () => {
     const { result } = renderHook(() => useCustomToast())
     result.current.showSuccessToast("Saved.")
-    expect(successMock).toHaveBeenCalledWith("Success!", { description: "Saved." })
+    expect(successMock).toHaveBeenCalledWith("Success!", {
+      description: "Saved.",
+    })
   })
 
   it("showErrorToast forwards the description under the generic error title", () => {

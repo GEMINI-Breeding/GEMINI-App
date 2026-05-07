@@ -18,18 +18,17 @@ import {
   Users,
 } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
-
+import { StepColumnMapping } from "@/features/import/components/StepColumnMapping"
 import { StepConfirm } from "@/features/import/components/StepConfirm"
 import { StepDetect } from "@/features/import/components/StepDetect"
-import {
-  GenomicWizardStub,
-  StepColumnMappingStub,
-  StepGermplasmReviewStub,
-  StepMetadataStub,
-  StepUploadStub,
-} from "@/features/import/components/Stubs"
+import { StepGermplasmReview } from "@/features/import/components/StepGermplasmReview"
+import { StepMetadata } from "@/features/import/components/StepMetadata"
+import { StepUpload } from "@/features/import/components/StepUpload"
+import { GenomicWizard } from "@/features/import/genomic/GenomicWizard"
+import type { DetectionResult } from "@/features/import/lib/detection-engine"
 import type {
   ColumnMapping,
+  FileWithPath,
   GermplasmReview,
   ImportMetadata,
   UploadResults,
@@ -47,96 +46,125 @@ const BASE_STEPS = [
 const MAPPING_STEP = { label: "Map Columns", icon: TableProperties } as const
 const GERMPLASM_STEP = { label: "Review Germplasm", icon: Users } as const
 
-export type GermplasmMappingMode =
-  | "none"
-  | "accession-only"
-  | "line-only"
-  | "ambiguous"
+// `germplasmMappingMode` lives in `../lib/germplasmMode.ts` so non-React
+// helpers (recordBuilder, etc.) can reuse it without pulling lucide/React.
+// Re-export the classification + type from the lib so existing imports
+// from `WizardShell` keep working.
+export {
+  type GermplasmMappingMode,
+  germplasmMappingMode,
+} from "@/features/import/lib/germplasmMode"
 
-/** Classify germplasm columns across active sheets. Same rules as the
- *  reference UI: any alias column → ambiguous; both accession and line
- *  columns → ambiguous; only one kind → that kind; none → none. */
-export function germplasmMappingMode(
-  mapping: ColumnMapping | null,
-): GermplasmMappingMode {
-  if (!mapping) return "none"
-  let sawAccession = false
-  let sawLine = false
-  let sawAlias = false
-  for (const c of mapping.sheetConfigs) {
-    if (c.skipped) continue
-    if (c.accessionNameColumn) sawAccession = true
-    if (c.lineNameColumn) sawLine = true
-    if (c.aliasColumn) sawAlias = true
-  }
-  if (!sawAccession && !sawLine && !sawAlias) return "none"
-  if (sawAlias) return "ambiguous"
-  if (sawAccession && sawLine) return "ambiguous"
-  if (sawAccession) return "accession-only"
-  return "line-only"
+import { germplasmMappingMode as germplasmMappingModeFn } from "@/features/import/lib/germplasmMode"
+
+export interface WizardShellProps {
+  /** When provided, the wizard skips StepDetect (the Files page already
+   *  picked the data kind from a dropdown). When omitted, falls back to
+   *  the auto-detect entry — kept for the future unification task. */
+  initialFiles?: FileWithPath[]
+  initialDetection?: DetectionResult
+  /** When provided alongside initialDetection, the wizard also skips its
+   *  own Metadata step — metadata was collected by the Files page's
+   *  DataStructureForm before the file was dropped. */
+  initialMetadata?: ImportMetadata
+  /** Optional close handler — when present, exposed via the GenomicWizardStub
+   *  exit and replaces the trait-flow "Done" reset behavior so the host
+   *  dialog can dismiss. */
+  onClose?: () => void
+  /** Forwarded to GenomicWizard / StepIngestGenomic so the host can lock
+   *  dialog dismissal while ingest is mid-flight. */
+  onBusyChange?: (busy: boolean) => void
 }
 
-export function WizardShell() {
-  const [step, setStep] = useState(0)
+export function WizardShell({
+  initialFiles,
+  initialDetection,
+  initialMetadata,
+  onClose,
+  onBusyChange,
+}: WizardShellProps = {}) {
+  const skipDetect =
+    initialFiles !== undefined && initialDetection !== undefined
+  const skipMetadata = skipDetect && initialMetadata !== undefined
+
+  // Step layout: leading [Detect, Metadata] (each may be skipped),
+  // optional [Mapping, Germplasm], trailing [Upload, Confirm].
+  const detectStepIndex = skipDetect ? -1 : 0
+  const metadataStepIndex = skipMetadata ? -1 : skipDetect ? 0 : 1
+  const mappingStepIndex = (skipDetect ? 0 : 1) + (skipMetadata ? 0 : 1)
+
   const [state, setState] = useState<WizardState>({
-    files: [],
-    detection: null,
-    metadata: null,
+    files: initialFiles ?? [],
+    detection: initialDetection ?? null,
+    metadata: initialMetadata ?? null,
     columnMapping: null,
     germplasmReview: null,
     uploadResults: null,
+    genomic: null,
   })
+  const [step, setStep] = useState(
+    skipMetadata ? mappingStepIndex : skipDetect ? metadataStepIndex : 0,
+  )
 
   const needsMapping =
     state.detection?.dataCategories.some((c) => c === "csv_tabular") ?? false
   const needsGermplasm =
-    needsMapping && germplasmMappingMode(state.columnMapping) === "ambiguous"
+    needsMapping && germplasmMappingModeFn(state.columnMapping) === "ambiguous"
 
   const steps = useMemo(() => {
-    const s: { label: string; icon: typeof Search }[] = [
-      BASE_STEPS[0],
-      BASE_STEPS[1],
-    ]
+    const s: { label: string; icon: typeof Search }[] = []
+    if (!skipDetect) s.push(BASE_STEPS[0])
+    if (!skipMetadata) s.push(BASE_STEPS[1])
     if (needsMapping) s.push(MAPPING_STEP)
     if (needsGermplasm) s.push(GERMPLASM_STEP)
     s.push(BASE_STEPS[2], BASE_STEPS[3])
     return s
-  }, [needsMapping, needsGermplasm])
+  }, [needsMapping, needsGermplasm, skipDetect, skipMetadata])
 
-  // Step indices. Base layout: 0 Detect, 1 Metadata, then optional Mapping,
-  // optional Germplasm, then Upload, Confirm.
-  const mappingStepIndex = 2
-  const germplasmStepIndex = needsMapping ? 3 : -1
-  const uploadStepIndex = (needsMapping ? 1 : 0) + (needsGermplasm ? 1 : 0) + 2
+  const germplasmStepIndex = needsMapping ? mappingStepIndex + 1 : -1
+  const uploadStepIndex =
+    mappingStepIndex + (needsMapping ? 1 : 0) + (needsGermplasm ? 1 : 0)
   const confirmStepIndex = uploadStepIndex + 1
 
   const handleDetectNext = useCallback<
     React.ComponentProps<typeof StepDetect>["onNext"]
-  >((files, detection) => {
-    setState((prev) => ({ ...prev, files, detection }))
-    setStep(1)
-  }, [])
+  >(
+    (files, detection) => {
+      setState((prev) => ({ ...prev, files, detection }))
+      setStep(metadataStepIndex)
+    },
+    [metadataStepIndex],
+  )
 
-  const handleMetadataNext = useCallback((metadata: ImportMetadata) => {
-    setState((prev) => ({ ...prev, metadata }))
-    setStep(2)
-  }, [])
+  const handleMetadataNext = useCallback(
+    (metadata: ImportMetadata) => {
+      setState((prev) => ({ ...prev, metadata }))
+      setStep(mappingStepIndex)
+    },
+    [mappingStepIndex],
+  )
 
-  const handleMappingNext = useCallback((mapping: ColumnMapping) => {
-    setState((prev) => ({
-      ...prev,
-      columnMapping: mapping,
-      germplasmReview: null,
-    }))
-    // Step 3 is either germplasm review or upload depending on whether
-    // the mapping's germplasm columns are ambiguous.
-    setStep(3)
-  }, [])
+  const handleMappingNext = useCallback(
+    (mapping: ColumnMapping) => {
+      setState((prev) => ({
+        ...prev,
+        columnMapping: mapping,
+        germplasmReview: null,
+      }))
+      // Lands on germplasm review if columns are ambiguous, otherwise jumps
+      // straight to upload — both indices are computed dynamically.
+      setStep(needsGermplasm ? germplasmStepIndex : uploadStepIndex)
+    },
+    [needsGermplasm, germplasmStepIndex, uploadStepIndex],
+  )
 
-  const handleGermplasmNext = useCallback((review: GermplasmReview) => {
-    setState((prev) => ({ ...prev, germplasmReview: review }))
-    setStep(4)
-  }, [])
+  const handleGermplasmNext = useCallback(
+    (review: GermplasmReview) => {
+      setState((prev) => ({ ...prev, germplasmReview: review }))
+      setStep(uploadStepIndex)
+    },
+    [uploadStepIndex],
+  )
 
   const handleUploadNext = useCallback(
     (results: UploadResults) => {
@@ -147,6 +175,10 @@ export function WizardShell() {
   )
 
   const reset = useCallback(() => {
+    if (onClose) {
+      onClose()
+      return
+    }
     setState({
       files: [],
       detection: null,
@@ -154,9 +186,10 @@ export function WizardShell() {
       columnMapping: null,
       germplasmReview: null,
       uploadResults: null,
+      genomic: null,
     })
     setStep(0)
-  }, [])
+  }, [onClose])
 
   const handleBack = useCallback((toStep: number) => {
     setStep(toStep)
@@ -172,10 +205,12 @@ export function WizardShell() {
 
   if (isGenomic && state.detection) {
     return (
-      <GenomicWizardStub
+      <GenomicWizard
         files={state.files}
         detection={state.detection}
-        onExit={reset}
+        metadata={state.metadata}
+        onBusyChange={onBusyChange}
+        onClose={reset}
       />
     )
   }
@@ -217,14 +252,14 @@ export function WizardShell() {
         })}
       </nav>
 
-      {step === 0 && <StepDetect onNext={handleDetectNext} />}
+      {step === detectStepIndex && <StepDetect onNext={handleDetectNext} />}
 
-      {step === 1 && state.detection && (
-        <StepMetadataStub
+      {step === metadataStepIndex && state.detection && (
+        <StepMetadata
           detection={state.detection}
           initial={state.metadata}
           onNext={handleMetadataNext}
-          onBack={() => handleBack(0)}
+          onBack={() => handleBack(detectStepIndex)}
         />
       )}
 
@@ -232,11 +267,11 @@ export function WizardShell() {
         step === mappingStepIndex &&
         state.detection &&
         state.metadata && (
-          <StepColumnMappingStub
+          <StepColumnMapping
             files={state.files}
             initial={state.columnMapping}
             onNext={handleMappingNext}
-            onBack={() => handleBack(1)}
+            onBack={() => handleBack(metadataStepIndex)}
           />
         )}
 
@@ -244,7 +279,7 @@ export function WizardShell() {
         step === germplasmStepIndex &&
         state.columnMapping &&
         state.metadata && (
-          <StepGermplasmReviewStub
+          <StepGermplasmReview
             mapping={state.columnMapping}
             metadata={state.metadata}
             initial={state.germplasmReview}
@@ -254,12 +289,12 @@ export function WizardShell() {
         )}
 
       {step === uploadStepIndex && state.detection && state.metadata && (
-        <StepUploadStub
+        <StepUpload
           files={state.files}
-          detection={state.detection}
           metadata={state.metadata}
           columnMapping={state.columnMapping}
           germplasmReview={state.germplasmReview}
+          onBusyChange={onBusyChange}
           onNext={handleUploadNext}
           onBack={() =>
             handleBack(
@@ -267,14 +302,18 @@ export function WizardShell() {
                 ? germplasmStepIndex
                 : needsMapping
                   ? mappingStepIndex
-                  : 1,
+                  : metadataStepIndex,
             )
           }
         />
       )}
 
       {step === confirmStepIndex && state.uploadResults && (
-        <StepConfirm results={state.uploadResults} onDone={reset} />
+        <StepConfirm
+          results={state.uploadResults}
+          onDone={reset}
+          onFinish={onClose}
+        />
       )}
     </div>
   )

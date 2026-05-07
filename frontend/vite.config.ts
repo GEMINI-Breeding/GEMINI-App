@@ -32,6 +32,19 @@ export default defineConfig({
         // to /api/jobs/{id}/progress using the same origin as HTTP calls.
         ws: true,
       },
+      // Litestar exposes its OpenAPI schema at /schema (not /api/schema),
+      // so the dev proxy needs an explicit forwarder for it. Without this
+      // BackendStatus's compatibility check fetches the Vite SPA fallback
+      // (index.html) and fails to parse as JSON.
+      "/schema": {
+        target: "http://127.0.0.1:7777",
+        changeOrigin: true,
+      },
+      // Same reason: /healthz lives at the Litestar root.
+      "/healthz": {
+        target: "http://127.0.0.1:7777",
+        changeOrigin: true,
+      },
       // TiTiler runs in the GEMINIbase compose stack at :8091 and serves COG
       // tiles for the orthomosaic overlay on the boundary map. Same proxy
       // pattern as /api so the frontend can use relative URLs.

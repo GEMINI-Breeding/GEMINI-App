@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { TraitsService, type TraitInput } from "@/client"
+import { type TraitInput, TraitsService } from "@/client"
 
 import { traitsConfig } from "./traits"
 

@@ -1,9 +1,7 @@
-import { useState, useEffect } from "react"
 import { useMutation } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Dialog,
   DialogContent,
@@ -12,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
 
 function apiUrl(path: string): string {
@@ -58,8 +58,15 @@ type TargetKey = (typeof TARGET_COLS)[number]["key"]
 
 // ── CSV helpers (same tiny parser as PlotBoundaryPrep) ────────────────────────
 
-function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(Boolean)
+function parseCSV(text: string): {
+  headers: string[]
+  rows: Record<string, string>[]
+} {
+  const lines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter(Boolean)
   if (!lines.length) return { headers: [], rows: [] }
 
   function parseLine(line: string): string[] {
@@ -69,8 +76,14 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
     for (let i = 0; i < line.length; i++) {
       const ch = line[i]
       if (ch === '"') {
-        if (inQ && line[i + 1] === '"') { cur += '"'; i++ } else inQ = !inQ
-      } else if (ch === "," && !inQ) { fields.push(cur); cur = "" } else cur += ch
+        if (inQ && line[i + 1] === '"') {
+          cur += '"'
+          i++
+        } else inQ = !inQ
+      } else if (ch === "," && !inQ) {
+        fields.push(cur)
+        cur = ""
+      } else cur += ch
     }
     fields.push(cur)
     return fields
@@ -79,7 +92,9 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   const headers = parseLine(lines[0]).map((h) => h.trim())
   const rows = lines.slice(1).map((line) => {
     const vals = parseLine(line)
-    return Object.fromEntries(headers.map((h, i) => [h, (vals[i] ?? "").trim()]))
+    return Object.fromEntries(
+      headers.map((h, i) => [h, (vals[i] ?? "").trim()]),
+    )
   })
   return { headers, rows }
 }
@@ -89,10 +104,16 @@ function remapAndSerialize(
   mapping: Partial<Record<TargetKey, string>>,
 ): string {
   if (!rows.length) return ""
-  const usedSources = new Set(Object.values(mapping).filter(Boolean) as string[])
-  const passthroughCols = Object.keys(rows[0]).filter((c) => !usedSources.has(c))
+  const usedSources = new Set(
+    Object.values(mapping).filter(Boolean) as string[],
+  )
+  const passthroughCols = Object.keys(rows[0]).filter(
+    (c) => !usedSources.has(c),
+  )
   const newHeaders: string[] = [
-    ...Object.entries(mapping).filter(([, src]) => src).map(([tgt]) => tgt),
+    ...Object.entries(mapping)
+      .filter(([, src]) => src)
+      .map(([tgt]) => tgt),
     ...passthroughCols,
   ]
   const lines = [newHeaders.join(",")]
@@ -100,7 +121,9 @@ function remapAndSerialize(
     const vals = newHeaders.map((h) => {
       const src = (mapping as Record<string, string>)[h] ?? h
       const v = row[src] ?? ""
-      return v.includes(",") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v
+      return v.includes(",") || v.includes('"')
+        ? `"${v.replace(/"/g, '""')}"`
+        : v
     })
     lines.push(vals.join(","))
   }
@@ -131,11 +154,17 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved: (rowCount: number) => void
-  initialCsvText?: string   // if provided, skip file picker and go straight to mapping
-  destPath?: string         // absolute server path of the already-uploaded file
+  initialCsvText?: string // if provided, skip file picker and go straight to mapping
+  destPath?: string // absolute server path of the already-uploaded file
 }
 
-export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText, destPath }: Props) {
+export function MsgsSyncedUploadDialog({
+  open,
+  onClose,
+  onSaved,
+  initialCsvText,
+  destPath,
+}: Props) {
   const [step, setStep] = useState<"upload" | "map">("upload")
   const [headers, setHeaders] = useState<string[]>([])
   const [parsedRows, setParsedRows] = useState<Record<string, string>[]>([])
@@ -147,7 +176,7 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
     if (open && initialCsvText) {
       loadCsvText(initialCsvText)
     }
-  }, [open, initialCsvText])
+  }, [open, initialCsvText, loadCsvText])
 
   function loadCsvText(text: string) {
     const { headers: h, rows } = parseCSV(text)
@@ -200,7 +229,9 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
     onError: () => showErrorToast("Failed to save msgs_synced.csv"),
   })
 
-  const requiredMapped = TARGET_COLS.filter((t) => t.required).every((t) => mapping[t.key])
+  const requiredMapped = TARGET_COLS.filter((t) => t.required).every(
+    (t) => mapping[t.key],
+  )
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
@@ -219,7 +250,12 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
         {step === "upload" && (
           <div className="space-y-3">
             <Label>Select CSV file</Label>
-            <Input type="file" accept=".csv" className="mt-1" onChange={handleFileChange} />
+            <Input
+              type="file"
+              accept=".csv"
+              className="mt-1"
+              onChange={handleFileChange}
+            />
           </div>
         )}
 
@@ -237,21 +273,35 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
                   <tr key={t.key}>
                     <td className="py-2 pr-4">
                       <div className="flex items-center gap-1.5">
-                        <code className="bg-muted rounded px-1 py-0.5 text-xs">{t.key}</code>
-                        {t.required && <span className="text-xs text-red-500">*</span>}
+                        <code className="bg-muted rounded px-1 py-0.5 text-xs">
+                          {t.key}
+                        </code>
+                        {t.required && (
+                          <span className="text-xs text-red-500">*</span>
+                        )}
                       </div>
-                      <div className="text-muted-foreground mt-0.5 text-xs">{t.hint}</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">
+                        {t.hint}
+                      </div>
                     </td>
                     <td className="py-2">
                       <select
                         className="bg-background w-full rounded border px-2 py-1 text-sm"
                         value={mapping[t.key] ?? ""}
-                        onChange={(e) => setMapping((m) => ({ ...m, [t.key]: e.target.value }))}
+                        onChange={(e) =>
+                          setMapping((m) => ({ ...m, [t.key]: e.target.value }))
+                        }
                       >
-                        {t.required
-                          ? <option value="">— select column —</option>
-                          : <option value="">— skip —</option>}
-                        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                        {t.required ? (
+                          <option value="">— select column —</option>
+                        ) : (
+                          <option value="">— skip —</option>
+                        )}
+                        {headers.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
                       </select>
                     </td>
                   </tr>
@@ -274,7 +324,12 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
                   <thead>
                     <tr className="bg-muted border-b">
                       {TARGET_COLS.filter((t) => mapping[t.key]).map((t) => (
-                        <th key={t.key} className="px-2 py-1 text-left font-medium">{t.key}</th>
+                        <th
+                          key={t.key}
+                          className="px-2 py-1 text-left font-medium"
+                        >
+                          {t.key}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -282,7 +337,9 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
                     {parsedRows.slice(0, 4).map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
                         {TARGET_COLS.filter((t) => mapping[t.key]).map((t) => (
-                          <td key={t.key} className="px-2 py-1">{row[mapping[t.key]!] ?? ""}</td>
+                          <td key={t.key} className="px-2 py-1">
+                            {row[mapping[t.key]!] ?? ""}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -295,9 +352,13 @@ export function MsgsSyncedUploadDialog({ open, onClose, onSaved, initialCsvText,
 
         <DialogFooter>
           {step === "map" && (
-            <Button variant="outline" onClick={() => setStep("upload")}>Back</Button>
+            <Button variant="outline" onClick={() => setStep("upload")}>
+              Back
+            </Button>
           )}
-          <Button variant="outline" onClick={handleClose}>Cancel</Button>
+          <Button variant="outline" onClick={handleClose}>
+            Cancel
+          </Button>
           {step === "map" && (
             <Button
               disabled={!requiredMapped || saveMutation.isPending}

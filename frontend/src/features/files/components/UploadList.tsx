@@ -13,13 +13,13 @@ import {
 import { dataTypes } from "@/config/dataTypes"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import {
-  useUploadQueue,
   type UploadTask,
+  useUploadQueue,
 } from "@/features/files/hooks/useUploadQueue"
 import {
-  useResolveScope,
   type ResolvedScope,
   type UploadScopeChoices,
+  useResolveScope,
 } from "@/features/files/hooks/useUploadScope"
 import { isExtensionAllowed } from "@/features/files/utils/extensions"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -52,6 +52,12 @@ interface UploadListProps {
   label?: string
   /** Optional sub-path appended to the target directory (e.g. "DEM"). */
   subDir?: string
+  /** When true, the inner UploadZone refuses clicks and drops, and
+   *  shows `disabledReason` in place of the usual instructions. Used
+   *  by the Files page to gate the upload affordance behind required
+   *  scope fields (data type, experiment). */
+  disabled?: boolean
+  disabledReason?: string
 }
 
 function buildTargetRootDir(
@@ -64,7 +70,7 @@ function buildTargetRootDir(
   // Preserve the existing MinIO path convention so the new FilesService
   // listing endpoints find the uploads under a predictable prefix.
   const values = { ...formValues }
-  if (values["date"]) values["year"] = values["date"].split("-")[0]
+  if (values.date) values.year = values.date.split("-")[0]
   let root = cfg.directory
     .map((field) => values[field.toLowerCase()] || field)
     .join("/")
@@ -96,9 +102,7 @@ function isFieldFilled(
   return false
 }
 
-function followUpForDataType(
-  dataType: string,
-): UploadTask["followUpJob"] {
+function followUpForDataType(dataType: string): UploadTask["followUpJob"] {
   // Amiga .bin files auto-extract via the FLIR worker. Everything else
   // drops onto MinIO and is done.
   if (dataType === "Farm-ng Binary File") return { kind: "extract_binary" }
@@ -140,6 +144,8 @@ export function UploadList({
   onUploadComplete,
   label,
   subDir,
+  disabled = false,
+  disabledReason,
 }: UploadListProps) {
   const [selected, setSelected] = useState<File[]>([])
   const [isExpanded, setIsExpanded] = useState(false)
@@ -185,7 +191,11 @@ export function UploadList({
       accepted.push(f)
     }
 
-    if (folderArtifacts.length > 0 && accepted.length === 0 && wrongType.length === 0) {
+    if (
+      folderArtifacts.length > 0 &&
+      accepted.length === 0 &&
+      wrongType.length === 0
+    ) {
       // Pure folder drop where the dropzone walker couldn't expand them.
       // This happens on browsers without webkitGetAsEntry (rare) or when
       // a user drops a folder that the browser refuses to read for
@@ -298,11 +308,17 @@ export function UploadList({
       }))
 
       setResolveStatus(null)
+      // The experiment is required by the Files-page UI gate, so by the
+      // time we get here `resolved.experiment` exists. Forward its id
+      // so the chunked-upload finalize handler can write the
+      // `experiment_files` pointer row that the Experiment.delete()
+      // cascade reads from.
       const result = await run(tasks, {
         title:
           followUpJob?.kind === "extract_binary"
             ? `Uploading ${selected.length} .bin file(s) + extracting`
             : `Uploading ${selected.length} file(s)`,
+        experimentId: resolved.experiment?.id,
       })
       onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
       setSelected([])
@@ -335,7 +351,9 @@ export function UploadList({
    * Translate the per-form-field scope map into the EntityChoice map the
    * resolver expects, then run the create-or-get pipeline.
    */
-  async function resolveScopeForFields(fields: string[]): Promise<ResolvedScope> {
+  async function resolveScopeForFields(
+    fields: string[],
+  ): Promise<ResolvedScope> {
     if (!scope) return {}
     const choices: UploadScopeChoices = {}
     for (const field of fields) {
@@ -354,7 +372,12 @@ export function UploadList({
       {label && (
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}
-      <UploadZone onFilesAdded={addFiles} accept={acceptAttr} />
+      <UploadZone
+        onFilesAdded={addFiles}
+        accept={acceptAttr}
+        disabled={disabled}
+        disabledReason={disabledReason}
+      />
 
       {selected.length > 0 && (
         <div className="border-border bg-card rounded-lg border p-6">

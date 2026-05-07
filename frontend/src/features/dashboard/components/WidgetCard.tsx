@@ -5,29 +5,47 @@
  * an "unconfigured" badge when no data source is set, and fullscreen expand.
  */
 
+import {
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Settings2,
+  Trash2,
+} from "lucide-react"
 import { useState } from "react"
-import { Settings2, Trash2, Maximize2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  FullscreenModal,
+  useExpandable,
+} from "@/components/Common/ExpandableSection"
 import { Button } from "@/components/ui/button"
-import { FullscreenModal, useExpandable } from "@/components/Common/ExpandableSection"
-import { WidgetConfigDialog } from "./WidgetConfigDialog"
-import { KpiWidget } from "../widgets/KpiWidget"
-import { ChartWidget } from "../widgets/ChartWidget"
-import { TableWidget } from "../widgets/TableWidget"
-import { PlotViewerWidget } from "../widgets/PlotViewerWidget"
 import type { DashboardWidget, PlotViewerConfig } from "../types"
+import { ChartWidget } from "../widgets/ChartWidget"
+import { KpiWidget } from "../widgets/KpiWidget"
+import { PlotViewerWidget } from "../widgets/PlotViewerWidget"
+import { TableWidget } from "../widgets/TableWidget"
+import { WidgetConfigDialog } from "./WidgetConfigDialog"
 
 function isUnconfigured(widget: DashboardWidget): boolean {
-  if (widget.type === "kpi") return !widget.config.traitRecordId || !widget.config.metric
+  if (widget.type === "kpi")
+    return !widget.config.traitRecordId || !widget.config.metric
   if (widget.type === "chart") {
     const hasY = !!widget.config.yAxis || (widget.config.yAxes?.length ?? 0) > 0
-    if (widget.config.mode === "temporal") return !widget.config.pipelineId || !hasY
+    if (widget.config.mode === "temporal")
+      return !widget.config.pipelineId || !hasY
     return !widget.config.traitRecordId || !hasY
   }
   if (widget.type === "table") {
-    return !widget.config.traitRecordId && !(widget.config.traitRecordIds?.length > 0)
+    return (
+      !widget.config.traitRecordId &&
+      !(widget.config.traitRecordIds?.length > 0)
+    )
   }
   if (widget.type === "plot-viewer") {
-    return !widget.config.traitRecordId && !(widget.config.traitRecordIds?.length > 0)
+    return (
+      !widget.config.traitRecordId &&
+      !(widget.config.traitRecordIds?.length > 0)
+    )
   }
   return false
 }
@@ -40,7 +58,13 @@ interface WidgetCardProps {
   onMoveRight?: () => void
 }
 
-export function WidgetCard({ widget, onUpdate, onRemove, onMoveLeft, onMoveRight }: WidgetCardProps) {
+export function WidgetCard({
+  widget,
+  onUpdate,
+  onRemove,
+  onMoveLeft,
+  onMoveRight,
+}: WidgetCardProps) {
   const [configOpen, setConfigOpen] = useState(false)
   const { isExpanded, open: openExpand, close: closeExpand } = useExpandable()
 
@@ -82,30 +106,62 @@ export function WidgetCard({ widget, onUpdate, onRemove, onMoveLeft, onMoveRight
                 <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
               </button>
             )}
-            <h3 className="text-xs font-semibold text-foreground truncate">{widget.title}</h3>
+            <h3 className="text-xs font-semibold text-foreground truncate">
+              {widget.title}
+            </h3>
           </div>
 
           {/* Action buttons — dimmed at rest, full opacity on group hover */}
           <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
             {onMoveLeft && (
-              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={onMoveLeft} title="Move left">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-6 h-6"
+                onClick={onMoveLeft}
+                title="Move left"
+              >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
             )}
             {onMoveRight && (
-              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={onMoveRight} title="Move right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-6 h-6"
+                onClick={onMoveRight}
+                title="Move right"
+              >
                 <ChevronRight className="w-3.5 h-3.5" />
               </Button>
             )}
             {!isKpi && (
-              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={openExpand} title="Fullscreen">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-6 h-6"
+                onClick={openExpand}
+                title="Fullscreen"
+              >
                 <Maximize2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => setConfigOpen(true)} title="Configure widget">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-6 h-6"
+              onClick={() => setConfigOpen(true)}
+              title="Configure widget"
+            >
               <Settings2 className="w-3.5 h-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="w-6 h-6 hover:text-destructive" onClick={onRemove} title="Remove widget">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-6 h-6 hover:text-destructive"
+              onClick={onRemove}
+              title="Remove widget"
+            >
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -116,7 +172,11 @@ export function WidgetCard({ widget, onUpdate, onRemove, onMoveLeft, onMoveRight
       </div>
 
       {/* Fullscreen modal */}
-      <FullscreenModal open={isExpanded} onClose={closeExpand} title={widget.title}>
+      <FullscreenModal
+        open={isExpanded}
+        onClose={closeExpand}
+        title={widget.title}
+      >
         <div className="p-6 h-full">{content}</div>
       </FullscreenModal>
 

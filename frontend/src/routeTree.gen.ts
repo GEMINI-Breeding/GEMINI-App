@@ -17,7 +17,6 @@ import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
-import { Route as LayoutImportRouteImport } from './routes/_layout/import'
 import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
@@ -27,7 +26,6 @@ import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze
 import { Route as LayoutAdminIndexRouteImport } from './routes/_layout/admin/index'
 import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
 import { Route as LayoutGenotypingStudyIdRouteImport } from './routes/_layout/genotyping/$studyId'
-import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
 import { Route as LayoutAdminTraitsRouteImport } from './routes/_layout/admin/traits'
 import { Route as LayoutAdminTraitLevelsRouteImport } from './routes/_layout/admin/trait-levels'
 import { Route as LayoutAdminSitesRouteImport } from './routes/_layout/admin/sites'
@@ -86,11 +84,6 @@ const LayoutItemsRoute = LayoutItemsRouteImport.update({
   path: '/items',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutImportRoute = LayoutImportRouteImport.update({
-  id: '/import',
-  path: '/import',
-  getParentRoute: () => LayoutRoute,
-} as any)
 const LayoutConsoleRoute = LayoutConsoleRouteImport.update({
   id: '/console',
   path: '/console',
@@ -135,11 +128,6 @@ const LayoutProcessWorkspaceIdRoute =
 const LayoutGenotypingStudyIdRoute = LayoutGenotypingStudyIdRouteImport.update({
   id: '/genotyping/$studyId',
   path: '/genotyping/$studyId',
-  getParentRoute: () => LayoutRoute,
-} as any)
-const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
-  id: '/analyze/$runId',
-  path: '/analyze/$runId',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutAdminTraitsRoute = LayoutAdminTraitsRouteImport.update({
@@ -245,7 +233,6 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/admin': typeof LayoutAdminRouteWithChildren
   '/console': typeof LayoutConsoleRoute
-  '/import': typeof LayoutImportRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
@@ -262,7 +249,6 @@ export interface FileRoutesByFullPath {
   '/admin/sites': typeof LayoutAdminSitesRoute
   '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/admin/traits': typeof LayoutAdminTraitsRoute
-  '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/admin/': typeof LayoutAdminIndexRoute
@@ -282,7 +268,6 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/console': typeof LayoutConsoleRoute
-  '/import': typeof LayoutImportRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
@@ -299,7 +284,6 @@ export interface FileRoutesByTo {
   '/admin/sites': typeof LayoutAdminSitesRoute
   '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/admin/traits': typeof LayoutAdminTraitsRoute
-  '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
   '/admin': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
@@ -321,7 +305,6 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/_layout/admin': typeof LayoutAdminRouteWithChildren
   '/_layout/console': typeof LayoutConsoleRoute
-  '/_layout/import': typeof LayoutImportRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
@@ -338,7 +321,6 @@ export interface FileRoutesById {
   '/_layout/admin/sites': typeof LayoutAdminSitesRoute
   '/_layout/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
   '/_layout/admin/traits': typeof LayoutAdminTraitsRoute
-  '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/_layout/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
   '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/_layout/admin/': typeof LayoutAdminIndexRoute
@@ -361,7 +343,6 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/console'
-    | '/import'
     | '/items'
     | '/settings'
     | '/'
@@ -378,7 +359,6 @@ export interface FileRouteTypes {
     | '/admin/sites'
     | '/admin/trait-levels'
     | '/admin/traits'
-    | '/analyze/$runId'
     | '/genotyping/$studyId'
     | '/process/$workspaceId'
     | '/admin/'
@@ -398,7 +378,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/console'
-    | '/import'
     | '/items'
     | '/settings'
     | '/'
@@ -415,7 +394,6 @@ export interface FileRouteTypes {
     | '/admin/sites'
     | '/admin/trait-levels'
     | '/admin/traits'
-    | '/analyze/$runId'
     | '/genotyping/$studyId'
     | '/admin'
     | '/analyze'
@@ -436,7 +414,6 @@ export interface FileRouteTypes {
     | '/signup'
     | '/_layout/admin'
     | '/_layout/console'
-    | '/_layout/import'
     | '/_layout/items'
     | '/_layout/settings'
     | '/_layout/'
@@ -453,7 +430,6 @@ export interface FileRouteTypes {
     | '/_layout/admin/sites'
     | '/_layout/admin/trait-levels'
     | '/_layout/admin/traits'
-    | '/_layout/analyze/$runId'
     | '/_layout/genotyping/$studyId'
     | '/_layout/process/$workspaceId'
     | '/_layout/admin/'
@@ -534,13 +510,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutItemsRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/import': {
-      id: '/_layout/import'
-      path: '/import'
-      fullPath: '/import'
-      preLoaderRoute: typeof LayoutImportRouteImport
-      parentRoute: typeof LayoutRoute
-    }
     '/_layout/console': {
       id: '/_layout/console'
       path: '/console'
@@ -602,13 +571,6 @@ declare module '@tanstack/react-router' {
       path: '/genotyping/$studyId'
       fullPath: '/genotyping/$studyId'
       preLoaderRoute: typeof LayoutGenotypingStudyIdRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/analyze/$runId': {
-      id: '/_layout/analyze/$runId'
-      path: '/analyze/$runId'
-      fullPath: '/analyze/$runId'
-      preLoaderRoute: typeof LayoutAnalyzeRunIdRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/admin/traits': {
@@ -803,11 +765,9 @@ const LayoutProcessWorkspaceIdRouteWithChildren =
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRouteWithChildren
   LayoutConsoleRoute: typeof LayoutConsoleRoute
-  LayoutImportRoute: typeof LayoutImportRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
-  LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
   LayoutGenotypingStudyIdRoute: typeof LayoutGenotypingStudyIdRoute
   LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
@@ -820,11 +780,9 @@ interface LayoutRouteChildren {
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRouteWithChildren,
   LayoutConsoleRoute: LayoutConsoleRoute,
-  LayoutImportRoute: LayoutImportRoute,
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
-  LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
   LayoutGenotypingStudyIdRoute: LayoutGenotypingStudyIdRoute,
   LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,

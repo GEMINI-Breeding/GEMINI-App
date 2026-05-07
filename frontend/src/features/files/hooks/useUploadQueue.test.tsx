@@ -23,15 +23,14 @@ vi.mock("@/client", () => ({
 }))
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { JobsService } from "@/client"
 import { ProcessProvider, useProcess } from "@/contexts/ProcessContext"
+import { uploadFileChunked } from "@/lib/chunkedUpload"
 import { useUploadQueue } from "./useUploadQueue"
 
 const mockedUpload = uploadFileChunked as unknown as ReturnType<typeof vi.fn>
-const mockedSubmit = JobsService.apiJobsSubmitSubmitJob as unknown as ReturnType<
-  typeof vi.fn
->
+const mockedSubmit =
+  JobsService.apiJobsSubmitSubmitJob as unknown as ReturnType<typeof vi.fn>
 
 const wrapper = ({ children }: { children: ReactNode }) => {
   const client = new QueryClient({
@@ -52,10 +51,12 @@ function useHarness() {
 
 function stubUploadResolvingInOrder() {
   let i = 0
-  mockedUpload.mockImplementation(async ({ objectName }: { objectName: string }) => {
-    i++
-    return { objectName, bytes: 1, chunkCount: 1 }
-  })
+  mockedUpload.mockImplementation(
+    async ({ objectName }: { objectName: string }) => {
+      i++
+      return { objectName, bytes: 1, chunkCount: 1 }
+    },
+  )
   return () => i
 }
 
@@ -97,9 +98,7 @@ describe("useUploadQueue", () => {
     mockedSubmit.mockResolvedValueOnce({ id: "job-2" })
     const { result } = renderHook(() => useHarness(), { wrapper })
 
-    let out:
-      | Awaited<ReturnType<typeof result.current.queue.run>>
-      | undefined
+    let out: Awaited<ReturnType<typeof result.current.queue.run>> | undefined
     await act(async () => {
       out = await result.current.queue.run([
         {

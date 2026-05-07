@@ -132,7 +132,10 @@ export function EntitySelectField({
             />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={CREATE_NEW} data-testid={`entity-create-${slugTestId}`}>
+            <SelectItem
+              value={CREATE_NEW}
+              data-testid={`entity-create-${slugTestId}`}
+            >
               + Create new…
             </SelectItem>
             {options.length === 0 ? (

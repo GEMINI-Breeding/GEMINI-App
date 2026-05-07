@@ -16,7 +16,11 @@ import DeleteUpload from "./DeleteUpload"
 import { EditUploadDialog } from "./EditUploadDialog"
 import { ImageViewerDialog } from "./ImageViewerDialog"
 
-const IMAGE_DATA_TYPES = new Set(["Image Data", "Farm-ng Binary File", "Orthomosaic"])
+const IMAGE_DATA_TYPES = new Set([
+  "Image Data",
+  "Farm-ng Binary File",
+  "Orthomosaic",
+])
 
 interface UploadActionsMenuProps {
   upload: FileUploadPublic
@@ -27,7 +31,7 @@ async function downloadZip(upload: FileUploadPublic) {
   const token =
     typeof OpenAPI.TOKEN === "function"
       ? await (OpenAPI.TOKEN as () => Promise<string>)()
-      : OpenAPI.TOKEN ?? ""
+      : (OpenAPI.TOKEN ?? "")
 
   const res = await fetch(`${base}/api/v1/files/${upload.id}/download-zip`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -54,7 +58,12 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
   const { addProcess, updateProcess } = useProcess()
 
   const canView = IMAGE_DATA_TYPES.has(upload.data_type)
-  const viewerTitle = [upload.experiment, upload.location, upload.population, upload.date]
+  const viewerTitle = [
+    upload.experiment,
+    upload.location,
+    upload.population,
+    upload.date,
+  ]
     .filter(Boolean)
     .join(" · ")
 
@@ -81,7 +90,9 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
           <DropdownMenuItem
             onClick={() => {
               setMenuOpen(false)
-              const label = [upload.experiment, upload.date].filter(Boolean).join(" · ") || "upload"
+              const label =
+                [upload.experiment, upload.date].filter(Boolean).join(" · ") ||
+                "upload"
               const pid = addProcess({
                 type: "processing",
                 status: "running",
@@ -91,8 +102,19 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
                 message: "Preparing archive…",
               })
               downloadZip(upload)
-                .then(() => updateProcess(pid, { status: "completed", progress: 100, message: "Saved to Downloads" }))
-                .catch((e: any) => updateProcess(pid, { status: "error", message: e?.message ?? "Download failed" }))
+                .then(() =>
+                  updateProcess(pid, {
+                    status: "completed",
+                    progress: 100,
+                    message: "Saved to Downloads",
+                  }),
+                )
+                .catch((e: any) =>
+                  updateProcess(pid, {
+                    status: "error",
+                    message: e?.message ?? "Download failed",
+                  }),
+                )
             }}
           >
             <Download className="mr-2 h-4 w-4" />

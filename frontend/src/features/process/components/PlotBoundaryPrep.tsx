@@ -54,6 +54,7 @@ import {
   buildTitilerTileUrl,
   resolveActiveOrtho,
   s3UrlForOrtho,
+  tilejsonBoundsToLeaflet,
 } from "@/features/process/lib/activeOrtho"
 import {
   applyLabelsToFeatures,
@@ -159,12 +160,7 @@ export function PlotBoundaryPrep({
     [[number, number], [number, number]] | undefined
   >(() => {
     const b = tilejsonQuery.data?.bounds
-    if (!b) return undefined
-    const [w, s, e, n] = b
-    return [
-      [s, w],
-      [n, e],
-    ]
+    return b ? tilejsonBoundsToLeaflet(b) : undefined
   }, [tilejsonQuery.data])
 
   const loaded = useLoadPlotGeometryVersion(directory, versionToLoad)

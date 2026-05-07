@@ -46,3 +46,18 @@ export function s3UrlForOrtho(v: OrthoVersion): string {
 export function buildTitilerTileUrl(s3Url: string): string {
   return `/titiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url=${encodeURIComponent(s3Url)}&tilesize=256`
 }
+
+/**
+ * Convert TiTiler tilejson `bounds` ([west, south, east, north] in WGS84) to
+ * the [[south, west], [north, east]] tuple Leaflet's `fitBounds` and our
+ * BoundaryMap/OrthoMapView components expect.
+ */
+export function tilejsonBoundsToLeaflet(
+  bounds: [number, number, number, number],
+): [[number, number], [number, number]] {
+  const [w, s, e, n] = bounds
+  return [
+    [s, w],
+    [n, e],
+  ]
+}

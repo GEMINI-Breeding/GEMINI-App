@@ -3,8 +3,12 @@
  * Reuses the same query keys as the Analyze tab for cache sharing.
  */
 
-import { useQuery, useQueries } from "@tanstack/react-query"
-import { analyzeApi, type TraitRecord, type TraitsResponse } from "@/features/analyze/api"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import {
+  analyzeApi,
+  type TraitRecord,
+  type TraitsResponse,
+} from "@/features/analyze/api"
 
 // ── All trait records (catalog) ───────────────────────────────────────────────
 
@@ -32,7 +36,8 @@ export function useTraitRecordGeojson(recordId: string | null) {
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     // Don't retry 404s — the file is missing on disk, retrying won't help
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -44,7 +49,8 @@ export function useMultiTraitGeojson(recordIds: string[]) {
       queryKey: ["trait-record-geojson", id],
       queryFn: () => analyzeApi.getTraitRecordGeojson(id),
       staleTime: 5 * 60_000,
-      retry: (failureCount: number, error: any) => error?.status !== 404 && failureCount < 2,
+      retry: (failureCount: number, error: any) =>
+        error?.status !== 404 && failureCount < 2,
     })),
   })
 
@@ -92,7 +98,7 @@ export function formatDashboardValue(value: unknown, col?: string): string {
       col.includes("/") ||
       lower.includes("count") ||
       lower === "n_plants" ||
-      lower.startsWith("n_") && !lower.includes("ndvi")
+      (lower.startsWith("n_") && !lower.includes("ndvi"))
     if (isCount) return value.toFixed(1)
 
     // Physical measurements: height and vegetation fraction
@@ -123,8 +129,8 @@ export function applyFilters(
   if (active.length === 0) return features
   return features.filter((f) =>
     active.every(([field, vals]) =>
-      vals.includes(String(f.properties?.[field] ?? ""))
-    )
+      vals.includes(String(f.properties?.[field] ?? "")),
+    ),
   )
 }
 
@@ -140,14 +146,18 @@ export function computeAggregate(
 ): number | null {
   const values = geojson.features
     .map((f) => f.properties?.[metric] as number)
-    .filter((v) => typeof v === "number" && !isNaN(v))
+    .filter((v) => typeof v === "number" && !Number.isNaN(v))
 
   if (values.length === 0) return null
   switch (aggregation) {
-    case "avg": return values.reduce((a, b) => a + b, 0) / values.length
-    case "min": return Math.min(...values)
-    case "max": return Math.max(...values)
-    case "count": return values.length
+    case "avg":
+      return values.reduce((a, b) => a + b, 0) / values.length
+    case "min":
+      return Math.min(...values)
+    case "max":
+      return Math.max(...values)
+    case "count":
+      return values.length
   }
 }
 
@@ -164,7 +174,7 @@ export function groupBy(
   geojson.features.forEach((f) => {
     const key = String(f.properties?.[groupField] ?? "(none)")
     const val = f.properties?.[metric] as number
-    if (typeof val === "number" && !isNaN(val)) {
+    if (typeof val === "number" && !Number.isNaN(val)) {
       if (!buckets.has(key)) buckets.set(key, [])
       buckets.get(key)!.push(val)
     }
@@ -193,7 +203,7 @@ export function groupByMulti(
     const metricMap = buckets.get(key)!
     metrics.forEach((m) => {
       const val = f.properties?.[m] as number
-      if (typeof val === "number" && !isNaN(val)) {
+      if (typeof val === "number" && !Number.isNaN(val)) {
         if (!metricMap.has(m)) metricMap.set(m, [])
         metricMap.get(m)!.push(val)
       }
@@ -204,7 +214,8 @@ export function groupByMulti(
       const row: Record<string, string | number> = { name }
       metrics.forEach((m) => {
         const vals = metricMap.get(m) ?? []
-        row[m] = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+        row[m] =
+          vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
       })
       return row
     })
@@ -232,10 +243,14 @@ function aggregateValues(
 ): number {
   if (vals.length === 0) return 0
   switch (agg) {
-    case "avg": return vals.reduce((a, b) => a + b, 0) / vals.length
-    case "min": return Math.min(...vals)
-    case "max": return Math.max(...vals)
-    case "sum": return vals.reduce((a, b) => a + b, 0)
+    case "avg":
+      return vals.reduce((a, b) => a + b, 0) / vals.length
+    case "min":
+      return Math.min(...vals)
+    case "max":
+      return Math.max(...vals)
+    case "sum":
+      return vals.reduce((a, b) => a + b, 0)
     case "median": {
       const s = [...vals].sort((a, b) => a - b)
       return s.length % 2 === 0
@@ -281,7 +296,7 @@ export function buildTemporalSeries(
     if (!groupByField) {
       const vals = features
         .map((f) => f.properties?.[metric] as number)
-        .filter((v) => typeof v === "number" && !isNaN(v))
+        .filter((v) => typeof v === "number" && !Number.isNaN(v))
 
       row[metric] = vals.length ? aggregateValues(vals, agg) : 0
 
@@ -290,7 +305,9 @@ export function buildTemporalSeries(
         let lo: number, hi: number
         if (options.bandType === "std") {
           const mean = vals.reduce((a, b) => a + b, 0) / vals.length
-          const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length)
+          const std = Math.sqrt(
+            vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length,
+          )
           lo = mean - std
           hi = mean + std
         } else {
@@ -306,7 +323,7 @@ export function buildTemporalSeries(
       features.forEach((f) => {
         const key = String(f.properties?.[groupByField] ?? "(none)")
         const val = f.properties?.[metric] as number
-        if (typeof val === "number" && !isNaN(val)) {
+        if (typeof val === "number" && !Number.isNaN(val)) {
           if (!buckets.has(key)) buckets.set(key, [])
           buckets.get(key)!.push(val)
         }
@@ -320,6 +337,8 @@ export function buildTemporalSeries(
   })
 
   return result.sort((a, b) =>
-    normalizeDateForSort(String(a.date)).localeCompare(normalizeDateForSort(String(b.date)))
+    normalizeDateForSort(String(a.date)).localeCompare(
+      normalizeDateForSort(String(b.date)),
+    ),
   )
 }

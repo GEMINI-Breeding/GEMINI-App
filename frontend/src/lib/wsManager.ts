@@ -95,9 +95,7 @@ function open(jobId: string): void {
     } catch {
       return
     }
-    const terminal = Boolean(
-      data.status && TERMINAL_STATUSES.has(data.status),
-    )
+    const terminal = Boolean(data.status && TERMINAL_STATUSES.has(data.status))
     const evt: JobProgressEvent = terminal ? { ...data, terminal: true } : data
     entry.lastEvent = evt
     entry.listeners.forEach((fn) => {

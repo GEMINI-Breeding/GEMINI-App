@@ -60,18 +60,18 @@ test.describe("R4a: aerial wizard happy path", () => {
     page,
     request,
     baseURL,
+    runPrefix,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
 
-    const stamp = Date.now()
-    const experiment = `pw-r4a-${stamp}`
+    const experiment = `${runPrefix}-r4a-exp`
     const location = "Davis"
     const population = "Cowpea"
     const date = "2022-06-27"
     const platform = "DJI"
     const sensor = "FC6310S"
-    const workspaceName = `R4a Workspace ${stamp}`
-    const pipelineName = `R4a Aerial ${stamp}`
+    const workspaceName = `${runPrefix}-r4a-workspace`
+    const pipelineName = `${runPrefix}-r4a-pipeline`
 
     // ── 1. Upload 5 drone images via the Files UI. ───────────────────────
     await navigateToUpload(page)
@@ -90,15 +90,14 @@ test.describe("R4a: aerial wizard happy path", () => {
     )
     await submitUploadAndWait(page, DRONE_IMAGES.length)
 
-    // ── 2. Create a workspace tied to the just-created experiment. ───────
+    // ── 2. Create a workspace. (Workspaces are name + description only;
+    //       experiment / scope is picked at run-creation from an upload.) ─
     await page.goto("/process")
     await expect(
       page.getByRole("heading", { name: /^process$/i }),
     ).toBeVisible()
     await page.locator('[data-onboarding="process-new-workspace"]').click()
     await page.getByLabel(/workspace name/i).fill(workspaceName)
-    await page.getByRole("combobox", { name: /experiment/i }).click()
-    await page.getByRole("option", { name: experiment }).click()
     await page.getByRole("button", { name: /create workspace/i }).click()
 
     // The new card is identifiable by its name; click into the workspace.
@@ -134,19 +133,18 @@ test.describe("R4a: aerial wizard happy path", () => {
       .first()
       .click()
 
-    // Lands on RunDetail. Pick the run's date/platform/sensor in the
-    // Run Setup card. The picker auto-selects the workspace's experiment
-    // because the workspace's defaultScope.experimentId was seeded from
-    // the create dialog.
-    await expect(
-      page.getByText(/run setup/i, { exact: false }).first(),
-    ).toBeVisible()
-    await page.getByTestId("aerial-date-select").click()
-    await page.getByRole("option", { name: date }).click()
-    await page.getByTestId("aerial-platform-select").click()
-    await page.getByRole("option", { name: platform }).click()
-    await page.getByTestId("aerial-sensor-select").click()
-    await page.getByRole("option", { name: sensor }).click()
+    // The NewRunDialog lists every uploaded dataset under Raw/. Pick the
+    // row matching this test's experiment / date / platform / sensor.
+    const uploadRow = page
+      .getByTestId("upload-row")
+      .filter({ hasText: experiment })
+      .filter({ hasText: date })
+      .filter({ hasText: platform })
+      .filter({ hasText: sensor })
+      .first()
+    await expect(uploadRow).toBeVisible({ timeout: 30_000 })
+    await uploadRow.click()
+    await page.getByRole("button", { name: /create run/i }).click()
 
     await expect(
       page.getByText(new RegExp(`${DRONE_IMAGES.length} images? found`)),
@@ -206,6 +204,43 @@ test.describe("R4a: aerial wizard happy path", () => {
     await expect(orthoPanel.getByTestId("ortho-version-row-1")).toBeVisible({
       timeout: 30_000,
     })
+
+    // ── Ortho viewer assertion: clicking the eye opens the in-app preview ──
+    // and TiTiler tiles actually render. This locks down the wiring that
+    // replaces the old "not yet wired in this build" stub. The CREATE_COG
+    // step auto-chains off RUN_ODM and is normally finished by the time we
+    // get here; if it isn't, the dialog falls back to the source TIF (slower
+    // tilejson, same plumbing) — either way one tilejson + at least one
+    // tile request must fire.
+    const tilejsonResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/titiler/cog/WebMercatorQuad/tilejson.json") &&
+        r.ok(),
+      { timeout: 60_000 },
+    )
+    const tileResponse = page.waitForResponse(
+      (r) => r.url().includes("/titiler/cog/tiles/") && r.status() === 200,
+      { timeout: 60_000 },
+    )
+    await orthoPanel
+      .getByTestId("ortho-version-row-1")
+      .getByRole("button", { name: /view/i })
+      .click()
+    await expect(page.getByTestId("ortho-viewer-map")).toBeVisible({
+      timeout: 30_000,
+    })
+    await tilejsonResponse
+    await tileResponse
+    const mapMounted = await page.evaluate(
+      () =>
+        !!(window as unknown as { __orthoViewerMap__?: unknown })
+          .__orthoViewerMap__,
+    )
+    expect(mapMounted).toBe(true)
+    // Close the dialog. Outside-clicks are globally blocked by the dialog
+    // primitive, so use Escape.
+    await page.keyboard.press("Escape")
+    await expect(page.getByTestId("ortho-viewer-map")).not.toBeVisible()
 
     // ── R4c assertion: trait_extraction step row is gated by boundaries. ─
     // plot_boundary_prep is a non-optional prereq, so trait_extraction's

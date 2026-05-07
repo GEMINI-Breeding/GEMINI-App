@@ -25,13 +25,15 @@ function file(name: string, lastModified?: string): FileMetadata {
   } as unknown as FileMetadata
 }
 
-function makeRun(versions: Array<{
-  filename: string
-  label?: string
-  source: "RUN_ODM" | "imported"
-  createdAt: string
-  jobId?: string
-}>): Run {
+function makeRun(
+  versions: Array<{
+    filename: string
+    label?: string
+    source: "RUN_ODM" | "imported"
+    createdAt: string
+    jobId?: string
+  }>,
+): Run {
   return {
     id: "r1",
     pipelineId: "p1",
@@ -70,7 +72,9 @@ describe("buildOrthoVersions", () => {
   })
 
   it("synthesizes a v1 from a single TIF with no metadata", () => {
-    const out = buildOrthoVersions(undefined, scope, [file("odm_orthophoto.tif")])
+    const out = buildOrthoVersions(undefined, scope, [
+      file("odm_orthophoto.tif"),
+    ])
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({
       version: 1,
@@ -172,7 +176,9 @@ describe("buildOrthoVersions", () => {
       file("odm_orthophoto.tif"),
       file("imported_ortho.tif"),
     ])
-    expect(out.map((v) => ({ filename: v.filename, version: v.version }))).toEqual([
+    expect(
+      out.map((v) => ({ filename: v.filename, version: v.version })),
+    ).toEqual([
       { filename: "odm_orthophoto.tif", version: 2 },
       { filename: "imported_ortho.tif", version: 1 },
     ])

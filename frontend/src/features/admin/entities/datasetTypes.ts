@@ -1,19 +1,24 @@
 import {
-  DatasetTypesService,
   type DatasetTypeInput,
   type DatasetTypeOutput,
+  DatasetTypesService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsNumber, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: DatasetTypeInput): DatasetTypeInput {
   return {
     ...input,
-    dataset_type_info: parseInfoField(input.dataset_type_info) as DatasetTypeInput["dataset_type_info"],
+    dataset_type_info: parseInfoField(
+      input.dataset_type_info,
+    ) as DatasetTypeInput["dataset_type_info"],
   }
 }
 
-export const datasetTypesConfig: EntityConfig<DatasetTypeOutput, DatasetTypeInput> = {
+export const datasetTypesConfig: EntityConfig<
+  DatasetTypeOutput,
+  DatasetTypeInput
+> = {
   slug: "dataset-types",
   singular: "Dataset type",
   plural: "Dataset types",
@@ -39,7 +44,12 @@ export const datasetTypesConfig: EntityConfig<DatasetTypeOutput, DatasetTypeInpu
     }),
   fields: [
     { key: "dataset_type_name", label: "Name", type: "text", required: true },
-    { key: "dataset_type_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "dataset_type_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ dataset_type_name: "" }),
   toInput: (row) => ({

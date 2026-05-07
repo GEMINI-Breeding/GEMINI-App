@@ -94,6 +94,8 @@ export async function deleteUploadsByPrefix(_prefix: string): Promise<number> {
   return DEPRECATED("deleteUploadsByPrefix")
 }
 
-export async function deleteWorkspacesByPrefix(_prefix: string): Promise<number> {
+export async function deleteWorkspacesByPrefix(
+  _prefix: string,
+): Promise<number> {
   return DEPRECATED("deleteWorkspacesByPrefix")
 }

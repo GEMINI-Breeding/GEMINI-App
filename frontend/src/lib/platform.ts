@@ -1,6 +1,6 @@
 /** Returns true when running inside Tauri (desktop), false in a plain browser. */
 export function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
 /**
@@ -16,28 +16,28 @@ export async function downloadFile(
   filters?: { name: string; extensions: string[] }[],
 ): Promise<boolean> {
   if (isTauri()) {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const { invoke } = await import("@tauri-apps/api/core");
-    const dest = await save({ defaultPath: filename, filters });
-    if (!dest) return false;
+    const { save } = await import("@tauri-apps/plugin-dialog")
+    const { invoke } = await import("@tauri-apps/api/core")
+    const dest = await save({ defaultPath: filename, filters })
+    if (!dest) return false
     // absoluteApiUrl is caller's responsibility — pass absolute URL
-    await invoke("download_to_file", { url, dest, method });
-    return true;
+    await invoke("download_to_file", { url, dest, method })
+    return true
   }
 
   // Browser fallback: fetch → blob → anchor click
-  const res = await fetch(url, { method });
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-  const blob = await res.blob();
-  const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = blobUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
-  return true;
+  const res = await fetch(url, { method })
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+  const blob = await res.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = blobUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000)
+  return true
 }
 
 /**
@@ -47,11 +47,11 @@ export async function downloadFile(
  */
 export async function openUrl(url: string): Promise<void> {
   if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("plugin:shell|open", { path: url });
-    return;
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin:shell|open", { path: url })
+    return
   }
-  window.open(url, "_blank", "noopener,noreferrer");
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
 /**
@@ -60,8 +60,8 @@ export async function openUrl(url: string): Promise<void> {
  * - In browser: creates a hidden <input type="file"> and resolves with the File objects.
  */
 export async function pickFiles(opts?: {
-  multiple?: boolean;
-  accept?: string; // e.g. "image/*,.csv"
+  multiple?: boolean
+  accept?: string // e.g. "image/*,.csv"
 }): Promise<File[] | string[] | null> {
   // E2E hook: the upload flow is Tauri-first and passes absolute paths to the
   // backend. Browsers strip absolute paths from File objects, so Playwright
@@ -69,31 +69,36 @@ export async function pickFiles(opts?: {
   // Gated out of production so real users never hit it.
   if (import.meta.env.MODE !== "production") {
     const injected = (window as unknown as { __E2E_PICK_FILES__?: string[] })
-      .__E2E_PICK_FILES__;
+      .__E2E_PICK_FILES__
     if (injected && injected.length > 0) {
-      (window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ = undefined;
-      return injected;
+      ;(
+        window as unknown as { __E2E_PICK_FILES__?: string[] }
+      ).__E2E_PICK_FILES__ = undefined
+      return injected
     }
   }
 
   if (isTauri()) {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({ multiple: opts?.multiple ?? false, directory: false });
-    if (!selected) return null;
-    return Array.isArray(selected) ? selected : [selected];
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      multiple: opts?.multiple ?? false,
+      directory: false,
+    })
+    if (!selected) return null
+    return Array.isArray(selected) ? selected : [selected]
   }
 
   // Browser fallback
   return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = opts?.multiple ?? false;
-    if (opts?.accept) input.accept = opts.accept;
+    const input = document.createElement("input")
+    input.type = "file"
+    input.multiple = opts?.multiple ?? false
+    if (opts?.accept) input.accept = opts.accept
     input.onchange = () => {
-      const files = input.files ? Array.from(input.files) : [];
-      resolve(files.length ? files : null);
-    };
-    input.oncancel = () => resolve(null);
-    input.click();
-  });
+      const files = input.files ? Array.from(input.files) : []
+      resolve(files.length ? files : null)
+    }
+    input.oncancel = () => resolve(null)
+    input.click()
+  })
 }

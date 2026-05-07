@@ -32,8 +32,13 @@ afterEach(() => {
 
 describe("usePlotGeometryVersions", () => {
   it("returns [] when directory is empty", async () => {
-    const spy = vi.spyOn(PlotGeometryService, "apiPlotGeometryVersionsListListVersions")
-    const { result } = renderHook(() => usePlotGeometryVersions(""), { wrapper })
+    const spy = vi.spyOn(
+      PlotGeometryService,
+      "apiPlotGeometryVersionsListListVersions",
+    )
+    const { result } = renderHook(() => usePlotGeometryVersions(""), {
+      wrapper,
+    })
     await waitFor(() => expect(result.current.isFetched).toBe(true), {
       timeout: 1500,
     }).catch(() => {
@@ -45,12 +50,24 @@ describe("usePlotGeometryVersions", () => {
   it("forwards the directory to the SDK", async () => {
     const spy = vi
       .spyOn(PlotGeometryService, "apiPlotGeometryVersionsListListVersions")
-      .mockResolvedValue([{ version: 1, name: "v1", is_active: true, created_at: "2026-04-26T00:00:00Z" }] as never)
-    const { result } = renderHook(() => usePlotGeometryVersions("Processed/abc/"), {
-      wrapper,
-    })
+      .mockResolvedValue([
+        {
+          version: 1,
+          name: "v1",
+          is_active: true,
+          created_at: "2026-04-26T00:00:00Z",
+        },
+      ] as never)
+    const { result } = renderHook(
+      () => usePlotGeometryVersions("Processed/abc/"),
+      {
+        wrapper,
+      },
+    )
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(spy).toHaveBeenCalledWith({ requestBody: { directory: "Processed/abc/" } })
+    expect(spy).toHaveBeenCalledWith({
+      requestBody: { directory: "Processed/abc/" },
+    })
     expect(result.current.data?.[0].version).toBe(1)
   })
 })
@@ -62,13 +79,17 @@ describe("useLoadPlotGeometryVersion", () => {
       .mockResolvedValue({
         version: 2,
         is_active: true,
-        state_snapshot: { boundaries: { type: "FeatureCollection", features: [] } },
+        state_snapshot: {
+          boundaries: { type: "FeatureCollection", features: [] },
+        },
       } as never)
     const { result } = renderHook(() => useLoadPlotGeometryVersion("dir/", 2), {
       wrapper,
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(spy).toHaveBeenCalledWith({ requestBody: { directory: "dir/", version: 2 } })
+    expect(spy).toHaveBeenCalledWith({
+      requestBody: { directory: "dir/", version: 2 },
+    })
   })
 })
 
@@ -77,16 +98,22 @@ describe("useSavePlotGeometryVersion", () => {
     const spy = vi
       .spyOn(PlotGeometryService, "apiPlotGeometryVersionsSaveSaveVersion")
       .mockResolvedValue({ version: 3, name: "v3", is_active: false } as never)
-    const { result } = renderHook(() => useSavePlotGeometryVersion(), { wrapper })
+    const { result } = renderHook(() => useSavePlotGeometryVersion(), {
+      wrapper,
+    })
     await result.current.mutateAsync({
       directory: "Processed/x/",
-      stateSnapshot: { boundaries: { type: "FeatureCollection", features: [] } },
+      stateSnapshot: {
+        boundaries: { type: "FeatureCollection", features: [] },
+      },
       name: "v3",
     })
     expect(spy).toHaveBeenCalledWith({
       requestBody: {
         directory: "Processed/x/",
-        state_snapshot: { boundaries: { type: "FeatureCollection", features: [] } },
+        state_snapshot: {
+          boundaries: { type: "FeatureCollection", features: [] },
+        },
         name: "v3",
       },
     })
@@ -96,19 +123,33 @@ describe("useSavePlotGeometryVersion", () => {
 describe("useActivatePlotGeometryVersion", () => {
   it("targets directory + version", async () => {
     const spy = vi
-      .spyOn(PlotGeometryService, "apiPlotGeometryVersionsActivateActivateVersion")
+      .spyOn(
+        PlotGeometryService,
+        "apiPlotGeometryVersionsActivateActivateVersion",
+      )
       .mockResolvedValue({} as never)
-    const { result } = renderHook(() => useActivatePlotGeometryVersion(), { wrapper })
+    const { result } = renderHook(() => useActivatePlotGeometryVersion(), {
+      wrapper,
+    })
     await result.current.mutateAsync({ directory: "d/", version: 4 })
-    expect(spy).toHaveBeenCalledWith({ requestBody: { directory: "d/", version: 4 } })
+    expect(spy).toHaveBeenCalledWith({
+      requestBody: { directory: "d/", version: 4 },
+    })
   })
 })
 
 describe("GPS shift hooks", () => {
   it("useGpsShiftStatus reads status by directory", async () => {
     const spy = vi
-      .spyOn(PlotGeometryService, "apiPlotGeometryGpsShiftStatusCheckGpsShiftStatus")
-      .mockResolvedValue({ shifted: true, current_lat: 1, current_lon: 2 } as never)
+      .spyOn(
+        PlotGeometryService,
+        "apiPlotGeometryGpsShiftStatusCheckGpsShiftStatus",
+      )
+      .mockResolvedValue({
+        shifted: true,
+        current_lat: 1,
+        current_lon: 2,
+      } as never)
     const { result } = renderHook(() => useGpsShiftStatus("d/"), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(spy).toHaveBeenCalledWith({ requestBody: { directory: "d/" } })
@@ -119,7 +160,11 @@ describe("GPS shift hooks", () => {
       .spyOn(PlotGeometryService, "apiPlotGeometryShiftGpsShiftGps")
       .mockResolvedValue({} as never)
     const { result } = renderHook(() => useShiftGps(), { wrapper })
-    await result.current.mutateAsync({ directory: "d/", currentLat: 38.5, currentLon: -121.7 })
+    await result.current.mutateAsync({
+      directory: "d/",
+      currentLat: 38.5,
+      currentLon: -121.7,
+    })
     expect(spy).toHaveBeenCalledWith({
       requestBody: { directory: "d/", current_lat: 38.5, current_lon: -121.7 },
     })

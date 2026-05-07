@@ -1,4 +1,8 @@
-import { createFileRoute, Link as RouterLink, redirect } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link as RouterLink,
+  redirect,
+} from "@tanstack/react-router"
 
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import { isLoggedIn } from "@/hooks/useAuth"

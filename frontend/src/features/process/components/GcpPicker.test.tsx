@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  serializeGcpList,
   type GcpCatalogEntry,
   type GcpMark,
+  serializeGcpList,
 } from "./GcpPicker"
 
 const catalog: GcpCatalogEntry[] = [

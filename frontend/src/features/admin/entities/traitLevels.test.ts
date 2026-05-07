@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { TraitLevelsService, type TraitLevelInput } from "@/client"
+import { type TraitLevelInput, TraitLevelsService } from "@/client"
 
 import { traitLevelsConfig } from "./traitLevels"
 
@@ -39,7 +39,8 @@ describe("traitLevelsConfig", () => {
       .mockResolvedValue({ id: 1, trait_level_name: "X" } as never)
     const input: TraitLevelInput = {
       trait_level_name: "X",
-      trait_level_info: '{"k":1}' as unknown as TraitLevelInput["trait_level_info"],
+      trait_level_info:
+        '{"k":1}' as unknown as TraitLevelInput["trait_level_info"],
     }
     await traitLevelsConfig.create(input)
     expect(spy).toHaveBeenCalledWith({

@@ -9,18 +9,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
-
-import { AdminEntityPage } from "./AdminEntityPage"
 import type { EntityConfig } from "@/features/admin/lib/types"
+import { AdminEntityPage } from "./AdminEntityPage"
 
 type Row = { id: string; name: string }
 type Input = { name: string }
 
 function makeConfig() {
-  const list = vi.fn(async (): Promise<Row[]> => [
-    { id: "1", name: "Alpha" },
-    { id: "2", name: "Beta" },
-  ])
+  const list = vi.fn(
+    async (): Promise<Row[]> => [
+      { id: "1", name: "Alpha" },
+      { id: "2", name: "Beta" },
+    ],
+  )
   const create = vi.fn(
     async (_: Input): Promise<Row> => ({ id: "3", name: "Gamma" }),
   )

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { SensorPlatformsService, type SensorPlatformInput } from "@/client"
+import { type SensorPlatformInput, SensorPlatformsService } from "@/client"
 
 import { sensorPlatformsConfig } from "./sensorPlatforms"
 
@@ -18,7 +18,9 @@ describe("sensorPlatformsConfig", () => {
   })
 
   it("emptyInput is the minimal create payload", () => {
-    expect(sensorPlatformsConfig.emptyInput()).toEqual({ sensor_platform_name: "" })
+    expect(sensorPlatformsConfig.emptyInput()).toEqual({
+      sensor_platform_name: "",
+    })
   })
 
   it("toInput drops write-only experiment_name + preserves info", () => {
@@ -40,18 +42,25 @@ describe("sensorPlatformsConfig", () => {
       .mockResolvedValue({ id: "x", sensor_platform_name: "X" } as never)
     const input: SensorPlatformInput = {
       sensor_platform_name: "X",
-      sensor_platform_info: '{"foo":42}' as unknown as SensorPlatformInput["sensor_platform_info"],
+      sensor_platform_info:
+        '{"foo":42}' as unknown as SensorPlatformInput["sensor_platform_info"],
     }
     await sensorPlatformsConfig.create(input)
     expect(spy).toHaveBeenCalledWith({
-      requestBody: { sensor_platform_name: "X", sensor_platform_info: { foo: 42 } },
+      requestBody: {
+        sensor_platform_name: "X",
+        sensor_platform_info: { foo: 42 },
+      },
     })
     spy.mockRestore()
   })
 
   it("delete passes the id as a string for the SDK", async () => {
     const spy = vi
-      .spyOn(SensorPlatformsService, "apiSensorPlatformsIdSensorPlatformIdDeleteSensorPlatform")
+      .spyOn(
+        SensorPlatformsService,
+        "apiSensorPlatformsIdSensorPlatformIdDeleteSensorPlatform",
+      )
       .mockResolvedValue({} as never)
     await sensorPlatformsConfig.delete({
       id: "sp-1",

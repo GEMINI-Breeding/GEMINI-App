@@ -40,10 +40,14 @@ function bboxOf(coords: LngLat[]): [number, number, number, number] {
   return [minX, minY, maxX, maxY]
 }
 
-function metersToDeg(meters: number, atLatDeg: number): { dLat: number; dLng: number } {
+function metersToDeg(
+  meters: number,
+  atLatDeg: number,
+): { dLat: number; dLng: number } {
   const dLat = (meters / EARTH_RADIUS_M) * (180 / Math.PI)
   const dLng =
-    (meters / (EARTH_RADIUS_M * Math.cos((atLatDeg * Math.PI) / 180))) * (180 / Math.PI)
+    (meters / (EARTH_RADIUS_M * Math.cos((atLatDeg * Math.PI) / 180))) *
+    (180 / Math.PI)
   return { dLat, dLng }
 }
 
@@ -52,7 +56,10 @@ function rotate(point: LngLat, origin: LngLat, angleRad: number): LngLat {
   const [ox, oy] = origin
   const dx = px - ox
   const dy = py - oy
-  return [ox + dx * Math.cos(angleRad) - dy * Math.sin(angleRad), oy + dx * Math.sin(angleRad) + dy * Math.cos(angleRad)]
+  return [
+    ox + dx * Math.cos(angleRad) - dy * Math.sin(angleRad),
+    oy + dx * Math.sin(angleRad) + dy * Math.cos(angleRad),
+  ]
 }
 
 /**
@@ -102,7 +109,9 @@ export function generateGridFeatures(
         [x0, y0],
       ]
       const rotated =
-        params.angleDeg === 0 ? corners : corners.map((p) => rotate(p, [cx, cy], angleRad))
+        params.angleDeg === 0
+          ? corners
+          : corners.map((p) => rotate(p, [cx, cy], angleRad))
 
       features.push({
         type: "Feature",

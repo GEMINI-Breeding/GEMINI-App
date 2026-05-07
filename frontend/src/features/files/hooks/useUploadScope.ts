@@ -18,31 +18,42 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
-  ExperimentsService,
-  PopulationsService,
-  SeasonsService,
-  SensorPlatformsService,
-  SensorsService,
-  SitesService,
-  UsersService,
   type ExperimentOutput,
+  ExperimentsService,
   type PopulationOutput,
+  PopulationsService,
   type SeasonOutput,
+  SeasonsService,
   type SensorOutput,
   type SensorPlatformOutput,
+  SensorPlatformsService,
+  SensorsService,
   type SiteOutput,
+  SitesService,
+  UsersService,
 } from "@/client"
-import type { EntityChoice, EntityOption } from "@/features/files/components/EntitySelectField"
+import type {
+  EntityChoice,
+  EntityOption,
+} from "@/features/files/components/EntitySelectField"
 import { resolveOrCreateEntity } from "@/features/files/lib/uploadScopeHelpers"
 import { isLoggedIn } from "@/lib/auth"
 
-export type ScopeKey = "experiment" | "site" | "population" | "season" | "sensorPlatform" | "sensor"
+export type ScopeKey =
+  | "experiment"
+  | "site"
+  | "population"
+  | "season"
+  | "sensorPlatform"
+  | "sensor"
 
 /** All the entity selections the form might collect. Date is plain text. */
 export type UploadScopeChoices = Partial<Record<ScopeKey, EntityChoice>>
 
 /** Resolved scope values used to build the upload path + run create calls. */
-export type ResolvedScope = Partial<Record<ScopeKey, { id: string; name: string }>>
+export type ResolvedScope = Partial<
+  Record<ScopeKey, { id: string; name: string }>
+>
 
 function asOptions<T extends { id?: string | number | null }>(
   rows: T[] | undefined,
@@ -63,55 +74,57 @@ export function useScopeOptions() {
   const experiments = useQuery<ExperimentOutput[], Error>({
     queryKey: ["experiments", "all"],
     queryFn: async () =>
-      (await ExperimentsService.apiExperimentsAllGetAllExperiments({
+      ((await ExperimentsService.apiExperimentsAllGetAllExperiments({
         limit: 500,
         offset: 0,
-      })) as ExperimentOutput[] ?? [],
+      })) as ExperimentOutput[]) ?? [],
     enabled,
   })
   const sites = useQuery<SiteOutput[], Error>({
     queryKey: ["sites", "all"],
     queryFn: async () =>
-      (await SitesService.apiSitesAllGetAllSites({
+      ((await SitesService.apiSitesAllGetAllSites({
         limit: 500,
         offset: 0,
-      })) as SiteOutput[] ?? [],
+      })) as SiteOutput[]) ?? [],
     enabled,
   })
   const populations = useQuery<PopulationOutput[], Error>({
     queryKey: ["populations", "all"],
     queryFn: async () =>
-      (await PopulationsService.apiPopulationsAllGetAllPopulations({
+      ((await PopulationsService.apiPopulationsAllGetAllPopulations({
         limit: 500,
         offset: 0,
-      })) as PopulationOutput[] ?? [],
+      })) as PopulationOutput[]) ?? [],
     enabled,
   })
   const seasons = useQuery<SeasonOutput[], Error>({
     queryKey: ["seasons", "all"],
     queryFn: async () =>
-      (await SeasonsService.apiSeasonsAllGetAllSeasons({
+      ((await SeasonsService.apiSeasonsAllGetAllSeasons({
         limit: 500,
         offset: 0,
-      })) as SeasonOutput[] ?? [],
+      })) as SeasonOutput[]) ?? [],
     enabled,
   })
   const sensorPlatforms = useQuery<SensorPlatformOutput[], Error>({
     queryKey: ["sensorPlatforms", "all"],
     queryFn: async () =>
-      (await SensorPlatformsService.apiSensorPlatformsAllGetAllSensorPlatforms({
-        limit: 500,
-        offset: 0,
-      })) as SensorPlatformOutput[] ?? [],
+      ((await SensorPlatformsService.apiSensorPlatformsAllGetAllSensorPlatforms(
+        {
+          limit: 500,
+          offset: 0,
+        },
+      )) as SensorPlatformOutput[]) ?? [],
     enabled,
   })
   const sensors = useQuery<SensorOutput[], Error>({
     queryKey: ["sensors", "all"],
     queryFn: async () =>
-      (await SensorsService.apiSensorsAllGetAllSensors({
+      ((await SensorsService.apiSensorsAllGetAllSensors({
         limit: 500,
         offset: 0,
-      })) as SensorOutput[] ?? [],
+      })) as SensorOutput[]) ?? [],
     enabled,
   })
 
@@ -194,9 +207,10 @@ export function useResolveScope() {
         match?.id != null
           ? String(match.id)
           : await (async () => {
-              const created = (await ExperimentsService.apiExperimentsCreateExperiment({
-                requestBody: { experiment_name: trimmed },
-              })) as ExperimentOutput
+              const created =
+                (await ExperimentsService.apiExperimentsCreateExperiment({
+                  requestBody: { experiment_name: trimmed },
+                })) as ExperimentOutput
               return String(created.id ?? "")
             })()
       await ensureUserAssociated(expId)
@@ -232,7 +246,10 @@ export function useResolveScope() {
     })
   }
 
-  function resolveOrCreatePopulation(c: EntityChoice, parentExperiment: string) {
+  function resolveOrCreatePopulation(
+    c: EntityChoice,
+    parentExperiment: string,
+  ) {
     return resolveOrCreateEntity<PopulationOutput>(c, {
       entityLabel: "population",
       search: async (name) =>
@@ -244,7 +261,10 @@ export function useResolveScope() {
       getId: (r) => r.id,
       create: async (name) =>
         (await PopulationsService.apiPopulationsCreatePopulation({
-          requestBody: { population_name: name, experiment_name: parentExperiment },
+          requestBody: {
+            population_name: name,
+            experiment_name: parentExperiment,
+          },
         })) as PopulationOutput,
       onResolved: invalidateAfter("populations"),
     })
@@ -322,7 +342,9 @@ export function useResolveScope() {
    * Resolve a full set of choices in dependency order. Skips entities
    * that aren't in `choices` (data types only require a subset).
    */
-  async function resolveScope(choices: UploadScopeChoices): Promise<ResolvedScope> {
+  async function resolveScope(
+    choices: UploadScopeChoices,
+  ): Promise<ResolvedScope> {
     const out: ResolvedScope = {}
 
     if (choices.experiment) {
@@ -330,15 +352,28 @@ export function useResolveScope() {
     }
     const expName = out.experiment?.name ?? ""
 
-    if (choices.site) out.site = await resolveOrCreateSite(choices.site, expName)
-    if (choices.population) out.population = await resolveOrCreatePopulation(choices.population, expName)
-    if (choices.season) out.season = await resolveOrCreateSeason(choices.season, expName)
+    if (choices.site)
+      out.site = await resolveOrCreateSite(choices.site, expName)
+    if (choices.population)
+      out.population = await resolveOrCreatePopulation(
+        choices.population,
+        expName,
+      )
+    if (choices.season)
+      out.season = await resolveOrCreateSeason(choices.season, expName)
     if (choices.sensorPlatform) {
-      out.sensorPlatform = await resolveOrCreateSensorPlatform(choices.sensorPlatform, expName)
+      out.sensorPlatform = await resolveOrCreateSensorPlatform(
+        choices.sensorPlatform,
+        expName,
+      )
     }
     const platformName = out.sensorPlatform?.name ?? ""
     if (choices.sensor) {
-      out.sensor = await resolveOrCreateSensor(choices.sensor, expName, platformName)
+      out.sensor = await resolveOrCreateSensor(
+        choices.sensor,
+        expName,
+        platformName,
+      )
     }
 
     return out

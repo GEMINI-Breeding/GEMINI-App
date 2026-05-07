@@ -59,18 +59,26 @@ export async function checkForUpdates(): Promise<CheckUpdateResult> {
       headers: { Accept: "application/vnd.github+json" },
       signal: AbortSignal.timeout(10_000),
     })
-    if (!res.ok) return { status: "error", message: `GitHub API returned ${res.status}` }
+    if (!res.ok)
+      return { status: "error", message: `GitHub API returned ${res.status}` }
 
     const data = await res.json()
     const remoteTag: string = data.tag_name ?? ""
     if (!remoteTag) return { status: "error", message: "No release tag found" }
 
     if (isNewer(CURRENT_VERSION, remoteTag)) {
-      return { status: "update_available", version: remoteTag, downloadUrl: RELEASES_PAGE }
+      return {
+        status: "update_available",
+        version: remoteTag,
+        downloadUrl: RELEASES_PAGE,
+      }
     }
     return { status: "up_to_date", version: remoteTag }
   } catch (err) {
-    return { status: "error", message: err instanceof Error ? err.message : "Network error" }
+    return {
+      status: "error",
+      message: err instanceof Error ? err.message : "Network error",
+    }
   }
 }
 
@@ -78,7 +86,9 @@ interface UseUpdateCheckerOptions {
   onUpdateAvailable: (version: string, downloadUrl: string) => void
 }
 
-export function useUpdateChecker({ onUpdateAvailable }: UseUpdateCheckerOptions) {
+export function useUpdateChecker({
+  onUpdateAvailable,
+}: UseUpdateCheckerOptions) {
   useEffect(() => {
     async function check() {
       const now = Date.now()

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import { FilesService, type FileUploadPublic } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,7 +20,11 @@ interface EditUploadDialogProps {
   onClose: () => void
 }
 
-export function EditUploadDialog({ upload, open, onClose }: EditUploadDialogProps) {
+export function EditUploadDialog({
+  upload,
+  open,
+  onClose,
+}: EditUploadDialogProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -46,7 +50,12 @@ export function EditUploadDialog({ upload, open, onClose }: EditUploadDialogProp
   }, [upload])
 
   const config = dataTypes[upload.data_type as keyof typeof dataTypes]
-  const fields: string[] = config?.fields ?? ["experiment", "location", "population", "date"]
+  const fields: string[] = config?.fields ?? [
+    "experiment",
+    "location",
+    "population",
+    "date",
+  ]
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -95,8 +104,14 @@ export function EditUploadDialog({ upload, open, onClose }: EditUploadDialogProp
           ))}
         </div>
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
             {saveMutation.isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

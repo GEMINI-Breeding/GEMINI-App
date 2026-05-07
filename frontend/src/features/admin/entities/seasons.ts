@@ -1,15 +1,13 @@
-import {
-  SeasonsService,
-  type SeasonInput,
-  type SeasonOutput,
-} from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
+import { type SeasonInput, type SeasonOutput, SeasonsService } from "@/client"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: SeasonInput): SeasonInput {
   return {
     ...input,
-    season_info: parseInfoField(input.season_info) as SeasonInput["season_info"],
+    season_info: parseInfoField(
+      input.season_info,
+    ) as SeasonInput["season_info"],
   }
 }
 
@@ -34,7 +32,9 @@ export const seasonsConfig: EntityConfig<SeasonOutput, SeasonInput> = {
       requestBody: normalize(input),
     })) as SeasonOutput,
   delete: async (row) =>
-    SeasonsService.apiSeasonsIdSeasonIdDeleteSeason({ seasonId: idAsString(row.id) }),
+    SeasonsService.apiSeasonsIdSeasonIdDeleteSeason({
+      seasonId: idAsString(row.id),
+    }),
   fields: [
     { key: "season_name", label: "Name", type: "text", required: true },
     { key: "season_start_date", label: "Start date", type: "date" },
@@ -45,7 +45,12 @@ export const seasonsConfig: EntityConfig<SeasonOutput, SeasonInput> = {
       type: "text",
       placeholder: "(experiment name)",
     },
-    { key: "season_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "season_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ season_name: "" }),
   toInput: (row) => ({

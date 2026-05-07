@@ -1,10 +1,6 @@
-import {
-  SitesService,
-  type SiteInput,
-  type SiteOutput,
-} from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
+import { type SiteInput, type SiteOutput, SitesService } from "@/client"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: SiteInput): SiteInput {
   return {
@@ -25,7 +21,9 @@ export const sitesConfig: EntityConfig<SiteOutput, SiteInput> = {
       offset: 0,
     })) as SiteOutput[],
   create: async (input) =>
-    (await SitesService.apiSitesCreateSite({ requestBody: normalize(input) })) as SiteOutput,
+    (await SitesService.apiSitesCreateSite({
+      requestBody: normalize(input),
+    })) as SiteOutput,
   update: async (row, input) =>
     (await SitesService.apiSitesIdSiteIdUpdateSite({
       siteId: idAsString(row.id),

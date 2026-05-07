@@ -31,6 +31,7 @@ export function DataTypes({ onChange }: DataTypesProps) {
         <Button
           variant="outline"
           data-onboarding="files-data-type-selector"
+          data-testid="files-data-type-selector"
           className={`${dropdownWidth} justify-between`}
         >
           {selectedFileType ?? "Select File Type"}

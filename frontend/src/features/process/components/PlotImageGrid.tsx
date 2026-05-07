@@ -99,7 +99,9 @@ function PlotThumb({ file, prefix }: { file: FileMetadata; prefix: string }) {
           <Skeleton className="h-full w-full" />
         )}
       </div>
-      <p className="truncate text-xs" title={label}>{label}</p>
+      <p className="truncate text-xs" title={label}>
+        {label}
+      </p>
     </div>
   )
 }

@@ -1,22 +1,28 @@
+import { useQuery } from "@tanstack/react-query"
 import {
-  DataFormatsService,
-  DataTypesService,
-  SensorTypesService,
-  SensorsService,
   type DataFormatOutput,
+  DataFormatsService,
   type DataTypeOutput,
+  DataTypesService,
   type SensorInput,
   type SensorOutput,
+  SensorsService,
   type SensorTypeOutput,
+  SensorTypesService,
 } from "@/client"
+import {
+  idAsNumber,
+  idAsString,
+  parseInfoField,
+} from "@/features/admin/lib/ids"
 import type { EntityConfig, EntityField } from "@/features/admin/lib/types"
-import { idAsNumber, idAsString, parseInfoField } from "@/features/admin/lib/ids"
-import { useQuery } from "@tanstack/react-query"
 
 function normalize(input: SensorInput): SensorInput {
   return {
     ...input,
-    sensor_info: parseInfoField(input.sensor_info) as SensorInput["sensor_info"],
+    sensor_info: parseInfoField(
+      input.sensor_info,
+    ) as SensorInput["sensor_info"],
   }
 }
 
@@ -115,7 +121,9 @@ export const sensorsConfig: EntityConfig<SensorOutput, SensorInput> = {
       requestBody: normalize(input),
     })) as SensorOutput,
   delete: async (row) =>
-    SensorsService.apiSensorsIdSensorIdDeleteSensor({ sensorId: idAsString(row.id) }),
+    SensorsService.apiSensorsIdSensorIdDeleteSensor({
+      sensorId: idAsString(row.id),
+    }),
   fields,
   emptyInput: () => ({ sensor_name: "" }) as SensorInput,
   toInput: (row) =>
@@ -124,7 +132,9 @@ export const sensorsConfig: EntityConfig<SensorOutput, SensorInput> = {
       sensor_type_id:
         row.sensor_type_id != null ? idAsNumber(row.sensor_type_id) : undefined,
       sensor_data_type_id:
-        row.sensor_data_type_id != null ? idAsNumber(row.sensor_data_type_id) : undefined,
+        row.sensor_data_type_id != null
+          ? idAsNumber(row.sensor_data_type_id)
+          : undefined,
       sensor_data_format_id:
         row.sensor_data_format_id != null
           ? idAsNumber(row.sensor_data_format_id)

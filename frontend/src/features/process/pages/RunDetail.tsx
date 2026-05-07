@@ -38,6 +38,7 @@ import {
   FilesService,
   type JobOutput,
   JobsService,
+  PlotGeometryService,
 } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -58,12 +59,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
-import {
-  type AerialScopeFields,
-  AerialScopePicker,
-  buildAerialScope,
-  useAerialScopeContext,
-} from "@/features/process/components/AerialScopePicker"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import {
@@ -72,14 +67,15 @@ import {
 } from "@/features/process/components/TraitExtractionDialog"
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
 import { usePlotGeometryVersions } from "@/features/process/hooks/usePlotGeometry"
+import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import { buildOrthoVersions } from "@/features/process/lib/orthoVersions"
 import {
   type AerialScope,
   isAerialScopeComplete,
+  plotBoundariesPath,
   processedPrefix,
   rawImagesPrefix,
 } from "@/features/process/lib/paths"
-import { useProcessScope } from "@/features/process/lib/processScope"
 import {
   executeStep,
   markStepSkipped,
@@ -93,7 +89,6 @@ import {
 } from "@/features/process/lib/runEvents"
 import {
   setStepState,
-  updateRun,
   usePipeline,
   useRun,
   useWorkspace,
@@ -274,7 +269,7 @@ function ProgressLog({ events }: { events: RunProgressEvent[] }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" })
-  }, [])
+  }, [events.length])
 
   if (events.length === 0) return null
 
@@ -323,6 +318,8 @@ interface StepRowProps {
   events: RunProgressEvent[]
   lastProgress: number | null
   isExecuting: boolean
+  /** Raw worker error_message persisted on runStore — humanized in-row. */
+  errorMessage?: string
   onRunStep: () => void
   onOpenTool: () => void
   onStopStep: () => void
@@ -340,6 +337,7 @@ function StepRow(props: StepRowProps) {
     events,
     lastProgress,
     isExecuting,
+    errorMessage,
     onRunStep,
     onOpenTool,
     onStopStep,
@@ -348,6 +346,8 @@ function StepRow(props: StepRowProps) {
     extraContent,
   } = props
   const [expanded, setExpanded] = useState(false)
+  const humanizedError =
+    status === "failed" ? humanizeJobError(step.key, errorMessage) : null
 
   const stepEvents = events.filter((e) => !e.step || e.step === step.key)
 
@@ -513,6 +513,41 @@ function StepRow(props: StepRowProps) {
             <p className="text-primary mt-1 text-xs">Ready to start</p>
           )}
 
+          {humanizedError && (
+            <div
+              className="border-destructive/40 bg-destructive/5 mt-2 rounded border p-2 text-xs"
+              data-testid="step-error-panel"
+            >
+              <p
+                className="text-destructive font-medium"
+                data-testid="step-error-headline"
+              >
+                {humanizedError.headline}
+              </p>
+              {humanizedError.hint && (
+                <p
+                  className="text-muted-foreground mt-1"
+                  data-testid="step-error-hint"
+                >
+                  {humanizedError.hint}
+                </p>
+              )}
+              {humanizedError.details && (
+                <details className="mt-1.5">
+                  <summary className="text-muted-foreground cursor-pointer text-[11px] hover:underline">
+                    Technical details
+                  </summary>
+                  <pre
+                    className="bg-muted/40 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border p-2 font-mono text-[11px]"
+                    data-testid="step-error-details"
+                  >
+                    {humanizedError.details}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+
           {(isActive || status === "failed") && (
             <div className="mt-2 overflow-hidden">
               {isActive && lastProgress !== null && (
@@ -538,26 +573,48 @@ function StepRow(props: StepRowProps) {
   )
 }
 
-// ── Run setup card (pick date/platform/sensor) ──────────────────────────────
+// ── Run scope summary (read-only — scope is locked to the picked upload) ────
 
-function RunSetupCard({
-  fields,
-  onChange,
-}: {
-  fields: AerialScopeFields
-  onChange: (next: AerialScopeFields) => void
-}) {
+/**
+ * Displays the seven path components captured at run-creation time. The
+ * upload-driven flow makes scope immutable per-run: all step submissions
+ * read it back from `run.uploadScope`, so the user does not need to (and
+ * must not be able to) re-select date / platform / sensor here. To run a
+ * different flight, create a new Run from the WorkspaceDetail page.
+ */
+function RunScopeSummary({ scope }: { scope: AerialScope }) {
+  const fields: Array<[string, string]> = [
+    ["Year", scope.year],
+    ["Experiment", scope.experiment],
+    ["Site", scope.location],
+    ["Population", scope.population],
+    ["Date", scope.date],
+    ["Platform", scope.platform],
+    ["Sensor", scope.sensor],
+  ]
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Run setup</CardTitle>
+        <CardTitle className="text-base">Run scope</CardTitle>
         <CardDescription>
-          Pick the flight date, platform, and sensor for this run. The
-          orthomosaic step uses these to locate raw images on MinIO.
+          The uploaded dataset this run targets. To process a different flight
+          or experiment, create a new Run from the workspace page.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <AerialScopePicker value={fields} onChange={onChange} />
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
+          {fields.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd
+                className="font-medium break-all"
+                data-testid={`scope-${label.toLowerCase()}`}
+              >
+                {value || "—"}
+              </dd>
+            </div>
+          ))}
+        </dl>
       </CardContent>
     </Card>
   )
@@ -681,44 +738,7 @@ export function RunDetail() {
   const pipeline = usePipeline(run?.pipelineId)
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const { addProcess, updateProcess, processes } = useProcess()
-  const ctx = useAerialScopeContext()
   const queryClient = useQueryClient()
-  const {
-    experimentId: scopedExperimentId,
-    setExperimentId: setScopedExperimentId,
-  } = useProcessScope()
-
-  // The workspace owns the experiment; push that into the shared
-  // useProcessScope store so AerialScopePicker (and the path-listing
-  // queries it drives) target the right experiment instead of inheriting
-  // whatever scope the user last picked on another Process page.
-  useEffect(() => {
-    if (!workspace) return
-    if (scopedExperimentId !== workspace.experimentId) {
-      setScopedExperimentId(workspace.experimentId)
-    }
-  }, [workspace, scopedExperimentId, setScopedExperimentId])
-
-  // Local state for the aerial-fields setup if the Run doesn't have them yet.
-  const [aerialFields, setAerialFields] = useState<AerialScopeFields>(
-    () =>
-      run?.aerialFields ?? {
-        date: "",
-        platform: "",
-        sensor: "",
-      },
-  )
-  // Persist scope picks back to the Run record so they survive reload.
-  useEffect(() => {
-    if (!run) return
-    if (
-      run.aerialFields?.date !== aerialFields.date ||
-      run.aerialFields?.platform !== aerialFields.platform ||
-      run.aerialFields?.sensor !== aerialFields.sensor
-    ) {
-      updateRun(runId, { aerialFields })
-    }
-  }, [aerialFields, run, runId])
 
   // Per-step ortho options. Seeded from the pipeline's default once the
   // pipeline record loads (it's a hook, so it can be undefined on first
@@ -741,13 +761,26 @@ export function RunDetail() {
     })
   }, [pipeline])
 
-  // Derived AerialScope (path strings) once the user has picked everything.
+  // Derive AerialScope (the seven path components workers consume)
+  // directly from the upload picked at run creation. This is the single
+  // source of truth — no AerialScopePicker / ProcessScopeSelectors here,
+  // and no per-render context resolution: every step submission, file
+  // listing, and prefix derivation reads the same scope back out of the
+  // Run record.
   const scope: AerialScope | null = useMemo(() => {
-    if (!aerialFields.date || !aerialFields.platform || !aerialFields.sensor)
-      return null
-    const built = buildAerialScope(ctx, aerialFields)
+    const u = run?.uploadScope
+    if (!u) return null
+    const built: AerialScope = {
+      year: u.year,
+      experiment: u.experiment,
+      location: u.location,
+      population: u.population,
+      date: u.date,
+      platform: u.platform,
+      sensor: u.sensor,
+    }
     return isAerialScopeComplete(built) ? built : null
-  }, [ctx, aerialFields])
+  }, [run?.uploadScope])
 
   // Confirm raw images exist (drives data_sync's "complete" signal too).
   const rawImagesQuery = useQuery<FileMetadata[], Error>({
@@ -1053,12 +1086,19 @@ export function RunDetail() {
           cpuCount,
         }
       }
+      const experimentId = run.uploadScope?.experimentId
+      if (!experimentId) {
+        showErrorToast(
+          "This run is missing its experiment binding. Re-create it from the workspace page.",
+        )
+        return
+      }
       try {
         const result = await executeStep({
           runId: run.id,
           stepKey,
           scope: scope ?? ({} as AerialScope),
-          experimentId: workspace.experimentId,
+          experimentId,
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
         })
@@ -1150,7 +1190,7 @@ export function RunDetail() {
     if (!run || !workspace || !scope) return
     if (traitDialogState.orthoVersion === null) return
     if (traitDialogState.boundaryVersion === null) {
-      showErrorToast("Pick a plot-boundary version (R5)")
+      showErrorToast("Pick a plot-boundary version")
       return
     }
     const versions = buildOrthoVersions(run, scope, orthoFiles)
@@ -1164,19 +1204,70 @@ export function RunDetail() {
     // Strip leading bucket segment for the worker (it adds the bucket
     // back from STORAGE_BUCKET).
     const orthoMinioPath = ortho.path.replace(/^[^/]+\//, "")
-    // Output path lives next to the ortho with a versioned suffix.
     const outputPath = `${processedPrefix(scope)}traits/v${traitDialogState.orthoVersion}-b${traitDialogState.boundaryVersion}-traits.geojson`
-    // Boundary path will be filled in by R5 (PlotBoundaryPrep writes the
-    // versioned GeoJSON). For now use the placeholder path our backend
-    // expects; R5 will replace this with the real version-resolved path.
-    const boundaryPath = `${processedPrefix(scope)}plot-boundaries/v${traitDialogState.boundaryVersion}.geojson`
+    const boundaryPath = plotBoundariesPath(
+      scope,
+      traitDialogState.boundaryVersion,
+    )
+    const directory = processedPrefix(scope)
+    const boundaryVersion = traitDialogState.boundaryVersion
 
     try {
+      // Boundaries are authoritatively stored as PlotGeometryService versions
+      // (Postgres). The EXTRACT_TRAITS worker reads from MinIO, so materialize
+      // the chosen version's FeatureCollection at boundaryPath before submit.
+      const loaded =
+        await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+          requestBody: { directory, version: boundaryVersion },
+        })
+      const fc = (loaded as { state_snapshot?: { boundaries?: unknown } })
+        ?.state_snapshot?.boundaries as
+        | { type?: string; features?: unknown[] }
+        | undefined
+      if (
+        !fc ||
+        fc.type !== "FeatureCollection" ||
+        !Array.isArray(fc.features) ||
+        fc.features.length === 0
+      ) {
+        showErrorToast(
+          `Plot-boundary v${boundaryVersion} has no polygons. Open the Plot Boundary Prep tool, draw or generate boundaries, and save a new version.`,
+        )
+        return
+      }
+      const blob = new Blob([JSON.stringify(fc)], {
+        type: "application/geo+json",
+      })
+      const file = new File([blob], `v${boundaryVersion}.geojson`, {
+        type: "application/geo+json",
+      })
+      await FilesService.apiFilesUploadUploadFile({
+        formData: { file, bucket_name: "gemini", object_name: boundaryPath },
+      })
+
+      // Drop any previously-buffered events for this step so a retry after a
+      // failure starts with a clean log and progress bar. The WS subscription
+      // for the new job will repopulate.
+      setEvents((prev) => {
+        const next = prev.filter((e) => e.step !== "trait_extraction")
+        eventBuffer.set(run.id, next)
+        return next
+      })
+      progressBuffer.set(run.id, null)
+      setLastProgress(null)
+
+      const experimentId = run.uploadScope?.experimentId
+      if (!experimentId) {
+        showErrorToast(
+          "This run is missing its experiment binding. Re-create it from the workspace page.",
+        )
+        return
+      }
       const result = await executeStep({
         runId: run.id,
         stepKey: "trait_extraction",
         scope,
-        experimentId: workspace.experimentId,
+        experimentId,
         traitExtraction: {
           orthomosaicPath: orthoMinioPath,
           boundaryGeojsonPath: boundaryPath,
@@ -1272,45 +1363,50 @@ export function RunDetail() {
           </Button>
         </div>
 
-        {/* Both aerial + ground pipelines need a flight scope (date /
-            platform / sensor) to find raw images at the right MinIO
-            prefix. The ground pipeline path naming is the same as the
-            aerial one — `rawImagesPrefix(scope)` works for both. */}
-        {(pipeline?.type === "aerial" || pipeline?.type === "ground") && (
-          <div className="mb-6 space-y-4">
-            <RunSetupCard fields={aerialFields} onChange={setAerialFields} />
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Inputs</CardTitle>
-                <CardDescription>
-                  Raw images expected at the prefix below.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {scope ? (
-                  <>
-                    <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
-                      {rawImagesPrefix(scope)}
-                    </code>
-                    <p className="text-muted-foreground flex items-center gap-2">
-                      <ImageIcon className="h-4 w-4" />
-                      {rawImagesQuery.isLoading
-                        ? "Looking for images…"
-                        : `${imageFiles.length} image${
-                            imageFiles.length === 1 ? "" : "s"
-                          } found`}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">
-                    Pick a flight date, platform, and sensor above to locate raw
-                    images.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+        {/* Legacy runs (created before the upload-driven flow) have no
+            uploadScope; they can't submit any compute step until the
+            user re-creates them from the workspace page. */}
+        {!scope && (
+          <div
+            className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800"
+            data-testid="run-missing-scope"
+          >
+            This run was created before the upload-driven flow and has no scope
+            attached. Delete it and create a new run from the workspace page —
+            the New Run dialog now picks the uploaded dataset directly.
           </div>
         )}
+
+        {/* Scope is locked to the upload picked at run-creation time —
+            see RunScopeSummary. The Inputs card is a sanity readout
+            (does the path actually contain images?), not a configurator. */}
+        {(pipeline?.type === "aerial" || pipeline?.type === "ground") &&
+          scope && (
+            <div className="mb-6 space-y-4">
+              <RunScopeSummary scope={scope} />
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Inputs</CardTitle>
+                  <CardDescription>
+                    Raw images expected at the prefix below.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
+                    {rawImagesPrefix(scope)}
+                  </code>
+                  <p className="text-muted-foreground flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4" />
+                    {rawImagesQuery.isLoading
+                      ? "Looking for images…"
+                      : `${imageFiles.length} image${
+                          imageFiles.length === 1 ? "" : "s"
+                        } found`}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
         <Card>
           <CardHeader>
@@ -1336,6 +1432,7 @@ export function RunDetail() {
                     events={events}
                     lastProgress={lastProgress}
                     isExecuting={isAnyExecuting}
+                    errorMessage={run?.steps[step.key]?.error}
                     onRunStep={() => handleRunStep(step.key)}
                     onOpenTool={() => handleOpenTool(step.key)}
                     onStopStep={() => handleStopStep(step.key)}

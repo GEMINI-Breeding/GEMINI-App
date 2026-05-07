@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from "react"
 import {
   createFileRoute,
   Outlet,
@@ -7,10 +6,12 @@ import {
   useNavigate,
 } from "@tanstack/react-router"
 import { CircleHelp } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { Footer } from "@/components/Common/Footer"
 import { HelpSidebar, OnboardingTour } from "@/components/Help"
+import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
 import {
@@ -18,11 +19,10 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { openUrl } from "@/lib/platform"
-import { useUpdateChecker } from "@/hooks/useUpdateChecker"
-import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
 import { isLoggedIn } from "@/hooks/useAuth"
+import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { onLogout } from "@/lib/auth"
+import { openUrl } from "@/lib/platform"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -62,32 +62,46 @@ function Layout() {
   const [tourStep, setTourStep] = useState<number>(0)
 
   const startTour = useCallback(() => {
-    const section = getTourSection(location.pathname, (location.search as any)?.step)
+    const section = getTourSection(
+      location.pathname,
+      (location.search as any)?.step,
+    )
     setTourSteps(section.steps)
     setTourStep(0)
   }, [location.pathname, location.search])
   const closeTour = useCallback(() => setTourSteps(null), [])
-  const nextTourStep = useCallback(() =>
-    setTourStep((s) => (tourSteps !== null && s < tourSteps.length - 1 ? s + 1 : s)), [tourSteps])
-  const prevTourStep = useCallback(() =>
-    setTourStep((s) => (s > 0 ? s - 1 : s)), [])
+  const nextTourStep = useCallback(
+    () =>
+      setTourStep((s) =>
+        tourSteps !== null && s < tourSteps.length - 1 ? s + 1 : s,
+      ),
+    [tourSteps],
+  )
+  const prevTourStep = useCallback(
+    () => setTourStep((s) => (s > 0 ? s - 1 : s)),
+    [],
+  )
 
-  const handleUpdateAvailable = useCallback((version: string, downloadUrl: string) => {
-    toast.info(`GEMI ${version} is available`, {
-      description: "Download the latest release from GitHub for your platform (macOS, Windows, Linux).",
-      duration: Infinity,
-      action: {
-        label: "Download",
-        onClick: () => {
-          localStorage.setItem("gemi_dismissed_version", version)
-          openUrl(downloadUrl)
+  const handleUpdateAvailable = useCallback(
+    (version: string, downloadUrl: string) => {
+      toast.info(`GEMI ${version} is available`, {
+        description:
+          "Download the latest release from GitHub for your platform (macOS, Windows, Linux).",
+        duration: Infinity,
+        action: {
+          label: "Download",
+          onClick: () => {
+            localStorage.setItem("gemi_dismissed_version", version)
+            openUrl(downloadUrl)
+          },
         },
-      },
-      onDismiss: () => {
-        localStorage.setItem("gemi_dismissed_version", version)
-      },
-    })
-  }, [])
+        onDismiss: () => {
+          localStorage.setItem("gemi_dismissed_version", version)
+        },
+      })
+    },
+    [],
+  )
 
   useUpdateChecker({ onUpdateAvailable: handleUpdateAvailable })
 

@@ -14,7 +14,7 @@
 import { useQueries } from "@tanstack/react-query"
 import { Download, Loader2 } from "lucide-react"
 
-import { JobsService, type JobOutput } from "@/client"
+import { type JobOutput, JobsService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -47,7 +47,9 @@ function downloadAuthed(filePath: string, suggestedName: string) {
 }
 
 export function TraitRecordsPanel({ run }: { run: Run }) {
-  const jobIds = run.steps.trait_extraction?.jobIds ?? []
+  // Newest first: jobIds is appended-in-order in runStore, so reverse for
+  // the panel.
+  const jobIds = [...(run.steps.trait_extraction?.jobIds ?? [])].reverse()
 
   // Pull each job's current state. Cheap because the WS subscription in
   // RunDetail already keeps the running ones live; this is for completed

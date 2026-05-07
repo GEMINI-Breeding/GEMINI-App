@@ -1,15 +1,17 @@
 import {
-  SensorPlatformsService,
   type SensorPlatformInput,
   type SensorPlatformOutput,
+  SensorPlatformsService,
 } from "@/client"
-import type { EntityConfig } from "@/features/admin/lib/types"
 import { idAsString, parseInfoField } from "@/features/admin/lib/ids"
+import type { EntityConfig } from "@/features/admin/lib/types"
 
 function normalize(input: SensorPlatformInput): SensorPlatformInput {
   return {
     ...input,
-    sensor_platform_info: parseInfoField(input.sensor_platform_info) as SensorPlatformInput["sensor_platform_info"],
+    sensor_platform_info: parseInfoField(
+      input.sensor_platform_info,
+    ) as SensorPlatformInput["sensor_platform_info"],
   }
 }
 
@@ -32,23 +34,37 @@ export const sensorPlatformsConfig: EntityConfig<
       requestBody: normalize(input),
     })) as SensorPlatformOutput,
   update: async (row, input) =>
-    (await SensorPlatformsService.apiSensorPlatformsIdSensorPlatformIdUpdateSensorPlatform({
-      sensorPlatformId: idAsString(row.id),
-      requestBody: normalize(input),
-    })) as SensorPlatformOutput,
+    (await SensorPlatformsService.apiSensorPlatformsIdSensorPlatformIdUpdateSensorPlatform(
+      {
+        sensorPlatformId: idAsString(row.id),
+        requestBody: normalize(input),
+      },
+    )) as SensorPlatformOutput,
   delete: async (row) =>
-    SensorPlatformsService.apiSensorPlatformsIdSensorPlatformIdDeleteSensorPlatform({
-      sensorPlatformId: idAsString(row.id),
-    }),
+    SensorPlatformsService.apiSensorPlatformsIdSensorPlatformIdDeleteSensorPlatform(
+      {
+        sensorPlatformId: idAsString(row.id),
+      },
+    ),
   fields: [
-    { key: "sensor_platform_name", label: "Name", type: "text", required: true },
+    {
+      key: "sensor_platform_name",
+      label: "Name",
+      type: "text",
+      required: true,
+    },
     {
       key: "experiment_name",
       label: "Experiment",
       type: "text",
       placeholder: "(experiment name)",
     },
-    { key: "sensor_platform_info", label: "Info (JSON)", type: "json", tableHidden: true },
+    {
+      key: "sensor_platform_info",
+      label: "Info (JSON)",
+      type: "json",
+      tableHidden: true,
+    },
   ],
   emptyInput: () => ({ sensor_platform_name: "" }),
   toInput: (row) => ({

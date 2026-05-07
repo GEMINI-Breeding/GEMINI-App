@@ -12,9 +12,10 @@
  * collects the same four values without the visual overlay; the visual
  * overlay can be added later if users find the blind-tuning UX painful.
  */
-import { useEffect, useState } from "react"
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, Save } from "lucide-react"
+import { useEffect, useState } from "react"
 
 import { PlotGeometryService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -27,12 +28,9 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  setStepState,
-  type Run,
-} from "@/features/process/lib/runStore"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
+import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -90,7 +88,12 @@ export function EdgeCropTool({
   useEffect(() => {
     if (!checkQuery.data) return
     const data = checkQuery.data as {
-      mask?: { left?: number; right?: number; top?: number; bottom?: number } | null
+      mask?: {
+        left?: number
+        right?: number
+        top?: number
+        bottom?: number
+      } | null
     }
     if (data.mask) {
       setMask({
@@ -140,17 +143,19 @@ export function EdgeCropTool({
         <CardHeader>
           <CardTitle className="text-base">Edge crop mask</CardTitle>
           <CardDescription>
-            Pixel margin AgRowStitch trims from each image edge before
-            matching features. Set to 0 unless your camera mount has a
-            fixed obstruction (lens cowl, monopod arm, etc.). Stored at{" "}
-            <code>{directory}</code>.
+            Pixel margin AgRowStitch trims from each image edge before matching
+            features. Set to 0 unless your camera mount has a fixed obstruction
+            (lens cowl, monopod arm, etc.). Stored at <code>{directory}</code>.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             {(["left", "right", "top", "bottom"] as const).map((side) => (
               <div key={side}>
-                <Label htmlFor={`mask-${side}`} className="mb-1.5 text-xs capitalize">
+                <Label
+                  htmlFor={`mask-${side}`}
+                  className="mb-1.5 text-xs capitalize"
+                >
                   {side} (px)
                 </Label>
                 <Input
@@ -159,7 +164,9 @@ export function EdgeCropTool({
                   type="number"
                   min={0}
                   value={mask[side]}
-                  onChange={(e) => setSide(side, parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) =>
+                    setSide(side, parseInt(e.target.value, 10) || 0)
+                  }
                 />
               </div>
             ))}

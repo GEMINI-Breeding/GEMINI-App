@@ -1,27 +1,59 @@
 import { test as base } from "@playwright/test"
+import { authHeader } from "./apiClient"
 import {
   attachConsoleErrorGuard,
   type ConsoleErrorGuardHandle,
 } from "./consoleErrorGuard"
+import { makePrefix } from "./uniquePrefix"
 
 type Fixtures = {
   consoleErrorGuard: ConsoleErrorGuardHandle
   runPrefix: string
 }
 
+// `??` would treat VITE_API_URL="" as "set", so fall through with `||`
+// to the dev fallback. Frontend `.env` deliberately blanks VITE_API_URL
+// so the dev server uses a relative `/api/*` proxy in the browser.
+const API_URL =
+  process.env.E2E_API_URL || process.env.VITE_API_URL || "http://127.0.0.1:7777"
+
+/**
+ * After each test, sweep entities the test created. Specs name their
+ * top-level entities with this prefix (`E2E-<slug>-<timestamp>`); the
+ * backend endpoint cascades a delete across experiments, genotyping
+ * studies, accessions, and lines whose names start with that string.
+ *
+ * The endpoint is gated behind GEMINI_E2E_CLEANUP_ENABLED on the
+ * backend; in CI/dev the docker-compose .env sets it to 1. In prod
+ * the env var is unset and the endpoint returns 404.
+ */
+async function cleanupByPrefix(prefix: string): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/api/e2e_cleanup?prefix=${encodeURIComponent(prefix)}`,
+    { method: "DELETE", headers: { Authorization: authHeader() } },
+  )
+  if (!res.ok && res.status !== 404) {
+    // 404 is expected when the endpoint is disabled (prod-shape config).
+    // Anything else means cleanup partially ran and we want it visible.
+    const body = await res.text()
+    throw new Error(
+      `e2e_cleanup(${prefix}) → ${res.status} ${res.statusText}: ${body}`,
+    )
+  }
+}
+
 /**
  * Playwright test extension. Every spec that imports `test` from this file
- * automatically gets a console-error guard that fails the test on
- * unexpected errors (per the CLAUDE.md strict-E2E rule).
+ * automatically gets:
+ *   - a console-error guard that fails the test on unexpected errors
+ *     (per CLAUDE.md's strict-E2E rule);
+ *   - a per-test `runPrefix` (the same shape `makePrefix` produces), and
+ *     an automatic afterEach that DELETEs entities under that prefix so
+ *     the dev DB doesn't accumulate test data across runs.
  *
- * `runPrefix` is intentionally not provided here. It used to wrap two
- * pre-migration cleanup helpers (deleteWorkspacesByPrefix /
- * deleteUploadsByPrefix) that are currently throwing stubs in
- * helpers/apiClient.ts pending Phase 12. Wiring that fixture in as a
- * silent-warn no-op was a trap: the first spec to opt in would think
- * cleanup ran, when in reality nothing was deleted. We don't include the
- * fixture at all until a real implementation lands — accessing it from a
- * spec produces a clear test-time error instead of fake green.
+ * Specs that already build their own prefix via `makePrefix(info)`
+ * should pass that exact string into the entity names they create —
+ * the auto-fixture will sweep using the same string.
  */
 export const test = base.extend<Fixtures>({
   consoleErrorGuard: [
@@ -32,15 +64,21 @@ export const test = base.extend<Fixtures>({
     },
     { auto: true },
   ],
-  runPrefix: async ({}, _use) => {
-    throw new Error(
-      "runPrefix fixture is not implemented. The pre-migration cleanup " +
-        "helpers (deleteWorkspacesByPrefix / deleteUploadsByPrefix) are " +
-        "throwing stubs scheduled for replacement in Phase 12. Until then, " +
-        "specs must use unique per-run identifiers and accept that test " +
-        "data accumulates in MinIO/Postgres.",
-    )
-  },
+  runPrefix: [
+    async ({}, use, info) => {
+      const prefix = makePrefix(info)
+      await use(prefix)
+      // afterEach: best-effort sweep. Logged but not failed-on if the
+      // endpoint is misconfigured — the test outcome already passed/
+      // failed by this point.
+      try {
+        await cleanupByPrefix(prefix)
+      } catch (err) {
+        console.warn(`[fixtures] cleanup failed for ${prefix}:`, err)
+      }
+    },
+    { auto: true },
+  ],
 })
 
 export { expect } from "@playwright/test"

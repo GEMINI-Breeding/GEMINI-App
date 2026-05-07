@@ -10,7 +10,9 @@ export function Footer() {
         <p className="text-muted-foreground text-sm">GEMI - {currentYear}</p>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => openUrl("https://github.com/GEMINI-Breeding/GEMINI-App")}
+            onClick={() =>
+              openUrl("https://github.com/GEMINI-Breeding/GEMINI-App")
+            }
             aria-label="GitHub"
             className="text-muted-foreground hover:text-foreground transition-colors"
           >

@@ -6,16 +6,12 @@
  * reference point in the imagery and applies the shift; subsequent plot-
  * geometry calculations use the shifted reference.
  */
-import { useState } from "react"
+
 import { Loader2 } from "lucide-react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -46,7 +42,9 @@ export function GpsShiftPanel({ directory }: { directory: string }) {
       setLon("")
       showSuccessToast("GPS shift applied")
     } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : "Failed to apply shift")
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to apply shift",
+      )
     }
   }
   async function applyUndo() {
@@ -54,7 +52,9 @@ export function GpsShiftPanel({ directory }: { directory: string }) {
       await undo.mutateAsync({ directory })
       showSuccessToast("GPS shift undone")
     } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : "Failed to undo shift")
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to undo shift",
+      )
     }
   }
 
@@ -82,7 +82,8 @@ export function GpsShiftPanel({ directory }: { directory: string }) {
             <div className="space-y-1 text-sm">
               <p className="text-muted-foreground text-xs">Current reference</p>
               <p className="font-mono text-xs">
-                {data.current_lat?.toFixed(6) ?? "—"}, {data.current_lon?.toFixed(6) ?? "—"}
+                {data.current_lat?.toFixed(6) ?? "—"},{" "}
+                {data.current_lon?.toFixed(6) ?? "—"}
               </p>
             </div>
           )}
@@ -90,7 +91,9 @@ export function GpsShiftPanel({ directory }: { directory: string }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="shift-lat" className="mb-1.5 text-xs">Current latitude</Label>
+            <Label htmlFor="shift-lat" className="mb-1.5 text-xs">
+              Current latitude
+            </Label>
             <Input
               id="shift-lat"
               type="number"
@@ -101,7 +104,9 @@ export function GpsShiftPanel({ directory }: { directory: string }) {
             />
           </div>
           <div>
-            <Label htmlFor="shift-lon" className="mb-1.5 text-xs">Current longitude</Label>
+            <Label htmlFor="shift-lon" className="mb-1.5 text-xs">
+              Current longitude
+            </Label>
             <Input
               id="shift-lon"
               type="number"

@@ -40,8 +40,8 @@ vi.mock("@/features/process/lib/runStore", () => ({
   findRunByJobId: (jobId: string) => findRunByJobIdMock(jobId),
 }))
 
-import { ProcessProvider, useProcess } from "./ProcessContext"
 import type { JobProgressEvent } from "@/lib/wsManager"
+import { ProcessProvider, useProcess } from "./ProcessContext"
 
 type Listener = (evt: JobProgressEvent) => void
 
@@ -168,7 +168,11 @@ describe("ProcessContext mutation actions", () => {
     )
     const items = result.current.processes[0].items
     expect(items[0]).toMatchObject({ id: "0", status: "pending" })
-    expect(items[1]).toMatchObject({ id: "1", status: "completed", label: "done" })
+    expect(items[1]).toMatchObject({
+      id: "1",
+      status: "completed",
+      label: "done",
+    })
   })
 
   it("removeProcess moves the process into history", () => {
@@ -227,7 +231,9 @@ describe("ProcessContext mutation actions", () => {
       })
     })
     act(() => result.current.clearCompleted())
-    expect(result.current.processes.map((p) => p.title)).toEqual(["still-going"])
+    expect(result.current.processes.map((p) => p.title)).toEqual([
+      "still-going",
+    ])
     expect(result.current.history.map((p) => p.title).sort()).toEqual([
       "done",
       "failed",
