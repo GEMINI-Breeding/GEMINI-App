@@ -23,6 +23,10 @@ import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
 import { UploadZone } from "../components/UploadZone"
 import { useResolveScope } from "../hooks/useUploadScope"
+import {
+  humanFieldLabel,
+  missingFormFields,
+} from "../lib/uploadFieldRequirements"
 
 const WIZARD_DATA_KINDS: Record<string, ImportDataKind> = {
   "Trait Data": "trait",
@@ -78,23 +82,21 @@ export function UploadData() {
    * Both gates required for any upload affordance on this page:
    *   1. A data type must be selected (so the path builder, dropzone
    *      hint, and wizard kind are all defined).
-   *   2. An experiment must be picked or named (every entity in this
-   *      app is scoped to an experiment; uploads with no experiment
-   *      get orphaned in MinIO and the trait/genomic flows produce
-   *      records that can never be reached from the UI).
+   *   2. Every field the data type declares (experiment, site,
+   *      population, date, sensor platform, sensor — depending on the
+   *      type) must be filled. Each entity in this app is scoped to
+   *      these; uploads with missing fields get orphaned in MinIO and
+   *      the trait/genomic flows produce records that can never be
+   *      reached from the UI.
    * The gate is enforced at the dropzone, not at form submit, so the
    * user can't even stage files into an undefined target.
    */
-  const expChoice = scope.experiment
-  const hasExperiment =
-    !!expChoice &&
-    (expChoice.kind === "existing" ||
-      (expChoice.kind === "new" && expChoice.name.trim().length > 0))
-  const uploadDisabled = !selectedFileType || !hasExperiment
+  const missingFields = missingFormFields(selectedFileType, formValues, scope)
+  const uploadDisabled = !selectedFileType || missingFields.length > 0
   const uploadDisabledReason = !selectedFileType
     ? "Select a data type to continue."
-    : !hasExperiment
-      ? "Select or create an experiment to continue."
+    : missingFields.length > 0
+      ? `Fill in: ${missingFields.map(humanFieldLabel).join(", ")}.`
       : undefined
 
   const { resolveScope } = useResolveScope()

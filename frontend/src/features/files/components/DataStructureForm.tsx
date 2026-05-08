@@ -1,4 +1,5 @@
 import { FolderTree } from "lucide-react"
+import { useEffect } from "react"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,6 +9,10 @@ import {
   EntitySelectField,
 } from "@/features/files/components/EntitySelectField"
 import { useScopeOptions } from "@/features/files/hooks/useUploadScope"
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 /**
  * Data-structure form: per-entity dropdowns where the user either picks an
@@ -52,6 +57,21 @@ export function DataStructureForm({
 }: DataStructureFormProps) {
   const options = useScopeOptions()
 
+  const config = fileType
+    ? dataTypes[fileType as keyof typeof dataTypes]
+    : undefined
+  const fields = config?.fields ?? []
+  const hasDateField = fields.includes("date")
+
+  // The native <input type="date"> shows today's date in the picker even when
+  // the underlying value is empty, so users think the field is set. Mirror
+  // that into form state on first render so validation accepts it.
+  useEffect(() => {
+    if (hasDateField && values.date === undefined) {
+      onValueChange("date", todayIsoDate())
+    }
+  }, [hasDateField, values.date, onValueChange])
+
   if (!fileType) {
     return (
       <div className="border-border bg-card rounded-lg border p-6">
@@ -60,8 +80,6 @@ export function DataStructureForm({
     )
   }
 
-  const config = dataTypes[fileType as keyof typeof dataTypes]
-  const fields = config?.fields ?? []
   const experimentChoice: EntityChoice = scope.experiment ?? { kind: "none" }
   const experimentChosen =
     experimentChoice.kind === "existing" ||

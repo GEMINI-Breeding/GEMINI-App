@@ -88,6 +88,7 @@ export type ChunkUploadRequest = {
     file_identifier: string;
     object_name: string;
     bucket_name?: (string | null);
+    experiment_id?: (string | null);
 };
 
 export type CsvSaveRequest = {
@@ -398,34 +399,13 @@ export type FilterPlotBordersRequest = {
     date: string;
 };
 
-export type GenotypeMatrixBatchInput = {
-    sample_headers: Array<(string)>;
-    variant_rows: Array<GenotypeMatrixVariantRow>;
-    record_info?: (string | {
-    [key: string]: unknown;
-} | null);
-};
-
-export type GenotypeMatrixBatchResult = {
-    variants_inserted: number;
-    records_inserted: number;
-    errors?: Array<(string)>;
-};
-
-export type GenotypeMatrixVariantRow = {
-    variant_name: string;
-    chromosome?: (number | null);
-    position?: (number | null);
-    alleles?: (string | null);
-    design_sequence?: (string | null);
-    calls: Array<(string | null)>;
-};
-
 export type GenotypePgenIngestRequest = {
     file: (Blob | File);
     sample_canonical_map_json?: (string | null);
     skipped_headers_json?: (string | null);
     created_accessions_json?: (string | null);
+    experiment_name?: (string | null);
+    population_name?: (string | null);
 };
 
 export type GenotypePgenIngestResult = {
@@ -436,12 +416,6 @@ export type GenotypePgenIngestResult = {
         [key: string]: unknown;
     };
     errors?: Array<(string)>;
-};
-
-export type GenotypeRecordBulkInput = {
-    records: Array<{
-        [key: string]: unknown;
-    }>;
 };
 
 export type GenotypeRecordOutput = {
@@ -523,6 +497,17 @@ export type GwasSubmitInput = {
     qc?: (string | {
     [key: string]: unknown;
 } | null);
+};
+
+export type ImageGpsEntry = {
+    name: string;
+    lat?: (number | null);
+    lon?: (number | null);
+    alt?: (number | null);
+};
+
+export type ImageGpsResponse = {
+    images: Array<ImageGpsEntry>;
 };
 
 export type ImageRequest = {
@@ -1942,6 +1927,14 @@ export type ApiDataTypesIdDataTypeIdDataFormatsGetAssociatedDataFormatsData = {
 
 export type ApiDataTypesIdDataTypeIdDataFormatsGetAssociatedDataFormatsResponse = (Array<DataFormatOutput>);
 
+export type ApiE2eCleanupCleanupByPrefixData = {
+    prefix: string;
+};
+
+export type ApiE2eCleanupCleanupByPrefixResponse = ({
+    [key: string]: unknown;
+});
+
 export type ApiExperimentsGetExperimentsData = {
     experimentEndDate?: (string | null);
     experimentInfo?: (string | {
@@ -2206,6 +2199,12 @@ export type ApiFilesListPaginatedFilePathListFilesPaginatedData = {
 
 export type ApiFilesListPaginatedFilePathListFilesPaginatedResponse = (PaginatedFileList);
 
+export type ApiFilesImageGpsFilePathListImageGpsData = {
+    filePath: string;
+};
+
+export type ApiFilesImageGpsFilePathListImageGpsResponse = (ImageGpsResponse);
+
 export type ApiFilesPresignFilePathPresignUrlData = {
     expiresSeconds?: number;
     filePath: string;
@@ -2301,22 +2300,6 @@ export type ApiGenotypingStudiesIdStudyIdRecordsGetRecordsData = {
 };
 
 export type ApiGenotypingStudiesIdStudyIdRecordsGetRecordsResponse = (Array<GenotypeRecordOutput>);
-
-export type ApiGenotypingStudiesIdStudyIdRecordsUploadRecordsData = {
-    requestBody: GenotypeRecordBulkInput;
-    studyId: string;
-};
-
-export type ApiGenotypingStudiesIdStudyIdRecordsUploadRecordsResponse = ({
-    [key: string]: unknown;
-});
-
-export type ApiGenotypingStudiesIdStudyIdIngestMatrixIngestMatrixData = {
-    requestBody: GenotypeMatrixBatchInput;
-    studyId: string;
-};
-
-export type ApiGenotypingStudiesIdStudyIdIngestMatrixIngestMatrixResponse = (GenotypeMatrixBatchResult);
 
 export type ApiGenotypingStudiesIdStudyIdIngestPgenIngestPgenData = {
     formData: GenotypePgenIngestRequest;

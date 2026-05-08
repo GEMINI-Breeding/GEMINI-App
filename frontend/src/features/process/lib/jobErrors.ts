@@ -86,7 +86,8 @@ export function humanizeJobError(
   // quality dropdown off Lowest. We surface that explicitly.
   if (/OpenMVS rejected every image/i.test(details)) {
     return {
-      headline: "Orthomosaic failed: quality preset too aggressive for this dataset.",
+      headline:
+        "Orthomosaic failed: quality preset too aggressive for this dataset.",
       hint: "Re-run with Reconstruction quality set to Low or Medium (the Lowest preset uses depthmap-resolution=320 + pc-quality=lowest, which can reject every image on some flights).",
       details,
     }
@@ -116,7 +117,8 @@ export function humanizeJobError(
     /couldn't match any image pairs/i.test(details)
   ) {
     return {
-      headline: "Orthomosaic failed: ODM couldn't reconstruct from these images.",
+      headline:
+        "Orthomosaic failed: ODM couldn't reconstruct from these images.",
       hint: "ODM needs ~80% forward overlap and valid EXIF GPS. Verify the flight plan, remove blurry frames, and check that EXIF was preserved through any pre-processing.",
       details,
     }

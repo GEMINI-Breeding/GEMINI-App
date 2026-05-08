@@ -12,6 +12,7 @@ import { useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { EdgeCropTool } from "@/features/process/components/EdgeCropTool"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
+import { ImageReviewer } from "@/features/process/components/ImageReviewer"
 import { InferenceTool } from "@/features/process/components/InferenceTool"
 import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
 import { PlotMarker } from "@/features/process/components/PlotMarker"
@@ -28,6 +29,7 @@ import {
 const STEP_LABELS: Record<string, string> = {
   plot_marking: "Plot Marking",
   gcp_selection: "GCP Selection",
+  image_review: "Image Exclusion",
   plot_boundary_prep: "Plot Boundary Prep",
   edge_crop: "Edge Crop",
   inference: "Inference",
@@ -38,6 +40,8 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
     "Navigate through raw images and mark the start and end frame for each plot row.",
   gcp_selection:
     "Select each ground control point in a drone image and mark its pixel location.",
+  image_review:
+    "Open a satellite map of the raw images and exclude any you don't want fed to ODM.",
   plot_boundary_prep:
     "Draw the outer field boundary, configure plot grid dimensions, and save as a versioned plot-boundary record.",
   edge_crop:
@@ -150,6 +154,13 @@ export function RunTool() {
         ) : step === "gcp_selection" && workspace ? (
           <GcpPicker
             workspace={workspace}
+            run={run}
+            scope={scope}
+            onSaved={goBack}
+            onCancel={goBack}
+          />
+        ) : step === "image_review" ? (
+          <ImageReviewer
             run={run}
             scope={scope}
             onSaved={goBack}

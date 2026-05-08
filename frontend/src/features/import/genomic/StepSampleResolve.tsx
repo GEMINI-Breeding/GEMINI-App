@@ -86,11 +86,14 @@ export function StepSampleResolve({
   const [state, setState] = useState<ResolutionState>({
     phase: "reading-headers",
   })
+  // Default to auto-create so the recommended action is preselected and
+  // the user can't accidentally drop genotype calls by hitting Continue
+  // without picking a side.
   const [userChoice, setUserChoice] = useState<UnresolvedAction>(() => {
-    if (!initial) return null
+    if (!initial) return "create_all"
     if (initial.skippedHeaders.length > 0) return "skip_all"
     if (initial.createdAccessions.length > 0) return "create_all"
-    return null
+    return "create_all"
   })
 
   useEffect(() => {
@@ -247,18 +250,18 @@ export function StepSampleResolve({
           </p>
           <div className="flex gap-2">
             <Button
-              variant={userChoice === "skip_all" ? "default" : "outline"}
-              onClick={() => setUserChoice("skip_all")}
-              data-testid="unresolved-skip-all"
-            >
-              Skip all {state.unresolvedHeaders.length}
-            </Button>
-            <Button
               variant={userChoice === "create_all" ? "default" : "outline"}
               onClick={() => setUserChoice("create_all")}
               data-testid="unresolved-create-all"
             >
               Auto-create accessions for all
+            </Button>
+            <Button
+              variant={userChoice === "skip_all" ? "default" : "outline"}
+              onClick={() => setUserChoice("skip_all")}
+              data-testid="unresolved-skip-all"
+            >
+              Skip all {state.unresolvedHeaders.length}
             </Button>
           </div>
           <details className="text-sm">

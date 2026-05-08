@@ -21,6 +21,11 @@ import {
   type UploadScopeChoices,
   useResolveScope,
 } from "@/features/files/hooks/useUploadScope"
+import {
+  humanFieldLabel,
+  missingFormFields,
+  requiredFormFields,
+} from "@/features/files/lib/uploadFieldRequirements"
 import { isExtensionAllowed } from "@/features/files/utils/extensions"
 import useCustomToast from "@/hooks/useCustomToast"
 import { UploadZone } from "./UploadZone"
@@ -76,30 +81,6 @@ function buildTargetRootDir(
     .join("/")
   if (subDir) root += `/${subDir}`
   return root
-}
-
-function requiredFormFields(dataType: string): string[] {
-  const cfg = dataTypes[dataType as keyof typeof dataTypes]
-  return ((cfg as { fields?: string[] } | undefined)?.fields ?? []).slice()
-}
-
-/**
- * A form field is considered "filled" if either:
- *   - it has a non-empty plain value (date), OR
- *   - the parent passed an EntityChoice that is `existing` or a `new` with a
- *     non-blank name (the upload click will resolve it before posting).
- */
-function isFieldFilled(
-  field: string,
-  formValues: Record<string, string>,
-  scope: Record<string, EntityChoice> | undefined,
-): boolean {
-  if (formValues[field]?.trim()) return true
-  const c = scope?.[field]
-  if (!c) return false
-  if (c.kind === "existing") return Boolean(c.id && c.name)
-  if (c.kind === "new") return c.name.trim().length > 0
-  return false
 }
 
 function followUpForDataType(dataType: string): UploadTask["followUpJob"] {
@@ -258,14 +239,12 @@ export function UploadList({
     if (selected.length === 0) return
 
     const required = requiredFormFields(dataType)
-    const missing = required.filter(
-      (field) => !isFieldFilled(field, formValues, scope),
-    )
+    const missing = missingFormFields(dataType, formValues, scope)
     if (missing.length > 0) {
       setRejection({
         title: "Required fields are blank",
         description:
-          `Fill in the following before uploading "${dataType}": ${missing.join(", ")}. ` +
+          `Fill in the following before uploading "${dataType}": ${missing.map(humanFieldLabel).join(", ")}. ` +
           `Each scope field must either pick an existing entity or "+ Create new…" with a name.`,
         rejectedNames: [],
         remediation:

@@ -14,6 +14,7 @@
  * The component is pure UI; the parent owns mutations and persistence.
  */
 import { Loader2 } from "lucide-react"
+import { useEffect, useRef } from "react"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -106,6 +107,16 @@ export function EntitySelectField({
 
   const newName = value.kind === "new" ? value.name : ""
 
+  // Radix Select returns focus to its trigger when it closes, which races
+  // with the new-name input's `autoFocus`. Defer focusing past that handoff.
+  const newNameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (value.kind === "new") {
+      const t = setTimeout(() => newNameInputRef.current?.focus(), 0)
+      return () => clearTimeout(t)
+    }
+  }, [value.kind])
+
   return (
     <div className="space-y-1.5">
       <Label htmlFor={`entity-${slugTestId}`}>
@@ -154,6 +165,7 @@ export function EntitySelectField({
       )}
       {value.kind === "new" && (
         <Input
+          ref={newNameInputRef}
           id={`entity-new-${slugTestId}`}
           data-testid={`entity-new-${slugTestId}`}
           value={newName}

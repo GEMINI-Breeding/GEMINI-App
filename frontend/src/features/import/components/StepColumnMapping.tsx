@@ -16,7 +16,7 @@
  * pattern as StepMetadata.
  */
 import { ChevronLeft, ChevronRight, Loader2, Plus, X } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -767,6 +767,16 @@ function PopulationField({
   const selectValue =
     mode === "none" ? POPULATION_NONE : mode === "new" ? POPULATION_NEW : value
 
+  // Radix Select returns focus to its trigger when it closes, which races
+  // with the new-name input's `autoFocus`. Defer focusing past that handoff.
+  const newNameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (mode === "new") {
+      const t = setTimeout(() => newNameInputRef.current?.focus(), 0)
+      return () => clearTimeout(t)
+    }
+  }, [mode])
+
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <h3 className="font-medium">Population name (optional)</h3>
@@ -805,6 +815,7 @@ function PopulationField({
       </Select>
       {mode === "new" && (
         <Input
+          ref={newNameInputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="e.g. UC Davis Diversity Panel"
@@ -825,6 +836,15 @@ function CollectionDateSection({
   config: SheetMapping
   onUpdate: (u: Partial<SheetMapping>) => void
 }) {
+  // The native <input type="date"> shows today's date in the picker even when
+  // the underlying value is empty, so users think the field is set. Mirror
+  // that into the sheet config so isSheetConfigValid accepts it.
+  useEffect(() => {
+    if (config.collectionDateMode === "fixed" && !config.collectionDate) {
+      onUpdate({ collectionDate: new Date().toISOString().slice(0, 10) })
+    }
+  }, [config.collectionDateMode, config.collectionDate, onUpdate])
+
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <h3 className="font-medium">Collection date</h3>

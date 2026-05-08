@@ -175,6 +175,13 @@ const AERIAL_STEPS: StepDef[] = [
     wiredIn: "R4a",
   },
   {
+    key: "image_review",
+    label: "Image Exclusion",
+    description:
+      "Open a satellite map of the raw images and exclude any you don't want fed to ODM (takeoff/landing frames, blurry shots, off-field captures).",
+    kind: "optional",
+  },
+  {
     key: "gcp_selection",
     label: "GCP Selection",
     description:
@@ -326,6 +333,8 @@ interface StepRowProps {
   onSkipStep?: () => void
   warning?: string
   extraContent?: React.ReactNode
+  /** Step-specific summary chip rendered alongside the kind/status badges. */
+  headerBadge?: React.ReactNode
 }
 
 function StepRow(props: StepRowProps) {
@@ -344,6 +353,7 @@ function StepRow(props: StepRowProps) {
     onSkipStep,
     warning,
     extraContent,
+    headerBadge,
   } = props
   const [expanded, setExpanded] = useState(false)
   const humanizedError =
@@ -448,6 +458,7 @@ function StepRow(props: StepRowProps) {
                   {step.wiredIn}
                 </Badge>
               )}
+              {headerBadge}
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">
               {isActive && (
@@ -1422,6 +1433,26 @@ export function RunDetail() {
               {steps.map((step, idx) => {
                 const status = getStepStatus(step.key, stepsState, steps)
                 const isLast = idx === steps.length - 1
+                const headerBadge = (() => {
+                  if (step.key !== "image_review") return null
+                  const outs = run?.steps.image_review?.outputs as
+                    | { excludedCount?: number; totalCount?: number }
+                    | undefined
+                  const excluded = outs?.excludedCount ?? 0
+                  if (excluded <= 0) return null
+                  const total = outs?.totalCount
+                  return (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-400 text-amber-700 text-xs"
+                      data-testid="image-review-summary-badge"
+                    >
+                      {typeof total === "number"
+                        ? `${excluded} / ${total} excluded`
+                        : `${excluded} excluded`}
+                    </Badge>
+                  )
+                })()
                 return (
                   <StepRow
                     key={step.key}
@@ -1441,6 +1472,7 @@ export function RunDetail() {
                         ? () => handleSkipStep(step.key)
                         : undefined
                     }
+                    headerBadge={headerBadge}
                     extraContent={
                       step.key === "orthomosaic" ? (
                         status === "completed" ? (

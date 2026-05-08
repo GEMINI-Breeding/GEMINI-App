@@ -397,6 +397,16 @@ export const ChunkUploadRequestSchema = {
                     type: 'null'
                 }
             ]
+        },
+        experiment_id: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
         }
     },
     type: 'object',
@@ -2045,124 +2055,6 @@ export const FilterPlotBordersRequestSchema = {
     title: 'FilterPlotBordersRequest'
 } as const;
 
-export const GenotypeMatrixBatchInputSchema = {
-    properties: {
-        sample_headers: {
-            items: {
-                type: 'string'
-            },
-            type: 'array'
-        },
-        variant_rows: {
-            items: {
-                '$ref': '#/components/schemas/GenotypeMatrixVariantRow'
-            },
-            type: 'array'
-        },
-        record_info: {
-            oneOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'object'
-                },
-                {
-                    type: 'null'
-                }
-            ]
-        }
-    },
-    type: 'object',
-    required: ['sample_headers', 'variant_rows'],
-    title: 'GenotypeMatrixBatchInput'
-} as const;
-
-export const GenotypeMatrixBatchResultSchema = {
-    properties: {
-        variants_inserted: {
-            type: 'integer'
-        },
-        records_inserted: {
-            type: 'integer'
-        },
-        errors: {
-            items: {
-                type: 'string'
-            },
-            type: 'array',
-            default: []
-        }
-    },
-    type: 'object',
-    required: ['records_inserted', 'variants_inserted'],
-    title: 'GenotypeMatrixBatchResult'
-} as const;
-
-export const GenotypeMatrixVariantRowSchema = {
-    properties: {
-        variant_name: {
-            type: 'string'
-        },
-        chromosome: {
-            oneOf: [
-                {
-                    type: 'integer'
-                },
-                {
-                    type: 'null'
-                }
-            ]
-        },
-        position: {
-            oneOf: [
-                {
-                    type: 'number'
-                },
-                {
-                    type: 'null'
-                }
-            ]
-        },
-        alleles: {
-            oneOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ]
-        },
-        design_sequence: {
-            oneOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ]
-        },
-        calls: {
-            items: {
-                oneOf: [
-                    {
-                        type: 'string'
-                    },
-                    {
-                        type: 'null'
-                    }
-                ]
-            },
-            type: 'array'
-        }
-    },
-    type: 'object',
-    required: ['calls', 'variant_name'],
-    title: 'GenotypeMatrixVariantRow'
-} as const;
-
 export const GenotypePgenIngestRequestSchema = {
     properties: {
         file: {
@@ -2191,6 +2083,26 @@ export const GenotypePgenIngestRequestSchema = {
             ]
         },
         created_accessions_json: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        experiment_name: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        population_name: {
             oneOf: [
                 {
                     type: 'string'
@@ -2233,20 +2145,6 @@ export const GenotypePgenIngestResultSchema = {
     type: 'object',
     required: ['records_inserted', 'variants_inserted'],
     title: 'GenotypePgenIngestResult'
-} as const;
-
-export const GenotypeRecordBulkInputSchema = {
-    properties: {
-        records: {
-            items: {
-                type: 'object'
-            },
-            type: 'array'
-        }
-    },
-    type: 'object',
-    required: ['records'],
-    title: 'GenotypeRecordBulkInput'
 } as const;
 
 export const GenotypeRecordOutputSchema = {
@@ -2743,6 +2641,61 @@ export const GwasSubmitInputSchema = {
     type: 'object',
     required: ['dataset_id', 'experiment_id', 'study_id'],
     title: 'GwasSubmitInput'
+} as const;
+
+export const ImageGpsEntrySchema = {
+    properties: {
+        name: {
+            type: 'string'
+        },
+        lat: {
+            oneOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        lon: {
+            oneOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        alt: {
+            oneOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'ImageGpsEntry'
+} as const;
+
+export const ImageGpsResponseSchema = {
+    properties: {
+        images: {
+            items: {
+                '$ref': '#/components/schemas/ImageGpsEntry'
+            },
+            type: 'array'
+        }
+    },
+    type: 'object',
+    required: ['images'],
+    title: 'ImageGpsResponse'
 } as const;
 
 export const ImageRequestSchema = {
