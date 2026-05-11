@@ -44,6 +44,7 @@ import { Route as LayoutProcessJobsJobIdRouteImport } from './routes/_layout/pro
 import { Route as LayoutProcessWorkspaceIdToolRouteImport } from './routes/_layout/process/$workspaceId/tool'
 import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
 import { Route as LayoutProcessWorkspaceIdRunRunIdRouteImport } from './routes/_layout/process/$workspaceId/run/$runId'
+import { Route as LayoutGenotypingStudyIdGwasJobIdRouteImport } from './routes/_layout/genotyping/$studyId_.gwas.$jobId'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -225,6 +226,12 @@ const LayoutProcessWorkspaceIdRunRunIdRoute =
     path: '/run/$runId',
     getParentRoute: () => LayoutProcessWorkspaceIdRoute,
   } as any)
+const LayoutGenotypingStudyIdGwasJobIdRoute =
+  LayoutGenotypingStudyIdGwasJobIdRouteImport.update({
+    id: '/genotyping/$studyId_/gwas/$jobId',
+    path: '/genotyping/$studyId/gwas/$jobId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -260,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/genotyping/$studyId/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesByTo {
@@ -294,6 +302,7 @@ export interface FileRoutesByTo {
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/genotyping/$studyId/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesById {
@@ -332,6 +341,7 @@ export interface FileRoutesById {
   '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/_layout/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/_layout/genotyping/$studyId_/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/_layout/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRouteTypes {
@@ -370,6 +380,7 @@ export interface FileRouteTypes {
     | '/process/$workspaceId/tool'
     | '/process/jobs/$jobId'
     | '/process/$workspaceId/'
+    | '/genotyping/$studyId/gwas/$jobId'
     | '/process/$workspaceId/run/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -404,6 +415,7 @@ export interface FileRouteTypes {
     | '/process/$workspaceId/tool'
     | '/process/jobs/$jobId'
     | '/process/$workspaceId'
+    | '/genotyping/$studyId/gwas/$jobId'
     | '/process/$workspaceId/run/$runId'
   id:
     | '__root__'
@@ -441,6 +453,7 @@ export interface FileRouteTypes {
     | '/_layout/process/$workspaceId/tool'
     | '/_layout/process/jobs/$jobId'
     | '/_layout/process/$workspaceId/'
+    | '/_layout/genotyping/$studyId_/gwas/$jobId'
     | '/_layout/process/$workspaceId/run/$runId'
   fileRoutesById: FileRoutesById
 }
@@ -699,6 +712,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessWorkspaceIdRunRunIdRouteImport
       parentRoute: typeof LayoutProcessWorkspaceIdRoute
     }
+    '/_layout/genotyping/$studyId_/gwas/$jobId': {
+      id: '/_layout/genotyping/$studyId_/gwas/$jobId'
+      path: '/genotyping/$studyId/gwas/$jobId'
+      fullPath: '/genotyping/$studyId/gwas/$jobId'
+      preLoaderRoute: typeof LayoutGenotypingStudyIdGwasJobIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
   }
 }
 
@@ -775,6 +795,7 @@ interface LayoutRouteChildren {
   LayoutGenotypingIndexRoute: typeof LayoutGenotypingIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
   LayoutProcessJobsJobIdRoute: typeof LayoutProcessJobsJobIdRoute
+  LayoutGenotypingStudyIdGwasJobIdRoute: typeof LayoutGenotypingStudyIdGwasJobIdRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
@@ -790,6 +811,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutGenotypingIndexRoute: LayoutGenotypingIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
   LayoutProcessJobsJobIdRoute: LayoutProcessJobsJobIdRoute,
+  LayoutGenotypingStudyIdGwasJobIdRoute: LayoutGenotypingStudyIdGwasJobIdRoute,
 }
 
 const LayoutRouteWithChildren =

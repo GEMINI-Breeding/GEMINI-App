@@ -26,10 +26,14 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
 
   test("add → navigate → edit → delete a study via the real UI", async ({
     page,
+    runPrefix,
   }) => {
-    const stamp = Date.now()
-    const initialName = `pw-study-${stamp}`
-    const renamedName = `pw-study-${stamp}-renamed`
+    // Use the auto-fixture's runPrefix so the afterEach cleanup sweeps
+    // anything this test leaves behind if it errors before reaching the
+    // explicit delete step. Local `pw-study-<timestamp>` naming used to
+    // get missed by cleanup and accumulate orphans in the DB.
+    const initialName = `${runPrefix}-study`
+    const renamedName = `${runPrefix}-study-renamed`
 
     // Sidebar entry visible (not on the original main, so the regression
     // here would be that the nav config didn't pick up the new entry).
@@ -72,8 +76,9 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     )
 
     // Records pane now renders the bcftools-backed records table; for an
-    // empty study the empty-state hint is what we assert. Variants and
-    // GWAS panes still render Phase-9f/9g placeholders. Radix lazy-renders
+    // empty study the empty-state hint is what we assert. Variants still
+    // renders a Phase-9c placeholder; GWAS now renders the real surface
+    // (Phase 9d) — assert the tab container is present. Radix lazy-renders
     // TabsContent so we have to click each tab before asserting.
     await page.getByRole("tab", { name: /records/i }).click()
     await expect(page.getByTestId("records-empty")).toBeVisible()
@@ -85,7 +90,7 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
 
     await page.getByRole("tab", { name: /gwas/i }).click()
     await expect(
-      page.getByTestId("genotyping-study-gwas-placeholder"),
+      page.getByTestId("genotyping-study-gwas-tab"),
     ).toBeVisible()
 
     // Back to dashboard.

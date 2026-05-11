@@ -1,27 +1,29 @@
 /**
  * Genotyping study detail page.
  *
- * Phase 9a: read-only header (study name + info JSON + linked-experiments
- * count) + tab strip with placeholders for the upcoming sub-phases:
+ * Phase 9a: Experiments tab (associated experiments list).
+ * Phase 9b: Records tab (paginated records browser).
+ * Phase 9c: Variants tab — placeholder.
+ * Phase 9d: GWAS tab — submit form + recent runs panel.
  *
- *   - Records tab     → 9b (matrix ingest + paginated records browser)
- *   - Variants tab    → 9c (paginated variants table with filter)
- *   - Experiments tab → 9a (associated experiments list — already useful)
- *   - GWAS tab        → 9d (submit dialog + RUN_GWAS jobs panel)
- *
- * The tab values are URL-stable (`?tab=records` etc.) once 9b lands. For
- * 9a we keep them as plain Radix Tabs without router state.
+ * The tab values are URL-stable via `?tab=` so the GWAS job-detail page
+ * can route back via Link with the tab preserved, and so the E2E can
+ * deep-link any tab.
  */
 
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { GwasTab } from "@/features/genotyping/components/GwasTab"
 import { RecordsTab } from "@/features/genotyping/components/RecordsTab"
 import {
   useGenotypingStudy,
   useGenotypingStudyExperiments,
 } from "@/features/genotyping/hooks/useGenotypingStudies"
+
+export const STUDY_TABS = ["experiments", "records", "variants", "gwas"] as const
+export type StudyTab = (typeof STUDY_TABS)[number]
 
 function StudyInfoBlock({ studyId }: { studyId: string }) {
   const study = useGenotypingStudy(studyId)
@@ -60,11 +62,6 @@ function ExperimentsTab({ studyId }: { studyId: string }) {
   }
   const rows = experiments.data ?? []
   if (rows.length === 0) {
-    // Empty state has its own testid so an E2E spec asserting
-    // "experiment X is associated" can distinguish "list rendered but
-    // empty" from "still loading" — the previous shape only had a
-    // testid on the populated list, so a missing-association bug
-    // looked indistinguishable from a slow render.
     return (
       <p
         className="text-muted-foreground text-sm"
@@ -103,6 +100,22 @@ function PlaceholderTab({ phase, kind }: { phase: string; kind: string }) {
 }
 
 export function StudyDetail({ studyId }: { studyId: string }) {
+  const navigate = useNavigate()
+  const search = useSearch({ from: "/_layout/genotyping/$studyId" }) as {
+    tab?: StudyTab
+  }
+  const activeTab: StudyTab = search.tab ?? "experiments"
+
+  function setTab(next: string) {
+    if (!STUDY_TABS.includes(next as StudyTab)) return
+    navigate({
+      to: "/genotyping/$studyId",
+      params: { studyId },
+      search: { tab: next as StudyTab },
+      replace: true,
+    })
+  }
+
   return (
     <div className="container max-w-6xl space-y-6 px-4 py-6">
       <Link
@@ -114,7 +127,7 @@ export function StudyDetail({ studyId }: { studyId: string }) {
 
       <StudyInfoBlock studyId={studyId} />
 
-      <Tabs defaultValue="experiments">
+      <Tabs value={activeTab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="experiments">Experiments</TabsTrigger>
           <TabsTrigger value="records">Records</TabsTrigger>
@@ -131,7 +144,7 @@ export function StudyDetail({ studyId }: { studyId: string }) {
           <PlaceholderTab phase="9c" kind="variants" />
         </TabsContent>
         <TabsContent value="gwas">
-          <PlaceholderTab phase="9d" kind="gwas" />
+          <GwasTab studyId={studyId} />
         </TabsContent>
       </Tabs>
     </div>
