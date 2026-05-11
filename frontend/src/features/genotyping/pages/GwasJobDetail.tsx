@@ -89,7 +89,7 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
   const statusLower = String(job.status ?? "").toLowerCase()
   const canCancel = statusLower === "pending" || statusLower === "running"
   // Workers report `progress` in percent (0-100), matching the
-  // convention in geo/odm/flir/ml workers. We render it directly.
+  // convention in geo/odm/amiga/ml workers. We render it directly.
   const progressPct = Math.round(job.progress ?? 0)
   const stage = progressDetail?.stage as string | undefined
 
