@@ -56,6 +56,8 @@ export function useUploadQueue() {
         id: String(i),
         name: fileNameFromPath(t.objectPath),
         status: "pending" as const,
+        uploadedBytes: 0,
+        totalBytes: t.file.size,
       }))
 
       const processId = addProcess({
@@ -81,7 +83,7 @@ export function useUploadQueue() {
           uploaded.push({ file: task.file, objectPath: result.objectPath })
 
           // Chain the follow-up job once the upload is durably on MinIO.
-          // The FLIR worker expects { files: [...filenames], localDirPath:
+          // The amiga worker expects { files: [...filenames], localDirPath:
           // <MinIO prefix without trailing slash> } so it can fetch from
           // MinIO and accept multiple .bin chunks of the same recording.
           if (task.followUpJob?.kind === "extract_binary") {
@@ -123,13 +125,17 @@ export function useUploadQueue() {
             message: undefined,
           })
         } else {
-          // ProcessContext auto-subscribes to any process with a runId, so
-          // picking the first EXTRACT_BINARY job id keeps progress flowing.
-          // Multi-job progress (one row per job) is a Phase-8 concern.
+          // Bar source-of-truth shifts to process.progress (driven by the
+          // job WS stream) now that runId is set. Reset to 0 so the bar
+          // visibly restarts at the start of the extraction phase rather
+          // than sitting at 100% from the just-finished upload.
+          // ProcessContext auto-subscribes to the first job id; multi-job
+          // progress aggregation (one row per job) is still deferred.
           updateProcess(processId, {
             status: "running",
             message: `Extracting ${jobIds.length} file(s)`,
             runId: jobIds[0],
+            progress: 0,
           })
         }
       } catch (err) {

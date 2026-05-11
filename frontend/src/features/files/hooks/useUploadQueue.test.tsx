@@ -116,7 +116,7 @@ describe("useUploadQueue", () => {
 
     expect(mockedSubmit).toHaveBeenCalledTimes(2)
     // Every submit goes through /api/jobs/submit with EXTRACT_BINARY in the
-    // shape the FLIR worker expects: {files: [name], localDirPath: <prefix>}.
+    // shape the amiga worker expects: {files: [name], localDirPath: <prefix>}.
     expect(mockedSubmit.mock.calls[0][0]).toEqual({
       requestBody: {
         job_type: "EXTRACT_BINARY",

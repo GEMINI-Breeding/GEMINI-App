@@ -4,7 +4,7 @@
  * worker actually decoded the file.
  *
  * This is the "extraction side" of the flow that amiga-upload.spec.ts
- * deliberately skips. It's slow (the FLIR worker has to decode the
+ * deliberately skips. It's slow (the amiga worker has to decode the
  * fixture end-to-end), so the timeouts are intentionally generous.
  *
  * Strict-E2E rules (CLAUDE.md):
@@ -25,7 +25,7 @@ import {
   submitUploadAndWait,
 } from "../helpers/uploadHelpers"
 
-// The FLIR worker is torch/kornia heavy — the first run inside a cold
+// The amiga worker is torch/kornia heavy — the first run inside a cold
 // container can take a minute or two on the test fixture. Budget for it.
 const EXTRACTION_TIMEOUT_MS = 5 * 60_000
 
@@ -56,7 +56,7 @@ test.describe("Amiga .bin full extraction", () => {
     // COMPLETED via wsManager.
     await submitUploadAndWait(page, 1, { timeoutMs: EXTRACTION_TIMEOUT_MS })
 
-    // The FLIR worker writes its outputs back under Raw/ (sibling to the
+    // The amiga worker writes its outputs back under Raw/ (sibling to the
     // Amiga/ input directory) and deletes the original .bin. Manage Data
     // already opens on Raw/, so we just filter to the new experiment slug
     // and assert three things:

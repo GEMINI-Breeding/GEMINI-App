@@ -84,7 +84,7 @@ function buildTargetRootDir(
 }
 
 function followUpForDataType(dataType: string): UploadTask["followUpJob"] {
-  // Amiga .bin files auto-extract via the FLIR worker. Everything else
+  // Amiga .bin files auto-extract via the amiga worker. Everything else
   // drops onto MinIO and is done.
   if (dataType === "Farm-ng Binary File") return { kind: "extract_binary" }
   return { kind: "none" }

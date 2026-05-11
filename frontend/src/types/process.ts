@@ -14,6 +14,10 @@ export interface ProcessItem {
   error?: string
   /** Custom status label override (e.g. "Extracting…") */
   label?: string
+  /** Bytes uploaded so far for this item (file_upload type only) */
+  uploadedBytes?: number
+  /** Total bytes for this item (file_upload type only) */
+  totalBytes?: number
 }
 
 export interface Process {

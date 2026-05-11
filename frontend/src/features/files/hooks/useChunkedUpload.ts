@@ -53,7 +53,7 @@ function computeFileIdentifier(file: File): string {
 }
 
 export function useChunkedUpload() {
-  const { updateProcess, updateProcessItem } = useProcess()
+  const { updateProcessItem } = useProcess()
 
   const uploadOne = useCallback(
     async (
@@ -66,6 +66,8 @@ export function useChunkedUpload() {
       updateProcessItem(processId, itemId, {
         status: "running",
         label: "Uploading 0%",
+        uploadedBytes: 0,
+        totalBytes: file.size,
       })
 
       const result = await uploadFileChunked({
@@ -75,14 +77,17 @@ export function useChunkedUpload() {
         experimentId,
         signal,
         onProgress: (p) => {
+          // Per-item bytes are the source of truth for the queue-wide
+          // progress bar; ProcessPanel aggregates them. Do not write to
+          // `process.progress` here — that field is owned by the
+          // extraction phase (WS job stream) and writing it from each
+          // file's progress callback causes backward jumps across files.
           const pct = Math.round(p.fraction * 100)
-          updateProcess(processId, {
-            message: `Uploading ${file.name} (${pct}%)`,
-            progress: pct,
-          })
           updateProcessItem(processId, itemId, {
             status: "running",
             label: `${pct}%`,
+            uploadedBytes: p.uploaded,
+            totalBytes: p.total,
           })
         },
       })
@@ -90,6 +95,8 @@ export function useChunkedUpload() {
       updateProcessItem(processId, itemId, {
         status: "completed",
         label: undefined,
+        uploadedBytes: file.size,
+        totalBytes: file.size,
       })
 
       return {
@@ -99,7 +106,7 @@ export function useChunkedUpload() {
         chunkCount: result.chunkCount,
       }
     },
-    [updateProcess, updateProcessItem],
+    [updateProcessItem],
   )
 
   return { uploadOne, computeFileIdentifier }

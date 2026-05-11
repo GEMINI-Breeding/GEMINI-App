@@ -14,13 +14,39 @@ function processProgress(process: Process): number {
     const raw = process.progress ?? (process.status === "completed" ? 100 : 0)
     return Math.round(raw)
   }
+  if (process.type === "file_upload") {
+    // Two phases:
+    //   1. Upload — bytes-weighted across all items.
+    //   2. Extraction — once useUploadQueue sets `runId`, the bar is
+    //      driven by the worker's job WS stream into `process.progress`.
+    if (process.runId !== undefined) {
+      return Math.round(process.progress ?? 0)
+    }
+    const total = process.items.length
+    if (total === 0) return process.status === "completed" ? 100 : 0
+    const totalBytes = process.items.reduce(
+      (acc, i) => acc + (i.totalBytes ?? 0),
+      0,
+    )
+    if (totalBytes > 0) {
+      const uploaded = process.items.reduce(
+        (acc, i) => acc + (i.uploadedBytes ?? 0),
+        0,
+      )
+      return Math.round((uploaded / totalBytes) * 100)
+    }
+    // Fallback for callers that don't populate byte counters.
+    const done = process.items.filter(
+      (i) => i.status === "completed" || i.status === "skipped",
+    ).length
+    const running = process.items.filter((i) => i.status === "running").length
+    return Math.round(((done + running * 0.5) / total) * 100)
+  }
   const total = process.items.length
   if (total === 0) return process.status === "completed" ? 100 : 0
   const done = process.items.filter(
     (i) => i.status === "completed" || i.status === "skipped",
   ).length
-  // Count in-progress items as half-complete so the bar advances during
-  // long extractions (e.g. Docker .bin extraction) instead of staying frozen.
   const running = process.items.filter((i) => i.status === "running").length
   return Math.round(((done + running * 0.5) / total) * 100)
 }
@@ -29,6 +55,10 @@ function processStatusLabel(process: Process): string {
   if (process.status === "completed") return "Done"
   if (process.status === "error") return "Failed"
   if (process.type === "processing") {
+    return `${Math.round(process.progress ?? 0)}%`
+  }
+  if (process.type === "file_upload" && process.runId !== undefined) {
+    // Extraction phase — show the percentage from the WS stream.
     return `${Math.round(process.progress ?? 0)}%`
   }
   const total = process.items.length
