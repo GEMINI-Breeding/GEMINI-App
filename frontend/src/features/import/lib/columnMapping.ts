@@ -113,14 +113,15 @@ export function isPristine(config: SheetMapping): boolean {
 
 /**
  * True when the sheet config is complete enough to ingest. A skipped
- * sheet is always valid (it'll be excluded). Required: plot number, at
- * least one enabled trait column with a non-empty trait name, season +
- * site (fixed value or chosen column), collection date (fixed value or
- * chosen column — "unknown" mode also counts as complete).
+ * sheet is always valid (it'll be excluded). Required: at least one
+ * enabled trait column with a non-empty trait name, season + site (fixed
+ * value or chosen column), collection date (fixed value or chosen
+ * column — "unknown" mode also counts as complete). Plot number is
+ * optional: when unmapped, records are saved with NULL plot fields and
+ * won't join to plot polygons on the map.
  */
 export function isSheetConfigValid(config: SheetMapping): boolean {
   if (config.skipped) return true
-  if (!config.plotNumberColumn) return false
   const enabledTraits = config.traitColumns.filter((tc) => tc.enabled)
   if (enabledTraits.length === 0) return false
   if (!enabledTraits.every((tc) => tc.traitName.trim() !== "")) return false

@@ -1,20 +1,18 @@
 /**
- * Hooks for reading and writing genotype records on a study.
+ * Hook for the paginated genotype-records table.
  *
  * `useGenotypeRecords` paginates the records table; the backend caps
  * `limit` at 500 and returns ordered-by-id (ascending) results. Filter
  * params (variantName, accessionName, chromosome) all map to query
  * params on the SDK call.
  *
- * `useIngestGenotypeMatrix` POSTs a parsed matrix; on success it
- * invalidates both the records list and the variants list (Phase 9c)
- * so the user sees the new rows on next render without a manual refetch.
+ * (The legacy `useIngestGenotypeMatrix` hook was removed when the
+ * genomic import wizard moved to a PGEN-only ingest pipeline; the
+ * matrix endpoint no longer exists in the backend.)
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 
 import {
-  type GenotypeMatrixBatchInput,
-  type GenotypeMatrixBatchResult,
   type GenotypeRecordOutput,
   GenotypingStudiesService,
 } from "@/client"
@@ -63,32 +61,5 @@ export function useGenotypeRecords(args: GenotypeRecordsParams) {
         accessionName,
         chromosome,
       }) as Promise<GenotypeRecordOutput[]>,
-  })
-}
-
-export function useIngestGenotypeMatrix(studyId: string | undefined) {
-  const qc = useQueryClient()
-  return useMutation<
-    GenotypeMatrixBatchResult,
-    Error,
-    GenotypeMatrixBatchInput
-  >({
-    mutationFn: (batch) => {
-      if (!studyId) {
-        return Promise.reject(
-          new Error("studyId is required to ingest a matrix."),
-        )
-      }
-      return GenotypingStudiesService.apiGenotypingStudiesIdStudyIdIngestMatrixIngestMatrix(
-        { studyId, requestBody: batch },
-      )
-    },
-    onSuccess: () => {
-      // Invalidate every records-derived query (any pagination / filter)
-      // and also the variants list (9c) and the experiments list (which
-      // could be affected if the backend cascades). Cheapest path: nuke
-      // the whole subtree.
-      qc.invalidateQueries({ queryKey: genotypingStudiesQueryKey })
-    },
   })
 }

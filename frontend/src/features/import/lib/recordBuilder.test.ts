@@ -364,4 +364,76 @@ describe("buildTraitRecords", () => {
     expect(groups).toEqual([])
     expect(grandTotal).toBe(0)
   })
+
+  it("emits records with plot_* keys when plot column is mapped (regression)", () => {
+    const { groups } = buildTraitRecords(mapping, { now: FIXED_NOW })
+    const ndvi = groups.find((g) => g.traitName === "NDVI")!
+    const rec = ndvi.bySeasonSite.get("Spring::Davis Field A")![0]
+    expect(Object.hasOwn(rec, "plot_number")).toBe(true)
+    expect(rec.plot_number).toBe(1)
+    expect(Object.hasOwn(rec, "plot_row_number")).toBe(true)
+    expect(Object.hasOwn(rec, "plot_column_number")).toBe(true)
+  })
+
+  describe("orphan trait records (no plot column mapped)", () => {
+    const orphanMapping: ColumnMapping = {
+      recordType: "trait",
+      sheets: [
+        {
+          name: "S1",
+          headers: ["ndvi", "season"],
+          rows: [
+            { ndvi: "0.4", season: "Spring" },
+            { ndvi: "0.5", season: "Spring" },
+            { ndvi: "", season: "Spring" }, // non-numeric → skipped
+            { ndvi: "0.6", season: "" }, // empty season → skipped
+          ],
+        },
+      ],
+      sheetConfigs: [
+        cfg({
+          plotNumberColumn: null,
+          plotRowColumn: null,
+          plotColumnColumn: null,
+          traitColumns: [
+            {
+              columnHeader: "ndvi",
+              traitName: "NDVI",
+              units: "",
+              enabled: true,
+            },
+          ],
+          seasonMode: "column",
+          seasonColumn: "season",
+          seasonName: "",
+        }),
+      ],
+    }
+
+    it("emits records (sheets without plot column no longer early-return)", () => {
+      const { groups, grandTotal } = buildTraitRecords(orphanMapping, {
+        now: FIXED_NOW,
+      })
+      expect(grandTotal).toBe(2)
+      expect(groups).toHaveLength(1)
+      expect(
+        groups[0].bySeasonSite.get("Spring::Davis Field A")?.length,
+      ).toBe(2)
+    })
+
+    it("omits plot_number / plot_row_number / plot_column_number keys", () => {
+      const { groups } = buildTraitRecords(orphanMapping, { now: FIXED_NOW })
+      const rec = groups[0].bySeasonSite.get("Spring::Davis Field A")![0]
+      expect(Object.hasOwn(rec, "plot_number")).toBe(false)
+      expect(Object.hasOwn(rec, "plot_row_number")).toBe(false)
+      expect(Object.hasOwn(rec, "plot_column_number")).toBe(false)
+      // The non-plot fields are still set correctly.
+      expect(rec.trait_value).toBe(0.4)
+      expect(typeof rec.timestamp).toBe("string")
+      expect(rec.record_info).toMatchObject({
+        sheet: "S1",
+        source_column: "ndvi",
+      })
+    })
+  })
 })

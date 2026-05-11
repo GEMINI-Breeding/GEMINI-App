@@ -47,7 +47,10 @@ import {
   reservedColumnSet,
   seedSheetConfig,
 } from "@/features/import/lib/columnMapping"
-import { parseSpreadsheet } from "@/features/import/lib/spreadsheet"
+import {
+  detectSkipRows,
+  parseSpreadsheet,
+} from "@/features/import/lib/spreadsheet"
 import type {
   ColumnMapping,
   FileWithPath,
@@ -83,6 +86,16 @@ export function StepColumnMapping({
   const [configs, setConfigs] = useState<SheetMapping[]>(
     () => initial?.sheetConfigs ?? [],
   )
+  // "Header lines to skip" — N lines before the row treated as the header.
+  // Auto-detected on first parse via findHeaderRowIndex (the same banner-
+  // row heuristic the XLSX path always used). The user can override.
+  const [skipRows, setSkipRows] = useState<number>(0)
+  // Hold the file the user dropped so we can re-parse it when skipRows
+  // changes without forcing the parent to re-pass files prop.
+  const tabularFileRef = useRef<File | null>(null)
+  // Tracks the most recently applied skipRows so the re-parse effect
+  // doesn't fire on the value the initial parse already used.
+  const appliedSkipRowsRef = useRef<number>(0)
   const [pendingMetadataSelect, setPendingMetadataSelect] =
     useState<string>(NOT_MAPPED)
 
@@ -110,13 +123,24 @@ export function StepColumnMapping({
           }
           return
         }
-        const parsed = await parseSpreadsheet(tabularFile)
+        // Auto-detect banner rows first so the "Header lines to skip"
+        // input opens pre-filled with a sensible guess — then parse with
+        // that explicit value. This keeps the initial preview identical
+        // to a manual override of the same number.
+        const detected = await detectSkipRows(tabularFile)
+        if (cancelled) return
+        const parsed = await parseSpreadsheet(tabularFile, {
+          skipRows: detected,
+        })
         if (cancelled) return
         if (parsed.length === 0) {
           setParseError("The file contains no data.")
           setLoading(false)
           return
         }
+        tabularFileRef.current = tabularFile
+        appliedSkipRowsRef.current = detected
+        setSkipRows(detected)
         setSheets(parsed)
         setSheetIdx(0)
         setConfigs(parsed.map((s) => emptySheetConfig(s)))
@@ -135,6 +159,46 @@ export function StepColumnMapping({
       cancelled = true
     }
   }, [files, initial])
+
+  // Re-parse the file when the user changes the "Header lines to skip"
+  // input. Resets every sheet's config because the headers (and thus the
+  // user's column picks) may have shifted.
+  useEffect(() => {
+    if (initial) return
+    if (skipRows === appliedSkipRowsRef.current) return
+    const file = tabularFileRef.current
+    if (!file) return
+    let cancelled = false
+    async function reparse() {
+      setLoading(true)
+      setParseError(null)
+      try {
+        const parsed = await parseSpreadsheet(file!, { skipRows })
+        if (cancelled) return
+        if (parsed.length === 0) {
+          setParseError("The file contains no data.")
+          setLoading(false)
+          return
+        }
+        appliedSkipRowsRef.current = skipRows
+        setSheets(parsed)
+        setSheetIdx(0)
+        setConfigs(parsed.map((s) => emptySheetConfig(s)))
+      } catch (err) {
+        if (!cancelled) {
+          setParseError(
+            err instanceof Error ? err.message : "Failed to re-parse file.",
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    reparse()
+    return () => {
+      cancelled = true
+    }
+  }, [skipRows, initial])
 
   const currentSheet = sheets[sheetIdx] ?? null
   const currentConfig: SheetMapping | null = configs[sheetIdx] ?? null
@@ -348,6 +412,8 @@ export function StepColumnMapping({
 
       {!currentConfig.skipped && (
         <>
+          <SkipRowsField value={skipRows} onChange={setSkipRows} />
+
           <DataPreview sheet={currentSheet} />
 
           <PlotColumnsSection
@@ -462,6 +528,49 @@ export function StepColumnMapping({
   )
 }
 
+function SkipRowsField({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (next: number) => void
+}) {
+  return (
+    <div className="space-y-2 rounded-lg border p-4">
+      <div className="flex items-center gap-3">
+        <Label
+          htmlFor="skip-rows-input"
+          className="text-sm font-medium whitespace-nowrap"
+        >
+          Header lines to skip
+        </Label>
+        <Input
+          id="skip-rows-input"
+          data-testid="skip-rows-input"
+          type="number"
+          min={0}
+          step={1}
+          value={value}
+          onChange={(e) => {
+            const raw = e.currentTarget.value
+            if (raw === "") {
+              onChange(0)
+              return
+            }
+            const n = Number.parseInt(raw, 10)
+            if (Number.isFinite(n) && n >= 0) onChange(n)
+          }}
+          className="w-24"
+        />
+      </div>
+      <p className="text-muted-foreground text-xs">
+        Drop this many lines before the header. Auto-detected from the file
+        on open — adjust if the preview below doesn&apos;t look right.
+      </p>
+    </div>
+  )
+}
+
 function DataPreview({ sheet }: { sheet: ParsedSheet }) {
   return (
     <div className="space-y-3 rounded-lg border p-4">
@@ -547,26 +656,33 @@ function PlotColumnsSection({
   config: SheetMapping
   onUpdate: (u: Partial<SheetMapping>) => void
 }) {
+  const plotUnmapped = !config.plotNumberColumn
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <div className="flex items-center gap-2">
         <h3 className="font-medium">Plot columns</h3>
-        <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-          Plot # required
-        </Badge>
       </div>
       <p className="text-muted-foreground text-sm">
-        Trait records attach to plots. Plot number is required; plot row and
-        column are optional.
+        Trait records can attach to plots. Plot number, row, and column are
+        all optional — leave them unmapped if your data has no plot context.
       </p>
+      {plotUnmapped && (
+        <p
+          data-testid="plot-unmapped-warning"
+          className="text-sm text-amber-700 dark:text-amber-400"
+        >
+          No plot column mapped. Records from this sheet will be saved without
+          plot linkage and won&apos;t appear on plot maps.
+        </p>
+      )}
       <div className="space-y-2">
-        <FieldRow label="Plot number *">
+        <FieldRow label="Plot number">
           <ColumnSelect
             testId="plot-number-select"
             value={config.plotNumberColumn}
             onChange={(next) => onUpdate({ plotNumberColumn: next })}
             headers={headers}
-            placeholder="-- Select a column --"
+            placeholder="-- Select a column (optional) --"
             className="flex-1"
           />
         </FieldRow>

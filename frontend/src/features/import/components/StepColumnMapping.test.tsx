@@ -180,7 +180,10 @@ describe("StepColumnMapping", () => {
       recordType: "trait",
       sheets: [sampleSheet],
       sheetConfigs: [
-        { ...validConfig, plotNumberColumn: null }, // invalid
+        // No enabled trait columns — invalid. (plotNumberColumn is no
+        // longer required: leaving it null produces orphan trait records,
+        // not a validation failure.)
+        { ...validConfig, traitColumns: [] },
       ],
     }
     render(

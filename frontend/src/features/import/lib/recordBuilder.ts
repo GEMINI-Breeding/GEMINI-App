@@ -235,9 +235,19 @@ function rowScalar(
 
 export interface TraitRecord {
   trait_value: number
-  plot_number: number
-  plot_row_number: number
-  plot_column_number: number
+  /** Omitted entirely when the sheet has no plot number column mapped —
+   *  those records are saved with NULL plot fields ("orphan" traits) and
+   *  won't appear on the plot map. */
+  plot_number?: number
+  plot_row_number?: number
+  plot_column_number?: number
+  /** Per-row germplasm name (accession-preferred, line, then alias).
+   *  The backend's populate_trait_record_ids trigger resolves this to
+   *  accession_id at INSERT time and RAISEs if it doesn't match a real
+   *  accession. Omitted when no germplasm column is mapped and no plot
+   *  is mapped either — the trigger then leaves accession_id NULL and
+   *  the record won't appear in GWAS phenotype lookups. */
+  accession_name?: string
   record_info: Record<string, unknown>
   timestamp: string
 }
@@ -298,9 +308,14 @@ export function buildTraitRecords(
   for (let si = 0; si < mapping.sheets.length; si++) {
     const sheet: ParsedSheet = mapping.sheets[si]
     const config = mapping.sheetConfigs[si]
-    if (!config || config.skipped || !config.plotNumberColumn) continue
+    if (!config || config.skipped) continue
     const enabledTraits = config.traitColumns.filter((tc) => tc.enabled)
     if (enabledTraits.length === 0) continue
+    // When no plot column is mapped, every row contributes an orphan
+    // record (no plot_number/row/col). When a plot column IS mapped, a
+    // row without a numeric value in that column is skipped — preserves
+    // the prior behavior of dropping partial-plot rows.
+    const hasPlotColumn = !!config.plotNumberColumn
 
     const sheetBaseDate =
       config.collectionDateMode === "fixed" && config.collectionDate
@@ -322,20 +337,25 @@ export function buildTraitRecords(
         const value = Number(raw)
         if (Number.isNaN(value)) continue
 
-        const plotRaw = row[config.plotNumberColumn]
-        if (plotRaw == null || plotRaw === "") continue
-        const plotNumber = Number(plotRaw)
-        if (Number.isNaN(plotNumber)) continue
-
-        let plotRow = 0
-        if (config.plotRowColumn && row[config.plotRowColumn] != null) {
-          const v = Number(row[config.plotRowColumn])
-          if (!Number.isNaN(v)) plotRow = v
-        }
-        let plotCol = 0
-        if (config.plotColumnColumn && row[config.plotColumnColumn] != null) {
-          const v = Number(row[config.plotColumnColumn])
-          if (!Number.isNaN(v)) plotCol = v
+        let plotNumber: number | undefined
+        let plotRow: number | undefined
+        let plotCol: number | undefined
+        if (hasPlotColumn) {
+          const plotRaw = row[config.plotNumberColumn as string]
+          if (plotRaw == null || plotRaw === "") continue
+          const n = Number(plotRaw)
+          if (Number.isNaN(n)) continue
+          plotNumber = n
+          plotRow = 0
+          if (config.plotRowColumn && row[config.plotRowColumn] != null) {
+            const v = Number(row[config.plotRowColumn])
+            if (!Number.isNaN(v)) plotRow = v
+          }
+          plotCol = 0
+          if (config.plotColumnColumn && row[config.plotColumnColumn] != null) {
+            const v = Number(row[config.plotColumnColumn])
+            if (!Number.isNaN(v)) plotCol = v
+          }
         }
 
         const recordInfo: Record<string, unknown> = {
@@ -406,12 +426,23 @@ export function buildTraitRecords(
 
         const record: TraitRecord = {
           trait_value: value,
-          plot_number: plotNumber,
-          plot_row_number: plotRow,
-          plot_column_number: plotCol,
           record_info: recordInfo,
           timestamp,
         }
+        if (hasPlotColumn) {
+          record.plot_number = plotNumber
+          record.plot_row_number = plotRow
+          record.plot_column_number = plotCol
+        }
+        // Per-row germplasm. `pickGermplasmFromRow` already enforces
+        // the accession > line > alias priority the wizard documents.
+        // We surface it as a top-level record field so the backend's
+        // populate_trait_record_ids trigger can resolve it to
+        // accession_id (and RAISE on a typo) instead of leaving it
+        // buried inside record_info JSONB where no FK/trigger can
+        // reach it.
+        const germplasm = pickGermplasmFromRow(row, config)
+        if (germplasm) record.accession_name = germplasm
         let bucket = bySeasonSite.get(key)
         if (!bucket) {
           bucket = []

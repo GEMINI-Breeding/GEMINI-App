@@ -89,9 +89,9 @@ describe("isSheetConfigValid", () => {
     expect(isSheetConfigValid(validBase())).toBe(true)
   })
 
-  it("rejects when plotNumberColumn is missing", () => {
+  it("accepts a sheet with no plotNumberColumn (orphan-trait import)", () => {
     expect(isSheetConfigValid(validBase({ plotNumberColumn: null }))).toBe(
-      false,
+      true,
     )
   })
 
