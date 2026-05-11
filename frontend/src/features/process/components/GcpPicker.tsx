@@ -1332,6 +1332,7 @@ export function GcpPicker({
   // select "+ Add new GCP" from the dropdown the boxes blank out and Save
   // creates a fresh entry.
   const [isAddingNew, setIsAddingNew] = useState(false)
+  const [newLabelS, setNewLabelS] = useState("")
   const [coordsLatS, setCoordsLatS] = useState("")
   const [coordsLonS, setCoordsLonS] = useState("")
   const [coordsAltS, setCoordsAltS] = useState("")
@@ -1416,9 +1417,13 @@ export function GcpPicker({
     parsedInputLon != null &&
     Number.isFinite(parsedInputLon) &&
     Number.isFinite(parsedInputAlt)
+  const newLabelTrimmed = newLabelS.trim()
+  const newLabelIsValid =
+    !isAddingNew ||
+    (newLabelTrimmed.length > 0 && !existingLabels.includes(newLabelTrimmed))
   const coordsAreDirty = (() => {
     if (!inputsValid) return false
-    if (isAddingNew) return true
+    if (isAddingNew) return newLabelIsValid
     if (!activeGcp) return false
     return (
       parsedInputLat !== (activeGcp.lat ?? null) ||
@@ -1432,7 +1437,7 @@ export function GcpPicker({
     const lon = coordsLonS.trim() === "" ? null : Number(coordsLonS)
     const alt = coordsAltS.trim() === "" ? 0 : Number(coordsAltS)
     const label = isAddingNew
-      ? nextNewGcpLabel()
+      ? newLabelTrimmed || nextNewGcpLabel()
       : (activeGcp?.label ?? "")
     try {
       validateGcpEntry(
@@ -1457,6 +1462,7 @@ export function GcpPicker({
       )
       setActiveLabel(label)
       setIsAddingNew(false)
+      setNewLabelS("")
     } catch (err) {
       showErrorToast(err instanceof Error ? err.message : String(err))
     }
@@ -1598,6 +1604,7 @@ export function GcpPicker({
                   onValueChange={(v) => {
                     if (v === ADD_GCP_SENTINEL) {
                       setIsAddingNew(true)
+                      setNewLabelS(nextNewGcpLabel())
                       setCoordsLatS("")
                       setCoordsLonS("")
                       setCoordsAltS("")
@@ -1683,6 +1690,25 @@ export function GcpPicker({
                 </Button>
               </div>
             </div>
+            {isAddingNew ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor="gcp-new-label">
+                  Label
+                </Label>
+                <Input
+                  id="gcp-new-label"
+                  value={newLabelS}
+                  onChange={(e) => setNewLabelS(e.target.value)}
+                  placeholder="e.g. GCP-NORTH"
+                  className="h-9 w-40"
+                  data-testid="gcp-new-label"
+                  aria-invalid={
+                    newLabelTrimmed.length > 0 &&
+                    existingLabels.includes(newLabelTrimmed)
+                  }
+                />
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label className="text-xs" htmlFor="gcp-coords-lat">
                 Lat (decimal °)
@@ -1742,6 +1768,7 @@ export function GcpPicker({
                 variant="ghost"
                 onClick={() => {
                   setIsAddingNew(false)
+                  setNewLabelS("")
                   // useEffect will repopulate inputs from the previous
                   // activeGcp (or clear them if there is none).
                 }}
@@ -2147,6 +2174,9 @@ export function GcpPicker({
                     const containerRect =
                       img.parentElement?.getBoundingClientRect()
                     if (!containerRect) return null
+                    // While the image is still decoding, naturalWidth/Height
+                    // are 0 and the projection would resolve to NaN/Infinity.
+                    if (!img.naturalWidth || !img.naturalHeight) return null
                     const sx = rect.width / img.naturalWidth
                     const sy = rect.height / img.naturalHeight
                     const x = m.pixel_x * sx + (rect.left - containerRect.left)

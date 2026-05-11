@@ -456,7 +456,7 @@ test.describe("R5b: GCP picker", () => {
   // Test 3 — "+ Add new GCP" inline form, with and without coords
   // ─────────────────────────────────────────────────────────────────────
 
-  test("+ Add new GCP: type one with coords, one without; add coords later via the inline affordance", async ({
+  test("+ Add new GCP: pick the sentinel, type a label + coords, save → entry lands in gcp_locations.csv", async ({
     page,
     request,
     baseURL,
@@ -472,49 +472,40 @@ test.describe("R5b: GCP picker", () => {
     const activeSelect = page.getByTestId("gcp-active-select")
     await expect(activeSelect).toBeVisible({ timeout: 15_000 })
 
-    // Open dropdown → click the "+ Add new GCP" sentinel. The inline form
-    // appears below the dropdown row.
+    // Open dropdown → click "+ Add new GCP" sentinel. The Label input
+    // appears in the inline editor pre-seeded with an auto "GCPn"; the
+    // Lat/Lon/Alt boxes blank out so the user can type fresh coords.
     await activeSelect.click()
     await page.getByTestId("gcp-add-new-item").click()
-    const addForm = page.getByTestId("gcp-add-form")
-    await expect(addForm).toBeVisible()
-
-    // Coord-bearing entry.
-    await page.getByTestId("gcp-add-label").fill("ADD-A")
-    await page.getByTestId("gcp-add-lat").fill("38.53371")
-    await page.getByTestId("gcp-add-lon").fill("-121.78246")
-    await page.getByTestId("gcp-add-alt").fill("11.5")
-    await page.getByTestId("gcp-add-submit").click()
-    await expect(addForm).toBeHidden({ timeout: 10_000 })
+    const labelInput = page.getByTestId("gcp-new-label")
+    await expect(labelInput).toBeVisible()
+    await labelInput.fill("ADD-A")
+    await page.getByTestId("gcp-coords-lat").fill("38.53371")
+    await page.getByTestId("gcp-coords-lon").fill("-121.78246")
+    await page.getByTestId("gcp-coords-alt").fill("11.5")
+    await page.getByTestId("gcp-coords-save").click()
+    await expect(labelInput).toBeHidden({ timeout: 10_000 })
     await expect(activeSelect).toContainText("ADD-A")
 
-    // Coord-less entry — only a label.
+    // Add a second GCP with a different label + coords.
     await activeSelect.click()
     await page.getByTestId("gcp-add-new-item").click()
-    await expect(addForm).toBeVisible()
-    await page.getByTestId("gcp-add-label").fill("ADD-B")
-    await page.getByTestId("gcp-add-submit").click()
-    await expect(addForm).toBeHidden({ timeout: 10_000 })
-
-    // ADD-B is active and shows the "no coords" badge in the dropdown.
-    await expect(activeSelect).toContainText("ADD-B")
+    await expect(labelInput).toBeVisible()
+    await labelInput.fill("ADD-B")
+    await page.getByTestId("gcp-coords-lat").fill("38.53357")
+    await page.getByTestId("gcp-coords-lon").fill("-121.78246")
+    await page.getByTestId("gcp-coords-alt").fill("11.1")
+    await page.getByTestId("gcp-coords-save").click()
+    await expect(labelInput).toBeHidden({ timeout: 10_000 })
+    // Both rows are reflected in the dropdown after the refetch lands.
     await activeSelect.click()
-    const optionB = page.getByRole("option", { name: /ADD-B/ })
-    await expect(optionB).toBeVisible()
-    await expect(optionB).toContainText(/no coords/i)
-    await optionB.click()
-
-    // ADD-B's marking area shows the inline "Add coordinates" affordance
-    // (the active GCP has no coords).
-    await expect(page.getByText(/has no survey coordinates yet/i)).toBeVisible()
-    await page.getByTestId("gcp-coords-add-open").click()
-    await page.getByTestId("gcp-coords-add-lat").fill("38.53357")
-    await page.getByTestId("gcp-coords-add-lon").fill("-121.78246")
-    await page.getByTestId("gcp-coords-add-alt").fill("11.1")
-    await page.getByTestId("gcp-coords-add-save").click()
-    await expect(page.getByText(/has no survey coordinates yet/i)).toBeHidden({
-      timeout: 15_000,
+    await expect(page.getByRole("option", { name: /ADD-A/ })).toBeVisible({
+      timeout: 10_000,
     })
+    await expect(page.getByRole("option", { name: /ADD-B/ })).toBeVisible({
+      timeout: 10_000,
+    })
+    await page.keyboard.press("Escape")
 
     // Verify gcp_locations.csv now has both rows.
     const token = await getAuthToken(request, baseURL)
@@ -538,10 +529,14 @@ test.describe("R5b: GCP picker", () => {
         .sort(),
     ).toEqual(["ADD-A", "ADD-B"])
 
-    // Mark each, save, verify gcp_list.txt has both labels.
+    // Mark each, save, verify gcp_list.txt has both labels. Explicitly
+    // activate each GCP before marking so we don't race the post-save
+    // refetch (which can briefly reset the active label to catalog[0]).
     await expect(
       page.getByText(/Reading EXIF GPS/i, { exact: false }),
     ).toBeHidden({ timeout: 60_000 })
+    await activeSelect.click()
+    await page.getByRole("option", { name: /ADD-B/ }).click()
     const imgViewer = await waitForGcpImageReady(page)
     await imgViewer.locator("img").click({ position: { x: 220, y: 140 } })
 
@@ -629,11 +624,32 @@ test.describe("R5b: GCP picker", () => {
     )
     await page.waitForTimeout(300) // settle fitBounds
 
-    // Shift-click 2 markers via synthetic events — same pattern as the
-    // image-review spec, robust against in-flight zoom transforms.
+    // Shift-click 2 markers. Use Playwright's real input pipeline (rather
+    // than synthetic dispatchEvent) so Leaflet's marker handler receives
+    // a genuine click — synthetic events on the SVG path don't always
+    // route through Leaflet's internal event manager.
     const TARGETS = [DRONE_IMAGES[0], DRONE_IMAGES[1]]
     for (const target of TARGETS) {
-      await page.evaluate((name) => {
+      // Re-wait for the marker each iteration. The first click triggers a
+      // React re-render in GcpPicker (setGcpImageGroups), which can
+      // briefly tear down + recreate the marker layer.
+      await page.waitForFunction(
+        (name) => {
+          const w = window as unknown as {
+            __imageDotMapMarkers__?: Map<
+              string,
+              { _path?: SVGElement; getElement?: () => SVGElement | null }
+            >
+          }
+          const m = w.__imageDotMapMarkers__?.get(name)
+          if (!m) return false
+          const el = m.getElement?.() ?? m._path
+          return !!el
+        },
+        target,
+        { timeout: 10_000 },
+      )
+      const handle = await page.evaluateHandle((name) => {
         const w = window as unknown as {
           __imageDotMapMarkers__?: Map<
             string,
@@ -641,19 +657,13 @@ test.describe("R5b: GCP picker", () => {
           >
         }
         const m = w.__imageDotMapMarkers__?.get(name)
-        if (!m) return
-        const el = (m.getElement?.() ?? m._path) as SVGElement | null
-        if (!el) return
-        el.dispatchEvent(
-          new MouseEvent("click", {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            shiftKey: true,
-          }),
-        )
+        if (!m) return null
+        return (m.getElement?.() ?? m._path) as SVGElement | null
       }, target)
-      await page.waitForTimeout(50)
+      const el = handle.asElement()
+      if (!el) throw new Error(`marker handle missing for ${target}`)
+      await el.click({ modifiers: ["Shift"] })
+      await page.waitForTimeout(120)
     }
 
     // The slider in the marking area should now show only the 2 lassoed
@@ -726,21 +736,21 @@ test.describe("R5b: GCP picker", () => {
     const activeSelect = page.getByTestId("gcp-active-select")
     await expect(activeSelect).toBeVisible({ timeout: 15_000 })
 
-    // Add 2 GCPs via the inline form.
+    // Add 2 GCPs via the inline editor.
+    const labelInput = page.getByTestId("gcp-new-label")
     for (const [label, lat, lon, alt] of [
       ["DEL-A", "38.53371", "-121.78246", "11.5"],
       ["DEL-B", "38.53357", "-121.78246", "11.1"],
     ] as const) {
       await activeSelect.click()
       await page.getByTestId("gcp-add-new-item").click()
-      await page.getByTestId("gcp-add-label").fill(label)
-      await page.getByTestId("gcp-add-lat").fill(lat)
-      await page.getByTestId("gcp-add-lon").fill(lon)
-      await page.getByTestId("gcp-add-alt").fill(alt)
-      await page.getByTestId("gcp-add-submit").click()
-      await expect(page.getByTestId("gcp-add-form")).toBeHidden({
-        timeout: 10_000,
-      })
+      await expect(labelInput).toBeVisible()
+      await labelInput.fill(label)
+      await page.getByTestId("gcp-coords-lat").fill(lat)
+      await page.getByTestId("gcp-coords-lon").fill(lon)
+      await page.getByTestId("gcp-coords-alt").fill(alt)
+      await page.getByTestId("gcp-coords-save").click()
+      await expect(labelInput).toBeHidden({ timeout: 10_000 })
     }
 
     // Verify both rows exist in MinIO before deletion.

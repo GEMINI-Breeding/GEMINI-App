@@ -20,6 +20,30 @@
  *      lists which files were skipped.
  */
 import { expect, test } from "../helpers/fixtures"
+import { fillUploadForm } from "../helpers/uploadHelpers"
+
+// Every scope field is required to unlock the dropzone. Each prereq
+// fill creates a fresh "+ Create new…" entity scoped to this test run.
+async function unlockDropzoneForImageData(
+  page: import("@playwright/test").Page,
+  runPrefix: string,
+): Promise<void> {
+  await page.goto("/files")
+  await page.locator('[data-onboarding="files-tab-upload"]').click()
+  await page.locator('[data-onboarding="files-data-type-selector"]').click()
+  await page
+    .getByRole("menuitem", { name: "Image Data", exact: true })
+    .click()
+  await fillUploadForm(page, {
+    experiment: `${runPrefix}-exp`,
+    location: `${runPrefix}-loc`,
+    population: `${runPrefix}-pop`,
+    platform: `${runPrefix}-pf`,
+    sensor: `${runPrefix}-sn`,
+  })
+  // Close any open dropdown / select restore.
+  await page.keyboard.press("Escape")
+}
 
 test.describe("UploadZone: folder drop", () => {
   test.setTimeout(120_000)
@@ -28,17 +52,7 @@ test.describe("UploadZone: folder drop", () => {
     page,
     runPrefix,
   }) => {
-    await page.goto("/files")
-    await page.locator('[data-onboarding="files-tab-upload"]').click()
-    await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page
-      .getByRole("menuitem", { name: "Image Data", exact: true })
-      .click()
-    // Files page gate: picking an experiment unlocks the dropzone.
-    await page.getByTestId("entity-select-experiment").click()
-    await page.getByTestId("entity-create-experiment").click()
-    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
-    await page.keyboard.press("Escape")
+    await unlockDropzoneForImageData(page, runPrefix)
 
     // Synthesize a DataTransfer whose only item is a DirectoryEntry-like
     // object containing two FileEntry-like children. This exercises the
@@ -120,17 +134,7 @@ test.describe("UploadZone: folder drop", () => {
     page,
     runPrefix,
   }) => {
-    await page.goto("/files")
-    await page.locator('[data-onboarding="files-tab-upload"]').click()
-    await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page
-      .getByRole("menuitem", { name: "Image Data", exact: true })
-      .click()
-    // Files page gate: picking an experiment unlocks the dropzone.
-    await page.getByTestId("entity-select-experiment").click()
-    await page.getByTestId("entity-create-experiment").click()
-    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
-    await page.keyboard.press("Escape")
+    await unlockDropzoneForImageData(page, runPrefix)
 
     // Older browsers / permission-blocked folders surface as a single
     // 0-byte File. Simulate that by adding to a real DataTransfer (no
@@ -165,17 +169,7 @@ test.describe("UploadZone: folder drop", () => {
     page,
     runPrefix,
   }) => {
-    await page.goto("/files")
-    await page.locator('[data-onboarding="files-tab-upload"]').click()
-    await page.locator('[data-onboarding="files-data-type-selector"]').click()
-    await page
-      .getByRole("menuitem", { name: "Image Data", exact: true })
-      .click()
-    // Files page gate: picking an experiment unlocks the dropzone.
-    await page.getByTestId("entity-select-experiment").click()
-    await page.getByTestId("entity-create-experiment").click()
-    await page.getByTestId("entity-new-experiment").fill(`${runPrefix}-exp`)
-    await page.keyboard.press("Escape")
+    await unlockDropzoneForImageData(page, runPrefix)
 
     // Drop two CSVs and one valid JPG to test the partial-rejection branch.
     await page.locator('[data-testid="upload-dropzone"]').evaluate((el) => {
