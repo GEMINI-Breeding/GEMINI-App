@@ -17,7 +17,7 @@
  */
 
 import L from "leaflet"
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import "leaflet/dist/leaflet.css"
 
 import {
@@ -89,6 +89,7 @@ export function ImageDotMap({
   dotColors,
   className,
 }: ImageDotMapProps) {
+  const wrapEl = useRef<HTMLDivElement | null>(null)
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<string, L.CircleMarker>>(new Map())
@@ -97,6 +98,10 @@ export function ImageDotMap({
   const onSelChangeRef = useRef(onSelectionChange)
   const selectedRef = useRef(selected)
   const dotsRef = useRef<Array<{ name: string; lat: number; lon: number }>>([])
+  // Click-to-activate: scroll-wheel zoom is off until the user clicks the
+  // map, so vertical wheel scrolling over the map keeps scrolling the page.
+  // Esc or a click outside the map deactivates again.
+  const [wheelActive, setWheelActive] = useState(false)
 
   useEffect(() => {
     onSelChangeRef.current = onSelectionChange
@@ -119,6 +124,10 @@ export function ImageDotMap({
       // Disable Leaflet's built-in BoxZoom so shift-drag is free for
       // selection rectangles instead of zooming.
       boxZoom: false,
+      // Wheel zoom is gated by click-to-activate (see effect below) so
+      // scrolling the page doesn't get hijacked when the cursor passes
+      // over the map.
+      scrollWheelZoom: false,
     })
 
     const osm = L.tileLayer(OSM_URL, {
@@ -244,6 +253,36 @@ export function ImageDotMap({
       didFitRef.current = false
       const w = window as unknown as { __imageDotMap__?: L.Map }
       if (w.__imageDotMap__ === map) w.__imageDotMap__ = undefined
+    }
+  }, [])
+
+  // ── Click-to-activate wheel zoom ─────────────────────────────────────────
+  // Engage Leaflet's scroll-wheel handler only after the user clicks the
+  // map. A click outside or Escape disengages. This keeps page scroll from
+  // being hijacked when the cursor merely passes over the map.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (wheelActive) map.scrollWheelZoom.enable()
+    else map.scrollWheelZoom.disable()
+  }, [wheelActive])
+
+  useEffect(() => {
+    const wrap = wrapEl.current
+    if (!wrap) return
+    function onDocPointerDown(ev: PointerEvent) {
+      if (!wrap) return
+      const inside = wrap.contains(ev.target as Node)
+      setWheelActive(inside)
+    }
+    function onKeyDown(ev: KeyboardEvent) {
+      if (ev.key === "Escape") setWheelActive(false)
+    }
+    document.addEventListener("pointerdown", onDocPointerDown, true)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onDocPointerDown, true)
+      document.removeEventListener("keydown", onKeyDown)
     }
   }, [])
 
@@ -382,15 +421,42 @@ export function ImageDotMap({
     extraLayerRef.current = group
   }, [extraMarkers])
 
+  // Active-state border lives on the wrapper as an inline boxShadow ring
+  // so it works regardless of any custom `className` the caller passes,
+  // and stays visible (the map div's own border was masking ring utilities).
+  const wrapStyle: CSSProperties = {
+    boxShadow: wheelActive
+      ? "0 0 0 3px #2563eb" // blue-600
+      : "0 0 0 1px #cbd5e1", // slate-300
+    borderRadius: 6,
+    transition: "box-shadow 150ms ease",
+  }
+
   return (
     <div
-      ref={mapEl}
-      data-testid="image-dot-map"
-      // `isolate` matches BoundaryMap so Leaflet's panes (z-index 200-800)
-      // stay scoped inside the map and don't render above body-portaled
-      // dialogs.
-      className={className ?? "h-[720px] w-full rounded-md border isolate"}
-    />
+      ref={wrapEl}
+      className="group relative"
+      style={wrapStyle}
+      data-wheel-active={wheelActive}
+    >
+      <div
+        ref={mapEl}
+        data-testid="image-dot-map"
+        // `isolate` matches BoundaryMap so Leaflet's panes (z-index 200-800)
+        // stay scoped inside the map and don't render above body-portaled
+        // dialogs. No `border` here — the wrapper renders the colored
+        // outline so it can switch color on activation.
+        className={className ?? "h-[720px] w-full rounded-md isolate"}
+      />
+      {!wheelActive && (
+        <div
+          className="pointer-events-none absolute bottom-2 left-1/2 z-[400] -translate-x-1/2 rounded-md bg-black/60 px-3 py-1 text-xs text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          data-testid="image-dot-map-wheel-hint"
+        >
+          Click map to enable scroll-zoom
+        </div>
+      )}
+    </div>
   )
 }
 
