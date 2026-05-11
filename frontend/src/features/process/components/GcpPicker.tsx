@@ -1612,6 +1612,7 @@ export function GcpPicker({
                     }
                     setIsAddingNew(false)
                     setActiveLabel(v)
+                    setImageIndex(0)
                   }}
                 >
                   <SelectTrigger
