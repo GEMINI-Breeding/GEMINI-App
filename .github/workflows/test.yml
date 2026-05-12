@@ -142,7 +142,8 @@ jobs:
         run: |
           docker compose -f docker-compose.yaml up -d --build \
             rest-api db storage storage-init logger titiler \
-            geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga
+            geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga \
+            geminibase-worker-gwas
 
       - name: Wait for /healthz
         run: |
