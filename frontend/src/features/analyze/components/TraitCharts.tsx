@@ -24,7 +24,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  fetchAnova,
+  fetchHeritability,
+  fetchSpatial,
+} from "../lib/multivariate"
 import { fetchTraitRecords } from "../lib/traitRecords"
+import { AnovaTable } from "./AnovaTable"
+import { HeritabilityPanel } from "./HeritabilityPanel"
+import { SpatialHeatmap } from "./SpatialHeatmap"
 
 const COLORS = [
   "#2563eb",
@@ -58,7 +66,14 @@ interface TraitChartsProps {
   traitUnits?: string
 }
 
-type ChartType = "histogram" | "forest" | "season-trend" | "site-trend"
+type ChartType =
+  | "histogram"
+  | "forest"
+  | "season-trend"
+  | "site-trend"
+  | "spatial"
+  | "anova"
+  | "heritability"
 type GroupBy = "none" | "experiment" | "season" | "site"
 
 function extractUnique(
@@ -357,34 +372,41 @@ export function TraitCharts({
               <SelectItem value="site-trend" disabled={!hasGenotypes}>
                 Site trend
               </SelectItem>
+              <SelectItem value="spatial">Field layout</SelectItem>
+              <SelectItem value="anova">ANOVA</SelectItem>
+              <SelectItem value="heritability">Heritability + BLUPs</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {chartType !== "season-trend" && chartType !== "site-trend" && (
-          <div className="space-y-1">
-            <label
-              htmlFor="trait-charts-group-by"
-              className="text-xs text-muted-foreground"
-            >
-              Group by
-            </label>
-            <Select
-              value={groupBy}
-              onValueChange={(v) => setGroupBy(v as GroupBy)}
-            >
-              <SelectTrigger id="trait-charts-group-by" className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                <SelectItem value="experiment">Experiment</SelectItem>
-                <SelectItem value="season">Season</SelectItem>
-                <SelectItem value="site">Site</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        {chartType !== "season-trend" &&
+          chartType !== "site-trend" &&
+          chartType !== "spatial" &&
+          chartType !== "anova" &&
+          chartType !== "heritability" && (
+            <div className="space-y-1">
+              <label
+                htmlFor="trait-charts-group-by"
+                className="text-xs text-muted-foreground"
+              >
+                Group by
+              </label>
+              <Select
+                value={groupBy}
+                onValueChange={(v) => setGroupBy(v as GroupBy)}
+              >
+                <SelectTrigger id="trait-charts-group-by" className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="experiment">Experiment</SelectItem>
+                  <SelectItem value="season">Season</SelectItem>
+                  <SelectItem value="site">Site</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
         <div className="h-6 w-px bg-border mx-1" />
 
@@ -474,8 +496,167 @@ export function TraitCharts({
       {chartType === "site-trend" && (
         <SiteTrend records={filtered} valueLabel={valueLabel} />
       )}
+      {chartType === "spatial" && (
+        <SpatialChart
+          traitName={traitName}
+          experimentNames={[...filterExperiment]}
+          seasonNames={[...filterSeason]}
+          siteNames={[...filterSite]}
+        />
+      )}
+      {chartType === "anova" && (
+        <AnovaChart
+          traitName={traitName}
+          experimentNames={[...filterExperiment]}
+          seasonNames={[...filterSeason]}
+          siteNames={[...filterSite]}
+        />
+      )}
+      {chartType === "heritability" && (
+        <HeritabilityChart
+          traitName={traitName}
+          experimentNames={[...filterExperiment]}
+          seasonNames={[...filterSeason]}
+          siteNames={[...filterSite]}
+        />
+      )}
     </div>
   )
+}
+
+interface StatsChartProps {
+  traitName: string
+  experimentNames: string[]
+  seasonNames: string[]
+  siteNames: string[]
+}
+
+function AnovaChart({
+  traitName,
+  experimentNames,
+  seasonNames,
+  siteNames,
+}: StatsChartProps) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [
+      "anova",
+      traitName,
+      experimentNames.join(","),
+      seasonNames.join(","),
+      siteNames.join(","),
+    ],
+    queryFn: () =>
+      fetchAnova({
+        trait_names: [traitName],
+        experiment_names: experimentNames.length ? experimentNames : undefined,
+        season_names: seasonNames.length ? seasonNames : undefined,
+        site_names: siteNames.length ? siteNames : undefined,
+        aggregation: "mean",
+        collapse_replicates: false,
+      }),
+    enabled: Boolean(traitName),
+  })
+
+  if (isLoading) {
+    return <ChartLoader label="Running ANOVA…" />
+  }
+  if (error) {
+    return <ChartError error={error} />
+  }
+  if (!data) return null
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        ANOVA uses raw per-plot values — averaging replicates would erase
+        the within-genotype variation the F-test measures.
+      </p>
+      <AnovaTable response={data} />
+    </div>
+  )
+}
+
+function HeritabilityChart({
+  traitName,
+  experimentNames,
+  seasonNames,
+  siteNames,
+}: StatsChartProps) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [
+      "heritability",
+      traitName,
+      experimentNames.join(","),
+      seasonNames.join(","),
+      siteNames.join(","),
+    ],
+    queryFn: () =>
+      fetchHeritability({
+        trait_names: [traitName],
+        experiment_names: experimentNames.length ? experimentNames : undefined,
+        season_names: seasonNames.length ? seasonNames : undefined,
+        site_names: siteNames.length ? siteNames : undefined,
+        aggregation: "mean",
+        collapse_replicates: false,
+      }),
+    enabled: Boolean(traitName),
+  })
+
+  if (isLoading) {
+    return <ChartLoader label="Estimating heritability…" />
+  }
+  if (error) {
+    return <ChartError error={error} />
+  }
+  if (!data) return null
+  return <HeritabilityPanel response={data} />
+}
+
+function ChartLoader({ label }: { label: string }) {
+  return (
+    <div className="flex h-32 items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      {label}
+    </div>
+  )
+}
+
+function ChartError({ error }: { error: unknown }) {
+  return (
+    <p className="text-sm text-destructive">
+      {error instanceof Error ? error.message : String(error)}
+    </p>
+  )
+}
+
+function SpatialChart({
+  traitName,
+  experimentNames,
+  seasonNames,
+  siteNames,
+}: StatsChartProps) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [
+      "spatial",
+      traitName,
+      experimentNames.join(","),
+      seasonNames.join(","),
+      siteNames.join(","),
+    ],
+    queryFn: () =>
+      fetchSpatial({
+        trait_names: [traitName],
+        experiment_names: experimentNames.length ? experimentNames : undefined,
+        season_names: seasonNames.length ? seasonNames : undefined,
+        site_names: siteNames.length ? siteNames : undefined,
+        aggregation: "mean",
+      }),
+    enabled: Boolean(traitName),
+  })
+
+  if (isLoading) return <ChartLoader label="Loading field layout…" />
+  if (error) return <ChartError error={error} />
+  if (!data) return null
+  return <SpatialHeatmap response={data} />
 }
 
 function Histogram({
