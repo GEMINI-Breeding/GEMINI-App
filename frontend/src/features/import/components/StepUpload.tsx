@@ -26,8 +26,6 @@ import { useEffect, useRef, useState } from "react"
 
 import {
   AccessionsService,
-  type DatasetOutput,
-  DatasetsService,
   type ExperimentOutput,
   ExperimentsService,
   LinesService,
@@ -44,6 +42,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useUploadQueue } from "@/features/files/hooks/useUploadQueue"
+import { createOrGetDatasetForUpload } from "@/features/files/lib/datasetForUpload"
 import { germplasmMappingMode } from "@/features/import/lib/germplasmMode"
 import {
   buildTraitRecords,
@@ -313,9 +312,15 @@ export function StepUpload({
         }
         if (abortedRef.current) return
 
+        const createdDatasetIds: string[] = []
         for (const dsName of metadata.datasetNames) {
           updateStep(stepIdx, { status: "creating" })
-          const ds = await createDatasetOrGet(dsName, experimentName)
+          const result = await createOrGetDatasetForUpload({
+            experimentName,
+            dataTypeLabel: "Trait Data",
+            explicitName: dsName,
+          })
+          const ds = result.dataset
           updateStep(stepIdx, {
             status: "done",
             id: ds.id ? String(ds.id) : undefined,
@@ -325,6 +330,7 @@ export function StepUpload({
             name: dsName,
             id: ds.id ? String(ds.id) : "",
           })
+          if (ds.id) createdDatasetIds.push(String(ds.id))
           stepIdx++
         }
         if (abortedRef.current) return
@@ -342,6 +348,12 @@ export function StepUpload({
             const result = await uploadQueue.run(tasks, {
               title: `Importing ${tasks.length} file(s)`,
               experimentId: experimentId ?? undefined,
+              // Trait CSV imports almost always create exactly one
+              // dataset; if there happen to be several, the first one
+              // owns the uploaded source CSV. Multi-dataset trait
+              // imports are vanishingly rare and the helper still
+              // works for them via the explicitName path above.
+              datasetId: createdDatasetIds[0],
             })
             setUploadedCount(result.uploaded.length)
           } catch (err) {
@@ -629,32 +641,6 @@ async function createSensorOrGet(
       sensorName,
     })) as SensorOutput[] | null
     const match = existing?.find((s) => s.sensor_name === sensorName)
-    if (match) return match
-    throw err
-  }
-}
-
-async function createDatasetOrGet(
-  datasetName: string,
-  experimentName: string,
-): Promise<DatasetOutput> {
-  const filesPrefix = `Raw/${experimentName}`
-  try {
-    return (await DatasetsService.apiDatasetsCreateDataset({
-      requestBody: {
-        dataset_name: datasetName,
-        experiment_name: experimentName,
-        dataset_info: {
-          files_prefix: `gemini/${filesPrefix}`,
-          bucket: "gemini",
-        },
-      },
-    })) as DatasetOutput
-  } catch (err) {
-    const existing = (await DatasetsService.apiDatasetsGetDatasets({
-      datasetName,
-    })) as DatasetOutput[] | null
-    const match = existing?.find((d) => d.dataset_name === datasetName)
     if (match) return match
     throw err
   }

@@ -61,6 +61,14 @@ export type ChunkedUploadOptions = {
    * multipart field on every chunk POST.
    */
   experimentId?: string
+  /**
+   * UUID of the dataset that owns this upload batch. Optional — when
+   * present, the backend's upload-finalize writes it into the
+   * `experiment_files.dataset_id` column so `Dataset.delete()` can
+   * sweep just this batch's files. Forwarded as the `dataset_id`
+   * multipart field on every chunk POST.
+   */
+  datasetId?: string
   /** Bytes per chunk. Defaults to 8 MiB; must be >= 5 MiB for S3 multipart. */
   chunkSize?: number
   /** Max chunks of this file in flight at once. Defaults to 4. */
@@ -137,6 +145,7 @@ async function uploadOneChunk({
   objectName,
   bucketName,
   experimentId,
+  datasetId,
   signal,
 }: {
   chunk: Blob
@@ -146,6 +155,7 @@ async function uploadOneChunk({
   objectName: string
   bucketName?: string
   experimentId?: string
+  datasetId?: string
   signal?: AbortSignal
 }): Promise<void> {
   const form = new FormData()
@@ -156,6 +166,7 @@ async function uploadOneChunk({
   form.append("object_name", objectName)
   if (bucketName) form.append("bucket_name", bucketName)
   if (experimentId) form.append("experiment_id", experimentId)
+  if (datasetId) form.append("dataset_id", datasetId)
 
   const token = getToken()
   const resp = await fetch(resolveApiUrl("/api/files/upload_chunk"), {
@@ -188,6 +199,7 @@ export async function uploadFileChunked(
     objectName,
     bucketName,
     experimentId,
+    datasetId,
     chunkSize = DEFAULT_CHUNK_SIZE,
     parallelParts = DEFAULT_PARALLEL_PARTS,
     onProgress,
@@ -237,6 +249,7 @@ export async function uploadFileChunked(
           objectName,
           bucketName,
           experimentId,
+          datasetId,
           signal,
         })
       } catch (err) {

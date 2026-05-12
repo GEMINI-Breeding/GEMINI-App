@@ -89,6 +89,7 @@ export type ChunkUploadRequest = {
     object_name: string;
     bucket_name?: (string | null);
     experiment_id?: (string | null);
+    dataset_id?: (string | null);
 };
 
 export type CsvSaveRequest = {
@@ -389,6 +390,29 @@ export type FileMetadata = {
     etag: string;
     size: number;
     content_type?: (string | null);
+};
+
+export type FileRegisterBatchEntry = {
+    bucket: string;
+    object_name: string;
+};
+
+export type FileRegisterBatchRequest = {
+    experiment_id: string;
+    dataset_id?: (string | null);
+    files: Array<FileRegisterBatchEntry>;
+};
+
+export type FileRegisterRequest = {
+    experiment_id: string;
+    bucket: string;
+    object_name: string;
+    dataset_id?: (string | null);
+};
+
+export type FileUnregisterRequest = {
+    bucket: string;
+    object_name: string;
 };
 
 export type FilterPlotBordersRequest = {
@@ -1829,6 +1853,14 @@ export type ApiDatasetsIdDatasetIdTraitsGetAssociatedTraitsData = {
 
 export type ApiDatasetsIdDatasetIdTraitsGetAssociatedTraitsResponse = (Array<TraitOutput>);
 
+export type ApiDatasetsIdDatasetIdFileCountGetDatasetFileCountData = {
+    datasetId: string;
+};
+
+export type ApiDatasetsIdDatasetIdFileCountGetDatasetFileCountResponse = ({
+    [key: string]: unknown;
+});
+
 export type ApiDatasetsUpdateMetadataUpdateMetadataData = {
     requestBody: {
         [key: string]: unknown;
@@ -2211,6 +2243,30 @@ export type ApiFilesPresignFilePathPresignUrlData = {
 };
 
 export type ApiFilesPresignFilePathPresignUrlResponse = (PresignedUrlResponse);
+
+export type ApiFilesRegisterRegisterFileData = {
+    requestBody: FileRegisterRequest;
+};
+
+export type ApiFilesRegisterRegisterFileResponse = ({
+    [key: string]: unknown;
+});
+
+export type ApiFilesRegisterBatchRegisterFilesBatchData = {
+    requestBody: FileRegisterBatchRequest;
+};
+
+export type ApiFilesRegisterBatchRegisterFilesBatchResponse = ({
+    [key: string]: unknown;
+});
+
+export type ApiFilesUnregisterUnregisterFileData = {
+    requestBody: FileUnregisterRequest;
+};
+
+export type ApiFilesUnregisterUnregisterFileResponse = ({
+    [key: string]: unknown;
+});
 
 export type ApiFilesUploadChunkUploadChunkData = {
     formData: ChunkUploadRequest;

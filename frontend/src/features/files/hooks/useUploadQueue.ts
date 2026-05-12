@@ -18,6 +18,7 @@ import { useCallback } from "react"
 
 import { JobsService } from "@/client"
 import { useProcess } from "@/contexts/ProcessContext"
+import { UPLOAD_PHASE_END } from "@/features/files/lib/uploadProgressSplit"
 import { runWithConcurrency } from "@/lib/concurrency"
 import { useChunkedUpload } from "./useChunkedUpload"
 
@@ -48,7 +49,18 @@ export function useUploadQueue() {
   const run = useCallback(
     async (
       tasks: UploadTask[],
-      opts: { title?: string; experimentId?: string } = {},
+      opts: {
+        title?: string
+        experimentId?: string
+        /**
+         * UUID of the dataset that owns this upload batch. Propagated to
+         * each chunked-upload finalize (so `experiment_files.dataset_id`
+         * is set) AND to any chained EXTRACT_BINARY job (so the amiga
+         * worker registers its outputs against the same dataset). When
+         * omitted, uploads land as legacy "experiment-owned" rows.
+         */
+        datasetId?: string
+      } = {},
     ): Promise<UploadQueueResult> => {
       const abort = new AbortController()
 
@@ -78,6 +90,7 @@ export function useUploadQueue() {
             processId,
             itemId: String(i),
             experimentId: opts.experimentId,
+            datasetId: opts.datasetId,
             signal: abort.signal,
           })
           uploaded.push({ file: task.file, objectPath: result.objectPath })
@@ -100,6 +113,14 @@ export function useUploadQueue() {
                 parameters: {
                   files: [filename],
                   localDirPath,
+                  // Forward both the experiment and dataset ids so the
+                  // worker can register each extracted output as an
+                  // experiment_files row scoped to this batch. Without
+                  // dataset_id, the hundreds of outputs would be
+                  // sweepable only by the experiment cascade's prefix
+                  // backstop — never by per-dataset delete.
+                  experiment_id: opts.experimentId,
+                  dataset_id: opts.datasetId,
                 },
                 // Without this the job row lands with experiment_id=NULL
                 // and the experiment-cascade delete leaves it behind as
@@ -125,17 +146,26 @@ export function useUploadQueue() {
             message: undefined,
           })
         } else {
-          // Bar source-of-truth shifts to process.progress (driven by the
-          // job WS stream) now that runId is set. Reset to 0 so the bar
-          // visibly restarts at the start of the extraction phase rather
-          // than sitting at 100% from the just-finished upload.
-          // ProcessContext auto-subscribes to the first job id; multi-job
-          // progress aggregation (one row per job) is still deferred.
+          // Unified 0→100 bar: the upload phase consumed [0,
+          // UPLOAD_PHASE_END]; the worker phase will fill the rest.
+          // Don't reset to 0 — that's the "fills then resets" UX
+          // that made the user think the operation was done.
+          // ProcessPanel.processProgress maps the worker's reported
+          // 0–100 into [UPLOAD_PHASE_END, 100], so leaving
+          // `progress: UPLOAD_PHASE_END` here just parks the bar at
+          // the handoff point until the first WS event arrives.
+          //
+          // The message says "Queued" because there's a ~5s gap
+          // between job submission and worker pickup (poll
+          // interval). Once the WS handler in ProcessContext sees
+          // the first RUNNING event it overwrites the message with
+          // the real stage label ("downloading" → "extracting" →
+          // "uploading" → "registering" → "Done").
           updateProcess(processId, {
             status: "running",
-            message: `Extracting ${jobIds.length} file(s)`,
+            message: `Queued for extraction (${jobIds.length} file${jobIds.length === 1 ? "" : "s"})`,
             runId: jobIds[0],
-            progress: 0,
+            progress: UPLOAD_PHASE_END,
           })
         }
       } catch (err) {

@@ -50,10 +50,10 @@ test.describe("Amiga .bin full extraction", () => {
 
     await dropFiles(page, [fixturePath("binary", binName)])
 
-    // submitUploadAndWait both confirms the "Uploading 1 .bin file(s) +
-    // extracting" title and then waits for the terminal "Done" message
-    // that ProcessContext writes when the EXTRACT_BINARY job reaches
-    // COMPLETED via wsManager.
+    // submitUploadAndWait both confirms the "Processing 1 .bin file"
+    // title (unified single-bar UX, Phase 9k) and then waits for the
+    // terminal "Done" message that ProcessContext writes when the
+    // EXTRACT_BINARY job reaches COMPLETED via wsManager.
     await submitUploadAndWait(page, 1, { timeoutMs: EXTRACTION_TIMEOUT_MS })
 
     // The amiga worker writes its outputs back under Raw/ (sibling to the

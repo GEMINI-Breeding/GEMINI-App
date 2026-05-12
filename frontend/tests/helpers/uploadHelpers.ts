@@ -144,12 +144,12 @@ export async function dropFiles(
  *     wsManager streams a terminal status from the worker.
  *
  * If `waitForDone === false`, the helper instead asserts the per-upload
- * completion signal — the ProcessPanel message flips from "Uploading N
- * .bin file(s) + extracting" to "Extracting N file(s)" exactly when the
- * client side finished every chunk *and* `JobsService.submitJob` returned
- * a real job id. A regression that dropped the final completion call (or
- * lost the follow-up job submission) would not produce that text. This
- * is the assertion that protects callers who skip the worker wait.
+ * completion signal — the ProcessPanel message flips from no message to
+ * "Queued for extraction (N file)" exactly when the client side
+ * finished every chunk *and* `JobsService.submitJob` returned a real
+ * job id. A regression that dropped the final completion call (or lost
+ * the follow-up job submission) would not produce that text. This is
+ * the assertion that protects callers who skip the worker wait.
  */
 export async function submitUploadAndWait(
   page: Page,
@@ -167,24 +167,28 @@ export async function submitUploadAndWait(
   await page.locator('[data-testid="upload-submit"]').click()
   await firstChunk
 
-  // Confirm the expected ProcessPanel title.
+  // Confirm the expected ProcessPanel title. Two title shapes:
+  //   • .bin uploads → "Processing N .bin file(s)"
+  //   • plain uploads → "Uploading N file(s)"
   await expect(
     page.getByText(
       new RegExp(
-        `^(Uploading ${expectedFileCount} \\.bin file|Uploading ${expectedFileCount} file)`,
+        `^(Processing ${expectedFileCount} \\.bin file|Uploading ${expectedFileCount} file)`,
         "i",
       ),
     ),
   ).toBeVisible({ timeout: 15_000 })
 
   if (opts.waitForDone === false) {
-    // The "Extracting N file(s)" message is set by useUploadQueue right
-    // after every chunk lands and the EXTRACT_BINARY job submission
-    // returns a non-empty job id. Asserting on it confirms the upload
-    // really finished client-side, not just that some chunks reached
-    // MinIO.
+    // The "Queued for extraction (N file)" message is set by
+    // useUploadQueue right after every chunk lands and the
+    // EXTRACT_BINARY job submission returns a non-empty job id.
+    // Asserting on it confirms the upload really finished client-
+    // side, not just that some chunks reached MinIO.
     await expect(
-      page.getByText(new RegExp(`^Extracting ${expectedFileCount} file`, "i")),
+      page.getByText(
+        new RegExp(`^Queued for extraction \\(${expectedFileCount} file`, "i"),
+      ),
     ).toBeVisible({ timeout: opts.timeoutMs ?? 60_000 })
     return
   }

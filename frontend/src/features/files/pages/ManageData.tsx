@@ -31,6 +31,7 @@ import { useState } from "react"
 
 import {
   type DatasetOutput,
+  DatasetsService,
   type ExperimentOutput,
   ExperimentsService,
   type FileMetadata,
@@ -380,18 +381,11 @@ function ExperimentRow({
             ) : (
               <ul className="space-y-1 text-sm">
                 {(datasetsQuery.data ?? []).map((ds) => (
-                  <li
+                  <DatasetRow
                     key={idAsString(ds.id)}
-                    className="flex items-center gap-2"
-                    data-testid={`manage-data-dataset-${ds.dataset_name ?? ""}`}
-                  >
-                    <span className="font-mono text-xs">{ds.dataset_name}</span>
-                    {ds.collection_date && (
-                      <span className="text-muted-foreground text-xs">
-                        · {ds.collection_date}
-                      </span>
-                    )}
-                  </li>
+                    dataset={ds}
+                    experimentId={expId}
+                  />
                 ))}
               </ul>
             )}
@@ -434,6 +428,163 @@ function ExperimentRow({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Per-dataset row inside the experiment's Datasets section. Hosts the
+ * trash icon that calls `apiDatasetsIdDatasetIdDeleteDataset` —
+ * `Dataset.delete()` on the backend cascades through:
+ *   1. row-targeted MinIO sweep via `experiment_files.dataset_id`
+ *      (every file the user uploaded under this batch)
+ *   2. the six columnar `*_records` tables by `dataset_name`
+ *      (trait/sensor/etc. record rows)
+ *   3. the `dataset_data/{exp}/{name}/` prefix backstop for record-
+ *      file uploads that never went through experiment_files
+ *
+ * Plain Yes/No confirm rather than type-the-name: dataset auto-names
+ * are deliberately long to be collision-safe (e.g.
+ * `ExpA__ImageData__20260511__143205__a1b2`) and typing one would be
+ * hostile UX. Experiment delete keeps its type-to-confirm gate
+ * because it's the bulk hammer.
+ */
+function DatasetRow({
+  dataset,
+  experimentId,
+}: {
+  dataset: DatasetOutput
+  experimentId: string | null
+}) {
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
+  const datasetId = idAsString(dataset.id)
+  const datasetName = dataset.dataset_name ?? "(unnamed)"
+
+  // `data_type_label` is written by `createOrGetDatasetForUpload`
+  // when the dataset is created (since migration 0007). Older
+  // datasets (trait CSV imports pre-migration, or any dataset that
+  // didn't go through the shared helper) won't have it — fall back
+  // to "—" rather than make up a label from the name.
+  const info =
+    dataset.dataset_info && typeof dataset.dataset_info === "object"
+      ? (dataset.dataset_info as Record<string, unknown>)
+      : null
+  const dataTypeLabel =
+    info && typeof info.data_type_label === "string"
+      ? (info.data_type_label as string)
+      : null
+
+  // Per-dataset file count. Tiny endpoint that does a single
+  // SELECT COUNT(*); cached for 30s because the count only changes
+  // on upload/delete and the row repaints on those events anyway
+  // (delete invalidates the parent's datasets query).
+  const fileCountQuery = useQuery({
+    queryKey: ["datasets", datasetId, "file_count"],
+    queryFn: async () => {
+      if (!datasetId) return null
+      const res =
+        await DatasetsService.apiDatasetsIdDatasetIdFileCountGetDatasetFileCount(
+          { datasetId },
+        )
+      const fc = (res as { file_count?: number } | null)?.file_count
+      return typeof fc === "number" ? fc : null
+    },
+    enabled: Boolean(datasetId),
+    staleTime: 30_000,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+        datasetId: id,
+      })
+    },
+    onSuccess: () => {
+      if (experimentId) {
+        queryClient.invalidateQueries({
+          queryKey: ["experiments", experimentId, "datasets"],
+        })
+        queryClient.invalidateQueries({
+          queryKey: ["experiments", experimentId, "files"],
+        })
+      }
+      showSuccessToast(`Dataset "${datasetName}" deleted`)
+    },
+    onError: (err) => {
+      showErrorToastWithCopy(
+        err instanceof Error ? err.message : "Delete failed",
+      )
+    },
+  })
+
+  const handleDelete = async () => {
+    if (!datasetId) return
+    await confirm({
+      title: `Delete dataset "${datasetName}"?`,
+      description: (
+        <span>
+          This removes every file uploaded under this batch from
+          storage, plus any records that reference it.{" "}
+          <strong>This cannot be undone.</strong>
+        </span>
+      ),
+      confirmLabel: "Delete dataset",
+      variant: "destructive",
+      action: () => deleteMutation.mutateAsync(datasetId),
+    })
+  }
+
+  const fileCount = fileCountQuery.data
+  const fileCountLabel =
+    fileCount === null || fileCount === undefined
+      ? fileCountQuery.isLoading
+        ? "…"
+        : null
+      : fileCount === 1
+        ? "1 file"
+        : `${fileCount} files`
+
+  return (
+    <li
+      className="flex items-center gap-2"
+      data-testid={`manage-data-dataset-${dataset.dataset_name ?? ""}`}
+    >
+      <span className="font-mono text-xs">{dataset.dataset_name}</span>
+      {dataTypeLabel && (
+        <span
+          className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-secondary-foreground"
+          data-testid={`manage-data-dataset-type-${dataset.dataset_name ?? ""}`}
+        >
+          {dataTypeLabel}
+        </span>
+      )}
+      {dataset.collection_date && (
+        <span className="text-muted-foreground text-xs">
+          · {dataset.collection_date}
+        </span>
+      )}
+      {fileCountLabel && (
+        <span
+          className="text-muted-foreground text-xs"
+          data-testid={`manage-data-dataset-filecount-${dataset.dataset_name ?? ""}`}
+        >
+          · {fileCountLabel}
+        </span>
+      )}
+      <span className="flex-1" />
+      <LoadingButton
+        size="sm"
+        variant="ghost"
+        loading={deleteMutation.isPending}
+        onClick={handleDelete}
+        title="Delete dataset"
+        data-testid={`manage-data-delete-dataset-${dataset.dataset_name ?? ""}`}
+        className="h-6 w-6 p-0"
+      >
+        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+      </LoadingButton>
+    </li>
   )
 }
 

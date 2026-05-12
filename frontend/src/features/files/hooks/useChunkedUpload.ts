@@ -36,6 +36,14 @@ export type ChunkedUploadOpts = {
    * compile while we migrate.
    */
   experimentId?: string
+  /**
+   * UUID of the dataset that owns this upload batch. Forwarded to
+   * `uploadFileChunked` so the chunked-upload finalize stamps
+   * `experiment_files.dataset_id`. Optional — legacy callers compile
+   * but those uploads land as "dataset-orphaned" and only the
+   * experiment cascade reaches them.
+   */
+  datasetId?: string
   /** Optional abort signal — aborts the per-file chunk loop. */
   signal?: AbortSignal
 }
@@ -60,7 +68,7 @@ export function useChunkedUpload() {
       file: File,
       opts: ChunkedUploadOpts,
     ): Promise<ChunkedUploadItemResult> => {
-      const { objectPath, processId, itemId, experimentId, signal } = opts
+      const { objectPath, processId, itemId, experimentId, datasetId, signal } = opts
       const fileIdentifier = computeFileIdentifier(file)
 
       updateProcessItem(processId, itemId, {
@@ -75,6 +83,7 @@ export function useChunkedUpload() {
         fileIdentifier,
         objectName: objectPath,
         experimentId,
+        datasetId,
         signal,
         onProgress: (p) => {
           // Per-item bytes are the source of truth for the queue-wide

@@ -4,7 +4,30 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { useProcess } from "@/contexts/ProcessContext"
+import {
+  mapUploadProgress,
+  mapWorkerProgress,
+} from "@/features/files/lib/uploadProgressSplit"
 import type { Process } from "@/types/process"
+
+/**
+ * Bytes-weighted percent across all items in a file_upload Process.
+ * Returns null if no item carries byte counters (legacy non-chunked
+ * callers); the caller falls back to count-based progress in that
+ * case.
+ */
+function uploadBytesPercent(process: Process): number | null {
+  const totalBytes = process.items.reduce(
+    (acc, i) => acc + (i.totalBytes ?? 0),
+    0,
+  )
+  if (totalBytes <= 0) return null
+  const uploaded = process.items.reduce(
+    (acc, i) => acc + (i.uploadedBytes ?? 0),
+    0,
+  )
+  return Math.round((uploaded / totalBytes) * 100)
+}
 
 function processProgress(process: Process): number {
   if (process.type === "processing") {
@@ -15,32 +38,31 @@ function processProgress(process: Process): number {
     return Math.round(raw)
   }
   if (process.type === "file_upload") {
-    // Two phases:
-    //   1. Upload — bytes-weighted across all items.
-    //   2. Extraction — once useUploadQueue sets `runId`, the bar is
-    //      driven by the worker's job WS stream into `process.progress`.
+    // Unified 0→100 bar split into two bands:
+    //   • Browser → MinIO chunk upload: [0, UPLOAD_PHASE_END]
+    //   • Worker job (download → extract → upload → register):
+    //     [UPLOAD_PHASE_END, 100]
+    //
+    // The bar never resets at the phase handoff — previously it
+    // filled to 100% during chunk upload and then reset to 0 when
+    // runId was set, which read like "done, then started over."
     if (process.runId !== undefined) {
-      return Math.round(process.progress ?? 0)
+      // Worker phase. process.progress is written by the WS
+      // handler from the worker's report_progress (0–100).
+      return Math.round(mapWorkerProgress(process.progress ?? 0))
     }
     const total = process.items.length
     if (total === 0) return process.status === "completed" ? 100 : 0
-    const totalBytes = process.items.reduce(
-      (acc, i) => acc + (i.totalBytes ?? 0),
-      0,
-    )
-    if (totalBytes > 0) {
-      const uploaded = process.items.reduce(
-        (acc, i) => acc + (i.uploadedBytes ?? 0),
-        0,
-      )
-      return Math.round((uploaded / totalBytes) * 100)
-    }
+    const bytesPct = uploadBytesPercent(process)
+    if (bytesPct !== null) return Math.round(mapUploadProgress(bytesPct))
     // Fallback for callers that don't populate byte counters.
     const done = process.items.filter(
       (i) => i.status === "completed" || i.status === "skipped",
     ).length
     const running = process.items.filter((i) => i.status === "running").length
-    return Math.round(((done + running * 0.5) / total) * 100)
+    return Math.round(
+      mapUploadProgress(((done + running * 0.5) / total) * 100),
+    )
   }
   const total = process.items.length
   if (total === 0) return process.status === "completed" ? 100 : 0
@@ -57,16 +79,19 @@ function processStatusLabel(process: Process): string {
   if (process.type === "processing") {
     return `${Math.round(process.progress ?? 0)}%`
   }
-  if (process.type === "file_upload" && process.runId !== undefined) {
-    // Extraction phase — show the percentage from the WS stream.
-    return `${Math.round(process.progress ?? 0)}%`
+  if (process.type === "file_upload") {
+    // Label matches the bar exactly — same mapped 0→100 percent
+    // across both phases. processProgress is the single source of
+    // truth, called twice with the same Process so the values
+    // can't drift.
+    return `${processProgress(process)}%`
   }
   const total = process.items.length
   const done = process.items.filter(
     (i) => i.status === "completed" || i.status === "skipped",
   ).length
   const running = process.items.filter((i) => i.status === "running").length
-  if (running > 0) return `${done}/${total} (${running} extracting)`
+  if (running > 0) return `${done}/${total} (${running} uploading)`
   return `${done}/${total}`
 }
 

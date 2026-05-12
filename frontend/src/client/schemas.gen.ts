@@ -407,6 +407,16 @@ export const ChunkUploadRequestSchema = {
                     type: 'null'
                 }
             ]
+        },
+        dataset_id: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
         }
     },
     type: 'object',
@@ -2030,6 +2040,88 @@ export const FileMetadataSchema = {
     type: 'object',
     required: ['bucket_name', 'etag', 'last_modified', 'object_name', 'size'],
     title: 'FileMetadata'
+} as const;
+
+export const FileRegisterBatchEntrySchema = {
+    properties: {
+        bucket: {
+            type: 'string'
+        },
+        object_name: {
+            type: 'string'
+        }
+    },
+    type: 'object',
+    required: ['bucket', 'object_name'],
+    title: 'FileRegisterBatchEntry'
+} as const;
+
+export const FileRegisterBatchRequestSchema = {
+    properties: {
+        experiment_id: {
+            type: 'string'
+        },
+        dataset_id: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        files: {
+            items: {
+                '$ref': '#/components/schemas/FileRegisterBatchEntry'
+            },
+            type: 'array'
+        }
+    },
+    type: 'object',
+    required: ['experiment_id', 'files'],
+    title: 'FileRegisterBatchRequest'
+} as const;
+
+export const FileRegisterRequestSchema = {
+    properties: {
+        experiment_id: {
+            type: 'string'
+        },
+        bucket: {
+            type: 'string'
+        },
+        object_name: {
+            type: 'string'
+        },
+        dataset_id: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['bucket', 'experiment_id', 'object_name'],
+    title: 'FileRegisterRequest'
+} as const;
+
+export const FileUnregisterRequestSchema = {
+    properties: {
+        bucket: {
+            type: 'string'
+        },
+        object_name: {
+            type: 'string'
+        }
+    },
+    type: 'object',
+    required: ['bucket', 'object_name'],
+    title: 'FileUnregisterRequest'
 } as const;
 
 export const FilterPlotBordersRequestSchema = {

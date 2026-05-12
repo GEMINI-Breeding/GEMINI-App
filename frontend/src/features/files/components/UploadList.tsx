@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, File, X } from "lucide-react"
 import { useMemo, useState } from "react"
 
+import { DatasetsService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,6 +17,8 @@ import {
   type UploadTask,
   useUploadQueue,
 } from "@/features/files/hooks/useUploadQueue"
+import { createOrGetDatasetForUpload } from "@/features/files/lib/datasetForUpload"
+import { idAsString } from "@/features/admin/lib/ids"
 import {
   type ResolvedScope,
   type UploadScopeChoices,
@@ -254,6 +257,11 @@ export function UploadList({
     }
 
     setIsUploading(true)
+    // Hoisted into the outer scope so the catch handler can decide
+    // whether to auto-delete the dataset we just created. Set inside
+    // the try block; only populated if `createOrGetDatasetForUpload`
+    // *created* the dataset (not got an existing one).
+    let createdDatasetIdForCleanup: string | undefined
     try {
       // 1. Resolve any "+ Create new…" entity choices via search-or-create.
       //    On success the resolved names land in formValues so the path
@@ -286,7 +294,45 @@ export function UploadList({
         followUpJob,
       }))
 
+      // Create the dataset that owns this batch. One submit click =
+      // one dataset row. The chunked-upload finalize stamps every
+      // `experiment_files` row with the resulting dataset_id; for
+      // farm-ng .bin uploads the same id is forwarded to the
+      // EXTRACT_BINARY job so the amiga worker can register its
+      // extracted outputs against the same batch. End result: the
+      // user can delete just this submission via the per-dataset
+      // trash icon in Manage Data.
       setResolveStatus(null)
+      const experimentName =
+        resolved.experiment?.name ?? merged.experiment ?? ""
+      let datasetId: string | undefined
+      if (experimentName) {
+        try {
+          const ds = await createOrGetDatasetForUpload({
+            experimentName,
+            dataTypeLabel: dataType,
+          })
+          datasetId = idAsString(ds.dataset.id) ?? undefined
+          // Only flag for cleanup if we *created* the row. An
+          // existing row (name collision) may already own data
+          // from a prior submission; auto-deleting that on failure
+          // would clobber data the user expected to keep.
+          if (ds.wasCreated && datasetId) {
+            createdDatasetIdForCleanup = datasetId
+          }
+        } catch (err) {
+          // Soft-failure: the upload still works; it just lands as
+          // legacy "experiment-owned, dataset-orphaned" and the user
+          // can only delete it via the experiment cascade. Surfaced
+          // as a toast so the user sees what happened.
+          const message = err instanceof Error ? err.message : String(err)
+          showErrorToastWithCopy(
+            `Could not create the upload's dataset (${message}). ` +
+              `The upload will continue without per-batch grouping.`,
+          )
+        }
+      }
+
       // The experiment is required by the Files-page UI gate, so by the
       // time we get here `resolved.experiment` exists. Forward its id
       // so the chunked-upload finalize handler can write the
@@ -295,15 +341,26 @@ export function UploadList({
       const result = await run(tasks, {
         title:
           followUpJob?.kind === "extract_binary"
-            ? `Uploading ${selected.length} .bin file(s) + extracting`
-            : `Uploading ${selected.length} file(s)`,
+            ? `Processing ${selected.length} .bin file${selected.length === 1 ? "" : "s"}`
+            : `Uploading ${selected.length} file${selected.length === 1 ? "" : "s"}`,
         experimentId: resolved.experiment?.id,
+        datasetId,
       })
+      // Upload succeeded — clear the cleanup flag so the catch
+      // branch below (which only runs on a throw) won't trigger.
+      // Belt-and-suspenders; the try wouldn't reach this line on
+      // failure anyway, but explicit is better than implicit.
+      createdDatasetIdForCleanup = undefined
       onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
       setSelected([])
     } catch (err) {
-      // Surface the *server's* error verbatim and keep it on screen until
-      // the user dismisses it.
+      // Surface the *server's* error verbatim in the modal dialog and
+      // keep it on screen until the user dismisses it. The dialog is
+      // the canonical surface for upload failures (long, multi-line
+      // S3 error bodies don't fit a toast); we deliberately skip
+      // `showErrorToastWithCopy` here so the message isn't truncated
+      // twice. The modal renders with `break-words` so the full body
+      // is selectable + scrollable.
       const message = err instanceof Error ? err.message : String(err)
       setRejection({
         title: resolveStatus
@@ -319,7 +376,37 @@ export function UploadList({
           ? "Try a different name (the entity may already exist with conflicting attributes), or check that the parent entity (experiment) is the one you intended."
           : "Common causes: backend container restarted, JWT expired (try refreshing the page to re-login), or a 5xx upstream from MinIO.",
       })
-      showErrorToastWithCopy(message)
+      // Auto-clean the empty dataset row we just created. Without
+      // this, every failed upload leaves an empty shell in Manage
+      // Data — confusing UX. Only safe when we *created* the
+      // dataset (not got an existing one — see wasCreated above)
+      // AND the file_count is still 0 (defense against a partial
+      // upload that managed to finalize some chunks before the
+      // throw). Best-effort: a failure to clean up is logged but
+      // does not propagate.
+      if (createdDatasetIdForCleanup) {
+        try {
+          const countResp =
+            await DatasetsService.apiDatasetsIdDatasetIdFileCountGetDatasetFileCount(
+              { datasetId: createdDatasetIdForCleanup },
+            )
+          const fc = (countResp as { file_count?: number } | null)?.file_count
+          if (typeof fc === "number" && fc === 0) {
+            await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+              datasetId: createdDatasetIdForCleanup,
+            })
+          }
+        } catch (cleanupErr) {
+          // Don't mask the original upload error — just log. The
+          // user can trash the empty dataset from Manage Data
+          // themselves.
+          // eslint-disable-next-line no-console
+          console.warn(
+            "Failed to auto-clean empty dataset after upload error:",
+            cleanupErr,
+          )
+        }
+      }
     } finally {
       setIsUploading(false)
       setResolveStatus(null)
@@ -446,9 +533,18 @@ export function UploadList({
             </p>
           )}
           {rejection && rejection.rejectedNames.length > 0 && (
-            <div className="max-h-48 overflow-y-auto rounded border bg-muted/40 p-2 text-xs font-mono">
+            <div className="max-h-64 overflow-y-auto rounded border bg-muted/40 p-2 text-xs font-mono">
               {rejection.rejectedNames.map((n, i) => (
-                <div key={`${i}:${n}`} className="truncate">
+                // `break-words` so long server-error strings (e.g. the
+                // multi-line S3 NoSuchKey response that includes the
+                // bucket/object path and request ids) wrap and stay
+                // legible. The previous `truncate` made these
+                // single-line ellipsified, which hid the part of the
+                // message the user actually needed.
+                <div
+                  key={`${i}:${n}`}
+                  className="whitespace-pre-wrap break-words py-0.5"
+                >
                   {n}
                 </div>
               ))}
