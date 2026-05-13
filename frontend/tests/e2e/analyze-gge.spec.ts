@@ -113,11 +113,14 @@ test.describe("Analyze — GGE biplot chart", () => {
     const traitH = `${runPrefix}-Height`
     const seasonName = `${runPrefix}-S`
 
-    // 4 accessions ranked differently across 3 sites to produce real GE.
+    // 4 accessions × 3 sites with NON-collinear ranks per env so the GGE
+    // biplot has scatter on both PC1 and PC2 (not collapsed to a single
+    // axis). Each site has a different rank pattern, which produces a
+    // genuine 2D convex hull instead of a degenerate line.
     const valuesPerSite: Record<string, Record<string, number>> = {
       X: { A: 20, B: 15, C: 10, D: 5 },
-      Y: { A: 14, B: 14, C: 14, D: 14 },
-      Z: { A: 5, B: 10, C: 15, D: 20 },
+      Y: { A: 8, B: 18, C: 14, D: 11 },
+      Z: { A: 5, B: 10, C: 17, D: 22 },
     }
 
     for (let i = 0; i < 3; i++) {
