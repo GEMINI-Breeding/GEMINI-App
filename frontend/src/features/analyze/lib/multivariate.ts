@@ -257,3 +257,37 @@ export interface GGEResponse {
 export function fetchGGE(req: MultivariateRequest): Promise<GGEResponse> {
   return postJson<GGEResponse>("/api/multivariate_analysis/gge", req)
 }
+
+export interface ManovaStat {
+  name: string
+  value: number
+  df_num: number
+  df_denom: number
+  F: number | null
+  p: number | null
+}
+
+export interface ManovaPanel {
+  env_label: string
+  kind: "one_way" | "two_way"
+  n_obs: number
+  n_groups: number
+  n_traits: number
+  replication_status: "replicated" | "unreplicated" | "insufficient_data"
+  terms: Record<string, ManovaStat[]>
+  message?: string | null
+}
+
+export interface ManovaResponse {
+  status: "ok" | "too_large" | "insufficient_data"
+  n_records_fetched: number
+  trait_names: string[]
+  panels: ManovaPanel[]
+  message?: string | null
+}
+
+export function fetchManova(
+  req: MultivariateRequest,
+): Promise<ManovaResponse> {
+  return postJson<ManovaResponse>("/api/multivariate_analysis/manova", req)
+}

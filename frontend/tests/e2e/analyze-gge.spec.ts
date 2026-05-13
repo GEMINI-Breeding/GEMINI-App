@@ -102,10 +102,10 @@ async function importTraitCsv(opts: ImportOpts) {
   })
 }
 
-test.describe("Analyze — Multivariate GGE biplot", () => {
+test.describe("Analyze — GGE biplot chart", () => {
   test.setTimeout(360_000)
 
-  test("import 3 envs → GGE sub-tab → biplot renders with envs + accessions", async ({
+  test("import 3 envs → pick trait → GGE chart type → biplot renders", async ({
     page,
     runPrefix,
   }) => {
@@ -139,22 +139,20 @@ test.describe("Analyze — Multivariate GGE biplot", () => {
       })
     }
 
-    // ---- Analyze → Multivariate → GGE ----
-    await page.goto("/analyze?view=multi")
+    // ---- Analyze (single-trait) → pick trait → GGE biplot chart ----
+    await page.goto("/analyze")
     await expect(page.getByRole("heading", { name: /^analyze$/i })).toBeVisible(
       { timeout: 15_000 },
     )
-    await page.getByTestId("mv-subtab-gge").click()
 
-    // Pick the trait
-    await page.getByTestId("mv-gge-trait").selectOption(traitH)
+    await page.getByTestId("analyze-trait-select").click()
+    await page
+      .getByRole("option", { name: new RegExp(traitH) })
+      .first()
+      .click()
 
-    // Isolate to the imported experiment
-    await page.getByTestId("mv-experiment").click()
-    await page.locator(`label:has-text("${experimentName}")`).first().click()
-    await page.getByRole("heading", { name: /^analyze$/i }).click()
-
-    await page.getByTestId("mv-gge-run").click()
+    await page.getByTestId("trait-charts-chart-type").click()
+    await page.getByRole("option", { name: "GGE biplot" }).click()
 
     const svg = page.getByTestId("mv-gge-svg")
     await expect(svg).toBeVisible({ timeout: 30_000 })

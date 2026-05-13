@@ -26,11 +26,13 @@ import {
 } from "@/components/ui/select"
 import {
   fetchAnova,
+  fetchGGE,
   fetchHeritability,
   fetchSpatial,
 } from "../lib/multivariate"
 import { fetchTraitRecords } from "../lib/traitRecords"
 import { AnovaTable } from "./AnovaTable"
+import { GgeBiplot } from "./GgeBiplot"
 import { HeritabilityPanel } from "./HeritabilityPanel"
 import { SpatialHeatmap } from "./SpatialHeatmap"
 
@@ -74,6 +76,7 @@ type ChartType =
   | "spatial"
   | "anova"
   | "heritability"
+  | "gge"
 type GroupBy = "none" | "experiment" | "season" | "site"
 
 function extractUnique(
@@ -375,6 +378,7 @@ export function TraitCharts({
               <SelectItem value="spatial">Field layout</SelectItem>
               <SelectItem value="anova">ANOVA</SelectItem>
               <SelectItem value="heritability">Heritability + BLUPs</SelectItem>
+              <SelectItem value="gge">GGE biplot</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -383,7 +387,8 @@ export function TraitCharts({
           chartType !== "site-trend" &&
           chartType !== "spatial" &&
           chartType !== "anova" &&
-          chartType !== "heritability" && (
+          chartType !== "heritability" &&
+          chartType !== "gge" && (
             <div className="space-y-1">
               <label
                 htmlFor="trait-charts-group-by"
@@ -520,6 +525,14 @@ export function TraitCharts({
           siteNames={[...filterSite]}
         />
       )}
+      {chartType === "gge" && (
+        <GgeChart
+          traitName={traitName}
+          experimentNames={[...filterExperiment]}
+          seasonNames={[...filterSeason]}
+          siteNames={[...filterSite]}
+        />
+      )}
     </div>
   )
 }
@@ -609,6 +622,47 @@ function HeritabilityChart({
   }
   if (!data) return null
   return <HeritabilityPanel response={data} />
+}
+
+function GgeChart({
+  traitName,
+  experimentNames,
+  seasonNames,
+  siteNames,
+}: StatsChartProps) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [
+      "gge",
+      traitName,
+      experimentNames.join(","),
+      seasonNames.join(","),
+      siteNames.join(","),
+    ],
+    queryFn: () =>
+      fetchGGE({
+        trait_names: [traitName],
+        experiment_names: experimentNames.length ? experimentNames : undefined,
+        season_names: seasonNames.length ? seasonNames : undefined,
+        site_names: siteNames.length ? siteNames : undefined,
+        aggregation: "mean",
+        // /gge force-enables collapse_replicates on the backend regardless,
+        // but be explicit so the request is self-documenting.
+        collapse_replicates: true,
+      }),
+    enabled: Boolean(traitName),
+  })
+
+  if (isLoading) return <ChartLoader label="Building GGE biplot…" />
+  if (error) return <ChartError error={error} />
+  if (!data) return null
+  if (data.status !== "ok") {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="mv-gge-empty">
+        {data.message ?? data.status}
+      </p>
+    )
+  }
+  return <GgeBiplot response={data} />
 }
 
 function ChartLoader({ label }: { label: string }) {

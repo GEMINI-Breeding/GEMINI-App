@@ -63,31 +63,39 @@ export function HeritabilityPanel({ response }: Props) {
 }
 
 function Card({ panel }: { panel: HPanel }) {
-  const ok = panel.convergence_status === "ok"
+  // H² is renderable whenever the math actually produced a number — both
+  // the REML path and the moment-estimator fallback set panel.h2 when
+  // they succeed. Hide the headline number only when the fit truly
+  // produced no result (failed / insufficient_data with no h2).
+  const hasH2 = panel.h2 != null
   return (
     <div
-      className={`flex min-w-[220px] flex-col gap-1 rounded-md border p-3 ${STATUS_COLOR[panel.convergence_status]}`}
+      className={`flex w-[280px] flex-col gap-1 rounded-md border p-3 ${STATUS_COLOR[panel.convergence_status]}`}
       data-testid={`mv-h2-card-${panel.env_label}`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <h4 className="text-sm font-medium">{panel.env_label}</h4>
-        <span className="text-xs">
+        <span className="text-xs whitespace-nowrap">
           n={panel.n_obs} · g={panel.n_groups} · reps≈
           {panel.mean_reps.toFixed(1)}
         </span>
       </div>
-      {ok ? (
+      {hasH2 && (
         <>
           <div className="text-2xl font-semibold tabular-nums">
-            H² = {panel.h2 == null ? "—" : panel.h2.toFixed(3)}
+            H² = {(panel.h2 as number).toFixed(3)}
           </div>
           <div className="text-xs">
             σ²_g = {fmt(panel.var_g)} · σ²_e = {fmt(panel.var_e)}
           </div>
         </>
-      ) : (
-        <div className="text-xs" data-testid="mv-h2-card-warning">
-          {panel.message ?? panel.convergence_status}
+      )}
+      {panel.message && (
+        <div
+          className="text-xs whitespace-pre-line break-words"
+          data-testid="mv-h2-card-warning"
+        >
+          {panel.message}
         </div>
       )}
     </div>

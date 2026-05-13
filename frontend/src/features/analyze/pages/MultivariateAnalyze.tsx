@@ -17,16 +17,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import { AggregationControl } from "../components/AggregationControl"
 import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
-import { GgeBiplot } from "../components/GgeBiplot"
+import { ManovaTable } from "../components/ManovaTable"
 import { PcaBiplot } from "../components/PcaBiplot"
 import {
   fetchCorrelation,
-  fetchGGE,
+  fetchManova,
   fetchMatrix,
   fetchPCA,
   type Aggregation,
   type CorrelationResponse,
-  type GGEResponse,
+  type ManovaResponse,
   type MatrixResponse,
   type MultivariateRequest,
   type PCAResponse,
@@ -61,15 +61,14 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
   // PCA defaults on for collapse: typically you want a genotype-level
   // ordination, not a per-plot point cloud (which mostly shows noise).
   const [pcaCollapseReps, setPcaCollapseReps] = useState(true)
-  // GGE is single-trait by nature — pick exactly one.
-  const [ggeTrait, setGgeTrait] = useState<string>("")
+  const [manovaTraits, setManovaTraits] = useState<Set<string>>(new Set())
 
   const [corrResults, setCorrResults] = useState<{
     matrix: MatrixResponse
     correlation: CorrelationResponse
   } | null>(null)
   const [pcaResult, setPcaResult] = useState<PCAResponse | null>(null)
-  const [ggeResult, setGgeResult] = useState<GGEResponse | null>(null)
+  const [manovaResult, setManovaResult] = useState<ManovaResponse | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -138,6 +137,8 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
     corrTraits.size === 0 ? traitOptions : [...corrTraits]
   const effectivePcaTraits =
     pcaTraits.size === 0 ? traitOptions : [...pcaTraits]
+  const effectiveManovaTraits =
+    manovaTraits.size === 0 ? traitOptions : [...manovaTraits]
 
   function baseRequest(
     traitNames: string[],
@@ -189,16 +190,15 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
     }
   }
 
-  async function runGGE() {
-    // GGE always works on genotype × env means — collapse_replicates is
-    // forced on by the backend regardless of the flag here.
-    const req = baseRequest([ggeTrait], true)
+  async function runManova() {
+    // MANOVA needs raw per-plot variance; backend force-disables collapse.
+    const req = baseRequest(effectiveManovaTraits, false)
     setLoading(true)
     setError(null)
-    setGgeResult(null)
+    setManovaResult(null)
     try {
-      const r = await fetchGGE(req)
-      setGgeResult(r)
+      const r = await fetchManova(req)
+      setManovaResult(r)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -287,8 +287,8 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
           <TabsTrigger value="pca" data-testid="mv-subtab-pca">
             PCA
           </TabsTrigger>
-          <TabsTrigger value="gge" data-testid="mv-subtab-gge">
-            GGE biplot
+          <TabsTrigger value="manova" data-testid="mv-subtab-manova">
+            MANOVA
           </TabsTrigger>
         </TabsList>
 
@@ -417,65 +417,55 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
           )}
         </TabsContent>
 
-        <TabsContent value="gge" className="mt-4 flex flex-col gap-4">
+        <TabsContent value="manova" className="mt-4 flex flex-col gap-4">
           <p className="text-xs text-muted-foreground">
-            Genotype × Environment (Yan & Tinker) biplot for one trait. Needs
-            at least 3 environments (experiment × season × site combinations)
-            where the same accessions appear. Always averages replicates by
-            accession.
+            MANOVA tests whether group means differ on the trait vector
+            simultaneously — the multivariate analogue of ANOVA. Needs raw
+            per-plot values, so replicate collapsing is disabled here.
           </p>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <label
-                htmlFor="mv-gge-trait"
-                className="text-xs text-muted-foreground"
-              >
-                Trait
-              </label>
-              <select
-                id="mv-gge-trait"
-                className="h-10 w-72 rounded-md border bg-background px-3 text-sm"
-                value={ggeTrait}
-                onChange={(e) => setGgeTrait(e.target.value)}
-                data-testid="mv-gge-trait"
-              >
-                <option value="">Pick a trait…</option>
-                {traitOptions.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <MultiSelectFilter
+              label="Traits"
+              options={traitOptions}
+              selected={manovaTraits}
+              onChange={setManovaTraits}
+              width="w-72"
+              testId="mv-manova-trait-picker"
+            />
             <button
               type="button"
               className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              disabled={!ggeTrait || !aggOk || loading || traitsLoading}
-              onClick={runGGE}
-              data-testid="mv-gge-run"
+              disabled={
+                effectiveManovaTraits.length < 2 ||
+                !aggOk ||
+                loading ||
+                traitsLoading
+              }
+              onClick={runManova}
+              data-testid="mv-manova-run"
             >
-              {loading ? "Running…" : "Run GGE"}
+              {loading ? "Running…" : "Run MANOVA"}
             </button>
-            {(!ggeTrait || !aggOk) && (
+            {(effectiveManovaTraits.length < 2 || !aggOk) && (
               <span className="text-xs text-muted-foreground">
-                {!ggeTrait
-                  ? "Pick a trait"
+                {effectiveManovaTraits.length < 2
+                  ? "Need at least 2 traits"
                   : !aggregation
                     ? "Pick an aggregation"
                     : "Pick a collection date"}
               </span>
             )}
           </div>
-          {ggeResult && ggeResult.status !== "ok" && (
+          {manovaResult && manovaResult.status !== "ok" && (
             <div
               className="rounded-md border border-amber-500 bg-amber-50 p-3 text-sm text-amber-900"
-              data-testid="mv-gge-warning"
+              data-testid="mv-manova-status-warning"
             >
-              {ggeResult.message || ggeResult.status}
+              {manovaResult.message || manovaResult.status}
             </div>
           )}
-          {ggeResult && ggeResult.status === "ok" && (
-            <GgeBiplot response={ggeResult} />
+          {manovaResult && manovaResult.status === "ok" && (
+            <ManovaTable response={manovaResult} />
           )}
         </TabsContent>
       </Tabs>
