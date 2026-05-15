@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { type CSSProperties, useMemo, useState } from "react"
 
 import type {
   HeritabilityPanel as HPanel,
@@ -88,6 +88,11 @@ function Card({ panel }: { panel: HPanel }) {
           <div className="text-xs">
             σ²_g = {fmt(panel.var_g)} · σ²_e = {fmt(panel.var_e)}
           </div>
+          {panel.grand_mean != null && (
+            <div className="text-xs tabular-nums" data-testid="mv-h2-card-grand-mean">
+              mean = {formatMean(panel.grand_mean)}
+            </div>
+          )}
         </>
       )}
       {panel.message && (
@@ -108,15 +113,35 @@ function fmt(v: number | null): string {
   return v.toFixed(3)
 }
 
+function formatMean(v: number): string {
+  // Means tend to live on the trait's natural scale, so prefer decimal
+  // over scientific unless the value is extreme.
+  if (Math.abs(v) >= 10_000 || (Math.abs(v) > 0 && Math.abs(v) < 0.01)) {
+    return v.toExponential(2)
+  }
+  return v.toFixed(2)
+}
+
 type SortKey = { trait: string; env: string } | null
+type ColorMode = "off" | "column" | "pooled"
+
+interface Col {
+  trait: string
+  env: string
+  key: string
+  map: Map<string, number>
+  grandMean: number | null
+  nObs: number
+}
 
 function BlupsTable({ panels }: { panels: HPanel[] }) {
   const [sortBy, setSortBy] = useState<SortKey>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [colorMode, setColorMode] = useState<ColorMode>("column")
 
   // Build a (trait, env) → (accession → blup) lookup, and a stable column
   // ordering (panels with H² estimates first).
-  const cols = useMemo(
+  const cols: Col[] = useMemo(
     () =>
       panels
         .filter((p) => p.blups.length > 0)
@@ -125,6 +150,8 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
           env: p.env_label,
           key: `${p.trait_name}::${p.env_label}`,
           map: new Map(p.blups.map((b) => [b.accession_name, b.blup])),
+          grandMean: p.grand_mean,
+          nObs: p.n_obs,
         })),
     [panels],
   )
@@ -133,6 +160,66 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
     for (const c of cols) for (const acc of c.map.keys()) s.add(acc)
     return [...s].sort()
   }, [cols])
+
+  // Pooled grand mean: weighted by n_obs so a site-year with more plots
+  // pulls the reference toward its mean — same weighting you'd get from
+  // pooling raw observations.
+  const pooledMean = useMemo(() => {
+    let num = 0
+    let den = 0
+    for (const c of cols) {
+      if (c.grandMean == null) continue
+      num += c.grandMean * c.nObs
+      den += c.nObs
+    }
+    return den > 0 ? num / den : null
+  }, [cols])
+
+  // For each column, the reference value to subtract (depends on mode)
+  // and the max absolute deviation (used to scale the color intensity).
+  // We compute max-|dev| per-column when in "column" mode (each column
+  // gets its own contrast range) and globally when in "pooled" mode
+  // (preserves cross-env magnitude differences, e.g. one site running
+  // systematically higher than another).
+  const colorScale = useMemo(() => {
+    if (colorMode === "off") return null
+    const refByCol = new Map<string, number | null>()
+    for (const c of cols) {
+      const ref =
+        colorMode === "column"
+          ? c.grandMean
+          : pooledMean
+      refByCol.set(c.key, ref)
+    }
+    if (colorMode === "column") {
+      const maxByCol = new Map<string, number>()
+      for (const c of cols) {
+        const ref = refByCol.get(c.key)
+        if (ref == null) {
+          maxByCol.set(c.key, 0)
+          continue
+        }
+        let m = 0
+        for (const v of c.map.values()) {
+          const d = Math.abs(v - ref)
+          if (d > m) m = d
+        }
+        maxByCol.set(c.key, m)
+      }
+      return { refByCol, maxByCol, globalMax: null as number | null }
+    }
+    // pooled mode → one global max across every cell
+    let globalMax = 0
+    for (const c of cols) {
+      const ref = refByCol.get(c.key)
+      if (ref == null) continue
+      for (const v of c.map.values()) {
+        const d = Math.abs(v - ref)
+        if (d > globalMax) globalMax = d
+      }
+    }
+    return { refByCol, maxByCol: null, globalMax }
+  }, [colorMode, cols, pooledMean])
 
   if (cols.length === 0 || accessions.length === 0) return null
 
@@ -159,9 +246,38 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
     }
   }
 
+  function cellStyle(col: Col, value: number): CSSProperties {
+    if (!colorScale) return {}
+    const ref = colorScale.refByCol.get(col.key)
+    if (ref == null) return {}
+    const max =
+      colorScale.maxByCol?.get(col.key) ??
+      colorScale.globalMax ??
+      0
+    if (max <= 0) return {}
+    const dev = value - ref
+    const t = Math.max(-1, Math.min(1, dev / max))
+    // Force a near-black text color on colored cells. The diverging
+    // palette includes white near zero, so leaving the cell on the
+    // theme's foreground (white in dark mode) would erase those values.
+    return { backgroundColor: divergingColor(t), color: "rgb(17, 24, 39)" }
+  }
+
   return (
     <div className="flex flex-col gap-2" data-testid="mv-blups-table">
-      <h3 className="text-base font-semibold">BLUPs</h3>
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-base font-semibold">BLUPs</h3>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Color by</span>
+          <ColorModeToggle value={colorMode} onChange={setColorMode} />
+          {colorMode !== "off" && (
+            <ColorLegend
+              mode={colorMode}
+              pooledMean={pooledMean}
+            />
+          )}
+        </div>
+      </div>
       <div className="overflow-auto rounded-md border">
         <table className="text-xs">
           <thead className="bg-muted/40">
@@ -181,6 +297,14 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
                     <div className="flex flex-col items-end">
                       <span>{c.trait}</span>
                       <span className="text-muted-foreground">{c.env}</span>
+                      {c.grandMean != null && (
+                        <span
+                          className="text-[10px] tabular-nums text-muted-foreground"
+                          data-testid="mv-blup-col-mean"
+                        >
+                          μ = {formatMean(c.grandMean)}
+                        </span>
+                      )}
                       {active && (
                         <span className="text-[10px] text-muted-foreground">
                           {sortDir === "desc" ? "▼" : "▲"}
@@ -204,6 +328,7 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
                     <td
                       key={c.key}
                       className="px-3 py-1.5 text-right tabular-nums"
+                      style={v == null ? undefined : cellStyle(c, v)}
                     >
                       {v == null ? "—" : v.toFixed(3)}
                     </td>
@@ -216,4 +341,87 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
       </div>
     </div>
   )
+}
+
+function ColorModeToggle({
+  value,
+  onChange,
+}: {
+  value: ColorMode
+  onChange: (v: ColorMode) => void
+}) {
+  const options: { v: ColorMode; label: string }[] = [
+    { v: "off", label: "Off" },
+    { v: "column", label: "Column mean" },
+    { v: "pooled", label: "Pooled mean" },
+  ]
+  return (
+    <div
+      className="inline-flex rounded-md border"
+      data-testid="mv-blup-color-mode"
+    >
+      {options.map((o) => (
+        <button
+          type="button"
+          key={o.v}
+          onClick={() => onChange(o.v)}
+          aria-pressed={value === o.v}
+          className={`px-2 py-1 text-xs ${
+            value === o.v
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function ColorLegend({
+  mode,
+  pooledMean,
+}: {
+  mode: Exclude<ColorMode, "off">
+  pooledMean: number | null
+}) {
+  return (
+    <div
+      className="flex items-center gap-2 text-muted-foreground"
+      data-testid="mv-blup-color-legend"
+    >
+      <span>below</span>
+      <span
+        className="h-3 w-16 rounded-sm"
+        style={{
+          background:
+            "linear-gradient(to right, rgb(178,24,43), rgb(255,255,255), rgb(33,102,172))",
+          border: "1px solid rgba(0,0,0,0.1)",
+        }}
+      />
+      <span>above</span>
+      <span>
+        {mode === "column"
+          ? "(each column's own mean)"
+          : pooledMean != null
+            ? `(pooled μ = ${formatMean(pooledMean)})`
+            : "(pooled mean)"}
+      </span>
+    </div>
+  )
+}
+
+/** RdBu-style diverging interpolation. t in [-1, 1]: -1 → red, 0 → white,
+ *  +1 → blue. Linear in each RGB channel between the three anchors;
+ *  cheap and good enough for table cell shading. */
+function divergingColor(t: number): string {
+  const tt = Math.max(-1, Math.min(1, t))
+  const neg = [178, 24, 43] // red
+  const mid = [255, 255, 255] // white
+  const pos = [33, 102, 172] // blue
+  const lerp = (a: number[], b: number[], u: number) =>
+    a.map((x, i) => Math.round(x + (b[i] - x) * u))
+  const rgb = tt < 0 ? lerp(mid, neg, -tt) : lerp(mid, pos, tt)
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
 }

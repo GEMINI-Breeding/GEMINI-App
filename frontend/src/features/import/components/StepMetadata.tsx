@@ -10,7 +10,7 @@
  * which already wires our SDK + react-query for experiment / platform /
  * sensor lookups.
  */
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,8 @@ import {
   EntitySelectField,
 } from "@/features/files/components/EntitySelectField"
 import { useScopeOptions } from "@/features/files/hooks/useUploadScope"
+import { useExistingDatasetNames } from "@/features/import/hooks/useExistingDatasetNames"
+import { buildDatasetName } from "@/features/import/lib/datasetName"
 import {
   type DetectionResult,
   needsSensorFields,
@@ -62,17 +64,29 @@ function initialNamedChoice(
 }
 
 function defaultDatasetNames(detection: DetectionResult): string[] {
-  const today = new Date().toISOString().slice(0, 10)
   const expName = detection.suggestedExperimentName
+  // Pick the first concrete category as the label hint. Mixed uploads
+  // fall back to "Mixed" via the lookup in datasetName.ts.
+  const category = detection.dataCategories[0] ?? null
   if (detection.fileGroups.length <= 1) {
-    const date = detection.detectedDates[0] || today
-    const base = expName ? `${expName} - ${date}` : `Collection ${date}`
-    return [base]
+    return [
+      buildDatasetName({
+        expName,
+        category,
+        // Only include the date when we genuinely *detected* one from
+        // the file/path. The previous fallback to `today` was the upload
+        // date, which is not the collection date — actively misleading.
+        collectionDate: detection.detectedDates[0] ?? null,
+      }),
+    ]
   }
-  return detection.fileGroups.map((g) => {
-    const date = g.date || today
-    return expName ? `${expName} - ${date}` : `Collection ${date}`
-  })
+  return detection.fileGroups.map((g) =>
+    buildDatasetName({
+      expName,
+      category,
+      collectionDate: g.date ?? null,
+    }),
+  )
 }
 
 export function StepMetadata({
@@ -107,6 +121,11 @@ export function StepMetadata({
     }
     return defaultDatasetNames(detection)
   })
+  // Globally-existing dataset names. Used to warn the user when a typed
+  // dataset name would collide with an existing dataset — the DB silently
+  // merges trait records into the existing dataset row, which is rarely
+  // what users want.
+  const existingNames = useExistingDatasetNames()
 
   const updateDatasetName = (index: number, value: string) => {
     setDatasetNames((prev) => {
@@ -234,33 +253,64 @@ export function StepMetadata({
           <h3 className="font-medium">Dataset Names</h3>
           <p className="text-muted-foreground text-sm">
             A dataset groups records from one collection event (e.g. a field
-            visit on a specific day). The default combines the experiment and
-            date — edit if you'd prefer something else.
+            visit on a specific day). The default combines the experiment, a
+            data-type label, the collection date (when detected from the
+            file/path), and a short random tag to keep re-uploads distinct.
+            Dataset names are globally unique — if you pick a name that's
+            already in use we'll warn you and the new records will be merged
+            into the existing dataset.
           </p>
         </div>
-        <div className="space-y-2">
-          {datasetNames.map((name, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Label
-                htmlFor={`dataset-name-${i}`}
-                className="text-muted-foreground w-6 shrink-0 text-sm"
-              >
-                {i + 1}.
-              </Label>
-              <Input
-                id={`dataset-name-${i}`}
-                value={name}
-                onChange={(e) => updateDatasetName(i, e.target.value)}
-                placeholder="Dataset name"
-                data-testid={`dataset-name-${i}`}
-              />
-              {detection.fileGroups[i]?.date && (
-                <span className="text-muted-foreground shrink-0 text-xs">
-                  {detection.fileGroups[i].date}
-                </span>
-              )}
-            </div>
-          ))}
+        <div className="space-y-3">
+          {datasetNames.map((name, i) => {
+            const trimmed = name.trim()
+            // Conflict: another dataset with this exact name already
+            // exists. Non-blocking — we don't disable Continue, since
+            // the user may genuinely want to append to that dataset.
+            // The warning just makes the silent-merge consequence
+            // visible.
+            const collides =
+              trimmed.length > 0 && existingNames.data?.has(trimmed) === true
+            return (
+              <div key={i} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor={`dataset-name-${i}`}
+                    className="text-muted-foreground w-6 shrink-0 text-sm"
+                  >
+                    {i + 1}.
+                  </Label>
+                  <Input
+                    id={`dataset-name-${i}`}
+                    value={name}
+                    onChange={(e) => updateDatasetName(i, e.target.value)}
+                    placeholder="Dataset name"
+                    data-testid={`dataset-name-${i}`}
+                    aria-invalid={collides}
+                  />
+                  {detection.fileGroups[i]?.date && (
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      {detection.fileGroups[i].date}
+                    </span>
+                  )}
+                </div>
+                {collides && (
+                  <p
+                    className="text-amber-600 dark:text-amber-500 flex items-start gap-1.5 pl-8 text-xs"
+                    data-testid={`dataset-name-warning-${i}`}
+                    role="status"
+                  >
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      A dataset with this name already exists. New records
+                      will be merged into the existing dataset — change
+                      the name if you want a separate dataset.
+                    </span>
+                  </p>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
 

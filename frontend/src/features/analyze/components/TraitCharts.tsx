@@ -91,12 +91,28 @@ function extractUnique(
   return [...set].sort()
 }
 
+// Mirrors the accession > line > alias priority the import wizard uses
+// when populating record_info (see features/import/lib/recordBuilder.ts).
+// `genotype` is kept as a final fallback for legacy records that predate
+// the wizard's column-mapping rewrite.
+function pickGenotype(record: TraitRecordOutput): string | null {
+  const info = record.record_info as Record<string, unknown> | undefined
+  if (!info) return null
+  for (const key of ["accession_name", "line_name", "germplasm_alias", "genotype"]) {
+    const v = info[key]
+    if (v != null) {
+      const s = String(v).trim()
+      if (s !== "") return s
+    }
+  }
+  return null
+}
+
 function extractGenotypes(records: TraitRecordOutput[]): string[] {
   const set = new Set<string>()
   for (const r of records) {
-    const info = r.record_info as Record<string, unknown> | undefined
-    const g = info?.genotype
-    if (g != null && String(g).trim() !== "") set.add(String(g).trim())
+    const g = pickGenotype(r)
+    if (g) set.add(g)
   }
   return [...set].sort()
 }
@@ -196,8 +212,7 @@ export function buildGenotypeData(
   const genotypeMeans = new Map<string, number[]>()
 
   for (const r of records) {
-    const info = r.record_info as Record<string, unknown> | undefined
-    const genotype = info?.genotype ? String(info.genotype).trim() : null
+    const genotype = pickGenotype(r)
     if (!genotype || r.trait_value == null) continue
 
     let series = "All"
@@ -785,9 +800,13 @@ function ForestPlot({
   )
   const [page, setPage] = useState(0)
   const [hoveredGenotype, setHoveredGenotype] = useState<string | null>(null)
-  const pageSize = 30
-  const totalPages = Math.ceil(genotypes.length / pageSize)
-  const pageGenotypes = genotypes.slice(page * pageSize, (page + 1) * pageSize)
+  const [pageSize, setPageSize] = useState(25)
+  const totalPages = Math.max(1, Math.ceil(genotypes.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const pageGenotypes = genotypes.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  )
 
   if (genotypes.length === 0) {
     return (
@@ -855,7 +874,7 @@ function ForestPlot({
               y1={margin.top}
               x2={xScale(tick)}
               y2={margin.top + plotHeight}
-              stroke="#e5e7eb"
+              className="stroke-border"
               strokeDasharray="3 3"
             />
           ))}
@@ -866,7 +885,7 @@ function ForestPlot({
               y={chartHeight - margin.bottom + 16}
               textAnchor="middle"
               fontSize={10}
-              fill="#6b7280"
+              className="fill-muted-foreground"
             >
               {tick.toFixed(1)}
             </text>
@@ -876,7 +895,7 @@ function ForestPlot({
             y={chartHeight - 4}
             textAnchor="middle"
             fontSize={11}
-            fill="#374151"
+            className="fill-foreground"
           >
             {valueLabel}
           </text>
@@ -903,7 +922,7 @@ function ForestPlot({
                     y={y - rowHeight / 2}
                     width={plotWidth}
                     height={rowHeight}
-                    fill="#f3f4f6"
+                    className="fill-accent"
                   />
                 )}
                 <text
@@ -912,7 +931,9 @@ function ForestPlot({
                   textAnchor="end"
                   dominantBaseline="central"
                   fontSize={11}
-                  fill={isHovered ? "#111827" : "#374151"}
+                  className={
+                    isHovered ? "fill-foreground" : "fill-muted-foreground"
+                  }
                   fontWeight={isHovered ? 600 : 400}
                 >
                   {genotype.length > 16
@@ -971,36 +992,61 @@ function ForestPlot({
             y1={margin.top}
             x2={margin.left}
             y2={margin.top + plotHeight}
-            stroke="#d1d5db"
+            className="stroke-border"
           />
         </svg>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPage(page - 1)}
+      <div className="flex items-center gap-3 text-sm flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground text-xs">Per page</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              setPageSize(Number(v))
+              setPage(0)
+            }}
           >
-            Previous
-          </Button>
-          <span className="text-muted-foreground">
-            Genotypes {page * pageSize + 1}-
-            {Math.min((page + 1) * pageSize, genotypes.length)} of{" "}
-            {genotypes.length}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages - 1}
-            onClick={() => setPage(page + 1)}
-          >
-            Next
-          </Button>
+            <SelectTrigger
+              className="h-8 w-20"
+              data-testid="forest-plot-page-size"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      )}
+        {totalPages > 1 && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={safePage === 0}
+              onClick={() => setPage(safePage - 1)}
+            >
+              Previous
+            </Button>
+            <span className="text-muted-foreground whitespace-nowrap">
+              Genotypes {safePage * pageSize + 1}-
+              {Math.min((safePage + 1) * pageSize, genotypes.length)} of{" "}
+              {genotypes.length}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setPage(safePage + 1)}
+            >
+              Next
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -1012,8 +1058,7 @@ function buildTrendChart(
   const genotypeByAxis = new Map<string, Map<string, number[]>>()
   const axisSet = new Set<string>()
   for (const r of records) {
-    const info = r.record_info as Record<string, unknown> | undefined
-    const genotype = info?.genotype ? String(info.genotype).trim() : null
+    const genotype = pickGenotype(r)
     const axisVal = r[axisKey]
     if (!genotype || r.trait_value == null || !axisVal) continue
     axisSet.add(axisVal)

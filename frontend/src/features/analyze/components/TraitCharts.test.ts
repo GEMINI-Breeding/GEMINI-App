@@ -84,4 +84,48 @@ describe("buildGenotypeData", () => {
     const { seriesKeys } = buildGenotypeData(records, "experiment")
     expect(seriesKeys).toEqual(["X", "Y"])
   })
+
+  // The import wizard writes germplasm into record_info under
+  // accession_name / line_name / germplasm_alias (and never under
+  // `genotype`). Picking up any of those is what unblocks the
+  // genotype-range / season-trend / site-trend chart types.
+  it("picks accession_name from record_info as the genotype label", () => {
+    const records = [
+      record(1, {
+        record_info: { accession_name: "PI-1" } as Record<string, unknown>,
+      }),
+      record(2, {
+        record_info: { accession_name: "PI-1" } as Record<string, unknown>,
+      }),
+    ]
+    const { genotypes } = buildGenotypeData(records, "none")
+    expect(genotypes).toEqual(["PI-1"])
+  })
+
+  it("falls back to line_name then germplasm_alias when accession_name is absent", () => {
+    const records = [
+      record(1, {
+        record_info: { line_name: "L1" } as Record<string, unknown>,
+      }),
+      record(2, {
+        record_info: { germplasm_alias: "A1" } as Record<string, unknown>,
+      }),
+    ]
+    const { genotypes } = buildGenotypeData(records, "none")
+    expect(new Set(genotypes)).toEqual(new Set(["L1", "A1"]))
+  })
+
+  it("prefers accession_name over line_name/germplasm_alias when multiple fields are set", () => {
+    const records = [
+      record(1, {
+        record_info: {
+          accession_name: "PI-1",
+          line_name: "L1",
+          germplasm_alias: "A1",
+        } as Record<string, unknown>,
+      }),
+    ]
+    const { genotypes } = buildGenotypeData(records, "none")
+    expect(genotypes).toEqual(["PI-1"])
+  })
 })

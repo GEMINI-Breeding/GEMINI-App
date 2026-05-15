@@ -27,6 +27,7 @@ import {
   AuthImage,
   downloadAuthed,
 } from "@/features/genotyping/components/AuthImage"
+import { GwasRunsSidebar } from "@/features/genotyping/components/GwasRunsSidebar"
 import { PcaPlot } from "@/features/genotyping/components/PcaPlot"
 import {
   jobTraitNames,
@@ -108,7 +109,7 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
   const traitLabel = traitNames.length > 0 ? traitNames.join(", ") : null
 
   return (
-    <div className="container max-w-6xl space-y-4 px-4 py-6">
+    <div className="container max-w-[1600px] space-y-4 px-4 py-6">
       <div className="flex items-center justify-between">
         <Link
           to="/genotyping/$studyId"
@@ -189,14 +190,17 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
         </div>
       </div>
 
-      <div>
-        <h1 className="text-2xl font-semibold">
-          GWAS — {result?.study_name ?? job.job_type}
-        </h1>
-        <p className="text-muted-foreground text-xs">
-          {traitLabel ? `${traitLabel} · ` : ""}Job {jobId}
-        </p>
-      </div>
+      <div className="flex flex-col gap-6 md:flex-row md:items-start">
+        <GwasRunsSidebar studyId={studyId} currentJobId={jobId} />
+        <div className="flex-1 space-y-4 min-w-0">
+        <div>
+          <h1 className="text-2xl font-semibold">
+            GWAS — {result?.study_name ?? job.job_type}
+          </h1>
+          <p className="text-muted-foreground text-xs">
+            {traitLabel ? `${traitLabel} · ` : ""}Job {jobId}
+          </p>
+        </div>
 
       {/* Status + progress */}
       <section
@@ -297,20 +301,19 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
                     <p className="text-muted-foreground mb-2 text-xs">
                       Manhattan{" "}
                       <span className="text-muted-foreground/70">
-                        (scroll horizontally to pan; click image to open
-                        full-size in a new tab)
+                        (click image to open full-size in a new tab)
                       </span>
                     </p>
-                    {/* Horizontal-scroll container so long chromosomes stay
-                        legible on narrow viewports. min-width pushes the
-                        underlying PNG well past container width — Manhattan
-                        plots are dense and benefit from real estate. */}
+                    {/* Fit the Manhattan PNG to the content column width.
+                        overflow-x-auto stays as a safety net for very
+                        narrow viewports; with the wider container the
+                        plot typically renders without horizontal scroll. */}
                     <div className="overflow-x-auto rounded border bg-white">
                       <AuthImage
                         data-testid="gwas-manhattan-img"
                         src={manhattanSrc}
                         alt="Manhattan plot"
-                        className="block min-w-[1400px] w-full"
+                        className="block h-auto w-full"
                         onImageClick={(url) => window.open(url, "_blank")}
                       />
                     </div>
@@ -467,6 +470,8 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
           </pre>
         </section>
       )}
+        </div>
+      </div>
     </div>
   )
 }

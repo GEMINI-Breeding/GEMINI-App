@@ -11,7 +11,7 @@
  * backend jobs.py::_sweep_gwas_artifacts).
  */
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ArrowRight, Trash2 } from "lucide-react"
+import { ArrowRight, BarChart3, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,14 @@ export function GwasRecentRuns({ studyId }: GwasRecentRunsProps) {
   const confirm = useConfirm()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const rows = jobs.data ?? []
+  // Most-recent completed run, by created_at. The "View results" button
+  // jumps the user straight into the detail/browser view for it; from
+  // there the sidebar lets them click through every run in this study.
+  // Hidden when nothing has completed yet — there's nothing to view.
+  const mostRecentCompletedJobId = rows
+    .filter((j) => String(j.status ?? "").toLowerCase() === "completed")
+    .map((j) => ({ id: idAsString(j.id), createdAt: j.created_at ?? "" }))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]?.id
 
   async function handleDelete(jobId: string, status: string, traitLabel: string) {
     const statusLower = status.toLowerCase()
@@ -90,7 +98,21 @@ export function GwasRecentRuns({ studyId }: GwasRecentRunsProps) {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Recent GWAS runs</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Recent GWAS runs</h2>
+        {mostRecentCompletedJobId && (
+          <Link
+            to="/genotyping/$studyId/gwas/$jobId"
+            params={{ studyId, jobId: mostRecentCompletedJobId }}
+            data-testid="gwas-view-results"
+          >
+            <Button size="sm" variant="default">
+              <BarChart3 className="mr-2 h-4 w-4" />
+              View results
+            </Button>
+          </Link>
+        )}
+      </div>
       {rows.length === 0 ? (
         <p
           className="text-muted-foreground text-sm"

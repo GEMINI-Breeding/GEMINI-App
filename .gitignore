@@ -22,3 +22,6 @@ frontend/coverage/
 test-results/
 frontend/test-results/
 frontend/playwright-report/
+
+# Local example datasets (multi-GB; not source)
+ExampleDatasets/

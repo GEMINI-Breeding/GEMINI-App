@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import type { FileMetadata } from "@/client"
 
-import { buildOrthoVersions, isOrthoTif } from "./orthoVersions"
+import {
+  buildOrthoVersions,
+  isOrthoTif,
+  mergeOrthoVersionFromJobResult,
+  type OrthoVersionMeta,
+} from "./orthoVersions"
 import type { Run } from "./runStore"
 
 const scope = {
@@ -159,6 +164,34 @@ describe("buildOrthoVersions", () => {
     expect(out[0].filename).toBe("odm_orthophoto.tif")
   })
 
+  it("synthesizes one entry per `odm_orthophoto-{jobId}.tif` on disk", () => {
+    // Two RUN_ODM runs in this scope's folder, neither yet recorded in
+    // run metadata (e.g., page just reloaded after the second run). Both
+    // should surface as separate versions, newest first.
+    const out = buildOrthoVersions(undefined, scope, [
+      file("odm_orthophoto-job-A.tif", "2026-04-28T10:00:00.000Z"),
+      file("odm_orthophoto-job-B.tif", "2026-04-28T12:00:00.000Z"),
+    ])
+    expect(
+      out.map((v) => ({ filename: v.filename, version: v.version })),
+    ).toEqual([
+      { filename: "odm_orthophoto-job-B.tif", version: 2 },
+      { filename: "odm_orthophoto-job-A.tif", version: 1 },
+    ])
+  })
+
+  it("attaches per-version COG flags for versioned filenames", () => {
+    const out = buildOrthoVersions(undefined, scope, [
+      file("odm_orthophoto-job-A.tif", "2026-04-28T10:00:00.000Z"),
+      file("odm_orthophoto-job-A-Pyramid.tif"),
+      file("odm_orthophoto-job-B.tif", "2026-04-28T12:00:00.000Z"),
+    ])
+    const aEntry = out.find((v) => v.filename === "odm_orthophoto-job-A.tif")
+    const bEntry = out.find((v) => v.filename === "odm_orthophoto-job-B.tif")
+    expect(aEntry?.hasCog).toBe(true)
+    expect(bEntry?.hasCog).toBe(false)
+  })
+
   it("sorts newest-first and assigns descending version numbers", () => {
     const run = makeRun([
       {
@@ -182,5 +215,70 @@ describe("buildOrthoVersions", () => {
       { filename: "odm_orthophoto.tif", version: 2 },
       { filename: "imported_ortho.tif", version: 1 },
     ])
+  })
+})
+
+describe("mergeOrthoVersionFromJobResult", () => {
+  const baseJob = {
+    id: "job-A",
+    completed_at: "2026-04-28T12:00:00.000Z",
+    result: {
+      orthophoto_path:
+        "Processed/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/odm_orthophoto-job-A.tif",
+      image_count: 42,
+    },
+  }
+
+  it("appends a RUN_ODM meta entry derived from the job result", () => {
+    const merged = mergeOrthoVersionFromJobResult([], baseJob)
+    expect(merged).not.toBeNull()
+    expect(merged).toHaveLength(1)
+    expect(merged?.[0]).toMatchObject({
+      filename: "odm_orthophoto-job-A.tif",
+      source: "RUN_ODM",
+      jobId: "job-A",
+      createdAt: "2026-04-28T12:00:00.000Z",
+    })
+    expect(merged?.[0].path).toBe(
+      "gemini/Processed/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/odm_orthophoto-job-A.tif",
+    )
+  })
+
+  it("is idempotent on jobId — duplicate call returns null", () => {
+    const first = mergeOrthoVersionFromJobResult([], baseJob)
+    expect(first).not.toBeNull()
+    const second = mergeOrthoVersionFromJobResult(
+      first as OrthoVersionMeta[],
+      baseJob,
+    )
+    expect(second).toBeNull()
+  })
+
+  it("returns null when the job has no orthophoto_path", () => {
+    expect(
+      mergeOrthoVersionFromJobResult([], {
+        id: "job-X",
+        result: { image_count: 0 },
+      }),
+    ).toBeNull()
+    expect(
+      mergeOrthoVersionFromJobResult([], { id: "job-Y", result: null }),
+    ).toBeNull()
+    expect(mergeOrthoVersionFromJobResult([], null)).toBeNull()
+  })
+
+  it("preserves existing entries when appending", () => {
+    const existing: OrthoVersionMeta[] = [
+      {
+        filename: "odm_orthophoto-job-old.tif",
+        source: "RUN_ODM",
+        jobId: "job-old",
+        createdAt: "2026-04-28T08:00:00.000Z",
+      },
+    ]
+    const merged = mergeOrthoVersionFromJobResult(existing, baseJob)
+    expect(merged).toHaveLength(2)
+    expect(merged?.[0].jobId).toBe("job-old")
+    expect(merged?.[1].jobId).toBe("job-A")
   })
 })

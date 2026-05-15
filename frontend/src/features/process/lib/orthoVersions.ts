@@ -60,9 +60,18 @@ export interface OrthoVersion {
 
 const DEFAULT_BUCKET = "gemini"
 
-/** The ortho TIFs the geo worker writes alongside RUN_ODM. */
-const ORTHO_FILENAME = "odm_orthophoto.tif"
-const COG_FILENAME = "odm_orthophoto-Pyramid.tif"
+/**
+ * Basename prefix for RUN_ODM outputs. The worker writes
+ *   `odm_orthophoto-{job_id}.tif`
+ * per run so re-runs don't overwrite prior versions; legacy runs may have
+ * the unversioned `odm_orthophoto.tif`. Both are detected by this prefix.
+ */
+const ORTHO_BASENAME_PREFIX = "odm_orthophoto"
+
+/** The CREATE_COG worker writes `{base}-Pyramid{ext}` next to the source TIF. */
+function cogSiblingName(orthoFilename: string): string {
+  return orthoFilename.replace(/\.tiff?$/i, "-Pyramid.tif")
+}
 
 export function readOrthoOutputs(run: Run | undefined): OrthoVersionMeta[] {
   const outs = run?.steps?.orthomosaic?.outputs as
@@ -108,8 +117,6 @@ export function buildOrthoVersions(
       lastModifiedByPath.set(name, lm)
     }
   }
-  const cogPresent = filesByName.has(COG_FILENAME)
-  const orthoPresent = filesByName.has(ORTHO_FILENAME)
 
   function metaExists(m: OrthoVersionMeta): boolean {
     if (m.path) {
@@ -128,6 +135,7 @@ export function buildOrthoVersions(
   }
 
   const versions: OrthoVersion[] = []
+  const knownFilenames = new Set<string>()
   for (const m of meta) {
     if (!metaExists(m)) continue
     const path = m.path ?? defaultProcessedPath(m.filename)
@@ -142,19 +150,30 @@ export function buildOrthoVersions(
       // imports / when R4a's job submission writes one); fall back to
       // MinIO's last_modified for legacy on-disk files we never recorded.
       createdAt: m.createdAt ?? lastModifiedFor(m),
-      hasCog: m.filename === ORTHO_FILENAME && cogPresent,
+      hasCog: filesByName.has(cogSiblingName(m.filename)),
     })
+    knownFilenames.add(m.filename)
   }
-  if (orthoPresent && !meta.some((m) => m.filename === ORTHO_FILENAME)) {
+  // Synthesize a fallback entry for any `odm_orthophoto*.tif` on disk
+  // that has no metadata. Covers legacy runs (pre-versioned filenames)
+  // and the brief window after a RUN_ODM completes but before the
+  // outputs.versions append has landed in runStore.
+  for (const f of files) {
+    const name = f.object_name ?? ""
+    const basename = name.split("/").pop() ?? ""
+    if (!basename.startsWith(ORTHO_BASENAME_PREFIX)) continue
+    if (!isOrthoTif(basename)) continue
+    if (knownFilenames.has(basename)) continue
     versions.push({
       version: 0,
-      filename: ORTHO_FILENAME,
-      path: defaultProcessedPath(ORTHO_FILENAME),
+      filename: basename,
+      path: defaultProcessedPath(basename),
       label: null,
       source: "RUN_ODM",
-      createdAt: lastModifiedByName.get(ORTHO_FILENAME) ?? null,
-      hasCog: cogPresent,
+      createdAt: lastModifiedByName.get(basename) ?? null,
+      hasCog: filesByName.has(cogSiblingName(basename)),
     })
+    knownFilenames.add(basename)
   }
 
   versions.sort((a, b) => {
@@ -170,4 +189,41 @@ export function buildOrthoVersions(
 
 export function isOrthoTif(name: string): boolean {
   return /\.tif?f$/i.test(name) && !/-Pyramid\.tif?f$/i.test(name)
+}
+
+/**
+ * Build an OrthoVersionMeta entry from a completed RUN_ODM JobOutput and
+ * append it to `existing`, returning the merged array. Returns null when
+ * the job didn't produce an orthophoto_path, or when a meta entry with
+ * the same jobId is already present (idempotent — both the WS terminal
+ * frame and the periodic poll in RunDetail can call this for the same
+ * job, and only the first should land).
+ */
+export function mergeOrthoVersionFromJobResult(
+  existing: OrthoVersionMeta[],
+  job:
+    | {
+        id?: string | number | null
+        result?: Record<string, unknown> | null
+        completed_at?: string | null
+      }
+    | null
+    | undefined,
+): OrthoVersionMeta[] | null {
+  if (!job) return null
+  const result = job.result ?? null
+  if (!result || typeof result !== "object") return null
+  const orthoPath = (result as { orthophoto_path?: unknown }).orthophoto_path
+  if (typeof orthoPath !== "string" || orthoPath === "") return null
+  const jobId = job.id != null ? String(job.id) : undefined
+  if (jobId && existing.some((m) => m.jobId === jobId)) return null
+  const filename = orthoPath.split("/").pop() ?? orthoPath
+  const meta: OrthoVersionMeta = {
+    filename,
+    path: `${DEFAULT_BUCKET}/${orthoPath}`,
+    source: "RUN_ODM",
+    jobId,
+    createdAt: job.completed_at ?? new Date().toISOString(),
+  }
+  return [...existing, meta]
 }

@@ -58,6 +58,7 @@ import type {
   ImportMetadata,
   UploadResults,
 } from "@/features/import/lib/types"
+import { extractApiErrorMessage } from "@/lib/apiError"
 import { runWithConcurrency } from "@/lib/concurrency"
 
 interface StepUploadProps {
@@ -384,7 +385,7 @@ export function StepUpload({
         if (abortedRef.current) return
         setPhase("done")
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = extractApiErrorMessage(err)
         setErrorMessage(msg)
         setPhase("error")
         setCreationSteps((prev) => {

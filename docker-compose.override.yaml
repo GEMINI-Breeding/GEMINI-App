@@ -8,7 +8,7 @@
 #   • Python source under `backend/gemini/`
 #       - rest-api: already bind-mounted with `--reload`; live edits
 #         take effect without watch (left as-is).
-#       - workers (ml, geo, flir, odm, gwas): synced into the container
+#       - workers (ml, geo, odm, gwas): synced into the container
 #         AND the worker process is restarted (sync+restart), since
 #         worker scripts have no reload mechanism of their own.
 #   • Dependency / Dockerfile changes
@@ -67,19 +67,6 @@ services:
           target: /app/gemini
         - action: rebuild
           path: ./backend/gemini/workers/geo/Dockerfile
-        - action: rebuild
-          path: ./backend/pyproject.toml
-        - action: rebuild
-          path: ./backend/poetry.lock
-
-  geminibase-worker-flir:
-    develop:
-      watch:
-        - action: sync+restart
-          path: ./backend/gemini
-          target: /app/gemini
-        - action: rebuild
-          path: ./backend/gemini/workers/flir/Dockerfile
         - action: rebuild
           path: ./backend/pyproject.toml
         - action: rebuild

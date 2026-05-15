@@ -68,7 +68,11 @@ import {
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
 import { usePlotGeometryVersions } from "@/features/process/hooks/usePlotGeometry"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
-import { buildOrthoVersions } from "@/features/process/lib/orthoVersions"
+import {
+  buildOrthoVersions,
+  mergeOrthoVersionFromJobResult,
+  readOrthoOutputs,
+} from "@/features/process/lib/orthoVersions"
 import {
   type AerialScope,
   isAerialScopeComplete,
@@ -88,6 +92,7 @@ import {
   subscribeJobAsRunEvent,
 } from "@/features/process/lib/runEvents"
 import {
+  getRun,
   setStepState,
   usePipeline,
   useRun,
@@ -909,10 +914,30 @@ export function RunDetail() {
         if (!job) return
         const status = String(job.status ?? "")
         if (status === "COMPLETED") {
-          setStepState(runId, stepKey, {
-            status: "completed",
-            completedAt: new Date().toISOString(),
-          })
+          // Orthomosaic: append the new OrthoVersionMeta atomically with
+          // marking the step completed. mergeOrthoVersionFromJobResult is
+          // idempotent on jobId, so re-firing here after the WS path already
+          // ran is a no-op.
+          if (stepKey === "orthomosaic") {
+            const r = getRun(runId)
+            const existing = readOrthoOutputs(r)
+            const merged = mergeOrthoVersionFromJobResult(existing, job)
+            setStepState(runId, stepKey, {
+              status: "completed",
+              completedAt: new Date().toISOString(),
+              outputs: merged
+                ? {
+                    ...(r?.steps?.orthomosaic?.outputs ?? {}),
+                    versions: merged,
+                  }
+                : (r?.steps?.orthomosaic?.outputs ?? undefined),
+            })
+          } else {
+            setStepState(runId, stepKey, {
+              status: "completed",
+              completedAt: new Date().toISOString(),
+            })
+          }
         } else if (status === "FAILED") {
           setStepState(runId, stepKey, {
             status: "failed",
@@ -957,20 +982,24 @@ export function RunDetail() {
         // moves the bottom ProcessPanel forward — the step row stays stuck.
         if (evt.terminal) {
           if (evt.event === "complete") {
-            setStepState(runId, stepKey, {
-              status: "completed",
-              completedAt: new Date(evt.timestamp).toISOString(),
-            })
-            // RUN_ODM landed: refetch the Processed/ listing so the
-            // new ortho TIF appears in OrthoVersionsPanel without a
-            // page reload.
             if (stepKey === "orthomosaic") {
+              // RUN_ODM landed. Trigger a fresh poll so settleFromJobStatus
+              // fetches the job, reads result.orthophoto_path, and appends
+              // a new OrthoVersionMeta to outputs.versions (idempotent on
+              // jobId). Then refetch the Processed/ listing so the new
+              // TIF appears in OrthoVersionsPanel without a page reload.
+              pollOnce()
               queryClient.invalidateQueries({
                 queryKey: [
                   "files",
                   "list",
                   scope ? processedPrefix(scope) : null,
                 ],
+              })
+            } else {
+              setStepState(runId, stepKey, {
+                status: "completed",
+                completedAt: new Date(evt.timestamp).toISOString(),
               })
             }
           } else if (evt.event === "error") {

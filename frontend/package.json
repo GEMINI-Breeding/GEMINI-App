@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "predev": "../scripts/check-worker-staleness.sh",
     "dev": "vite",
     "dev:backend": "../scripts/start-backend.sh",
     "dev:full": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev\"",

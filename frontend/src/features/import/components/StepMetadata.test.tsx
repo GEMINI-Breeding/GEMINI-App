@@ -18,6 +18,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  DatasetsService,
   ExperimentsService,
   PopulationsService,
   SeasonsService,
@@ -79,6 +80,13 @@ beforeEach(() => {
   vi.spyOn(SensorsService, "apiSensorsAllGetAllSensors").mockResolvedValue(
     [] as never,
   )
+  // useExistingDatasetNames fires on mount; default to "no existing
+  // datasets" so the conflict warning stays hidden unless a test
+  // overrides this mock.
+  vi.spyOn(
+    DatasetsService,
+    "apiDatasetsAllGetAllDatasets",
+  ).mockResolvedValue([] as never)
 })
 
 afterEach(() => {
@@ -191,6 +199,68 @@ describe("StepMetadata", () => {
     await screen.findByTestId("entity-select-experiment")
     expect(screen.queryByTestId("entity-select-sensor-platform")).toBeNull()
     expect(screen.queryByTestId("entity-select-sensor")).toBeNull()
+  })
+
+  it("warns when a typed dataset name collides with an existing dataset", async () => {
+    // Surface an existing dataset called "GEMINI - 2026-05-01" so the
+    // initial dataset name we pass in trips the conflict warning.
+    vi.spyOn(
+      DatasetsService,
+      "apiDatasetsAllGetAllDatasets",
+    ).mockResolvedValue([
+      { id: "ds-existing", dataset_name: "GEMINI - 2026-05-01" },
+    ] as never)
+    render(
+      <StepMetadata
+        detection={detection()}
+        initial={{
+          experimentId: "exp-1",
+          experimentName: "GEMINI",
+          sensorPlatformName: "",
+          sensorName: "",
+          datasetNames: ["GEMINI - 2026-05-01"],
+          createNew: { experiment: false, sensorPlatform: false, sensor: false },
+        }}
+        onNext={() => {}}
+        onBack={() => {}}
+      />,
+      { wrapper },
+    )
+    // Warning is async — it waits for the datasets query to resolve.
+    expect(
+      await screen.findByTestId("dataset-name-warning-0"),
+    ).toBeInTheDocument()
+    // Continue must NOT be disabled by the warning — merging is allowed,
+    // just made visible. (No experiment is picked in this `initial`
+    // either, so the existing experiment guard might still disable
+    // Continue; we only assert that the *warning* didn't block the
+    // input's aria-validity flag.)
+    expect(screen.getByTestId("dataset-name-0")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    )
+  })
+
+  it("does not warn when the typed name has no collision", async () => {
+    render(
+      <StepMetadata
+        detection={detection()}
+        initial={{
+          experimentId: "exp-1",
+          experimentName: "GEMINI",
+          sensorPlatformName: "",
+          sensorName: "",
+          // Default mock returns no datasets, so this name can't collide.
+          datasetNames: ["GEMINI - Traits - 2026-05-01 - a3f7"],
+          createNew: { experiment: false, sensorPlatform: false, sensor: false },
+        }}
+        onNext={() => {}}
+        onBack={() => {}}
+      />,
+      { wrapper },
+    )
+    await screen.findByTestId("entity-select-experiment")
+    expect(screen.queryByTestId("dataset-name-warning-0")).toBeNull()
   })
 
   it("renders sensor fields for drone_imagery", async () => {

@@ -71,6 +71,13 @@ export const test = base.extend<Fixtures>({
       // afterEach: best-effort sweep. Logged but not failed-on if the
       // endpoint is misconfigured — the test outcome already passed/
       // failed by this point.
+      // Local debugging escape hatch: set KEEP_E2E_DATA=1 to keep the
+      // test's MinIO + DB entities around so the produced artifacts can
+      // be inspected.
+      if (process.env.KEEP_E2E_DATA === "1") {
+        console.warn(`[fixtures] KEEP_E2E_DATA=1 — skipping cleanup for ${prefix}`)
+        return
+      }
       try {
         await cleanupByPrefix(prefix)
       } catch (err) {

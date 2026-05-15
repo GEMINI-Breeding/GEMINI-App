@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import { WizardShell } from "@/features/import/components/WizardShell"
+import { buildDatasetName } from "@/features/import/lib/datasetName"
 import {
   type DetectionResult,
   detectFiles,
@@ -85,6 +86,7 @@ function entity(choice: EntityChoice | undefined): {
 function buildInitialMetadata(
   scope: Record<string, EntityChoice>,
   formValues: Record<string, string>,
+  dataKind: ImportDataKind,
 ): ImportMetadata | undefined {
   const experiment = entity(scope.experiment)
   if (!experiment.name) return undefined
@@ -99,10 +101,16 @@ function buildInitialMetadata(
   // so the literal "None" lands in the dataset name).
   //
   // Mirrors `defaultDatasetNames` in StepMetadata.tsx for consistency
-  // between entry paths.
-  const today = new Date().toISOString().slice(0, 10)
-  const date = (formValues.date ?? "").trim() || today
-  const datasetName = `${experiment.name} - ${date}`
+  // between entry paths. Only treats `formValues.date` as the collection
+  // date when the user actually typed one — falling back to "today"
+  // would put the upload date in the name, which is misleading.
+  const userTypedDate = (formValues.date ?? "").trim() || null
+  const category = dataKind === "genomic" ? "genomic" : "csv_tabular"
+  const datasetName = buildDatasetName({
+    expName: experiment.name,
+    category,
+    collectionDate: userTypedDate,
+  })
 
   return {
     experimentId: experiment.id,
@@ -140,8 +148,8 @@ export function ImportWizardDialog({
   // dialog mounts once per file selection so this is just a stable ref.
   const decorated = useMemo(() => decorate(files), [files])
   const initialMetadata = useMemo(
-    () => buildInitialMetadata(scope, formValues),
-    [scope, formValues],
+    () => buildInitialMetadata(scope, formValues, dataKind),
+    [scope, formValues, dataKind],
   )
 
   // Run the detection engine on the dropped file. For xlsx, this peeks

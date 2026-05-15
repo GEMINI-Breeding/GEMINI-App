@@ -178,6 +178,11 @@ export interface HeritabilityPanel {
   var_g: number | null
   var_e: number | null
   h2: number | null
+  /** Reference value BLUPs are centered on — REML intercept when the
+   *  fit converges, arithmetic trait mean for the moment-estimator
+   *  fallback. Use as the "average" reference when computing per-
+   *  accession deviation. */
+  grand_mean: number | null
   convergence_status:
     | "ok"
     | "warning"
