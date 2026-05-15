@@ -34,6 +34,30 @@ export type BoundaryMapProps = {
   orthoBounds?: [[number, number], [number, number]]
   /** 0-1 overlay opacity (default 0.85). */
   orthoOpacity?: number
+  /**
+   * Currently-selected blockId. The matching outer polygon renders with
+   * a highlight stroke; its grid cells render in the block's accent color
+   * at higher opacity.
+   */
+  selectedBlockId?: string | null
+  /**
+   * Fires when the user clicks an outer-boundary polygon. Pass through to
+   * lift the selected block into the parent component.
+   */
+  onSelectBlock?: (blockId: string) => void
+}
+
+/**
+ * Deterministic HSL colour from a blockId. Same id → same hue every
+ * render, so a block keeps its accent across re-renders and reloads.
+ */
+function colorForBlockId(blockId: string): string {
+  let h = 0
+  for (let i = 0; i < blockId.length; i += 1) {
+    h = (h * 31 + blockId.charCodeAt(i)) >>> 0
+  }
+  const hue = h % 360
+  return `hsl(${hue}, 75%, 45%)`
 }
 
 export function BoundaryMap({
@@ -45,6 +69,8 @@ export function BoundaryMap({
   orthoTileUrl,
   orthoBounds,
   orthoOpacity,
+  selectedBlockId,
+  onSelectBlock,
 }: BoundaryMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -52,11 +78,19 @@ export function BoundaryMap({
   const orthoLayerRef = useRef<L.TileLayer | null>(null)
   const didFitOrthoRef = useRef(false)
   const onChangeRef = useRef(onFeaturesChange)
+  const onSelectBlockRef = useRef(onSelectBlock)
   // Latest orthoTileUrl available at map-init time. Refs let the one-time
   // init effect read the current prop without depending on it.
   useEffect(() => {
     onChangeRef.current = onFeaturesChange
   }, [onFeaturesChange])
+  useEffect(() => {
+    onSelectBlockRef.current = onSelectBlock
+  }, [onSelectBlock])
+  // Track the feature-count signature so we can refit the map only when
+  // polygons are added/removed — not on every pm:edit. Without this
+  // guard, dragging a vertex causes a refit that yanks the view.
+  const lastFitSignatureRef = useRef<string>("")
 
   // One-time map init.
   useEffect(() => {
@@ -123,6 +157,51 @@ export function BoundaryMap({
       rotateMode: false,
     })
     map.pm.setGlobalOptions({ layerGroup: editable })
+
+    // Rename Geoman's tool tooltips from "Layer(s)" to "Block(s)" so the
+    // UI matches the rest of the boundary-prep tool's terminology. The
+    // strings here come from Geoman's default English translation table
+    // (buttonTitles + tooltips); only the keys we want to override need
+    // to appear, but setLang requires the full object shape so we set
+    // the rest verbatim from the source. fallback = "en" keeps Geoman's
+    // built-in strings for anything we haven't named.
+    const customLang = {
+      tooltips: {
+        placeMarker: "Click to place marker",
+        firstVertex: "Click to place first vertex",
+        continueLine: "Click to continue drawing",
+        finishLine: "Click any existing marker to finish",
+        finishPoly: "Click first marker to finish",
+        finishRect: "Click to finish",
+        startCircle: "Click to place circle center",
+        finishCircle: "Click to finish circle",
+        placeCircleMarker: "Click to place circle marker",
+        placeText: "Click to place text",
+      },
+      actions: {
+        finish: "Finish",
+        cancel: "Cancel",
+        removeLastVertex: "Remove Last Vertex",
+      },
+      buttonTitles: {
+        drawMarkerButton: "Draw Marker",
+        drawPolyButton: "Draw Polygons",
+        drawLineButton: "Draw Polyline",
+        drawCircleButton: "Draw Circle",
+        drawRectButton: "Draw Rectangle",
+        editButton: "Edit Blocks",
+        dragButton: "Drag Blocks",
+        cutButton: "Cut Blocks",
+        deleteButton: "Remove Blocks",
+        drawCircleMarkerButton: "Draw Circle Marker",
+        snappingButton: "Snap dragged marker to other layers and vertices",
+        pinningButton: "Pin shared vertices together",
+        rotateButton: "Rotate Blocks",
+        drawTextButton: "Draw Text",
+        scaleButton: "Scale Blocks",
+      },
+    } as unknown as Parameters<typeof map.pm.setLang>[1]
+    map.pm.setLang("en", customLang, "en")
 
     function emit() {
       const out: GeoJSON.Feature[] = []
@@ -216,11 +295,60 @@ export function BoundaryMap({
 
     layer.clearLayers()
     for (const f of features) {
-      L.geoJSON(f as GeoJSON.GeoJsonObject, {
-        style: { color: "#2563eb", weight: 2, fillOpacity: 0.2 },
-      }).eachLayer((l) => layer.addLayer(l))
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      const blockId =
+        typeof props.blockId === "string" ? (props.blockId as string) : null
+      const isOuter = props.role === "outer"
+      const isSelected = blockId != null && blockId === selectedBlockId
+      const accent = blockId ? colorForBlockId(blockId) : "#2563eb"
+      // Outer boundaries draw with a thicker stroke and minimal fill so
+      // the user can see what's inside; grid cells draw with the block's
+      // accent at a higher fill so they read as one cohesive group.
+      const baseStyle: L.PathOptions = isOuter
+        ? {
+            color: isSelected ? "#facc15" : accent,
+            weight: isSelected ? 4 : 2,
+            fillOpacity: 0.05,
+            dashArray: isSelected ? undefined : "4 4",
+          }
+        : {
+            color: accent,
+            weight: 1,
+            fillOpacity: isSelected ? 0.35 : 0.2,
+          }
+      L.geoJSON(f as GeoJSON.GeoJsonObject, { style: baseStyle }).eachLayer(
+        (l) => {
+          // Clicking an outer polygon selects that block. Use a flag on
+          // the layer so pm-edit clicks don't double-fire selection.
+          if (isOuter && blockId) {
+            ;(l as L.Path).on?.("click", (ev: L.LeafletMouseEvent) => {
+              // Stop the click from propagating to the map background so
+              // it doesn't deselect or interfere with Geoman tooling.
+              L.DomEvent.stopPropagation(ev.originalEvent)
+              onSelectBlockRef.current?.(blockId)
+            })
+            // Tooltip with the block label so the user can identify
+            // which polygon is which at a glance.
+            const label =
+              typeof props.label === "string" ? (props.label as string) : null
+            if (label) {
+              ;(l as L.Path).bindTooltip?.(label, {
+                permanent: true,
+                direction: "center",
+                className: "boundary-block-label",
+              })
+            }
+          }
+          layer.addLayer(l)
+        },
+      )
     }
-    if (features.length > 0) {
+    // Refit only when the polygon count changes — i.e. when polygons are
+    // added or removed. pm:edit produces the same count, so dragging a
+    // vertex no longer yanks the user's view.
+    const signature = String(features.length)
+    if (features.length > 0 && signature !== lastFitSignatureRef.current) {
+      lastFitSignatureRef.current = signature
       try {
         const bounds = layer.getBounds()
         if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] })
@@ -228,7 +356,7 @@ export function BoundaryMap({
         // ignore
       }
     }
-  }, [features])
+  }, [features, selectedBlockId])
 
   return (
     <div

@@ -71,6 +71,61 @@ import useCustomToast from "@/hooks/useCustomToast"
 
 const DEFAULT_BUCKET = "gemini"
 
+type BlockParams = {
+  label: string
+  rows: number
+  cols: number
+  angle: number
+  gapMeters: number
+}
+
+const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
+  rows: 4,
+  cols: 10,
+  angle: 0,
+  gapMeters: 0,
+}
+
+function bboxOuterFromFeatures(
+  fs: GeoJSON.Feature[],
+): GeoJSON.Feature<GeoJSON.Polygon> | null {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let any = false
+  for (const f of fs) {
+    if (f.geometry?.type !== "Polygon") continue
+    for (const [x, y] of (f.geometry as GeoJSON.Polygon).coordinates[0] as [
+      number,
+      number,
+    ][]) {
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+      any = true
+    }
+  }
+  if (!any) return null
+  return {
+    type: "Feature",
+    properties: { role: "outer" },
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [minX, minY],
+          [maxX, minY],
+          [maxX, maxY],
+          [minX, maxY],
+          [minX, minY],
+        ],
+      ],
+    },
+  }
+}
+
 export interface PlotBoundaryPrepProps {
   run: Run
   scope: AerialScope
@@ -86,22 +141,151 @@ export function PlotBoundaryPrep({
 }: PlotBoundaryPrepProps) {
   const directory = useMemo(() => processedPrefix(scope), [scope])
 
-  const [features, setFeatures] = useState<GeoJSON.Feature[]>([])
+  const [features, setFeaturesRaw] = useState<GeoJSON.Feature[]>([])
   const [versionToLoad, setVersionToLoad] = useState<number | null>(null)
   const [versionName, setVersionName] = useState("")
-  const [rows, setRows] = useState(4)
-  const [cols, setCols] = useState(10)
-  const [angle, setAngle] = useState(0)
-  const [gapMeters, setGapMeters] = useState(0)
+  // Per-block grid params. The user can draw multiple outer boundaries
+  // ("blocks"), each with its own rows/cols/angle/gap. The grid panel
+  // edits the active block; switching blocks via the map swaps which
+  // params are visible.
+  const [blocks, setBlocks] = useState<Record<string, BlockParams>>({})
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
   const [fieldDesign, setFieldDesign] = useState<FieldDesign | null>(null)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  // Default rows/cols for the *next* block to be drawn. Set when the
+  // user uploads a field design before drawing any boundary — otherwise
+  // the first block they draw would get the manual defaults (4×10)
+  // instead of the fd dimensions.
+  const [pendingDefaultParams, setPendingDefaultParams] = useState<{
+    rows: number
+    cols: number
+  } | null>(null)
+
   // Grid generation has two modes: "manual" (user picks rows/cols) and
   // "fd" (rows/cols come from an uploaded field-design CSV, which also
   // tags each polygon with the CSV's plot metadata). The user toggles
   // between them; switching back to "manual" doesn't discard the loaded
   // field design (so re-toggling restores it without re-upload).
   const [gridMode, setGridMode] = useState<"manual" | "fd">("manual")
+
+  // Derived active-block params. Falls back to pending defaults (set
+  // when a field design is loaded before any boundary is drawn), then
+  // to global defaults, so the inputs always render something sensible.
+  const activeParams: BlockParams =
+    activeBlockId && blocks[activeBlockId]
+      ? blocks[activeBlockId]
+      : {
+          label: "",
+          ...DEFAULT_BLOCK_PARAMS,
+          ...(pendingDefaultParams ?? {}),
+        }
+  const { rows, cols, angle, gapMeters } = activeParams
+
+  function updateActiveParams(patch: Partial<BlockParams>) {
+    if (activeBlockId) {
+      setBlocks((prev) => ({
+        ...prev,
+        [activeBlockId]: { ...(prev[activeBlockId] ?? activeParams), ...patch },
+      }))
+      return
+    }
+    // No active block — apply rows/cols to pendingDefaultParams so the
+    // value sticks until the user draws a boundary.
+    if (patch.rows !== undefined || patch.cols !== undefined) {
+      setPendingDefaultParams((prev) => ({
+        rows: patch.rows ?? prev?.rows ?? DEFAULT_BLOCK_PARAMS.rows,
+        cols: patch.cols ?? prev?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
+      }))
+    }
+  }
+  const setRows = (v: number) => updateActiveParams({ rows: v })
+  const setCols = (v: number) => updateActiveParams({ cols: v })
+  const setAngle = (v: number) => updateActiveParams({ angle: v })
+  const setGapMeters = (v: number) => updateActiveParams({ gapMeters: v })
+
+  // Wrap setFeatures so every incoming feature list (from the map or
+  // from grid generation/load) is reconciled with the per-block state.
+  // Three concerns:
+  //   1. Tag any newly-drawn polygon (no role, no blockId, no row/col)
+  //      as a new outer with a fresh blockId + auto label.
+  //   2. Drop any blockId from `blocks` whose outer polygon was deleted,
+  //      and discard cells that referenced the dead block.
+  //   3. Auto-select the most recently added outer.
+  function setFeatures(next: GeoJSON.Feature[]) {
+    let nextActive: string | null = activeBlockId
+    let newBlocks: Record<string, BlockParams> | null = null
+    let highestNum = 0
+    for (const id of Object.keys(blocks)) {
+      const m = id.match(/^block-(\d+)$/)
+      if (m) highestNum = Math.max(highestNum, Number(m[1]))
+    }
+    // Pass 1: stamp fresh outers.
+    const stamped = next.map((f) => {
+      if (f.geometry?.type !== "Polygon") return f
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      if (props.role === "outer" || typeof props.blockId === "string") return f
+      if (props.row !== undefined || props.col !== undefined) return f
+      highestNum += 1
+      const newId = `block-${highestNum}`
+      const label = `Block ${highestNum}`
+      if (!newBlocks) newBlocks = { ...blocks }
+      newBlocks[newId] = {
+        label,
+        ...DEFAULT_BLOCK_PARAMS,
+        ...(pendingDefaultParams ?? {}),
+      }
+      nextActive = newId
+      return {
+        ...f,
+        properties: {
+          ...(f.properties ?? {}),
+          role: "outer",
+          blockId: newId,
+          label,
+        },
+      }
+    })
+    // Pass 2: figure out which blocks still have a surviving outer.
+    const surviving = new Set<string>()
+    for (const f of stamped) {
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      if (props.role === "outer" && typeof props.blockId === "string") {
+        surviving.add(props.blockId as string)
+      }
+    }
+    // Pass 3: drop cells whose parent block is gone.
+    const pruned = stamped.filter((f) => {
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      if (props.role === "outer") return true
+      const bid = typeof props.blockId === "string" ? props.blockId : null
+      // Cells without a blockId are legacy/loaded features — keep them.
+      if (!bid) return true
+      return surviving.has(bid)
+    })
+    // Reconcile blocks dict.
+    const baseBlocks = newBlocks ?? blocks
+    let prunedBlocks: Record<string, BlockParams> = baseBlocks
+    let blocksChanged = newBlocks !== null
+    for (const id of Object.keys(baseBlocks)) {
+      if (!surviving.has(id)) {
+        if (!blocksChanged) {
+          prunedBlocks = { ...baseBlocks }
+          blocksChanged = true
+        }
+        delete prunedBlocks[id]
+      }
+    }
+    if (blocksChanged) setBlocks(prunedBlocks)
+    // Active block must still exist; otherwise pick any survivor or null.
+    if (nextActive && !surviving.has(nextActive)) {
+      nextActive = surviving.values().next().value ?? null
+    }
+    if (nextActive !== activeBlockId) setActiveBlockId(nextActive)
+    // We consumed pendingDefaultParams when creating new blocks above.
+    if (newBlocks && pendingDefaultParams) setPendingDefaultParams(null)
+    setFeaturesRaw(pruned)
+  }
 
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
@@ -163,48 +347,103 @@ export function PlotBoundaryPrep({
     return b ? tilejsonBoundsToLeaflet(b) : undefined
   }, [tilejsonQuery.data])
 
+  // Derived counts. The outer-boundary polygon is held in `features` (so
+  // it renders/edits on the map) but isn't a plot — keep it out of the
+  // count surfaced to the user and out of the save/clear gating.
+  const plotFeatureCount = useMemo(
+    () => features.filter((f) => f.properties?.role !== "outer").length,
+    [features],
+  )
+
   const loaded = useLoadPlotGeometryVersion(directory, versionToLoad)
   useEffect(() => {
     if (!loaded.data?.state_snapshot) return
     const fc = loaded.data.state_snapshot.boundaries
-    if (fc?.features) setFeatures(fc.features as GeoJSON.Feature[])
     const grid = loaded.data.state_snapshot.grid
-    if (grid) {
-      setRows(grid.rows)
-      setCols(grid.cols)
-      setAngle(grid.angle_deg ?? 0)
-      setGapMeters(grid.spacing_m ?? 0)
-    }
     const fd = loaded.data.state_snapshot.field_design
+
+    if (fc?.features) {
+      const loadedFeatures = fc.features as GeoJSON.Feature[]
+      // Group loaded cells by blockId. Snapshots saved before multi-block
+      // support don't carry blockId — bucket those into "block-1" so the
+      // UI presents them as a single legacy block.
+      const byBlock = new Map<string, GeoJSON.Feature[]>()
+      for (const f of loadedFeatures) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        const bid =
+          typeof props.blockId === "string" ? (props.blockId as string) : null
+        const key = bid ?? "block-1"
+        const arr = byBlock.get(key) ?? []
+        arr.push(f)
+        byBlock.set(key, arr)
+      }
+      // Reconstruct an outer for each block from the bbox of its cells.
+      // Snapshots strip outers at save time, so we always recompute on
+      // load — otherwise regenerateGrid would inscribe into a cell.
+      const outers: GeoJSON.Feature[] = []
+      const taggedCells: GeoJSON.Feature[] = []
+      const blockEntries: Record<string, BlockParams> = {}
+      let blockNum = 0
+      for (const [bid, cells] of byBlock.entries()) {
+        blockNum += 1
+        const numericMatch = bid.match(/^block-(\d+)$/)
+        const n = numericMatch ? Number(numericMatch[1]) : blockNum
+        const label = `Block ${n}`
+        const outer = bboxOuterFromFeatures(cells)
+        if (outer) {
+          outer.properties = {
+            ...(outer.properties ?? {}),
+            role: "outer",
+            blockId: bid,
+            label,
+          }
+          outers.push(outer)
+        }
+        // Stamp cells with blockId so they group correctly going forward.
+        for (const c of cells) {
+          taggedCells.push({
+            ...c,
+            properties: { ...(c.properties ?? {}), blockId: bid, block: label },
+          })
+        }
+        // Per-block grid params: prefer values saved on each cell (none
+        // today, but reserved for future), then the snapshot-wide grid,
+        // then defaults.
+        blockEntries[bid] = {
+          label,
+          rows: grid?.rows ?? DEFAULT_BLOCK_PARAMS.rows,
+          cols: grid?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
+          angle: grid?.angle_deg ?? DEFAULT_BLOCK_PARAMS.angle,
+          gapMeters: grid?.spacing_m ?? DEFAULT_BLOCK_PARAMS.gapMeters,
+        }
+      }
+      setBlocks(blockEntries)
+      setActiveBlockId(Object.keys(blockEntries)[0] ?? null)
+      setFeaturesRaw([...outers, ...taggedCells])
+    }
     if (fd) {
       setFieldDesign(fd)
       // The version was saved with a field design, so default the UI to
       // the field-design tab on reload.
       setGridMode("fd")
-      // Auto-populate Rows/Cols only when the loaded version has no grid
-      // yet — otherwise the saved grid wins.
-      if (!grid) {
-        const dims = dimensionsFromDesign(fd)
-        setRows(dims.rows)
-        setCols(dims.cols)
-      }
     }
   }, [loaded.data])
 
   function regenerateGrid() {
-    // Use the first polygon as the outer boundary; if none, do nothing.
-    const outer =
-      features.find(
-        (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
-          f.geometry?.type === "Polygon" &&
-          (f.properties?.role ?? "outer") === "outer",
-      ) ??
-      features.find(
-        (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
-          f.geometry?.type === "Polygon",
-      )
+    if (!activeBlockId) {
+      showErrorToast("Draw a boundary first, then generate the grid.")
+      return
+    }
+    const outer = features.find(
+      (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
+        f.geometry?.type === "Polygon" &&
+        f.properties?.role === "outer" &&
+        f.properties?.blockId === activeBlockId,
+    )
     if (!outer) {
-      showErrorToast("Draw an outer boundary first, then generate the grid.")
+      showErrorToast(
+        "Active block has no outer boundary — draw one or select another block.",
+      )
       return
     }
     const grid = generateGridFeatures(outer.geometry, {
@@ -214,33 +453,51 @@ export function PlotBoundaryPrep({
       gapXMeters: gapMeters,
       gapYMeters: gapMeters,
     })
-    // Replace the feature list with just the grid. The outer rectangle
-    // would otherwise be saved as one giant "plot" that wraps all the
-    // others — SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS treat every feature
-    // in the FeatureCollection as a distinct plot, so an enclosing
-    // rectangle creates a junk plot covering the whole field.
-    // Apply CSV-derived labels only when the user is in field-design
-    // mode. In manual mode the loaded field design is intentionally
-    // ignored so the polygons stay free of CSV metadata.
+    // Stamp every cell with the parent blockId + the block label so the
+    // map can colour them together and so saved snapshots carry the
+    // grouping. Apply CSV-derived labels only when the user is in
+    // field-design mode.
     const labeled =
       gridMode === "fd" && fieldDesign
         ? applyLabelsToFeatures(grid, fieldDesign)
         : grid
-    setFeatures(labeled)
+    const blockLabel = blocks[activeBlockId]?.label ?? activeBlockId
+    const tagged = labeled.map((f) => ({
+      ...f,
+      properties: {
+        ...(f.properties ?? {}),
+        blockId: activeBlockId,
+        block: blockLabel,
+      },
+    }))
+    // Replace only the *active* block's existing cells. Other blocks'
+    // outers and cells are preserved so the user can iterate per-block.
+    const keep = features.filter((f) => {
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      if (props.role === "outer") return true
+      return props.blockId !== activeBlockId
+    })
+    setFeaturesRaw([...keep, ...tagged])
   }
 
   function setFdTransform(transform: FdTransform) {
     if (!fieldDesign) return
     const next: FieldDesign = { ...fieldDesign, transform }
     setFieldDesign(next)
-    // Re-label the existing geometry live without redrawing.
-    if (features.length > 0) {
+    // Re-label the existing geometry live without redrawing. The outer
+    // boundary (role="outer") is excluded — it isn't a plot and would
+    // otherwise get spurious CSV row/col props bootstrapped onto it.
+    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    if (plotFeatures.length > 0) {
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
-        features,
+        features: plotFeatures,
       }
       const merged = mergeLabelsIntoExisting(fc, next)
-      setFeatures(merged.features as GeoJSON.Feature[])
+      const outerFeatures = features.filter(
+        (f) => f.properties?.role === "outer",
+      )
+      setFeatures([...outerFeatures, ...(merged.features as GeoJSON.Feature[])])
     }
   }
 
@@ -249,9 +506,15 @@ export function PlotBoundaryPrep({
     setFdDialogOpen(false)
     setGridMode("fd")
     const dims = dimensionsFromDesign(fd)
-    setRows(dims.rows)
-    setCols(dims.cols)
-    if (features.length === 0) {
+    if (activeBlockId) {
+      setRows(dims.rows)
+      setCols(dims.cols)
+    } else {
+      // No block yet — stash dims so the next-drawn block uses them.
+      setPendingDefaultParams({ rows: dims.rows, cols: dims.cols })
+    }
+    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    if (plotFeatures.length === 0) {
       showSuccessToast(
         `Field design loaded — ${fd.rows.length} plots (${dims.rows} × ${dims.cols}).`,
       )
@@ -259,10 +522,13 @@ export function PlotBoundaryPrep({
       // Re-label existing geometry against the newly uploaded design.
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
-        features,
+        features: plotFeatures,
       }
       const merged = mergeLabelsIntoExisting(fc, fd)
-      setFeatures(merged.features as GeoJSON.Feature[])
+      const outerFeatures = features.filter(
+        (f) => f.properties?.role === "outer",
+      )
+      setFeatures([...outerFeatures, ...(merged.features as GeoJSON.Feature[])])
       showSuccessToast(
         `Field design loaded — ${fd.rows.length} plots applied to existing geometry.`,
       )
@@ -306,13 +572,18 @@ export function PlotBoundaryPrep({
   }
 
   async function saveCurrent() {
-    if (features.length === 0) {
+    // Strip the role="outer" feature: SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS
+    // treat every feature in the saved FeatureCollection as a distinct
+    // plot, so an enclosing rectangle would create a junk plot covering
+    // the whole field.
+    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    if (plotFeatures.length === 0) {
       throw new Error("Draw at least one polygon first")
     }
     const snapshot: PlotGeometryStateSnapshot = {
-      boundaries: { type: "FeatureCollection", features },
+      boundaries: { type: "FeatureCollection", features: plotFeatures },
       grid: { rows, cols, spacing_m: gapMeters, angle_deg: angle },
-      created_from: features.length > 1 ? "grid" : "draw",
+      created_from: plotFeatures.length > 1 ? "grid" : "draw",
       // Only persist the field design when the user is on the field-
       // design tab. Otherwise toggling to Manual + saving would still
       // carry hidden CSV state on the snapshot.
@@ -355,11 +626,14 @@ export function PlotBoundaryPrep({
               onFeaturesChange={setFeatures}
               orthoTileUrl={orthoTileUrl}
               orthoBounds={orthoBounds}
+              selectedBlockId={activeBlockId}
+              onSelectBlock={setActiveBlockId}
             />
             <div className="mt-2 flex items-center justify-between text-xs">
               <p className="text-muted-foreground">
-                {features.length} feature{features.length === 1 ? "" : "s"}{" "}
-                drawn
+                {plotFeatureCount} plot{plotFeatureCount === 1 ? "" : "s"}{" "}
+                across {Object.keys(blocks).length} block
+                {Object.keys(blocks).length === 1 ? "" : "s"}
               </p>
               {activeOrtho && tilejsonQuery.isError && (
                 <p className="text-muted-foreground italic">
@@ -373,12 +647,42 @@ export function PlotBoundaryPrep({
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Grid</CardTitle>
+              <CardTitle className="text-base">
+                Grid
+                {activeBlockId && blocks[activeBlockId] ? (
+                  <span
+                    className="ml-2 text-sm font-normal text-muted-foreground"
+                    data-testid="active-block-label"
+                  >
+                    — {blocks[activeBlockId].label} active
+                  </span>
+                ) : null}
+              </CardTitle>
               <CardDescription>
-                Generate plot rectangles inscribed in the outer polygon.
+                {Object.keys(blocks).length > 1
+                  ? "Click a boundary on the map to switch which block the grid panel targets."
+                  : "Generate plot rectangles inscribed in the outer polygon."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {Object.keys(blocks).length > 1 ? (
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  data-testid="block-switcher"
+                >
+                  {Object.entries(blocks).map(([id, p]) => (
+                    <Button
+                      key={id}
+                      size="sm"
+                      variant={id === activeBlockId ? "default" : "outline"}
+                      onClick={() => setActiveBlockId(id)}
+                      data-testid={`block-switch-${id}`}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
               <Tabs
                 value={gridMode}
                 onValueChange={(v) => setGridMode(v as "manual" | "fd")}
@@ -458,7 +762,15 @@ export function PlotBoundaryPrep({
                         <p className="mb-1.5">
                           Field design:{" "}
                           <strong>{fieldDesign.rows.length}</strong> plots
-                          loaded ({rows} × {cols})
+                          loaded (
+                          {activeBlockId
+                            ? rows
+                            : (pendingDefaultParams?.rows ?? rows)}{" "}
+                          ×{" "}
+                          {activeBlockId
+                            ? cols
+                            : (pendingDefaultParams?.cols ?? cols)}
+                          )
                         </p>
                         <div className="mb-2 flex items-center gap-3">
                           <Label
@@ -580,7 +892,9 @@ export function PlotBoundaryPrep({
                   size="sm"
                   variant="outline"
                   onClick={regenerateGrid}
-                  disabled={gridMode === "fd" && !fieldDesign}
+                  disabled={
+                    !activeBlockId || (gridMode === "fd" && !fieldDesign)
+                  }
                 >
                   Generate plot grid
                 </Button>
@@ -619,7 +933,7 @@ export function PlotBoundaryPrep({
                   data-testid="boundary-save-and-complete"
                   onClick={handleSaveAndComplete}
                   disabled={
-                    features.length === 0 ||
+                    plotFeatureCount === 0 ||
                     save.isPending ||
                     activate.isPending
                   }
@@ -631,7 +945,7 @@ export function PlotBoundaryPrep({
                 <Button
                   variant="outline"
                   onClick={handleSaveOnly}
-                  disabled={features.length === 0 || save.isPending}
+                  disabled={plotFeatureCount === 0 || save.isPending}
                 >
                   Save without activating
                 </Button>
