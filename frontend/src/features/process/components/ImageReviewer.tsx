@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { ImageDotMap } from "@/features/process/components/ImageDotMap"
+import { useActiveDatasetShortId } from "@/features/process/hooks/useActiveDatasetShortId"
 import { useImageGps } from "@/features/process/hooks/useImageGps"
 import {
   parseImageFilter,
@@ -55,10 +56,13 @@ export function ImageReviewer({
   // The map needs a single dataset to render — pulling per-image GPS
   // from the worker-cached endpoint requires one prefix. Multi-dataset
   // image-review would need a UX redesign (which dot belongs to which
-  // dataset?), so we gate the tool on exactly one selection.
+  // dataset?), so we gate the tool on exactly one. When the scope has
+  // only one observed dataset, that one is auto-picked.
+  const { activeShortId, observedShortIds } = useActiveDatasetShortId(
+    scope,
+    run,
+  )
   const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
-  const activeShortId =
-    datasetShortIds.length === 1 ? datasetShortIds[0] : null
 
   // useImageGps tolerates null and disables its queries — the tool
   // shows a "pick exactly one dataset" prompt below when the user
@@ -187,9 +191,9 @@ export function ImageReviewer({
             Pick exactly one dataset to review
           </CardTitle>
           <CardDescription data-testid="image-review-needs-single-dataset">
-            {datasetShortIds.length === 0
-              ? "This run is targeting all datasets at this scope. Open the run page and select a single dataset before opening the image review tool."
-              : `This run targets ${datasetShortIds.length} datasets. The image review tool operates on one dataset at a time — narrow the selection on the run page first.`}
+            {datasetShortIds.length > 1
+              ? `This run targets ${datasetShortIds.length} datasets. The image review tool operates on one dataset at a time — narrow the selection on the run page first.`
+              : `This scope has ${observedShortIds.length} datasets and no single one is selected. Open the run page and pick exactly one dataset before opening the image review tool.`}
           </CardDescription>
         </CardHeader>
       </Card>

@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { ImageDotMap } from "@/features/process/components/ImageDotMap"
+import { useActiveDatasetShortId } from "@/features/process/hooks/useActiveDatasetShortId"
 import { useImageGps } from "@/features/process/hooks/useImageGps"
 import { parseImageFilter } from "@/features/process/lib/imageFilter"
 import {
@@ -719,11 +720,14 @@ export function GcpPicker({
 
   // GCP picker is single-dataset: each mark ties a GCP to a pixel in
   // a specific image, and a GCP set typically belongs to a flight (not
-  // arbitrarily across uploads). Gate the tool on exactly one selected
-  // dataset; the wizard's multi-select governs which one.
+  // arbitrarily across uploads). When the scope has only one observed
+  // dataset, that one is auto-picked; when multiple are observed the
+  // user must narrow the run's selection.
+  const { activeShortId, observedShortIds } = useActiveDatasetShortId(
+    scope,
+    run,
+  )
   const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
-  const activeShortId =
-    datasetShortIds.length === 1 ? datasetShortIds[0] : null
 
   // Image listing + EXIF GPS — shared with the image-review step.
   const {
@@ -1510,9 +1514,9 @@ export function GcpPicker({
             Pick exactly one dataset for GCP marking
           </CardTitle>
           <CardDescription data-testid="gcp-picker-needs-single-dataset">
-            {datasetShortIds.length === 0
-              ? "This run is targeting all datasets at this scope. Open the run page and select a single dataset before opening the GCP tool."
-              : `This run targets ${datasetShortIds.length} datasets. The GCP picker operates on one dataset at a time — narrow the selection on the run page first.`}
+            {datasetShortIds.length > 1
+              ? `This run targets ${datasetShortIds.length} datasets. The GCP picker operates on one dataset at a time — narrow the selection on the run page first.`
+              : `This scope has ${observedShortIds.length} datasets and no single one is selected. Open the run page and pick exactly one dataset before opening the GCP tool.`}
           </CardDescription>
         </CardHeader>
       </Card>
