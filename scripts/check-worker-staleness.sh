@@ -139,10 +139,14 @@ for s in "${stale[@]}"; do
   short_names+=("$name")
 done
 
-# Build a single rebuild command the developer can copy/paste.
+# Build a single rebuild command the developer can copy/paste. Use
+# the absolute compose-file path so the command works regardless of
+# which directory `npm run dev` was invoked from (typically frontend/,
+# where a bare `-f docker-compose.yaml` would not resolve).
+COMPOSE_FILE="$BACKEND_DIR/gemini/pipeline/docker-compose.yaml"
 echo
 echo "${DIM}To refresh:${RESET}"
-echo "  docker compose -p geminibase -f docker-compose.yaml up -d --build ${short_names[*]}"
+echo "  docker compose -p geminibase -f $COMPOSE_FILE up -d --build ${short_names[*]}"
 echo "${DIM}(set SKIP_STALE_CHECK=1 to suppress this check)${RESET}"
 echo
 
