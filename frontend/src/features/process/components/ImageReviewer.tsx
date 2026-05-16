@@ -84,20 +84,26 @@ export function ImageReviewer({
   // `_load_image_filter` lookup.
   const scopePrefix = rawScopePrefix(scope)
   const filterObjectName = `${scopePrefix}${FILTER_FILENAME}`
-  // Try to fetch on every mount; 404 → empty set. Avoids a
-  // chicken-and-egg list/check pass that the per-dataset images query
-  // can't satisfy (the filter file lives one directory up from the
-  // images this hook lists).
-  const filterQuery = useQuery<Set<string>, Error>({
-    queryKey: ["image-filter", filterObjectName],
+  // Existence pre-check via a non-recursive listing of the scope
+  // root. Avoids the 404 console-error noise that an unconditional
+  // download generates for scopes that haven't yet saved a filter.
+  const scopeListingQuery = useQuery<string[], Error>({
+    queryKey: ["files", "list-scope-root", scopePrefix],
     queryFn: async () => {
-      try {
-        return parseImageFilter(await fetchObjectAsText(filterObjectName))
-      } catch {
-        return new Set<string>()
-      }
+      const res = await FilesService.apiFilesListFilePathListFiles({
+        filePath: `${DEFAULT_BUCKET}/${scopePrefix}`,
+      })
+      const list = (res as { object_name: string }[] | null) ?? []
+      return list.map((f) => f.object_name)
     },
     enabled: Boolean(activeShortId),
+  })
+  const filterOnDisk =
+    scopeListingQuery.data?.includes(filterObjectName) ?? false
+  const filterQuery = useQuery<Set<string>, Error>({
+    queryKey: ["image-filter", filterObjectName],
+    queryFn: async () => parseImageFilter(await fetchObjectAsText(filterObjectName)),
+    enabled: Boolean(activeShortId) && filterOnDisk,
   })
 
   // ── Selection state ───────────────────────────────────────────────────────
@@ -163,6 +169,11 @@ export function ImageReviewer({
       // exclusion immediately when the user navigates over.
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix, "gcp-picker"],
+      })
+      // The scope-root listing gates filterOnDisk; refresh so the
+      // newly-saved file is picked up next time the picker mounts.
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
       })
       showSuccessToast(
         `Saved ${FILTER_FILENAME} (${excluded.size} excluded, ${includedCount} kept)`,

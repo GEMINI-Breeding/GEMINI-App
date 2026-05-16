@@ -163,19 +163,8 @@ test.describe("Image Review (optional aerial step)", () => {
     request,
     baseURL,
     runPrefix,
-    consoleErrorGuard,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
-
-    // The image-filter try-fetch 404s on first load when no filter
-    // exists yet — the picker tolerates it and starts with an empty
-    // exclusion set. Chromium still logs the 404; whitelist it.
-    consoleErrorGuard.expectError(/image_filter\.txt/)
-    // Leaflet's marker-shadow image is served from node_modules in the
-    // dev server, which the Vite middleware refuses with a 403 unless
-    // the file is allowlisted. Pre-existing dev-only noise unrelated
-    // to image review; whitelist.
-    consoleErrorGuard.expectError(/leaflet\/dist\/images/)
 
     const scope = await createWorkspaceAndOpenRun(page, { runPrefix })
 

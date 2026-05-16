@@ -747,11 +747,26 @@ export function GcpPicker({
   const scopePrefix = rawScopePrefix(scope)
   const csvObjectName = `${scopePrefix}${CSV_FILENAME}`
   const groupsObjectName = `${scopePrefix}${GROUPS_FILENAME}`
-  // Try-fetch pattern: the per-dataset image listing won't surface
-  // these sibling files, so we always attempt the download and
-  // tolerate 404 with an empty result.
-  const csvQueryEnabled = Boolean(activeShortId)
-  const groupsQueryEnabled = Boolean(activeShortId)
+  // Existence pre-check via a non-recursive listing of the scope root.
+  // Without this the picker's three sidecar queries would each fire a
+  // download on mount, each 404'ing for scopes that don't yet have
+  // sidecars — Chromium logs every 404 as a console.error which then
+  // trips the strict E2E console-error guard.
+  const scopeListingQuery = useQuery<string[], Error>({
+    queryKey: ["files", "list-scope-root", scopePrefix],
+    queryFn: async () => {
+      const res = await FilesService.apiFilesListFilePathListFiles({
+        filePath: `${DEFAULT_BUCKET}/${scopePrefix}`,
+      })
+      const list = (res as { object_name: string }[] | null) ?? []
+      return list.map((f) => f.object_name)
+    },
+    enabled: Boolean(activeShortId),
+  })
+  const scopeListNames = scopeListingQuery.data ?? []
+  const csvOnDisk = scopeListNames.includes(csvObjectName)
+  const groupsOnDisk = scopeListNames.includes(groupsObjectName)
+  const filterOnDisk = scopeListNames.includes(`${scopePrefix}${IMAGE_FILTER_FILENAME}`)
 
   // ── Excluded images (image_review step) ───────────────────────────────────
   // The optional Image Exclusion step writes `image_filter.txt` at
@@ -760,14 +775,8 @@ export function GcpPicker({
   const filterObjectName = `${scopePrefix}${IMAGE_FILTER_FILENAME}`
   const filterQuery = useQuery<Set<string>, Error>({
     queryKey: ["gcp-image-filter", filterObjectName],
-    queryFn: async () => {
-      try {
-        return parseImageFilter(await fetchObjectAsText(filterObjectName))
-      } catch {
-        return new Set<string>()
-      }
-    },
-    enabled: Boolean(activeShortId),
+    queryFn: async () => parseImageFilter(await fetchObjectAsText(filterObjectName)),
+    enabled: Boolean(activeShortId) && filterOnDisk,
   })
   const excludedNames = filterQuery.data ?? new Set<string>()
 
@@ -801,36 +810,25 @@ export function GcpPicker({
   )
 
   // ── Fetch + parse the CSV (coordinates) and groups sidecar (per-GCP images)
-  // Try-fetch pattern: 404 → empty result. The per-dataset image
-  // listing won't surface these scope-root sidecars.
+  // Gated on the scope-root listing so we don't generate spurious
+  // 404 console errors for scopes that haven't yet saved a sidecar.
   const csvQuery = useQuery<GcpCatalogEntry[], Error>({
     queryKey: ["gcp-csv", csvObjectName],
-    queryFn: async () => {
-      try {
-        return parseGcpLocationsCsv(await fetchObjectAsText(csvObjectName))
-      } catch {
-        return []
-      }
-    },
-    enabled: csvQueryEnabled,
+    queryFn: async () =>
+      parseGcpLocationsCsv(await fetchObjectAsText(csvObjectName)),
+    enabled: Boolean(activeShortId) && csvOnDisk,
   })
   const groupsQuery = useQuery<Record<string, string[]>, Error>({
     queryKey: ["gcp-image-groups", groupsObjectName],
-    queryFn: async () => {
-      try {
-        return parseGcpImageGroups(await fetchObjectAsText(groupsObjectName))
-      } catch {
-        return {}
-      }
-    },
-    enabled: groupsQueryEnabled,
+    queryFn: async () =>
+      parseGcpImageGroups(await fetchObjectAsText(groupsObjectName)),
+    enabled: Boolean(activeShortId) && groupsOnDisk,
   })
   const csvRows = csvQuery.data ?? []
-  // Existence flags now derived from the try-fetch results: an empty
-  // CSV / empty filter set means the file is absent (404 → empty
-  // result via the catch in the queryFn).
-  const csvExists = csvRows.length > 0
-  const filterExists = (filterQuery.data ?? new Set<string>()).size > 0
+  // Existence flags driven by the scope-root listing (which the
+  // queries themselves gate on).
+  const csvExists = csvOnDisk
+  const filterExists = filterOnDisk
 
   // Per-GCP image groups (map mode). Initial value comes from step
   // state; hydrated from the durable JSON sidecar once it loads. Local
@@ -1199,6 +1197,9 @@ export function GcpPicker({
         queryKey: ["files", "list", imagesPrefix],
       })
       queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
+      queryClient.invalidateQueries({
         queryKey: ["gcp-csv", csvObjectName],
       })
       queryClient.invalidateQueries({
@@ -1249,6 +1250,9 @@ export function GcpPicker({
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
       })
       queryClient.invalidateQueries({
         queryKey: ["gcp-image-groups", groupsObjectName],
@@ -1333,6 +1337,9 @@ export function GcpPicker({
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix],
       })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
       showSuccessToast(
         `Uploaded ${GCP_FILENAME} (${marks.length} marks) and ${GEO_FILENAME}`,
       )
@@ -1361,8 +1368,12 @@ export function GcpPicker({
     queryClient.invalidateQueries({
       queryKey: ["files", "list", imagesPrefix],
     })
-    // CSV query is now keyed on the object name (scope-root), not the
-    // image prefix.
+    // The scope-root listing drives the existence flag (csvOnDisk)
+    // that gates the CSV download. Refresh it first so the picker
+    // knows the file now exists.
+    queryClient.invalidateQueries({
+      queryKey: ["files", "list-scope-root", scopePrefix],
+    })
     queryClient.invalidateQueries({ queryKey: ["gcp-csv", csvObjectName] })
   }
 
@@ -1432,6 +1443,9 @@ export function GcpPicker({
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
       })
       queryClient.invalidateQueries({
         queryKey: ["gcp-csv", csvObjectName],

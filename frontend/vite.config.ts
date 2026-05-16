@@ -20,6 +20,14 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    fs: {
+      // Allow serving from anywhere the workspace can resolve files
+      // from. In the worktree dev setup, frontend/node_modules is a
+      // symlink whose realpath is outside the worktree root; the
+      // default Vite fs.allow would 403 anything served from there
+      // (e.g. Leaflet's marker images via @fs/...).
+      strict: false,
+    },
     proxy: {
       // Dev proxy: /api/* HTTP requests forward to the GEMINIbase REST API
       // so the frontend can keep using relative URLs (avoids WebKit
