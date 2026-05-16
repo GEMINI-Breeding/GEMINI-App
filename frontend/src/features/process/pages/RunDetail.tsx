@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
+import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import {
   type TraitDialogState,
@@ -86,6 +87,10 @@ import {
   type OrthomosaicParams,
   stopStep,
 } from "@/features/process/lib/runApi"
+import {
+  isThermalGpsRequiredError,
+  type ThermalGpsRequiredError,
+} from "@/features/process/lib/thermalGpsPreflight"
 import {
   closeJobConnection,
   type RunProgressEvent,
@@ -872,6 +877,8 @@ export function RunDetail() {
 
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [traitDialogOpen, setTraitDialogOpen] = useState(false)
+  const [thermalGpsBlockedError, setThermalGpsBlockedError] =
+    useState<ThermalGpsRequiredError | null>(null)
   const [traitDialogState, setTraitDialogState] = useState<TraitDialogState>({
     orthoVersion: null,
     boundaryVersion: null,
@@ -1166,6 +1173,13 @@ export function RunDetail() {
           showSuccessToast(`${stepKey} job submitted`)
         }
       } catch (err) {
+        // Thermal-GPS-blocked errors deserve a modal the user has to
+        // acknowledge — they describe a structural problem with the
+        // dataset, not a transient transport blip a toast can hide.
+        if (isThermalGpsRequiredError(err)) {
+          setThermalGpsBlockedError(err)
+          return
+        }
         showErrorToast(
           err instanceof Error ? err.message : `Failed to run ${stepKey}`,
         )
@@ -1556,6 +1570,14 @@ export function RunDetail() {
         state={traitDialogState}
         onChange={setTraitDialogState}
         onSubmit={handleSubmitTraits}
+      />
+
+      <ThermalGpsBlockedDialog
+        open={thermalGpsBlockedError !== null}
+        error={thermalGpsBlockedError}
+        onOpenChange={(open) => {
+          if (!open) setThermalGpsBlockedError(null)
+        }}
       />
     </div>
   )

@@ -11,6 +11,11 @@
  * 8–16 KB) to classify each file. Output drives the WizardShell branch
  * (genomic vs tabular) and the StepDetect summary panel.
  */
+import {
+  jpegLooksLikeFlir as sharedJpegLooksLikeFlir,
+  tiffLooksLikeThermal as sharedTiffLooksLikeThermal,
+} from "@/lib/thermalProbe"
+
 import type { FileWithPath } from "./types"
 
 export interface DetectedFileGroup {
@@ -78,8 +83,18 @@ export interface DetectionResult {
 const DATE_PATTERN = /(\d{4})-(\d{2})-(\d{2})/
 const DJI_PATTERN = /DJI_\d{4}/i
 const AMIGA_PATTERN = /Amiga/i
+// `camT-<timestamp>.tif[f]` — emitted by farm-ng Amiga / T4 thermal-capture
+// rigs. The example datasets in ExampleDatasets/test_thermal_data/ all use
+// this convention; the TIFFs themselves carry no Make/Model EXIF, so this
+// filename pattern is our only fast signal for Boson-class output.
+const THERMAL_FILENAME_PATTERN = /^camT[-_]/i
+// Folder-name substrings that strongly imply thermal. Kept conservative —
+// these don't fire on plain RGB datasets.
+const THERMAL_PATH_HINTS = ["flir", "thermal", "boson", "/t4/", "irx"]
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "tif", "tiff"])
+const JPEG_EXTENSIONS = new Set(["jpg", "jpeg"])
+const TIFF_EXTENSIONS = new Set(["tif", "tiff"])
 const GENOMIC_EXTENSIONS = new Set([
   "vcf",
   "hapmap",
@@ -395,6 +410,24 @@ async function peekTextHead(
   return readBoundedText(file, bytes)
 }
 
+// Probes used to live inline here. They moved to `src/lib/thermalProbe.ts`
+// so the legacy Image Data upload form can call the exact same byte
+// scans without depending on the wizard's detection-engine surface.
+// Thin wrappers preserve the FileWithPath-typed signatures the caller
+// already uses.
+function jpegLooksLikeFlir(file: FileWithPath): Promise<boolean> {
+  return sharedJpegLooksLikeFlir(file)
+}
+
+function tiffLooksLikeThermal(file: FileWithPath): Promise<boolean> {
+  return sharedTiffLooksLikeThermal(file)
+}
+
+function pathHasThermalHint(path: string): boolean {
+  const lower = path.toLowerCase()
+  return THERMAL_PATH_HINTS.some((h) => lower.includes(h))
+}
+
 function inspectVcfPreview(text: string): GenomicMatrixShape | null {
   const lines = text.split("\n")
   const headerLine = lines.find((l) => l.startsWith("#CHROM"))
@@ -490,9 +523,14 @@ export async function detectFiles(
     if (PLINK_EXTENSIONS.has(ext)) hasPlinkExt = true
     if (HAPMAP_EXTENSIONS.has(ext)) hasHapmapExt = true
     if (VCF_EXTENSIONS.has(ext)) hasVcfExt = true
+    // Fast-path thermal signals: dedicated FLIR raw extensions, camT-* TIFF
+    // filenames, or a path that mentions a thermal-capture rig. Byte-level
+    // probes for ambiguous JPEG/TIFF groups run after the loop.
     if (
       THERMAL_EXTENSIONS.has(ext) ||
-      (ext === "tiff" && path.toLowerCase().includes("flir"))
+      (TIFF_EXTENSIONS.has(ext) && THERMAL_FILENAME_PATTERN.test(file.name)) ||
+      ((IMAGE_EXTENSIONS.has(ext) || THERMAL_EXTENSIONS.has(ext)) &&
+        pathHasThermalHint(path))
     )
       hasThermal = true
     if (CSV_EXTENSIONS.has(ext)) csvFiles.push(file)
@@ -600,10 +638,40 @@ export async function detectFiles(
   }
   fileGroups.sort((a, b) => (a.date || "").localeCompare(b.date || ""))
 
+  // Slow-path: only fires when the fast path didn't already conclude this
+  // batch is thermal, and the batch is a single image-only group (the case
+  // where a FLIR-One-Pro JPEG batch is otherwise indistinguishable from a
+  // DJI RGB drone batch). Cost is bounded to one byte-peek per ambiguous
+  // group.
+  if (!hasThermal && hasImages && !hasGenomic) {
+    for (const group of fileGroups) {
+      const imageFiles = group.files.filter((f) =>
+        IMAGE_EXTENSIONS.has(getExtension(f.name)),
+      )
+      if (imageFiles.length === 0) continue
+      const sample = imageFiles[0]
+      const ext = getExtension(sample.name)
+      const looksThermal = JPEG_EXTENSIONS.has(ext)
+        ? await jpegLooksLikeFlir(sample)
+        : TIFF_EXTENSIONS.has(ext)
+          ? await tiffLooksLikeThermal(sample)
+          : false
+      if (looksThermal) {
+        hasThermal = true
+        break
+      }
+    }
+  }
+
   const categories: DataCategory[] = []
-  if (hasDJI || (hasImages && dates.size > 0)) categories.push("drone_imagery")
-  if (hasGenomic) categories.push("genomic")
+  // Thermal is exclusive with drone_imagery: a FLIR JPEG batch should not
+  // also be tagged drone_imagery just because it has images + dates. ODM is
+  // handled the same way for both downstream; the wizard only branches on
+  // category for the calibration UI.
   if (hasThermal) categories.push("thermal")
+  if (!hasThermal && (hasDJI || (hasImages && dates.size > 0)))
+    categories.push("drone_imagery")
+  if (hasGenomic) categories.push("genomic")
   const suppressTabular =
     matrixXlsxFile !== null &&
     spreadsheetFiles.length === 1 &&
@@ -623,7 +691,28 @@ export async function detectFiles(
   let suggestedPlatform: string | null = null
   let suggestedDataFormat: string
 
-  if (hasDJI) {
+  if (hasThermal) {
+    suggestedSensorType = "Thermal Camera"
+    suggestedPlatform = hasAmiga
+      ? "Amiga Robot"
+      : hasDJI
+        ? "DJI Drone"
+        : null
+    // Format reflects what's actually on disk so downstream "data type"
+    // chips render something meaningful. JPEG = FLIR One Pro–class, TIFF =
+    // Boson-class raw.
+    const hasJpeg = files.some((f) =>
+      JPEG_EXTENSIONS.has(getExtension(f.name)),
+    )
+    const hasTiff = files.some((f) =>
+      TIFF_EXTENSIONS.has(getExtension(f.name)),
+    )
+    suggestedDataFormat = hasJpeg
+      ? "Thermal JPEG"
+      : hasTiff
+        ? "Thermal TIFF (16-bit)"
+        : "Thermal"
+  } else if (hasDJI) {
     suggestedSensorType = "RGB Camera"
     suggestedPlatform = "DJI Drone"
     suggestedDataFormat = "JPEG"

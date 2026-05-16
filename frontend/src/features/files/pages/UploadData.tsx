@@ -313,6 +313,10 @@ export function UploadData() {
               )}
             </div>
           ) : (
+            // Thermal-data detection + calibration picker now lives
+            // INSIDE UploadList — it probes file bytes after the user
+            // drops a batch, so we don't depend on a manual "this is
+            // thermal" toggle here. See UploadList.addFiles().
             <UploadList
               dataType={selectedFileType}
               formValues={formValues}

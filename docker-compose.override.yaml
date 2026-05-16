@@ -101,3 +101,18 @@ services:
           path: ./backend/pyproject.toml
         - action: rebuild
           path: ./backend/poetry.lock
+
+  geminibase-worker-thermal:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/thermal/Dockerfile
+        - action: rebuild
+          path: ./backend/gemini/workers/thermal/requirements.txt
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock

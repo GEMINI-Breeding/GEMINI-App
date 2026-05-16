@@ -14,11 +14,20 @@ import {
 import { dataTypes } from "@/config/dataTypes"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import {
+  type PostUploadJob,
   type UploadTask,
   useUploadQueue,
 } from "@/features/files/hooks/useUploadQueue"
 import { createOrGetDatasetForUpload } from "@/features/files/lib/datasetForUpload"
 import { idAsString } from "@/features/admin/lib/ids"
+import type {
+  SensorClassification,
+  ThermalCalibration,
+  ThermalCalibrationMode,
+} from "@/features/import/lib/types"
+import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
+import { probeFilesForThermal } from "@/lib/thermalProbe"
+import { ThermalCalibrationField } from "./ThermalCalibrationField"
 import {
   type ResolvedScope,
   type UploadScopeChoices,
@@ -136,6 +145,19 @@ export function UploadList({
   const [isUploading, setIsUploading] = useState(false)
   const [resolveStatus, setResolveStatus] = useState<string | null>(null)
   const [rejection, setRejection] = useState<RejectionDetails | null>(null)
+  // Thermal-detection state. `defaultMode` seeds the calibration
+  // picker; `calibration` is what gets forwarded as the
+  // postUploadJob's parameters. `hint` carries the probe's hint so
+  // sensor-create can pick the right DataFormat (TIFF vs JPEG). All
+  // three reset to null when the batch is cleared or every thermal
+  // file is removed.
+  const [thermalDefaultMode, setThermalDefaultMode] =
+    useState<ThermalCalibrationMode | null>(null)
+  const [thermalCalibration, setThermalCalibration] =
+    useState<ThermalCalibration | null>(null)
+  const [thermalHint, setThermalHint] = useState<
+    "flir_jpeg" | "boson_tiff" | null
+  >(null)
   const { showErrorToastWithCopy } = useCustomToast()
   const { run } = useUploadQueue()
   const { resolveScope } = useResolveScope()
@@ -222,11 +244,42 @@ export function UploadList({
     if (accepted.length > 0) {
       setSelected((prev) => [...prev, ...accepted])
       onFilesSelected?.(accepted)
+      // Auto-detect thermal content when uploading Image Data. Runs
+      // byte-peek probes on the dropped batch; if any file is a FLIR
+      // JPEG or a 16-bit BlackIsZero TIFF, the calibration picker
+      // appears below the file list. No "This is thermal data"
+      // checkbox: missing the manual flag was a silent-failure mode
+      // (worker never ran, viewer showed gray box).
+      if (dataType === "Image Data") {
+        void probeFilesForThermal(accepted).then((res) => {
+          if (!res.hasThermal) return
+          // Boson default is centikelvin — what BosonUSB / farm-ng's
+          // Amiga rig emit. See backend BOSON_PRESETS. The two
+          // TLinear modes remain selectable for cameras genuinely
+          // configured that way, but the auto-default has to match
+          // the most common source.
+          const seed: ThermalCalibrationMode =
+            res.hint === "flir_jpeg" ? "flir_one_pro" : "boson_centikelvin"
+          setThermalDefaultMode((prev) => prev ?? seed)
+          setThermalHint((prev) => prev ?? res.hint)
+        })
+      }
     }
   }
 
   const removeFile = (index: number) => {
-    setSelected((prev) => prev.filter((_, i) => i !== index))
+    setSelected((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      // If the user emptied the staged list entirely, drop the
+      // thermal banner along with it so the next batch can start
+      // clean.
+      if (next.length === 0) {
+        setThermalDefaultMode(null)
+        setThermalCalibration(null)
+        setThermalHint(null)
+      }
+      return next
+    })
   }
 
   const handleUploadClick = async () => {
@@ -338,13 +391,35 @@ export function UploadList({
       // so the chunked-upload finalize handler can write the
       // `experiment_files` pointer row that the Experiment.delete()
       // cascade reads from.
+      // Build the per-batch THERMAL_EXTRACT submission when the
+      // upload form's calibration block is set. The worker expects
+      // the *dataset* prefix (the sensor-level directory whose
+      // siblings are `Images/` and `RawThermal/`), not the
+      // `…/Images/` directory the files themselves landed in.
+      // `buildTargetRootDir` appends `Images` for the "Image Data"
+      // data type per `frontend/src/config/dataTypes.ts:23-33`, so
+      // strip that one segment.
+      const datasetPrefix = targetRootDir.replace(/\/Images$/, "") + "/"
+      const postUploadJob: PostUploadJob | undefined = thermalCalibration
+        ? {
+            jobType: "THERMAL_EXTRACT",
+            parameters: {
+              dataset_prefix: datasetPrefix,
+              thermal_calibration: thermalCalibration,
+            },
+          }
+        : undefined
+
       const result = await run(tasks, {
         title:
           followUpJob?.kind === "extract_binary"
             ? `Processing ${selected.length} .bin file${selected.length === 1 ? "" : "s"}`
-            : `Uploading ${selected.length} file${selected.length === 1 ? "" : "s"}`,
+            : thermalCalibration
+              ? `Uploading ${selected.length} thermal file${selected.length === 1 ? "" : "s"}`
+              : `Uploading ${selected.length} file${selected.length === 1 ? "" : "s"}`,
         experimentId: resolved.experiment?.id,
         datasetId,
+        postUploadJob,
       })
       // Upload succeeded — clear the cleanup flag so the catch
       // branch below (which only runs on a throw) won't trigger.
@@ -353,6 +428,9 @@ export function UploadList({
       createdDatasetIdForCleanup = undefined
       onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
       setSelected([])
+      setThermalDefaultMode(null)
+      setThermalCalibration(null)
+      setThermalHint(null)
     } catch (err) {
       // Surface the *server's* error verbatim in the modal dialog and
       // keep it on screen until the user dismisses it. The dialog is
@@ -430,7 +508,30 @@ export function UploadList({
     }
     if (Object.keys(choices).length === 0) return {}
     setResolveStatus("registering entities")
-    return resolveScope(choices)
+    // Derive the sensor classification from what the probe found.
+    // Thermal: (Thermal=3, Image=4, TIFF=12 or JPEG=8). Plain Image
+    // Data with no thermal hit: (RGB=1, Image=4, JPEG=8). Anything
+    // else (Ardupilot Logs, etc.) doesn't pass classification.
+    let sensorClassification: SensorClassification | null = null
+    if (dataType === "Image Data") {
+      if (thermalHint !== null) {
+        sensorClassification = {
+          sensorTypeId: SensorType.Thermal,
+          dataTypeId: DataType.Image,
+          dataFormatId:
+            thermalHint === "boson_tiff"
+              ? DataFormat.TIFF
+              : DataFormat.JPEG,
+        }
+      } else {
+        sensorClassification = {
+          sensorTypeId: SensorType.RGB,
+          dataTypeId: DataType.Image,
+          dataFormatId: DataFormat.JPEG,
+        }
+      }
+    }
+    return resolveScope(choices, { sensorClassification })
   }
 
   return (
@@ -494,11 +595,27 @@ export function UploadList({
             </div>
           )}
 
+          {thermalDefaultMode !== null && (
+            <div className="mt-3">
+              <ThermalCalibrationField
+                defaultMode={thermalDefaultMode}
+                onChange={setThermalCalibration}
+              />
+            </div>
+          )}
+
           <div className="mt-4 flex gap-2">
             <Button
               variant="outline"
               onClick={handleUploadClick}
-              disabled={isUploading}
+              disabled={
+                isUploading ||
+                // Thermal was detected but the user-defined inputs are
+                // still invalid → field emits null. Block submit until
+                // they're valid so we don't fire a THERMAL_EXTRACT
+                // with bad calibration constants.
+                (thermalDefaultMode !== null && thermalCalibration === null)
+              }
               data-testid="upload-submit"
             >
               {isUploading
@@ -509,7 +626,12 @@ export function UploadList({
             </Button>
             <Button
               variant="ghost"
-              onClick={() => setSelected([])}
+              onClick={() => {
+                setSelected([])
+                setThermalDefaultMode(null)
+                setThermalCalibration(null)
+                setThermalHint(null)
+              }}
               disabled={isUploading}
             >
               Clear

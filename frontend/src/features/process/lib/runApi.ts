@@ -25,6 +25,10 @@ import {
   setStepState,
   updateRun,
 } from "@/features/process/lib/runStore"
+import {
+  checkThermalGpsPreflight,
+  ThermalGpsRequiredError,
+} from "@/features/process/lib/thermalGpsPreflight"
 
 export interface OrthomosaicParams {
   reconstruction_quality?: string
@@ -125,6 +129,18 @@ export async function executeStep(
     }
 
     case "orthomosaic": {
+      // Preflight: if this scope points at a thermal dataset whose
+      // worker-written summary says `has_gps=false`, refuse to submit.
+      // ODM would otherwise spin for ~10 minutes before bailing on
+      // "Not enough features" — a worse UX and a wasted compute slot.
+      // Non-thermal datasets (no sidecar) pass through unchanged.
+      const preflight = await checkThermalGpsPreflight(scope)
+      if (preflight.kind === "missing_gps") {
+        throw new ThermalGpsRequiredError(
+          preflight.mode,
+          preflight.totalFiles,
+        )
+      }
       const params: Record<string, unknown> = {
         year: scope.year,
         experiment: scope.experiment,
@@ -133,6 +149,16 @@ export async function executeStep(
         date: scope.date,
         platform: scope.platform,
         sensor: scope.sensor,
+        // Default Medium quality for radiometric thermal scopes — the
+        // low-contrast, narrow-temperature-range raw previews
+        // over-detect features at the default High preset. The user
+        // can still override via the orthomosaic params input.
+        ...(preflight.kind === "ok" &&
+        preflight.thermal &&
+        !orthomosaic?.reconstruction_quality &&
+        !orthomosaic?.custom_options
+          ? { reconstruction_quality: "Medium" }
+          : {}),
         ...(orthomosaic?.reconstruction_quality
           ? { reconstruction_quality: orthomosaic.reconstruction_quality }
           : {}),

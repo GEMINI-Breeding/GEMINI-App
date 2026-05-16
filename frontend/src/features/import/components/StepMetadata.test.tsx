@@ -135,6 +135,8 @@ describe("StepMetadata", () => {
     await user.click(screen.getByTestId("metadata-continue"))
 
     expect(onNext).toHaveBeenCalledTimes(1)
+    // The sensorClassification + thermalCalibration fields default to null
+    // for non-image / non-thermal imports (this case is a CSV trait import).
     expect(onNext.mock.calls[0][0]).toEqual({
       experimentId: null,
       experimentName: "TomatoMAGIC",
@@ -146,6 +148,8 @@ describe("StepMetadata", () => {
         sensorPlatform: false,
         sensor: false,
       },
+      sensorClassification: null,
+      thermalCalibration: null,
     })
   })
 
@@ -276,5 +280,108 @@ describe("StepMetadata", () => {
     await screen.findByTestId("entity-select-experiment")
     expect(screen.getByTestId("entity-select-sensor-platform")).toBeTruthy()
     expect(screen.getByTestId("entity-select-sensor")).toBeTruthy()
+  })
+
+  it("shows the thermal-calibration block and pre-selects FLIR One Pro for thermal JPEG", async () => {
+    const user = userEvent.setup()
+    const onNext = vi.fn()
+    render(
+      <StepMetadata
+        detection={detection({
+          dataCategories: ["thermal"],
+          suggestedDataFormat: "Thermal JPEG",
+          suggestedSensorType: "Thermal Camera",
+        } as Partial<DetectionResult>)}
+        initial={{
+          experimentId: "exp-1",
+          experimentName: "GEMINI",
+          sensorPlatformName: "DJI",
+          sensorName: "FLIR One Pro",
+          datasetNames: ["GEMINI - 2026-05-01"],
+          createNew: {
+            experiment: false,
+            sensorPlatform: true,
+            sensor: true,
+          },
+        }}
+        onNext={onNext}
+        onBack={() => {}}
+      />,
+      { wrapper },
+    )
+    expect(
+      await screen.findByTestId("thermal-calibration"),
+    ).toBeInTheDocument()
+    await user.click(screen.getByTestId("metadata-continue"))
+    const m = onNext.mock.calls[0][0]
+    expect(m.thermalCalibration).toEqual({ mode: "flir_one_pro" })
+    // Thermal JPEG → SensorType=3 (Thermal), DataType=4 (Image),
+    // DataFormat=8 (JPEG). Asserting the integers directly is the whole
+    // point of the enum-mirror refactor.
+    expect(m.sensorClassification).toEqual({
+      sensorTypeId: 3,
+      dataTypeId: 4,
+      dataFormatId: 8,
+    })
+  })
+
+  it("defaults Boson thermal to centikelvin and emits user-defined scale/offset when picked", async () => {
+    const user = userEvent.setup()
+    const onNext = vi.fn()
+    render(
+      <StepMetadata
+        detection={detection({
+          dataCategories: ["thermal"],
+          suggestedDataFormat: "Thermal TIFF (16-bit)",
+          suggestedSensorType: "Thermal Camera",
+        } as Partial<DetectionResult>)}
+        initial={{
+          experimentId: "exp-1",
+          experimentName: "GEMINI",
+          sensorPlatformName: "Amiga",
+          sensorName: "Boson 640",
+          datasetNames: ["GEMINI - 2026-05-01"],
+          createNew: {
+            experiment: false,
+            sensorPlatform: true,
+            sensor: true,
+          },
+        }}
+        onNext={onNext}
+        onBack={() => {}}
+      />,
+      { wrapper },
+    )
+    await screen.findByTestId("thermal-calibration")
+    // Default for TIFF is centikelvin — Continue without changes emits it.
+    // (BosonUSB / farm-ng Amiga emit pixel-as-centikelvin; the two
+    // TLinear modes remain selectable but aren't the default.)
+    await user.click(screen.getByTestId("metadata-continue"))
+    let m = onNext.mock.calls[0][0]
+    expect(m.thermalCalibration).toEqual({ mode: "boson_centikelvin" })
+    expect(m.sensorClassification).toEqual({
+      sensorTypeId: 3,
+      dataTypeId: 4,
+      dataFormatId: 12,
+    })
+
+    // Switch to user_defined; new fields appear; their values flow through.
+    onNext.mockReset()
+    await user.click(screen.getByTestId("thermal-mode-trigger"))
+    // Radix Select renders options in a portal; pick by visible text.
+    await user.click(await screen.findByText(/User-defined/i))
+    const scale = await screen.findByTestId("thermal-scale")
+    const offset = screen.getByTestId("thermal-offset")
+    await user.clear(scale)
+    await user.type(scale, "0.04")
+    await user.clear(offset)
+    await user.type(offset, "0")
+    await user.click(screen.getByTestId("metadata-continue"))
+    m = onNext.mock.calls[0][0]
+    expect(m.thermalCalibration).toEqual({
+      mode: "user_defined",
+      scale: 0.04,
+      offset: 0,
+    })
   })
 })

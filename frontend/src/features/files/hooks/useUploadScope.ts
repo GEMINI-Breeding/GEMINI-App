@@ -37,6 +37,7 @@ import type {
   EntityOption,
 } from "@/features/files/components/EntitySelectField"
 import { resolveOrCreateEntity } from "@/features/files/lib/uploadScopeHelpers"
+import type { SensorClassification } from "@/features/import/lib/types"
 import { isLoggedIn } from "@/lib/auth"
 
 export type ScopeKey =
@@ -316,6 +317,7 @@ export function useResolveScope() {
     c: EntityChoice,
     parentExperiment: string,
     parentPlatform: string,
+    classification?: SensorClassification | null,
   ) {
     return resolveOrCreateEntity<SensorOutput>(c, {
       entityLabel: "sensor",
@@ -327,11 +329,28 @@ export function useResolveScope() {
       getName: (r) => r.sensor_name,
       getId: (r) => r.id,
       create: async (name) =>
+        // Without explicit IDs the backend stores `0` (Default) for
+        // every enum field. The Image Data form previously omitted
+        // them entirely; downstream code that filters by sensor type
+        // (e.g. RUN_ODM's thermal preflight) had no way to tell an
+        // RGB sensor from a Thermal one because all sensors landed
+        // as type=0. Phase A.4 fixed the wizard path; this is the
+        // matching fix for the legacy form path.
         (await SensorsService.apiSensorsCreateSensor({
           requestBody: {
             sensor_name: name,
             experiment_name: parentExperiment,
             sensor_platform_name: parentPlatform,
+            ...(classification
+              ? {
+                  sensor_type_id:
+                    classification.sensorTypeId as unknown as string,
+                  sensor_data_type_id:
+                    classification.dataTypeId as unknown as string,
+                  sensor_data_format_id:
+                    classification.dataFormatId as unknown as string,
+                }
+              : {}),
           },
         })) as SensorOutput,
       onResolved: invalidateAfter("sensors"),
@@ -341,9 +360,17 @@ export function useResolveScope() {
   /**
    * Resolve a full set of choices in dependency order. Skips entities
    * that aren't in `choices` (data types only require a subset).
+   *
+   * `opts.sensorClassification` is forwarded to the sensor-create
+   * call so the new Sensor row lands with the right enum IDs (e.g.
+   * Thermal=3 + Image=4 + TIFF=12). Omitting it falls back to the
+   * backend defaults of `0` — which used to be the only behavior
+   * and is why sensors created before Phase G.2 are unclassifiable
+   * by downstream code.
    */
   async function resolveScope(
     choices: UploadScopeChoices,
+    opts?: { sensorClassification?: SensorClassification | null },
   ): Promise<ResolvedScope> {
     const out: ResolvedScope = {}
 
@@ -373,6 +400,7 @@ export function useResolveScope() {
         choices.sensor,
         expName,
         platformName,
+        opts?.sensorClassification,
       )
     }
 

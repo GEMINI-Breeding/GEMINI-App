@@ -32,9 +32,21 @@ async function cleanupByPrefix(prefix: string): Promise<void> {
     `${API_URL}/api/e2e_cleanup?prefix=${encodeURIComponent(prefix)}`,
     { method: "DELETE", headers: { Authorization: authHeader() } },
   )
-  if (!res.ok && res.status !== 404) {
-    // 404 is expected when the endpoint is disabled (prod-shape config).
-    // Anything else means cleanup partially ran and we want it visible.
+  if (res.status === 404) {
+    // The endpoint exists in the controller registry but is gated
+    // behind `GEMINI_E2E_CLEANUP_ENABLED=1`. In prod the env var is
+    // unset and the 404 is expected. On a dev box that gate being
+    // off is a bug — every spec leaks E2E-prefixed rows. Warn loudly
+    // so the developer hits this once and fixes the .env, instead of
+    // silently accumulating garbage.
+    console.warn(
+      `[fixtures] cleanup for ${prefix} → 404. ` +
+        `Set GEMINI_E2E_CLEANUP_ENABLED=1 in backend/gemini/pipeline/.env ` +
+        `and recreate the rest-api container.`,
+    )
+    return
+  }
+  if (!res.ok) {
     const body = await res.text()
     throw new Error(
       `e2e_cleanup(${prefix}) → ${res.status} ${res.statusText}: ${body}`,

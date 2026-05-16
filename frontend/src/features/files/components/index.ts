@@ -1,5 +1,6 @@
 export { DataStructureForm } from "./DataStructureForm"
 export { DataTypes } from "./DataTypes"
 export { TextField } from "./TextField"
+export { ThermalCalibrationField } from "./ThermalCalibrationField"
 export { UploadList } from "./UploadList"
 export { UploadZone } from "./UploadZone"

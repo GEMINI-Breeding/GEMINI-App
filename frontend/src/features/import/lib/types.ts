@@ -26,6 +26,44 @@ export interface ParsedSheet {
   rows: Record<string, unknown>[]
 }
 
+/**
+ * Boson-class thermal cameras emit 16-bit TIFFs with no embedded mode
+ * info, so the wizard collects calibration constants alongside the
+ * camera identity. The chosen mode determines whether the worker can
+ * compute °C per pixel and which scale/offset to apply. FLIR One Pro
+ * JPEGs are self-describing — picking `flir_one_pro` skips
+ * scale/offset inputs entirely.
+ */
+export type ThermalCalibrationMode =
+  | "flir_one_pro"
+  | "boson_centikelvin"
+  | "boson_tlinear_high"
+  | "boson_tlinear_low"
+  | "boson_agc_nonradiometric"
+  | "user_defined"
+
+export interface ThermalCalibration {
+  mode: ThermalCalibrationMode
+  /** Kelvin per raw count. Only required for `user_defined`; the other
+   *  modes carry fixed values consumed by the worker. */
+  scale?: number
+  /** Kelvin offset added after scaling. Only required for
+   *  `user_defined`. */
+  offset?: number
+}
+
+/**
+ * Backend-enum classification for the sensor row this import will
+ * create. Populated by StepMetadata from the wizard's data-category
+ * detection so StepUpload can stop hardcoding `0`s when it calls
+ * `apiSensorsCreateSensor`.
+ */
+export interface SensorClassification {
+  sensorTypeId: number
+  dataTypeId: number
+  dataFormatId: number
+}
+
 export interface ImportMetadata {
   experimentId: string | null
   experimentName: string
@@ -37,6 +75,13 @@ export interface ImportMetadata {
     sensorPlatform: boolean
     sensor: boolean
   }
+  /** Set by StepMetadata when the data category is image-like
+   *  (drone_imagery / thermal / elevation). Left null for tabular and
+   *  genomic imports, which don't need a sensor row. */
+  sensorClassification?: SensorClassification | null
+  /** Set when the data category includes "thermal". Drives the
+   *  THERMAL_EXTRACT worker downstream. */
+  thermalCalibration?: ThermalCalibration | null
 }
 
 export interface TraitColumn {

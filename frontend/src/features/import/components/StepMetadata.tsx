@@ -17,6 +17,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   type EntityChoice,
   EntitySelectField,
 } from "@/features/files/components/EntitySelectField"
@@ -27,7 +34,13 @@ import {
   type DetectionResult,
   needsSensorFields,
 } from "@/features/import/lib/detection-engine"
-import type { ImportMetadata } from "@/features/import/lib/types"
+import type {
+  ImportMetadata,
+  SensorClassification,
+  ThermalCalibration,
+  ThermalCalibrationMode,
+} from "@/features/import/lib/types"
+import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
 
 interface StepMetadataProps {
   detection: DetectionResult
@@ -63,6 +76,82 @@ function initialNamedChoice(
   return { kind: "none" }
 }
 
+/**
+ * Derive the (sensor_type, data_type, data_format) triple from the
+ * detection result. The wizard previously sent (0, 0, 0) for everything,
+ * which made it impossible to tell RGB and thermal sensors apart at the
+ * DB level — see Phase A.4 of the thermal-support plan.
+ *
+ * Returns null for non-image categories (tabular, genomic) — those don't
+ * create a sensor row and the field stays undefined on metadata.
+ */
+function deriveSensorClassification(
+  detection: DetectionResult,
+): SensorClassification | null {
+  const categories = detection.dataCategories
+  const isThermal = categories.includes("thermal")
+  const isDrone = categories.includes("drone_imagery")
+  const isElevation = categories.includes("elevation")
+  if (!isThermal && !isDrone && !isElevation) return null
+
+  const hasTiff = /TIFF/i.test(detection.suggestedDataFormat)
+  const dataFormatId = hasTiff
+    ? DataFormat.TIFF
+    : isThermal
+      ? DataFormat.JPEG
+      : DataFormat.JPEG
+  const sensorTypeId = isThermal
+    ? SensorType.Thermal
+    : isElevation
+      ? SensorType.Depth
+      : SensorType.RGB
+  return {
+    sensorTypeId,
+    dataTypeId: DataType.Image,
+    dataFormatId,
+  }
+}
+
+/**
+ * Pick a sensible default calibration mode from the detected file
+ * shape. FLIR-One-Pro JPEGs carry Planck constants per file so the
+ * worker can compute T(°C) without further input — the wizard
+ * pre-selects `flir_one_pro` and disables the dropdown for that case.
+ * Boson TIFFs need a user pick because the camera mode isn't recorded
+ * anywhere in the file.
+ */
+function defaultThermalMode(
+  detection: DetectionResult,
+): ThermalCalibrationMode {
+  if (/JPEG/i.test(detection.suggestedDataFormat)) return "flir_one_pro"
+  // Boson TIFFs from BosonUSB / farm-ng Amiga emit pixel-as-centikelvin
+  // by default; that's the right pre-select for the average user.
+  // The two TLinear modes remain selectable.
+  return "boson_centikelvin"
+}
+
+const THERMAL_MODE_LABELS: Record<ThermalCalibrationMode, string> = {
+  flir_one_pro: "FLIR One Pro (auto, per-file Planck)",
+  boson_centikelvin: "Boson — centikelvin (T_K = pixel × 0.01)",
+  boson_tlinear_high: "Boson TLinear — high-gain (0.04 K/count)",
+  boson_tlinear_low: "Boson TLinear — low-gain (0.4 K/count)",
+  boson_agc_nonradiometric: "Boson — non-radiometric (AGC, no temperature)",
+  user_defined: "User-defined scale + offset",
+}
+
+const THERMAL_MODE_ORDER_BOSON: ThermalCalibrationMode[] = [
+  "boson_centikelvin",
+  "boson_tlinear_high",
+  "boson_tlinear_low",
+  "boson_agc_nonradiometric",
+  "user_defined",
+]
+
+const THERMAL_MODE_ORDER_FLIR: ThermalCalibrationMode[] = [
+  "flir_one_pro",
+  "user_defined",
+]
+
 function defaultDatasetNames(detection: DetectionResult): string[] {
   const expName = detection.suggestedExperimentName
   // Pick the first concrete category as the label hint. Mixed uploads
@@ -96,6 +185,13 @@ export function StepMetadata({
   onBack,
 }: StepMetadataProps) {
   const showSensorFields = needsSensorFields(detection.dataCategories)
+  const isThermal = detection.dataCategories.includes("thermal")
+  // FLIR JPEGs are self-describing; Boson TIFFs need a user pick. Pre-fill
+  // accordingly but always let the user override.
+  const thermalDefaultMode = defaultThermalMode(detection)
+  const thermalModeOptions = /JPEG/i.test(detection.suggestedDataFormat)
+    ? THERMAL_MODE_ORDER_FLIR
+    : THERMAL_MODE_ORDER_BOSON
   const scopeOptions = useScopeOptions()
 
   const [experimentChoice, setExperimentChoice] = useState<EntityChoice>(() =>
@@ -121,6 +217,25 @@ export function StepMetadata({
     }
     return defaultDatasetNames(detection)
   })
+  const [thermalMode, setThermalMode] = useState<ThermalCalibrationMode>(
+    () => initial?.thermalCalibration?.mode ?? thermalDefaultMode,
+  )
+  // Free-typed scale/offset for `user_defined` mode. Stored as strings so
+  // partial typing ("0.0") doesn't clobber to NaN; parsed on continue.
+  const [userScale, setUserScale] = useState<string>(() => {
+    const init = initial?.thermalCalibration
+    if (init?.mode === "user_defined" && typeof init.scale === "number") {
+      return String(init.scale)
+    }
+    return "0.01"
+  })
+  const [userOffset, setUserOffset] = useState<string>(() => {
+    const init = initial?.thermalCalibration
+    if (init?.mode === "user_defined" && typeof init.offset === "number") {
+      return String(init.offset)
+    }
+    return "0"
+  })
   // Globally-existing dataset names. Used to warn the user when a typed
   // dataset name would collide with an existing dataset — the DB silently
   // merges trait records into the existing dataset row, which is rarely
@@ -141,11 +256,22 @@ export function StepMetadata({
     return false
   }
 
+  const userScaleNum = Number.parseFloat(userScale)
+  const userOffsetNum = Number.parseFloat(userOffset)
+  const userCalibValid =
+    Number.isFinite(userScaleNum) &&
+    userScaleNum > 0 &&
+    Number.isFinite(userOffsetNum)
+
   const isValid = (): boolean => {
     const datasetsOk = datasetNames.every((n) => n.trim() !== "")
     if (!isChoiceOk(experimentChoice) || !datasetsOk) return false
     if (!showSensorFields) return true
-    return isChoiceOk(platformChoice) && isChoiceOk(sensorChoice)
+    if (!isChoiceOk(platformChoice) || !isChoiceOk(sensorChoice)) return false
+    if (isThermal && thermalMode === "user_defined" && !userCalibValid) {
+      return false
+    }
+    return true
   }
 
   const handleContinue = () => {
@@ -178,6 +304,19 @@ export function StepMetadata({
           : ""
       : ""
 
+    const sensorClassification = showSensorFields
+      ? deriveSensorClassification(detection)
+      : null
+    const thermalCalibration: ThermalCalibration | null = isThermal
+      ? thermalMode === "user_defined"
+        ? {
+            mode: "user_defined",
+            scale: userScaleNum,
+            offset: userOffsetNum,
+          }
+        : { mode: thermalMode }
+      : null
+
     const metadata: ImportMetadata = {
       experimentId: expId,
       experimentName: expName,
@@ -189,6 +328,8 @@ export function StepMetadata({
         sensorPlatform: showSensorFields ? platformIsNew : false,
         sensor: showSensorFields ? sensorIsNew : false,
       },
+      sensorClassification,
+      thermalCalibration,
     }
     onNext(metadata)
   }
@@ -246,6 +387,84 @@ export function StepMetadata({
             />
           )}
         </div>
+
+        {isThermal && (
+          <div
+            className="space-y-3 border-t pt-4"
+            data-testid="thermal-calibration"
+          >
+            <div>
+              <h4 className="font-medium text-sm">Thermal Calibration</h4>
+              <p className="text-muted-foreground text-xs">
+                Boson TIFFs don't record which mode the camera was in;
+                pick the matching calibration so the worker can compute
+                per-pixel temperatures. FLIR One Pro JPEGs are
+                self-describing — pick "FLIR One Pro" for those.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="thermal-mode">Calibration mode</Label>
+                <Select
+                  value={thermalMode}
+                  onValueChange={(v) =>
+                    setThermalMode(v as ThermalCalibrationMode)
+                  }
+                >
+                  <SelectTrigger
+                    id="thermal-mode"
+                    data-testid="thermal-mode-trigger"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {thermalModeOptions.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {THERMAL_MODE_LABELS[opt]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {thermalMode === "user_defined" && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="thermal-scale">Scale (K / count)</Label>
+                    <Input
+                      id="thermal-scale"
+                      type="number"
+                      step="any"
+                      value={userScale}
+                      onChange={(e) => setUserScale(e.target.value)}
+                      data-testid="thermal-scale"
+                      aria-invalid={
+                        !Number.isFinite(userScaleNum) || userScaleNum <= 0
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="thermal-offset">Offset (K)</Label>
+                    <Input
+                      id="thermal-offset"
+                      type="number"
+                      step="any"
+                      value={userOffset}
+                      onChange={(e) => setUserOffset(e.target.value)}
+                      data-testid="thermal-offset"
+                      aria-invalid={!Number.isFinite(userOffsetNum)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {thermalMode === "user_defined" && !userCalibValid && (
+              <p className="text-amber-600 dark:text-amber-500 flex items-start gap-1.5 text-xs">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Scale must be a positive number and offset must be numeric.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border p-4 space-y-3">

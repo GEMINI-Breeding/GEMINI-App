@@ -165,4 +165,92 @@ describe("useResolveScope.resolveScope", () => {
       }),
     ).rejects.toThrow(/experiment name is empty/i)
   })
+
+  it("forwards sensorClassification to apiSensorsCreateSensor so the new Sensor row has the right enum IDs", async () => {
+    // Regression guard for the bug the user hit: the legacy Image
+    // Data form was creating sensors with sensor_type_id=0 because
+    // the resolver's create call omitted the enum fields entirely.
+    // Phase G.2 plumbed a `sensorClassification` option through; this
+    // test pins that the payload now carries the IDs verbatim.
+    vi.spyOn(
+      SensorPlatformsService,
+      "apiSensorPlatformsGetSensorPlatforms",
+    ).mockResolvedValue([] as never)
+    vi.spyOn(
+      SensorPlatformsService,
+      "apiSensorPlatformsCreateSensorPlatform",
+    ).mockResolvedValue({
+      id: 33,
+      sensor_platform_name: "Amiga",
+    } as never)
+    vi.spyOn(SensorsService, "apiSensorsGetSensors").mockResolvedValue(
+      [] as never,
+    )
+    const sensorsCreate = vi
+      .spyOn(SensorsService, "apiSensorsCreateSensor")
+      .mockResolvedValue({ id: 55, sensor_name: "Boson 640" } as never)
+
+    const { result } = renderHook(() => useResolveScope(), { wrapper })
+    await result.current.resolveScope(
+      {
+        experiment: { kind: "existing", id: "exp-1", name: "GEMINI" },
+        sensorPlatform: { kind: "new", name: "Amiga" },
+        sensor: { kind: "new", name: "Boson 640" },
+      },
+      {
+        sensorClassification: {
+          sensorTypeId: 3, // Thermal
+          dataTypeId: 4, // Image
+          dataFormatId: 12, // TIFF
+        },
+      },
+    )
+
+    expect(sensorsCreate).toHaveBeenCalledWith({
+      requestBody: {
+        sensor_name: "Boson 640",
+        experiment_name: "GEMINI",
+        sensor_platform_name: "Amiga",
+        sensor_type_id: 3,
+        sensor_data_type_id: 4,
+        sensor_data_format_id: 12,
+      },
+    })
+  })
+
+  it("omits enum IDs when no sensorClassification is supplied (backward compatible)", async () => {
+    vi.spyOn(
+      SensorPlatformsService,
+      "apiSensorPlatformsGetSensorPlatforms",
+    ).mockResolvedValue([] as never)
+    vi.spyOn(
+      SensorPlatformsService,
+      "apiSensorPlatformsCreateSensorPlatform",
+    ).mockResolvedValue({ id: 33, sensor_platform_name: "Drone" } as never)
+    vi.spyOn(SensorsService, "apiSensorsGetSensors").mockResolvedValue(
+      [] as never,
+    )
+    const sensorsCreate = vi
+      .spyOn(SensorsService, "apiSensorsCreateSensor")
+      .mockResolvedValue({ id: 99, sensor_name: "RGB" } as never)
+
+    const { result } = renderHook(() => useResolveScope(), { wrapper })
+    await result.current.resolveScope({
+      experiment: { kind: "existing", id: "exp-1", name: "GEMINI" },
+      sensorPlatform: { kind: "new", name: "Drone" },
+      sensor: { kind: "new", name: "RGB" },
+    })
+
+    // Payload must not include the three enum fields at all when
+    // classification is absent — preserves the pre-G.2 wire shape
+    // for callers that didn't opt in (Ardupilot Logs, Reference
+    // Data, etc.).
+    expect(sensorsCreate).toHaveBeenCalledWith({
+      requestBody: {
+        sensor_name: "RGB",
+        experiment_name: "GEMINI",
+        sensor_platform_name: "Drone",
+      },
+    })
+  })
 })

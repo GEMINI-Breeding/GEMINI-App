@@ -33,6 +33,11 @@ vi.mock("@/client", () => ({
     apiJobsSubmitSubmitJob: (data: unknown) => submitMock(data),
     apiJobsJobIdCancelCancelJob: (data: unknown) => cancelMock(data),
   },
+  // OpenAPI is read by thermalGpsPreflight to build the rest-api URL.
+  // Stub with an empty BASE so the preflight's relative fetch path
+  // ("/api/files/download/...") falls back to whatever vi.stubGlobal
+  // assigns to `fetch`.
+  OpenAPI: { BASE: "" },
 }))
 
 const SCOPE: AerialScope = {
@@ -88,6 +93,15 @@ beforeEach(() => {
   __resetRunStoreForTests()
   submitMock.mockReset()
   cancelMock.mockReset()
+  // Orthomosaic step calls checkThermalGpsPreflight, which fetches
+  // RawThermal/thermal_dataset.json from the rest API. Default to 404
+  // (non-thermal dataset) so existing tests keep submitting without
+  // having to mock fetch themselves. Thermal-specific tests below
+  // override this with their own stub.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(new Response(null, { status: 404 }))),
+  )
 })
 
 describe("executeStep", () => {
@@ -165,6 +179,95 @@ describe("executeStep", () => {
       submitMock.mockResolvedValue({ id: null } as unknown as JobOutput)
       await expect(executeStep(baseInput(run, "orthomosaic"))).rejects.toThrow(
         /RUN_ODM submitted but no job id returned/i,
+      )
+    })
+
+    it("refuses to submit when the thermal preflight reports missing GPS", async () => {
+      const run = seedRun()
+      // Override the default 404 fetch stub with a thermal summary
+      // that has no per-image GPS — the worker-side contract for a
+      // Boson-class dataset.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                mode: "boson_tlinear_high",
+                has_gps: false,
+                total_files: 11,
+              }),
+            ),
+          ),
+        ),
+      )
+      submitMock.mockResolvedValue({
+        id: "should-not-be-submitted",
+      } as unknown as JobOutput)
+
+      // The preflight throws a typed ThermalGpsRequiredError so the
+      // RunDetail handler can route it to a modal dialog rather than
+      // a toast.
+      await expect(
+        executeStep(baseInput(run, "orthomosaic")),
+      ).rejects.toThrow(/no per-image GPS/i)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("auto-applies the Medium preset for thermal datasets with GPS", async () => {
+      // Radiometric thermal previews are low-contrast; the High
+      // preset over-detects features. Worker plan calls for a
+      // per-sensor default of `reconstruction_quality=Medium` when
+      // the caller didn't pass an explicit preset.
+      const run = seedRun()
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                mode: "flir_one_pro",
+                has_gps: true,
+                total_files: 22,
+              }),
+            ),
+          ),
+        ),
+      )
+      submitMock.mockResolvedValue({
+        id: "ortho-thermal-1",
+      } as unknown as JobOutput)
+      await executeStep(baseInput(run, "orthomosaic"))
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters.reconstruction_quality).toBe(
+        "Medium",
+      )
+    })
+
+    it("respects an explicit reconstruction_quality even for thermal", async () => {
+      const run = seedRun()
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({ mode: "flir_one_pro", has_gps: true }),
+            ),
+          ),
+        ),
+      )
+      submitMock.mockResolvedValue({ id: "j" } as unknown as JobOutput)
+      await executeStep({
+        ...baseInput(run, "orthomosaic"),
+        orthomosaic: { reconstruction_quality: "Ultra" },
+      })
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters.reconstruction_quality).toBe(
+        "Ultra",
       )
     })
   })

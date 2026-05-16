@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Download,
   File as FileIcon,
+  Flame,
   Image as ImageIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -26,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { idAsString } from "@/features/admin/lib/ids"
+import { ThermalViewerDialog } from "@/features/files/components/ThermalViewerDialog"
 import { deriveImagePathAttrs } from "@/features/files/lib/imagePath"
 import { getToken } from "@/lib/auth"
 
@@ -57,13 +59,22 @@ function apiUrl(path: string): string {
 }
 
 /**
- * Fetch the thumbnail with bearer auth and return an object URL. The
- * `<img src="/api/files/thumbnail/...">` form cannot include the
+ * Fetch a thumbnail with bearer auth and return an object URL.
+ *
+ * The `<img src="/api/files/thumbnail/...">` form cannot include the
  * Authorization header, so we blob-fetch and feed `URL.createObjectURL`.
+ *
+ * `previewObjectName` lets the caller substitute a sibling file for
+ * the rendered thumbnail. Used for thermal TIFFs: browsers can't
+ * decode 16-bit BlackIsZero TIFFs and the backend thumbnail endpoint
+ * 405s on `.tiff`, so we fetch the worker-written palette JPEG via
+ * the full-download endpoint instead. The result is small enough
+ * (~80 KB) that not going through the thumbnail resizer is fine.
  */
 function useThumbnailUrl(
   bucket: string,
   objectName: string,
+  previewObjectName?: string,
 ): { url: string | null; loading: boolean } {
   const [url, setUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -73,7 +84,13 @@ function useThumbnailUrl(
     let createdObjectUrl: string | null = null
     setLoading(true)
     setUrl(null)
-    const path = `/api/files/thumbnail/${bucket}/${objectName}?size=200`
+    // When we have a sibling preview, fetch the full bytes from the
+    // download endpoint (the preview is already small + already
+    // rendered by the worker). Otherwise hit the resizing thumbnail
+    // endpoint as before.
+    const path = previewObjectName
+      ? `/api/files/download/${bucket}/${previewObjectName}`
+      : `/api/files/thumbnail/${bucket}/${objectName}?size=200`
     fetch(apiUrl(path), {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
@@ -94,18 +111,55 @@ function useThumbnailUrl(
       active = false
       if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl)
     }
-  }, [bucket, objectName])
+  }, [bucket, objectName, previewObjectName])
 
   return { url, loading }
 }
 
-function ThumbnailTile({ file }: { file: FileMetadata }) {
-  const { url, loading } = useThumbnailUrl(file.bucket_name, file.object_name)
+function ThumbnailTile({
+  file,
+  isThermal,
+  previewObjectName,
+  onOpen,
+}: {
+  file: FileMetadata
+  isThermal: boolean
+  /** Optional MinIO key for a JPEG preview to render in place of
+   *  this file's own bytes. Used for thermal TIFFs: the browser
+   *  can't decode 16-bit single-channel TIFFs, so we paint the
+   *  worker-written `Images/{base}.jpg` instead. The file's own
+   *  name is still what shows under the tile. */
+  previewObjectName?: string
+  onOpen: ((file: FileMetadata) => void) | null
+}) {
+  const { url, loading } = useThumbnailUrl(
+    file.bucket_name,
+    file.object_name,
+    previewObjectName,
+  )
   const name = fileNameOf(file.object_name)
+  // Only thermal images are clickable in v1 — they're the only files
+  // with a useful "open" action beyond the existing download button.
+  const clickable = isThermal && onOpen !== null
   return (
     <div
-      className="group relative rounded-lg border overflow-hidden hover:border-primary transition-colors"
-      data-testid="image-thumbnail"
+      className={`group relative rounded-lg border overflow-hidden hover:border-primary transition-colors ${
+        clickable ? "cursor-pointer" : ""
+      }`}
+      data-testid={isThermal ? "thermal-thumbnail" : "image-thumbnail"}
+      onClick={clickable ? () => onOpen!(file) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                onOpen!(file)
+              }
+            }
+          : undefined
+      }
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
     >
       <div className="aspect-square bg-muted flex items-center justify-center">
         {url ? (
@@ -119,6 +173,15 @@ function ThumbnailTile({ file }: { file: FileMetadata }) {
           <ImageIcon className="text-muted-foreground h-6 w-6 animate-pulse" />
         ) : (
           <ImageIcon className="text-muted-foreground h-6 w-6" />
+        )}
+        {isThermal && (
+          <span
+            className="absolute top-1 right-1 inline-flex items-center gap-1 rounded bg-orange-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white"
+            data-testid="thermal-badge"
+          >
+            <Flame className="h-3 w-3" />
+            Thermal
+          </span>
         )}
       </div>
       <div className="p-1.5">
@@ -223,6 +286,106 @@ export function ImageViewer() {
     return map
   }, [allFiles, experimentName])
 
+  // Thermal-aware indices for the gallery, built once per file list:
+  //
+  //   - `thermalSidecarKeys`: every `…/RawThermal/{base}.json` the
+  //     THERMAL_EXTRACT worker wrote. Used to tag matching gallery
+  //     entries with the "Thermal" badge.
+  //   - `previewJpegByOriginal`: maps an original-upload key (e.g.
+  //     `…/Images/camT-001.tiff`) to the worker-written JPEG preview
+  //     in the same directory (`…/Images/camT-001.jpg`). Boson TIFFs
+  //     don't render in the browser (Chrome has no TIFF decoder, the
+  //     server-side thumbnail endpoint 405s on `.tiff`); the JPEG
+  //     preview is what we paint instead.
+  //   - `previewJpegs`: the set of worker-written JPEG keys
+  //     themselves. The gallery hides these as standalone entries so
+  //     each original frame shows once, not as a (TIFF, JPEG) pair.
+  const thermalIndices = useMemo(() => {
+    const sidecarKeys = new Set<string>()
+    // basename → list of keys in the same Images/ directory grouped
+    // by basename. Lets us find a JPEG sibling for any TIFF and vice
+    // versa.
+    type Group = { dir: string; base: string; jpeg?: string; tiff?: string }
+    // Key is `dir + "\n" + base` — using a control character that
+    // never appears in a MinIO object name, so directories with
+    // spaces (e.g. "Cowpea MAGIC") don't break the split below.
+    const groupsByDirAndBase = new Map<string, Group>()
+
+    for (const f of allFiles) {
+      const name = f.object_name
+      if (name.includes("/RawThermal/") && name.endsWith(".json")) {
+        sidecarKeys.add(name)
+        continue
+      }
+      const lastSlash = name.lastIndexOf("/")
+      if (lastSlash < 0) continue
+      const dir = name.slice(0, lastSlash)
+      if (!dir.endsWith("/Images")) continue
+      const fileWithExt = name.slice(lastSlash + 1)
+      const dot = fileWithExt.lastIndexOf(".")
+      if (dot <= 0) continue
+      const base = fileWithExt.slice(0, dot)
+      const ext = fileWithExt.slice(dot + 1).toLowerCase()
+      // Key separates dir from base with "\n" (a control char
+      // that never appears in a MinIO object name), so directories
+      // with spaces (e.g. "Cowpea MAGIC") don't collide on a
+      // naive split downstream.
+      const key = dir + "\n" + base
+      let group = groupsByDirAndBase.get(key)
+      if (!group) {
+        group = { dir, base }
+        groupsByDirAndBase.set(key, group)
+      }
+      if (ext === "tif" || ext === "tiff") group.tiff = name
+      else if (ext === "jpg" || ext === "jpeg") {
+        // First JPEG wins as "the preview"; same-basename
+        // collisions should not happen, but if they do, any
+        // additional JPEGs stay visible in the gallery.
+        if (!group.jpeg) group.jpeg = name
+      }
+    }
+
+    const previewJpegByOriginal = new Map<string, string>()
+    const previewJpegs = new Set<string>()
+    for (const group of groupsByDirAndBase.values()) {
+      if (!group.tiff || !group.jpeg) continue
+      // Worker only writes the JPEG when it also wrote a sidecar;
+      // if the sidecar is missing this JPEG is genuinely user-
+      // uploaded and should not be hidden.
+      const sidecar =
+        group.dir.slice(0, -"/Images".length) +
+        "/RawThermal/" +
+        group.base +
+        ".json"
+      if (!sidecarKeys.has(sidecar)) continue
+      previewJpegByOriginal.set(group.tiff, group.jpeg)
+      previewJpegs.add(group.jpeg)
+    }
+    return { sidecarKeys, previewJpegByOriginal, previewJpegs }
+  }, [allFiles])
+  const { sidecarKeys: thermalSidecarKeys, previewJpegByOriginal, previewJpegs } =
+    thermalIndices
+
+  function isThermalImage(file: FileMetadata): boolean {
+    // Match `…/Images/{base}.{ext}` against `…/RawThermal/{base}.json`.
+    const name = file.object_name
+    const lastSlash = name.lastIndexOf("/")
+    if (lastSlash < 0) return false
+    const dir = name.slice(0, lastSlash)
+    if (!dir.endsWith("/Images")) return false
+    const fileWithExt = name.slice(lastSlash + 1)
+    const dot = fileWithExt.lastIndexOf(".")
+    const basename = dot > 0 ? fileWithExt.slice(0, dot) : fileWithExt
+    const sidecar = `${dir.slice(0, -"/Images".length)}/RawThermal/${basename}.json`
+    return thermalSidecarKeys.has(sidecar)
+  }
+
+  // Per-click handler for thermal thumbnails. State lives at this
+  // level so the dialog survives gallery scrolls / pagination.
+  const [thermalOpenFile, setThermalOpenFile] = useState<FileMetadata | null>(
+    null,
+  )
+
   // Distinct option lists per attribute (drop empty values so the
   // dropdown only lists real choices).
   // Distinct option lists per attribute (drop empty values so the
@@ -267,6 +430,19 @@ export function ImageViewer() {
   const filteredFiles = useMemo(() => {
     const fnQuery = filenameQuery.trim().toLowerCase()
     return allFiles.filter((f) => {
+      // `RawThermal/` is the THERMAL_EXTRACT worker's output tier
+      // (raw uint16 TIFFs + per-file JSON sidecars + a per-dataset
+      // summary). Those files are inputs to the ThermalViewerDialog,
+      // not user-facing browser entries — hiding them collapses each
+      // thermal frame down to a single tile in the gallery.
+      if (f.object_name.includes("/RawThermal/")) return false
+      // Worker-written JPEG previews are infrastructure, not user
+      // files: a `Images/{base}.jpg` whose sibling `RawThermal/
+      // {base}.json` exists is just the renderable version of the
+      // original Boson TIFF. Hide them so each thermal frame shows
+      // once. The TIFF itself stays visible and its thumbnail is
+      // served from this JPEG (see ThumbnailTile).
+      if (previewJpegs.has(f.object_name)) return false
       if (fnQuery && !f.object_name.toLowerCase().includes(fnQuery))
         return false
       const attrs = fileAttrs.get(f.object_name)
@@ -285,6 +461,7 @@ export function ImageViewer() {
     allFiles,
     fileAttrs,
     filenameQuery,
+    previewJpegs,
     filterLocation,
     filterPopulation,
     filterDate,
@@ -557,7 +734,15 @@ export function ImageViewer() {
                 data-testid="image-gallery"
               >
                 {imageFiles.map((f) => (
-                  <ThumbnailTile key={f.object_name} file={f} />
+                  <ThumbnailTile
+                    key={f.object_name}
+                    file={f}
+                    isThermal={isThermalImage(f)}
+                    previewObjectName={previewJpegByOriginal.get(
+                      f.object_name,
+                    )}
+                    onOpen={setThermalOpenFile}
+                  />
                 ))}
               </div>
             </div>
@@ -615,6 +800,17 @@ export function ImageViewer() {
             </div>
           )}
         </>
+      )}
+
+      {thermalOpenFile && (
+        <ThermalViewerDialog
+          open={true}
+          bucket={thermalOpenFile.bucket_name}
+          rgbObjectName={thermalOpenFile.object_name}
+          onOpenChange={(open) => {
+            if (!open) setThermalOpenFile(null)
+          }}
+        />
       )}
     </div>
   )

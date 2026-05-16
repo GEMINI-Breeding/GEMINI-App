@@ -56,10 +56,12 @@ import type {
   FileWithPath,
   GermplasmReview,
   ImportMetadata,
+  SensorClassification,
   UploadResults,
 } from "@/features/import/lib/types"
 import { extractApiErrorMessage } from "@/lib/apiError"
 import { runWithConcurrency } from "@/lib/concurrency"
+import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
 
 interface StepUploadProps {
   files: FileWithPath[]
@@ -119,6 +121,31 @@ function buildObjectName(experimentName: string, file: FileWithPath): string {
   const dateMatch = path.match(/(\d{4}-\d{2}-\d{2})/)
   const date = dateMatch ? dateMatch[1] : today
   return `Raw/${date}/${experimentName}/${file.name}`
+}
+
+/**
+ * Greatest common parent directory across a list of MinIO object
+ * paths. Used to derive the thermal worker's `dataset_prefix` from
+ * the per-file object paths the wizard already built. The trailing
+ * `/` is included so the worker can pass the prefix straight to
+ * `list_objects` without re-checking. Returns `""` if the inputs
+ * have no shared parent.
+ */
+function commonParentPrefix(paths: string[]): string {
+  if (paths.length === 0) return ""
+  const parts = paths.map((p) => p.split("/"))
+  // Strip the trailing filename segment from every path before
+  // comparison — we want the parent directory, not the longest
+  // shared filename prefix.
+  const dirs = parts.map((segs) => segs.slice(0, -1))
+  const minLen = Math.min(...dirs.map((d) => d.length))
+  const common: string[] = []
+  for (let i = 0; i < minLen; i++) {
+    const seg = dirs[0][i]
+    if (dirs.every((d) => d[i] === seg)) common.push(seg)
+    else break
+  }
+  return common.length === 0 ? "" : common.join("/") + "/"
 }
 
 export function StepUpload({
@@ -299,6 +326,7 @@ export function StepUpload({
             metadata.sensorName,
             experimentName,
             metadata.sensorPlatformName,
+            metadata.sensorClassification ?? null,
           )
           updateStep(stepIdx, {
             status: "done",
@@ -345,6 +373,26 @@ export function StepUpload({
             file,
             objectPath: buildObjectName(experimentName, file),
           }))
+          // For thermal imports, kick off a single THERMAL_EXTRACT
+          // after all uploads finish. The dataset prefix is the
+          // common parent of every uploaded object path; the worker
+          // lists thermal-extensioned objects under that prefix and
+          // writes RGB previews + raw + JSON sidecars alongside.
+          let postUploadJob:
+            | { jobType: "THERMAL_EXTRACT"; parameters: Record<string, unknown> }
+            | undefined
+          if (metadata.thermalCalibration && tasks.length > 0) {
+            const datasetPrefix = commonParentPrefix(
+              tasks.map((t) => t.objectPath),
+            )
+            postUploadJob = {
+              jobType: "THERMAL_EXTRACT",
+              parameters: {
+                dataset_prefix: datasetPrefix,
+                thermal_calibration: metadata.thermalCalibration,
+              },
+            }
+          }
           try {
             const result = await uploadQueue.run(tasks, {
               title: `Importing ${tasks.length} file(s)`,
@@ -355,6 +403,7 @@ export function StepUpload({
               // imports are vanishingly rare and the helper still
               // works for them via the explicitName path above.
               datasetId: createdDatasetIds[0],
+              postUploadJob,
             })
             setUploadedCount(result.uploaded.length)
           } catch (err) {
@@ -625,14 +674,22 @@ async function createSensorOrGet(
   sensorName: string,
   experimentName: string,
   sensorPlatformName: string,
+  classification: SensorClassification | null | undefined,
 ): Promise<SensorOutput> {
+  // Default to (Default, Default, Default) when the caller didn't classify
+  // — keeps the wizard usable for tabular/genomic imports that don't go
+  // through StepMetadata's sensor branch. Image imports must classify or
+  // downstream thermal/RGB branching can't tell sensors apart.
+  const sensorTypeId = classification?.sensorTypeId ?? SensorType.Default
+  const dataTypeId = classification?.dataTypeId ?? DataType.Default
+  const dataFormatId = classification?.dataFormatId ?? DataFormat.Default
   try {
     return (await SensorsService.apiSensorsCreateSensor({
       requestBody: {
         sensor_name: sensorName,
-        sensor_type_id: 0 as unknown as string,
-        sensor_data_type_id: 0 as unknown as string,
-        sensor_data_format_id: 0 as unknown as string,
+        sensor_type_id: sensorTypeId as unknown as string,
+        sensor_data_type_id: dataTypeId as unknown as string,
+        sensor_data_format_id: dataFormatId as unknown as string,
         experiment_name: experimentName,
         sensor_platform_name: sensorPlatformName,
       },

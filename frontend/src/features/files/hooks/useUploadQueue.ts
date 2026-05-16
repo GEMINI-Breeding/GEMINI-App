@@ -32,6 +32,18 @@ export type UploadTask = {
   followUpJob?: { kind: "extract_binary" } | { kind: "none" }
 }
 
+/**
+ * Per-batch job kicked off once after every file in this run has
+ * uploaded successfully. Used for THERMAL_EXTRACT, where the job runs
+ * against a MinIO prefix (year/exp/.../sensor/) rather than per
+ * filename, and where parameters travel with the dataset rather than
+ * with each file.
+ */
+export type PostUploadJob = {
+  jobType: "THERMAL_EXTRACT"
+  parameters: Record<string, unknown>
+}
+
 export type UploadQueueResult = {
   uploaded: { file: File; objectPath: string }[]
   jobIds: string[]
@@ -60,6 +72,12 @@ export function useUploadQueue() {
          * omitted, uploads land as legacy "experiment-owned" rows.
          */
         datasetId?: string
+        /**
+         * Optional single job to submit *after every task uploads*. Used
+         * by the thermal flow: one THERMAL_EXTRACT job per dataset, not
+         * one per file. Skipped if any task failed.
+         */
+        postUploadJob?: PostUploadJob
       } = {},
     ): Promise<UploadQueueResult> => {
       const abort = new AbortController()
@@ -136,6 +154,32 @@ export function useUploadQueue() {
         })
 
         await runWithConcurrency(uploadThunks, MAX_CONCURRENCY)
+
+        // Per-batch follow-up: THERMAL_EXTRACT runs once against the
+        // dataset's MinIO prefix after every file is on disk. We
+        // submit *after* runWithConcurrency so the worker never starts
+        // before all inputs are visible to it.
+        if (opts.postUploadJob && uploaded.length > 0) {
+          try {
+            const job = await JobsService.apiJobsSubmitSubmitJob({
+              requestBody: {
+                job_type: opts.postUploadJob.jobType,
+                parameters: {
+                  ...opts.postUploadJob.parameters,
+                  experiment_id: opts.experimentId,
+                  dataset_id: opts.datasetId,
+                },
+                experiment_id: opts.experimentId,
+              },
+            })
+            if (job?.id) jobIds.push(String(job.id))
+          } catch (err) {
+            // Surface but don't fail the whole upload — files are
+            // already on MinIO and the user can re-trigger extraction
+            // via the manual re-run path in Phase B.5's plan note.
+            console.error("Post-upload job submit failed:", err)
+          }
+        }
 
         if (jobIds.length === 0) {
           // No extraction to wait for — mark done immediately.
