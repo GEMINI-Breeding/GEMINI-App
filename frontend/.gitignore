@@ -27,4 +27,5 @@ openapi.json
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-/playwright/.auth/tests/e2e/_*.csv
+/playwright/.auth/
+tests/e2e/_*.csv
