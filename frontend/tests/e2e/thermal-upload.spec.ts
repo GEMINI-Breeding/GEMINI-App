@@ -130,7 +130,10 @@ async function runThermalUploadAndVerify(
   const submitted = (await submitResp.json()) as {
     id?: string
     job_type?: string
-    parameters?: { thermal_calibration?: { mode?: string } }
+    parameters?: {
+      thermal_calibration?: { mode?: string }
+      dataset_prefix?: string
+    }
   }
   expect(submitted.job_type).toBe("THERMAL_EXTRACT")
   expect(submitted.parameters?.thermal_calibration?.mode).toBe(
@@ -140,6 +143,15 @@ async function runThermalUploadAndVerify(
     submitted.id,
     "THERMAL_EXTRACT job id must be returned",
   ).toBeTruthy()
+
+  // Option-A migration contract: the dataset_prefix the worker sees
+  // must include an 8-hex per-dataset segment between {sensor}/ and
+  // the trailing slash. Without this, two uploads at the same scope
+  // would commingle on disk.
+  const datasetPrefix = submitted.parameters?.dataset_prefix ?? ""
+  expect(datasetPrefix).toMatch(
+    new RegExp(`/${sensor}/[0-9a-f]{8}/$`),
+  )
 
   // Worker terminal state — same signal the amiga + image specs use.
   await expect(page.getByText(/^Done$/i).first()).toBeVisible({
@@ -218,5 +230,73 @@ test.describe("Thermal upload (Image Data path)", () => {
     runPrefix,
   }) => {
     await runThermalUploadAndVerify(page, BOSON_CASE, runPrefix)
+  })
+
+  test("Two FLIR uploads at the same scope land at distinct dataset prefixes", async ({
+    page,
+    runPrefix,
+  }) => {
+    // Regression for the commingled-prefix bug Option A fixes: two
+    // back-to-back uploads under identical scope fields must produce
+    // two distinct `dataset_prefix` values (different 8-hex
+    // segments). Pre-Option-A, both would land at
+    // `…/{sensor}/Images/` and the worker would mix their files.
+    const experiment = `${runPrefix}-exp`
+    const location = `${runPrefix}-loc`
+    const population = `${runPrefix}-pop`
+    const date = "2024-07-25"
+    const platform = `${runPrefix}-plat`
+    const sensor = `${runPrefix}-sensor`
+
+    async function runOneUpload(): Promise<string> {
+      await navigateToUpload(page)
+      await selectDataType(page, "Image Data")
+      await fillUploadForm(page, {
+        experiment,
+        location,
+        population,
+        date,
+        platform,
+        sensor,
+      })
+      await dropFiles(page, FLIR_CASE.fixtures)
+      await expect(page.getByTestId("thermal-calibration-field")).toBeVisible({
+        timeout: 15_000,
+      })
+      const submitJobResp = page.waitForResponse(
+        (r) =>
+          r.url().includes("/api/jobs/submit") &&
+          r.request().method() === "POST",
+        { timeout: 120_000 },
+      )
+      const firstChunk = waitForResponseOk(
+        page,
+        "POST",
+        /\/api\/files\/upload_chunk$/,
+        60_000,
+      )
+      await page.getByTestId("upload-submit").click()
+      await firstChunk
+      const submitResp = await submitJobResp
+      const submitted = (await submitResp.json()) as {
+        parameters?: { dataset_prefix?: string }
+      }
+      const prefix = submitted.parameters?.dataset_prefix ?? ""
+      // Wait for the worker to finish before kicking off the second
+      // upload; otherwise the page transitions while the first batch
+      // is still in flight and the second submit's response listener
+      // can race against the first.
+      await expect(page.getByText(/^Done$/i).first()).toBeVisible({
+        timeout: 300_000,
+      })
+      return prefix
+    }
+
+    const firstPrefix = await runOneUpload()
+    expect(firstPrefix).toMatch(new RegExp(`/${sensor}/[0-9a-f]{8}/$`))
+    const secondPrefix = await runOneUpload()
+    expect(secondPrefix).toMatch(new RegExp(`/${sensor}/[0-9a-f]{8}/$`))
+    // Distinct short-ids — the whole point of Option A.
+    expect(secondPrefix).not.toBe(firstPrefix)
   })
 })
