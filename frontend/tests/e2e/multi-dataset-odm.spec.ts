@@ -65,7 +65,16 @@ test.describe("Multi-dataset ODM (Option A)", () => {
   test("multi-select shows both datasets, deselecting one narrows RUN_ODM", async ({
     page,
     runPrefix,
+    consoleErrorGuard,
   }) => {
+    // The RGB datasets have no RawThermal/thermal_dataset.json — the
+    // thermal-GPS preflight will fetch and 404, which the preflight
+    // tolerates but Chromium logs as a console error. Whitelist that
+    // one URL pattern so the guard's strict pass still catches real
+    // regressions.
+    consoleErrorGuard.expectError(
+      /RawThermal\/thermal_dataset\.json/,
+    )
     const scope: RunScope = {
       experiment: `${runPrefix}-exp`,
       location: `${runPrefix}-loc`,
@@ -112,7 +121,20 @@ test.describe("Multi-dataset ODM (Option A)", () => {
       .first()
     await expect(uploadRow).toBeVisible({ timeout: 30_000 })
     await uploadRow.click()
-    await page.getByRole("button", { name: /create run/i }).click()
+    // Wait for the row to be visually selected (NewRunDialog flips
+    // the `aria-selected` attribute on click). Without this the
+    // following Create Run click occasionally races the row-select
+    // state transition.
+    await expect(uploadRow).toHaveAttribute("aria-selected", "true", {
+      timeout: 5_000,
+    })
+    // The NewRunDialog footer can render outside the viewport on the
+    // default Playwright window when the upload table is tall. JS-
+    // dispatched click bypasses the viewport requirement; the button
+    // is a normal <button> with an onClick handler so this is the
+    // same code path a real user's mouse hits.
+    const createRunBtn = page.getByRole("button", { name: /create run/i })
+    await createRunBtn.evaluate((el) => (el as HTMLButtonElement).click())
 
     // Inputs card lists every image across both datasets (recursive
     // scope-root listing). Both batches together = 4 files.
@@ -144,6 +166,17 @@ test.describe("Multi-dataset ODM (Option A)", () => {
     await expect(
       page.getByText(/1 of 2 datasets selected/i),
     ).toBeVisible({ timeout: 5_000 })
+
+    // Data Sync gates orthomosaic — flip it to completed (no-op
+    // step that just confirms images exist at the scope).
+    const dataSyncRow = page.getByTestId("step-row-data_sync")
+    await expect(dataSyncRow).toHaveAttribute("data-status", "ready", {
+      timeout: 15_000,
+    })
+    await dataSyncRow.getByRole("button", { name: /run step/i }).click()
+    await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
+      timeout: 10_000,
+    })
 
     // Trigger ODM. The submit fires immediately — we don't wait for
     // worker completion, just that the request body carries the
