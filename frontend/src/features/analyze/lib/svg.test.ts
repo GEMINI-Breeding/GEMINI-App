@@ -51,7 +51,7 @@ describe("divergingColor", () => {
   it("interpolates linearly between endpoints", () => {
     const half = divergingColor(0.5)
     const match = half.match(/rgb\((\d+),(\d+),(\d+)\)/)!
-    const [r, g, b] = [Number(match[1]), Number(match[2]), Number(match[3])]
+    const [r, , b] = [Number(match[1]), Number(match[2]), Number(match[3])]
     // Halfway between (255,255,255) and (33,102,172) is roughly (144, 178, 213).
     expect(r).toBeGreaterThan(120)
     expect(r).toBeLessThan(170)
