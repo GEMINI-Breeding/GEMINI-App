@@ -163,8 +163,19 @@ test.describe("Image Review (optional aerial step)", () => {
     request,
     baseURL,
     runPrefix,
+    consoleErrorGuard,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
+
+    // The image-filter try-fetch 404s on first load when no filter
+    // exists yet — the picker tolerates it and starts with an empty
+    // exclusion set. Chromium still logs the 404; whitelist it.
+    consoleErrorGuard.expectError(/image_filter\.txt/)
+    // Leaflet's marker-shadow image is served from node_modules in the
+    // dev server, which the Vite middleware refuses with a 403 unless
+    // the file is allowlisted. Pre-existing dev-only noise unrelated
+    // to image review; whitelist.
+    consoleErrorGuard.expectError(/leaflet\/dist\/images/)
 
     const scope = await createWorkspaceAndOpenRun(page, { runPrefix })
 
@@ -290,25 +301,28 @@ test.describe("Image Review (optional aerial step)", () => {
     })
 
     // Verify the sidecar landed in MinIO with exactly the dragged count.
+    // Post Option-A: image_filter.txt lives at the scope root
+    // (Raw/.../{sensor}/), sibling of every per-dataset subdir — the
+    // worker's _load_image_filter and the picker both read from there.
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/Images/`
+    const scopePrefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/`
     const listRes = await request.get(
-      new URL(`/api/files/list/gemini/${prefix}`, baseURL).toString(),
+      new URL(`/api/files/list/gemini/${scopePrefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${token}` } },
     )
     expect(listRes.ok()).toBe(true)
     const files = (await listRes.json()) as Array<{ object_name: string }>
     const names = files.map((f) => f.object_name ?? "")
     expect(
-      names.some((n) => n.endsWith("/image_filter.txt")),
-      `expected image_filter.txt under ${prefix}, got ${JSON.stringify(names)}`,
+      names.some((n) => n === `${scopePrefix}image_filter.txt`),
+      `expected image_filter.txt at ${scopePrefix}, got ${JSON.stringify(names)}`,
     ).toBe(true)
 
     const filterText = await fetchMinioObjectText(
       request,
       baseURL,
       token,
-      `${prefix}image_filter.txt`,
+      `${scopePrefix}image_filter.txt`,
     )
     const lines = filterText
       .split(/\r?\n/)

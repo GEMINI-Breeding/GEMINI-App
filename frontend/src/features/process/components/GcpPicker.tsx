@@ -1199,10 +1199,10 @@ export function GcpPicker({
         queryKey: ["files", "list", imagesPrefix],
       })
       queryClient.invalidateQueries({
-        queryKey: ["gcp-csv", imagesPrefix],
+        queryKey: ["gcp-csv", csvObjectName],
       })
       queryClient.invalidateQueries({
-        queryKey: ["gcp-image-groups", imagesPrefix],
+        queryKey: ["gcp-image-groups", groupsObjectName],
       })
     },
     onError: (err) =>
@@ -1251,7 +1251,7 @@ export function GcpPicker({
         queryKey: ["files", "list", imagesPrefix],
       })
       queryClient.invalidateQueries({
-        queryKey: ["gcp-image-groups", imagesPrefix],
+        queryKey: ["gcp-image-groups", groupsObjectName],
       })
     },
     onError: (err) =>
@@ -1361,7 +1361,9 @@ export function GcpPicker({
     queryClient.invalidateQueries({
       queryKey: ["files", "list", imagesPrefix],
     })
-    queryClient.invalidateQueries({ queryKey: ["gcp-csv", imagesPrefix] })
+    // CSV query is now keyed on the object name (scope-root), not the
+    // image prefix.
+    queryClient.invalidateQueries({ queryKey: ["gcp-csv", csvObjectName] })
   }
 
   // ── Inline coordinate editor (next to the Active GCP dropdown) ────────────
@@ -1432,7 +1434,7 @@ export function GcpPicker({
         queryKey: ["files", "list", imagesPrefix],
       })
       queryClient.invalidateQueries({
-        queryKey: ["gcp-csv", imagesPrefix],
+        queryKey: ["gcp-csv", csvObjectName],
       })
     },
     onError: (err) =>
