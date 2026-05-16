@@ -79,11 +79,18 @@ function seedRun(): Run {
   return r
 }
 
+const SHORT_ID = "a2f31b04"
+
 function baseInput(run: Run, stepKey: string): ExecuteStepInput {
   return {
     runId: run.id,
     stepKey,
     scope: SCOPE,
+    // Single dataset selected by default — orthomosaic preflight runs
+    // exactly one fetch against the short-id's per-dataset summary.
+    // Tests covering the "all datasets" no-preflight branch override
+    // this to [].
+    datasetShortIds: [SHORT_ID],
     experimentId: "exp-uuid",
   }
 }
@@ -150,6 +157,7 @@ describe("executeStep", () => {
         date: "2026-04-29",
         platform: "Drone",
         sensor: "RGB",
+        dataset_short_ids: [SHORT_ID],
         reconstruction_quality: "High",
         custom_options: "--fast",
       })
@@ -172,6 +180,31 @@ describe("executeStep", () => {
         "reconstruction_quality",
       )
       expect(call.requestBody.parameters).not.toHaveProperty("custom_options")
+    })
+
+    it("omits dataset_short_ids and skips preflight when 'all datasets' (empty list)", async () => {
+      // Empty list = "all datasets at this scope"; worker recurses
+      // the scope root. No canonical short-id to preflight against,
+      // so the thermal sidecar fetch is skipped entirely.
+      const run = seedRun()
+      const fetchSpy = vi.fn(() =>
+        Promise.resolve(new Response(null, { status: 404 })),
+      )
+      vi.stubGlobal("fetch", fetchSpy)
+      submitMock.mockResolvedValue({
+        id: "ortho-all",
+      } as unknown as JobOutput)
+      await executeStep({
+        ...baseInput(run, "orthomosaic"),
+        datasetShortIds: [],
+      })
+      expect(fetchSpy).not.toHaveBeenCalled()
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters).not.toHaveProperty(
+        "dataset_short_ids",
+      )
     })
 
     it("throws when the SDK returns no job id", async () => {

@@ -73,14 +73,18 @@ function apiUrl(path: string): string {
 
 /**
  * Build the MinIO key the worker writes its per-dataset summary to.
- * Mirrors the `RawThermal/` sibling of `Images/`:
+ * Mirrors the `RawThermal/` sibling of `Images/` inside the per-dataset
+ * subdir (post Option-A migration):
  *
- *   Raw/.../{sensor}/Images/          ← ODM input
- *   Raw/.../{sensor}/RawThermal/      ← worker outputs
- *   Raw/.../{sensor}/RawThermal/thermal_dataset.json
+ *   Raw/.../{sensor}/{shortId}/Images/          ← ODM input
+ *   Raw/.../{sensor}/{shortId}/RawThermal/      ← worker outputs
+ *   Raw/.../{sensor}/{shortId}/RawThermal/thermal_dataset.json
  */
-function thermalSummaryPath(scope: AerialScope): string {
-  const prefix = rawImagesPrefix(scope) // ends with "Images/"
+function thermalSummaryPath(
+  scope: AerialScope,
+  datasetShortId: string,
+): string {
+  const prefix = rawImagesPrefix(scope, datasetShortId) // ends with "Images/"
   if (!prefix.endsWith("/Images/")) {
     // Defensive: a future tweak to rawImagesPrefix could break the
     // sibling assumption. Surface that loudly.
@@ -92,15 +96,16 @@ function thermalSummaryPath(scope: AerialScope): string {
 }
 
 /**
- * Check whether the dataset for `scope` is a thermal dataset with no
- * GPS. Resolves to a discriminated union so callers can branch
- * without inspecting HTTP details.
+ * Check whether the dataset for `scope` + `datasetShortId` is a
+ * thermal dataset with no GPS. Resolves to a discriminated union so
+ * callers can branch without inspecting HTTP details.
  */
 export async function checkThermalGpsPreflight(
   scope: AerialScope,
+  datasetShortId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ThermalGpsPreflightResult> {
-  const key = thermalSummaryPath(scope)
+  const key = thermalSummaryPath(scope, datasetShortId)
   const url = apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${key}`)
   let resp: Response
   try {

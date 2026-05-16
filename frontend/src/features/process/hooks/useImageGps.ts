@@ -56,8 +56,16 @@ export interface UseImageGpsResult {
   imagesPrefix: string
 }
 
-export function useImageGps(scope: AerialScope): UseImageGpsResult {
-  const imagesPrefix = rawImagesPrefix(scope)
+export function useImageGps(
+  scope: AerialScope,
+  datasetShortId: string | null,
+): UseImageGpsResult {
+  // Empty prefix when the caller hasn't picked a dataset yet — the
+  // queries below are disabled in that state, so the value is unused.
+  // We avoid calling rawImagesPrefix(scope, "") because it throws.
+  const imagesPrefix = datasetShortId
+    ? rawImagesPrefix(scope, datasetShortId)
+    : ""
 
   const filesQuery = useQuery<FileMetadata[], Error>({
     queryKey: ["files", "list", imagesPrefix, "image-gps"],
@@ -67,7 +75,7 @@ export function useImageGps(scope: AerialScope): UseImageGpsResult {
       })
       return (res as FileMetadata[] | null) ?? []
     },
-    enabled: isLoggedIn(),
+    enabled: isLoggedIn() && Boolean(datasetShortId),
   })
 
   const allFiles = filesQuery.data ?? []
@@ -87,7 +95,7 @@ export function useImageGps(scope: AerialScope): UseImageGpsResult {
       })
       return res
     },
-    enabled: isLoggedIn() && images.length > 0,
+    enabled: isLoggedIn() && Boolean(datasetShortId) && images.length > 0,
     staleTime: Number.POSITIVE_INFINITY,
   })
 

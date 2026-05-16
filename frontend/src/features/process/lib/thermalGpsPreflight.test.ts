@@ -29,20 +29,23 @@ const SCOPE: AerialScope = {
   platform: "Amiga",
   sensor: "FLIR-Boson",
 }
+const SHORT_ID = "a2f31b04"
 
 describe("checkThermalGpsPreflight", () => {
   it("returns ok when the sidecar is missing (non-thermal dataset)", async () => {
-    const fetchMock = vi.fn(() =>
+    const fetchMock: typeof fetch = vi.fn(() =>
       Promise.resolve(new Response(null, { status: 404 })),
     )
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result.kind).toBe("ok")
     expect(result).toEqual({ kind: "ok", thermal: false, hasGps: false })
-    // URL must hit the sibling-of-Images RawThermal path; locked so
-    // future tweaks to rawImagesPrefix don't drift the contract.
-    const [calledUrl] = fetchMock.mock.calls[0]
+    // URL must hit the sibling-of-Images RawThermal path inside the
+    // per-dataset subdir; locked so future tweaks to rawImagesPrefix
+    // don't drift the contract.
+    const calledUrl = (fetchMock as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0][0]
     expect(String(calledUrl)).toContain(
-      "Raw/2026/GEMINI/Davis/Cowpea/2026-04-29/Amiga/FLIR-Boson/RawThermal/thermal_dataset.json",
+      "Raw/2026/GEMINI/Davis/Cowpea/2026-04-29/Amiga/FLIR-Boson/a2f31b04/RawThermal/thermal_dataset.json",
     )
   })
 
@@ -60,7 +63,7 @@ describe("checkThermalGpsPreflight", () => {
         }),
       ),
     )
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result).toEqual({
       kind: "missing_gps",
       mode: "boson_tlinear_high",
@@ -82,7 +85,7 @@ describe("checkThermalGpsPreflight", () => {
         }),
       ),
     )
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result).toEqual({ kind: "ok", thermal: true, hasGps: true })
   })
 
@@ -90,13 +93,13 @@ describe("checkThermalGpsPreflight", () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(new Response(null, { status: 500 })),
     )
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result.kind).toBe("sidecar_unreadable")
   })
 
   it("returns sidecar_unreadable when fetch rejects", async () => {
     const fetchMock = vi.fn(() => Promise.reject(new Error("offline")))
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result.kind).toBe("sidecar_unreadable")
   })
 
@@ -104,7 +107,7 @@ describe("checkThermalGpsPreflight", () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(new Response("not json")),
     )
-    const result = await checkThermalGpsPreflight(SCOPE, fetchMock)
+    const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result.kind).toBe("sidecar_unreadable")
   })
 })

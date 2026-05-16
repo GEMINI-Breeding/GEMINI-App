@@ -79,7 +79,7 @@ import {
   isAerialScopeComplete,
   plotBoundariesPath,
   processedPrefix,
-  rawImagesPrefix,
+  rawScopePrefix,
 } from "@/features/process/lib/paths"
 import {
   executeStep,
@@ -804,12 +804,15 @@ export function RunDetail() {
   }, [run?.uploadScope])
 
   // Confirm raw images exist (drives data_sync's "complete" signal too).
+  // Lists the scope root recursively so the inputs card sees every
+  // dataset's Images/ — pre-Phase-5 the run is scope-wide; Phase 5
+  // adds a multi-select that narrows this view.
   const rawImagesQuery = useQuery<FileMetadata[], Error>({
-    queryKey: ["files", "list", scope ? rawImagesPrefix(scope) : null],
+    queryKey: ["files", "list", scope ? rawScopePrefix(scope) : null],
     queryFn: async () => {
       if (!scope) return []
       const res = await FilesService.apiFilesListFilePathListFiles({
-        filePath: `${DEFAULT_BUCKET}/${rawImagesPrefix(scope)}`,
+        filePath: `${DEFAULT_BUCKET}/${rawScopePrefix(scope)}`,
       })
       return (res as FileMetadata[] | null) ?? []
     },
@@ -818,8 +821,10 @@ export function RunDetail() {
   })
   const imageFiles = useMemo(
     () =>
-      (rawImagesQuery.data ?? []).filter((f) =>
-        /\.(jpe?g|png|tif?f)$/i.test(f.object_name ?? ""),
+      (rawImagesQuery.data ?? []).filter(
+        (f) =>
+          (f.object_name ?? "").includes("/Images/") &&
+          /\.(jpe?g|png|tif?f)$/i.test(f.object_name ?? ""),
       ),
     [rawImagesQuery.data],
   )
@@ -1145,6 +1150,7 @@ export function RunDetail() {
           runId: run.id,
           stepKey,
           scope: scope ?? ({} as AerialScope),
+          datasetShortIds: run.uploadScope?.datasetShortIds ?? [],
           experimentId,
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
@@ -1447,7 +1453,7 @@ export function RunDetail() {
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
-                    {rawImagesPrefix(scope)}
+                    {rawScopePrefix(scope)}
                   </code>
                   <p className="text-muted-foreground flex items-center gap-2">
                     <ImageIcon className="h-4 w-4" />

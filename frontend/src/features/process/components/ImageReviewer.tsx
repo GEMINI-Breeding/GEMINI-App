@@ -3,13 +3,14 @@
  *
  * Drops a satellite map for the run's raw-images prefix, lets the user
  * shift-drag/shift-click to mark images for exclusion, and writes the
- * resulting basename list to `Raw/{scope}/Images/image_filter.txt`.
- * The ODM worker honors that sidecar at submission time.
+ * resulting basename list to `Raw/{scope}/image_filter.txt` (scope
+ * root, sibling of every dataset subdir). The ODM worker honors that
+ * sidecar at submission time across all datasets it pools.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, MapPin, SkipForward } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -28,6 +29,7 @@ import {
 } from "@/features/process/lib/imageFilter"
 import { fetchObjectAsText } from "@/features/process/lib/imageGps"
 import type { AerialScope } from "@/features/process/lib/paths"
+import { rawScopePrefix } from "@/features/process/lib/paths"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -50,6 +52,17 @@ export function ImageReviewer({
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
 
+  // The map needs a single dataset to render — pulling per-image GPS
+  // from the worker-cached endpoint requires one prefix. Multi-dataset
+  // image-review would need a UX redesign (which dot belongs to which
+  // dataset?), so we gate the tool on exactly one selection.
+  const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
+  const activeShortId =
+    datasetShortIds.length === 1 ? datasetShortIds[0] : null
+
+  // useImageGps tolerates null and disables its queries — the tool
+  // shows a "pick exactly one dataset" prompt below when the user
+  // hasn't narrowed to one yet.
   const {
     images,
     gpsMap,
@@ -60,20 +73,27 @@ export function ImageReviewer({
     imageBbox,
     filesQuery,
     imagesPrefix,
-  } = useImageGps(scope)
+  } = useImageGps(scope, activeShortId)
 
-  // ── Existing image_filter.txt (so a re-open shows current exclusions) ─────
-  const filterObjectName = `${imagesPrefix}${FILTER_FILENAME}`
-  const filterExists = useMemo(
-    () =>
-      (filesQuery.data ?? []).some((f) => f.object_name === filterObjectName),
-    [filesQuery.data, filterObjectName],
-  )
+  // image_filter.txt lives at the scope root so it applies across all
+  // datasets the ODM job pools. Same key as the worker's
+  // `_load_image_filter` lookup.
+  const scopePrefix = rawScopePrefix(scope)
+  const filterObjectName = `${scopePrefix}${FILTER_FILENAME}`
+  // Try to fetch on every mount; 404 → empty set. Avoids a
+  // chicken-and-egg list/check pass that the per-dataset images query
+  // can't satisfy (the filter file lives one directory up from the
+  // images this hook lists).
   const filterQuery = useQuery<Set<string>, Error>({
-    queryKey: ["image-filter", imagesPrefix, filterExists],
-    queryFn: async () =>
-      parseImageFilter(await fetchObjectAsText(filterObjectName)),
-    enabled: filterExists,
+    queryKey: ["image-filter", filterObjectName],
+    queryFn: async () => {
+      try {
+        return parseImageFilter(await fetchObjectAsText(filterObjectName))
+      } catch {
+        return new Set<string>()
+      }
+    },
+    enabled: Boolean(activeShortId),
   })
 
   // ── Selection state ───────────────────────────────────────────────────────
@@ -159,6 +179,23 @@ export function ImageReviewer({
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (activeShortId === null) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Pick exactly one dataset to review
+          </CardTitle>
+          <CardDescription data-testid="image-review-needs-single-dataset">
+            {datasetShortIds.length === 0
+              ? "This run is targeting all datasets at this scope. Open the run page and select a single dataset before opening the image review tool."
+              : `This run targets ${datasetShortIds.length} datasets. The image review tool operates on one dataset at a time — narrow the selection on the run page first.`}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+
   if (filesQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-12">

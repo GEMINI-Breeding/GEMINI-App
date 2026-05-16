@@ -42,7 +42,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { AerialScope } from "@/features/process/lib/paths"
-import { plotImagesPrefix, rawImagesPrefix } from "@/features/process/lib/paths"
+import {
+  plotImagesPrefix,
+  rawImagesPrefix,
+  rawScopePrefix,
+} from "@/features/process/lib/paths"
 import { executeStep } from "@/features/process/lib/runApi"
 import type { Pipeline, Run } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -147,13 +151,21 @@ export function InferenceTool({
 
   // Image source: prefer plot-image crops if SPLIT_ORTHOMOSAIC has run;
   // otherwise fall back to raw images for a single-image smoke test.
-  const sources = useMemo(
-    () => [
+  // Raw images: when the run targets exactly one dataset, point at its
+  // per-dataset prefix; otherwise list the scope root recursively (the
+  // backend listing endpoint walks subdirs and the picker filters to
+  // /Images/ entries).
+  const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
+  const sources = useMemo(() => {
+    const rawPrefix =
+      datasetShortIds.length === 1
+        ? rawImagesPrefix(scope, datasetShortIds[0])
+        : rawScopePrefix(scope)
+    return [
       { label: "Plot images (post-split)", prefix: plotImagesPrefix(scope) },
-      { label: "Raw drone images", prefix: rawImagesPrefix(scope) },
-    ],
-    [scope],
-  )
+      { label: "Raw drone images", prefix: rawPrefix },
+    ]
+  }, [scope, datasetShortIds])
   const [sourceIdx, setSourceIdx] = useState(0)
   const activePrefix = sources[sourceIdx].prefix
 

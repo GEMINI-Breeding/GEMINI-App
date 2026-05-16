@@ -98,6 +98,14 @@ export interface RunUploadScope {
   sensor: string
   /** GEMINIbase Experiment.id; required by the job-submit endpoint. */
   experimentId?: Id
+  /**
+   * Per-dataset short-ids (8-hex segments) the user has chosen to feed
+   * into the run's compute steps. Empty / undefined means "all
+   * datasets at this scope" — the wizard's default after the user
+   * picks the row in NewRunDialog. Set to a single id when running
+   * single-dataset tools (GCP picker, image review, thermal preflight).
+   */
+  datasetShortIds?: string[]
 }
 
 export interface Run {

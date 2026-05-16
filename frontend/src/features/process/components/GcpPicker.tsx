@@ -2,18 +2,20 @@
  * GcpPicker — interactive tool for marking ground control points.
  *
  * CSV-driven workflow ported from `main`. The user uploads a
- * `gcp_locations.csv` (Label,Lat_dec,Lon_dec,Altitude) which is stored at
- * `Raw/{scope}/Images/gcp_locations.csv` so it is shared across runs of the
- * same scope. The picker reads each image's EXIF GPS in the browser
- * (via `exifr`) so it can filter the image list by proximity to each GCP
- * and emit a `geo.txt` companion that NodeODM consumes alongside
- * `gcp_list.txt`. Marks are kept in the run's `gcp_selection` step state.
+ * `gcp_locations.csv` (Label,Lat_dec,Lon_dec,Altitude) which is stored
+ * at the scope root `Raw/{scope}/gcp_locations.csv` so it is shared
+ * across runs *and* across datasets at the same scope. The picker
+ * reads each image's EXIF GPS in the browser (via `exifr`) so it can
+ * filter the image list by proximity to each GCP and emit a `geo.txt`
+ * companion that NodeODM consumes alongside `gcp_list.txt`. Marks
+ * are kept in the run's `gcp_selection` step state.
  *
- * On save we upload two files to `Raw/{scope}/Images/`:
+ * On save we upload two files to `Raw/{scope}/`:
  *  - `gcp_list.txt` — ODM GCP file (EPSG:4326 header + per-mark rows)
  *  - `geo.txt`      — image GPS sidecar (EPSG:4326 header + per-image rows)
  *
- * The GEMINIbase ODM worker is patched to forward both files to NodeODM.
+ * The GEMINIbase ODM worker is patched to read both files from the
+ * scope root via `_download_gcp_files`.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -59,6 +61,7 @@ import {
   type ImageGps,
 } from "@/features/process/lib/imageGps"
 import type { AerialScope } from "@/features/process/lib/paths"
+import { rawScopePrefix } from "@/features/process/lib/paths"
 import {
   type Run,
   setStepState,
@@ -562,7 +565,12 @@ function haversineM(
 // ── CSV upload panel ────────────────────────────────────────────────────────
 
 interface CsvUploadPanelProps {
-  imagesPrefix: string
+  /**
+   * Scope-root prefix (`Raw/.../{sensor}/`) — sibling of every dataset
+   * subdir. The CSV is scope-wide because GCP locations describe the
+   * field, not any one upload.
+   */
+  scopePrefix: string
   onLoaded: () => void
   onCancel?: () => void
   onSkip?: () => void
@@ -570,7 +578,7 @@ interface CsvUploadPanelProps {
 }
 
 function CsvUploadPanel({
-  imagesPrefix,
+  scopePrefix,
   onLoaded,
   onCancel,
   onSkip,
@@ -590,7 +598,7 @@ function CsvUploadPanel({
         formData: {
           file,
           bucket_name: DEFAULT_BUCKET,
-          object_name: `${imagesPrefix}${CSV_FILENAME}`,
+          object_name: `${scopePrefix}${CSV_FILENAME}`,
         },
       })
     },
@@ -709,6 +717,14 @@ export function GcpPicker({
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
 
+  // GCP picker is single-dataset: each mark ties a GCP to a pixel in
+  // a specific image, and a GCP set typically belongs to a flight (not
+  // arbitrarily across uploads). Gate the tool on exactly one selected
+  // dataset; the wizard's multi-select governs which one.
+  const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
+  const activeShortId =
+    datasetShortIds.length === 1 ? datasetShortIds[0] : null
+
   // Image listing + EXIF GPS — shared with the image-review step.
   const {
     images: allImages,
@@ -718,35 +734,36 @@ export function GcpPicker({
     gpsReadyCount,
     filesQuery,
     imagesPrefix,
-  } = useImageGps(scope)
+  } = useImageGps(scope, activeShortId)
 
-  const allFiles = filesQuery.data ?? []
-
-  const csvObjectName = `${imagesPrefix}${CSV_FILENAME}`
-  const groupsObjectName = `${imagesPrefix}${GROUPS_FILENAME}`
-  const csvExists = useMemo(
-    () => allFiles.some((f) => f.object_name === csvObjectName),
-    [allFiles, csvObjectName],
-  )
-  const groupsExist = useMemo(
-    () => allFiles.some((f) => f.object_name === groupsObjectName),
-    [allFiles, groupsObjectName],
-  )
+  // All scope-wide sidecars (gcp_list.txt, geo.txt, gcp_locations.csv,
+  // gcp_image_groups.json, image_filter.txt) live at the scope root,
+  // sibling of every dataset subdir. The ODM worker reads them from
+  // the same place via `_download_gcp_files` / `_load_image_filter`.
+  const scopePrefix = rawScopePrefix(scope)
+  const csvObjectName = `${scopePrefix}${CSV_FILENAME}`
+  const groupsObjectName = `${scopePrefix}${GROUPS_FILENAME}`
+  // Try-fetch pattern: the per-dataset image listing won't surface
+  // these sibling files, so we always attempt the download and
+  // tolerate 404 with an empty result.
+  const csvQueryEnabled = Boolean(activeShortId)
+  const groupsQueryEnabled = Boolean(activeShortId)
 
   // ── Excluded images (image_review step) ───────────────────────────────────
-  // The optional Image Exclusion step writes `image_filter.txt` next to
-  // the raw images. Drop those names from the candidate list and the
+  // The optional Image Exclusion step writes `image_filter.txt` at
+  // the scope root. Drop those names from the candidate list and the
   // geo.txt sidecar so the GCP picker and ODM agree on what's in the run.
-  const filterObjectName = `${imagesPrefix}${IMAGE_FILTER_FILENAME}`
-  const filterExists = useMemo(
-    () => allFiles.some((f) => f.object_name === filterObjectName),
-    [allFiles, filterObjectName],
-  )
+  const filterObjectName = `${scopePrefix}${IMAGE_FILTER_FILENAME}`
   const filterQuery = useQuery<Set<string>, Error>({
-    queryKey: ["gcp-image-filter", imagesPrefix, filterExists],
-    queryFn: async () =>
-      parseImageFilter(await fetchObjectAsText(filterObjectName)),
-    enabled: filterExists,
+    queryKey: ["gcp-image-filter", filterObjectName],
+    queryFn: async () => {
+      try {
+        return parseImageFilter(await fetchObjectAsText(filterObjectName))
+      } catch {
+        return new Set<string>()
+      }
+    },
+    enabled: Boolean(activeShortId),
   })
   const excludedNames = filterQuery.data ?? new Set<string>()
 
@@ -780,23 +797,36 @@ export function GcpPicker({
   )
 
   // ── Fetch + parse the CSV (coordinates) and groups sidecar (per-GCP images)
+  // Try-fetch pattern: 404 → empty result. The per-dataset image
+  // listing won't surface these scope-root sidecars.
   const csvQuery = useQuery<GcpCatalogEntry[], Error>({
-    queryKey: ["gcp-csv", imagesPrefix, csvExists],
+    queryKey: ["gcp-csv", csvObjectName],
     queryFn: async () => {
-      const text = await fetchObjectAsText(csvObjectName)
-      return parseGcpLocationsCsv(text)
+      try {
+        return parseGcpLocationsCsv(await fetchObjectAsText(csvObjectName))
+      } catch {
+        return []
+      }
     },
-    enabled: csvExists,
+    enabled: csvQueryEnabled,
   })
   const groupsQuery = useQuery<Record<string, string[]>, Error>({
-    queryKey: ["gcp-image-groups", imagesPrefix, groupsExist],
+    queryKey: ["gcp-image-groups", groupsObjectName],
     queryFn: async () => {
-      const text = await fetchObjectAsText(groupsObjectName)
-      return parseGcpImageGroups(text)
+      try {
+        return parseGcpImageGroups(await fetchObjectAsText(groupsObjectName))
+      } catch {
+        return {}
+      }
     },
-    enabled: groupsExist,
+    enabled: groupsQueryEnabled,
   })
   const csvRows = csvQuery.data ?? []
+  // Existence flags now derived from the try-fetch results: an empty
+  // CSV / empty filter set means the file is absent (404 → empty
+  // result via the catch in the queryFn).
+  const csvExists = csvRows.length > 0
+  const filterExists = (filterQuery.data ?? new Set<string>()).size > 0
 
   // Per-GCP image groups (map mode). Initial value comes from step
   // state; hydrated from the durable JSON sidecar once it loads. Local
@@ -1253,8 +1283,11 @@ export function GcpPicker({
         : marksAfterExclusion
       const gcpText = serializeGcpList(keptCatalog, includedMarks)
       const geoText = serializeGeoTxt(imageNames, gpsMap)
-      await uploadText(gcpText, `${imagesPrefix}${GCP_FILENAME}`, "text/plain")
-      await uploadText(geoText, `${imagesPrefix}${GEO_FILENAME}`, "text/plain")
+      // gcp_list.txt + geo.txt land at the scope root so the worker's
+      // _download_gcp_files picks them up regardless of which datasets
+      // the multi-select feeds in.
+      await uploadText(gcpText, `${scopePrefix}${GCP_FILENAME}`, "text/plain")
+      await uploadText(geoText, `${scopePrefix}${GEO_FILENAME}`, "text/plain")
       if (culledGcps.length > 0) {
         showErrorToast(
           `Excluded ${culledGcps.length} GCP(s) more than ${GCP_BBOX_CULL_BUFFER_M} m outside the image area: ${culledGcps
@@ -1280,8 +1313,8 @@ export function GcpPicker({
         manualMarks: marks,
         outputs: {
           ...(run.steps.gcp_selection?.outputs ?? {}),
-          gcpListPath: `${imagesPrefix}${GCP_FILENAME}`,
-          geoTxtPath: `${imagesPrefix}${GEO_FILENAME}`,
+          gcpListPath: `${scopePrefix}${GCP_FILENAME}`,
+          geoTxtPath: `${scopePrefix}${GEO_FILENAME}`,
           gcpLocationsCsvPath: csvObjectName,
           gcpImageGroupsPath: groupsObjectName,
           gcpCount: catalog.length,
@@ -1469,6 +1502,22 @@ export function GcpPicker({
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (activeShortId === null) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Pick exactly one dataset for GCP marking
+          </CardTitle>
+          <CardDescription data-testid="gcp-picker-needs-single-dataset">
+            {datasetShortIds.length === 0
+              ? "This run is targeting all datasets at this scope. Open the run page and select a single dataset before opening the GCP tool."
+              : `This run targets ${datasetShortIds.length} datasets. The GCP picker operates on one dataset at a time — narrow the selection on the run page first.`}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
   if (filesQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -1493,7 +1542,7 @@ export function GcpPicker({
   if (replaceMode) {
     return (
       <CsvUploadPanel
-        imagesPrefix={imagesPrefix}
+        scopePrefix={scopePrefix}
         hasExisting={csvExists}
         onLoaded={onCsvLoaded}
         onCancel={() => setReplaceMode(false)}

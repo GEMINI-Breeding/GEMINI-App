@@ -44,6 +44,13 @@ export interface AvailableUpload {
   dataType: "Image Data" | "Orthomosaic"
   /** Number of files counted under this prefix (just for display). */
   fileCount: number
+  /**
+   * Sorted list of distinct dataset short-ids observed at this scope
+   * (new layout). Empty for legacy uploads. The Run wizard exposes a
+   * multi-select over these so a single ODM job can pool images from
+   * multiple per-dataset prefixes.
+   */
+  datasetShortIds: string[]
 }
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png)$/i
@@ -59,13 +66,23 @@ interface ParsedRawObject {
   sensor: string
   /** Path component immediately after sensor — e.g. "Images" or "Orthomosaic". */
   bucketKind: string
+  /**
+   * 8-hex dataset prefix segment (post Option-A migration) when this
+   * object lives under a per-dataset subdir. Null for legacy layouts
+   * where the bucketKind sits directly after sensor.
+   */
+  datasetShortId: string | null
   filename: string
 }
+
+/** 8 lowercase hex chars — see datasetForUpload.extractDatasetShortId. */
+const SHORT_ID_RE = /^[0-9a-f]{8}$/
 
 function parseRawObjectName(objectName: string): ParsedRawObject | null {
   if (!objectName.startsWith("Raw/")) return null
   const parts = objectName.split("/")
-  // ["Raw", year, exp, site, pop, date, platform, sensor, bucketKind, ...rest, filename]
+  // New:    [Raw, year, exp, site, pop, date, platform, sensor, SHORTID, bucketKind, ...rest, filename]
+  // Legacy: [Raw, year, exp, site, pop, date, platform, sensor, bucketKind,           ...rest, filename]
   if (parts.length < 10) return null
   const [
     ,
@@ -76,7 +93,7 @@ function parseRawObjectName(objectName: string): ParsedRawObject | null {
     date,
     platform,
     sensor,
-    bucketKind,
+    eighth,
   ] = parts
   if (
     !year ||
@@ -89,6 +106,17 @@ function parseRawObjectName(objectName: string): ParsedRawObject | null {
   ) {
     return null
   }
+  // The eighth segment is either the dataset short-id (new) or the
+  // bucketKind directly (legacy). Distinguish by hex shape.
+  let datasetShortId: string | null = null
+  let bucketKind: string
+  if (SHORT_ID_RE.test(eighth)) {
+    if (parts.length < 11) return null
+    datasetShortId = eighth
+    bucketKind = parts[9]
+  } else {
+    bucketKind = eighth
+  }
   const filename = parts[parts.length - 1]
   return {
     year,
@@ -99,6 +127,7 @@ function parseRawObjectName(objectName: string): ParsedRawObject | null {
     platform,
     sensor,
     bucketKind,
+    datasetShortId,
     filename,
   }
 }
@@ -122,6 +151,10 @@ export function useAvailableUploads(): {
 
   const uploads = useMemo<AvailableUpload[]>(() => {
     const groups = new Map<string, AvailableUpload>()
+    // Per-group set of distinct short-ids — turned into a sorted array
+    // at the end. Tracked separately because Maps aren't structurally
+    // mutable per-key from a sort callback later.
+    const shortIdSets = new Map<string, Set<string>>()
     for (const item of listing.data ?? []) {
       const parsed = parseRawObjectName(item.object_name ?? "")
       if (!parsed) continue
@@ -129,7 +162,7 @@ export function useAvailableUploads(): {
       const isTif = TIF_EXTENSIONS.test(parsed.filename)
       // Treat Raw/.../Sensor/Orthomosaic/*.tif as an "Orthomosaic" upload
       // (the user brought in a pre-built mosaic). Everything under
-      // Raw/.../Sensor/Images/*.{jpg,png,tif} counts as "Image Data".
+      // Raw/.../Sensor/[shortId/]Images/*.{jpg,png,tif} counts as "Image Data".
       // Keys other than Images / Orthomosaic (e.g. metadata sidecars,
       // GCP CSVs) don't represent processable uploads on their own.
       let dataType: "Image Data" | "Orthomosaic" | null = null
@@ -149,6 +182,12 @@ export function useAvailableUploads(): {
         parsed.sensor,
         dataType,
       ].join("/")
+      let shortIds = shortIdSets.get(key)
+      if (!shortIds) {
+        shortIds = new Set<string>()
+        shortIdSets.set(key, shortIds)
+      }
+      if (parsed.datasetShortId) shortIds.add(parsed.datasetShortId)
       const existing = groups.get(key)
       if (existing) {
         existing.fileCount += 1
@@ -165,7 +204,14 @@ export function useAvailableUploads(): {
         sensor: parsed.sensor,
         dataType,
         fileCount: 1,
+        datasetShortIds: [],
       })
+    }
+    // Materialize the per-group short-ids so the React-Query value is
+    // immutable and stable across renders (sorted = deterministic).
+    for (const [key, upload] of groups) {
+      const set = shortIdSets.get(key)
+      upload.datasetShortIds = set ? Array.from(set).sort() : []
     }
     return Array.from(groups.values()).sort((a, b) => {
       // Most recent date first; tiebreak by experiment then platform so

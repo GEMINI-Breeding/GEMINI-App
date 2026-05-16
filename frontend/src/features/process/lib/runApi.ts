@@ -79,6 +79,13 @@ export interface ExecuteStepInput {
   stepKey: string
   /** Resolved aerial scope (date, platform, sensor, name path components). */
   scope: AerialScope
+  /**
+   * Dataset short-ids selected for this step. Empty / undefined means
+   * "all datasets at this scope" — the worker recurses the scope root.
+   * Set to one or more 8-hex segments to restrict the job to specific
+   * uploads.
+   */
+  datasetShortIds?: string[]
   /** GEMINIbase Experiment.id from the workspace. */
   experimentId: string
   /** Per-step parameters. */
@@ -103,6 +110,7 @@ export async function executeStep(
   input: ExecuteStepInput,
 ): Promise<ExecuteStepResult> {
   const { runId, stepKey, scope, experimentId, orthomosaic } = input
+  const datasetShortIds = input.datasetShortIds ?? []
 
   switch (stepKey) {
     case "data_sync": {
@@ -129,17 +137,34 @@ export async function executeStep(
     }
 
     case "orthomosaic": {
-      // Preflight: if this scope points at a thermal dataset whose
+      // Preflight: if any selected dataset is a thermal dataset whose
       // worker-written summary says `has_gps=false`, refuse to submit.
       // ODM would otherwise spin for ~10 minutes before bailing on
       // "Not enough features" — a worse UX and a wasted compute slot.
-      // Non-thermal datasets (no sidecar) pass through unchanged.
-      const preflight = await checkThermalGpsPreflight(scope)
-      if (preflight.kind === "missing_gps") {
-        throw new ThermalGpsRequiredError(
-          preflight.mode,
-          preflight.totalFiles,
-        )
+      // Non-thermal datasets (no sidecar) pass through unchanged. When
+      // the user picked "all datasets at this scope" (empty list), we
+      // skip the preflight: there's no canonical short-id to check
+      // against and the wizard shows a separate "all datasets selected"
+      // affordance for that case.
+      let preflight: Awaited<
+        ReturnType<typeof checkThermalGpsPreflight>
+      > = { kind: "ok", thermal: false, hasGps: false }
+      for (const shortId of datasetShortIds) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await checkThermalGpsPreflight(scope, shortId)
+        if (result.kind === "missing_gps") {
+          throw new ThermalGpsRequiredError(result.mode, result.totalFiles)
+        }
+        // First thermal-with-GPS hit wins for the quality-preset
+        // heuristic below.
+        if (
+          result.kind === "ok" &&
+          result.thermal &&
+          preflight.kind === "ok" &&
+          !preflight.thermal
+        ) {
+          preflight = result
+        }
       }
       const params: Record<string, unknown> = {
         year: scope.year,
@@ -149,6 +174,12 @@ export async function executeStep(
         date: scope.date,
         platform: scope.platform,
         sensor: scope.sensor,
+        // Worker uses dataset_short_ids to restrict listing; absent =>
+        // recursive listing under the scope root (legacy / "all"
+        // semantics).
+        ...(datasetShortIds.length > 0
+          ? { dataset_short_ids: datasetShortIds }
+          : {}),
         // Default Medium quality for radiometric thermal scopes — the
         // low-contrast, narrow-temperature-range raw previews
         // over-detect features at the default High preset. The user

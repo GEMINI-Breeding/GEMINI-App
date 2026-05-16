@@ -57,7 +57,7 @@ describe("useImageGps", () => {
       "apiFilesImageGpsFilePathListImageGps",
     ).mockRejectedValue(new Error("500: column metadata_json does not exist"))
 
-    const { result } = renderHook(() => useImageGps(SCOPE), { wrapper })
+    const { result } = renderHook(() => useImageGps(SCOPE, "a2f31b04"), { wrapper })
 
     await waitFor(() => expect(result.current.gpsError).not.toBeNull(), {
       timeout: 1500,
@@ -84,7 +84,7 @@ describe("useImageGps", () => {
       images: [{ name: "a.JPG", lat: 38.5, lon: -121.7, alt: 18 }],
     } as never)
 
-    const { result } = renderHook(() => useImageGps(SCOPE), { wrapper })
+    const { result } = renderHook(() => useImageGps(SCOPE, "a2f31b04"), { wrapper })
 
     await waitFor(() => expect(result.current.gpsLoading).toBe(false), {
       timeout: 1500,
