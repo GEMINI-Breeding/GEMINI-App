@@ -99,6 +99,7 @@ import {
 import {
   getRun,
   setStepState,
+  updateRun,
   usePipeline,
   useRun,
   useWorkspace,
@@ -745,6 +746,92 @@ function OrthomosaicOptions({
   )
 }
 
+// ── Dataset multi-select (per-run subset of all uploads at the scope) ───────
+
+/**
+ * Picks which per-dataset prefixes feed RUN_ODM. Default = all observed
+ * short-ids selected. The user can deselect individual datasets to
+ * exclude them; deselecting all reverts to "all datasets at this scope"
+ * semantics (the worker recurses the scope root). Selection persists
+ * to `run.uploadScope.datasetShortIds`.
+ */
+function DatasetMultiSelect({
+  available,
+  selected,
+  onChange,
+}: {
+  available: string[]
+  selected: string[]
+  onChange: (next: string[]) => void
+}) {
+  if (available.length <= 1) {
+    // Single dataset (or zero) at this scope — nothing to choose. Hide
+    // the picker entirely so the orthomosaic step looks the same as
+    // pre-multi-dataset days.
+    return null
+  }
+  const selectedSet = new Set(selected)
+  const allSelected =
+    selected.length === 0 || selected.length === available.length
+  return (
+    <div
+      className="rounded-md border bg-card p-3 space-y-2"
+      data-testid="dataset-multi-select"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs">Datasets at this scope</Label>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => onChange([])}
+            disabled={allSelected}
+            data-testid="dataset-select-all"
+          >
+            All
+          </Button>
+        </div>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        {allSelected
+          ? `All ${available.length} datasets feed this run.`
+          : `${selected.length} of ${available.length} datasets selected — deselect to exclude.`}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {available.map((id) => {
+          const isOn = allSelected || selectedSet.has(id)
+          return (
+            <button
+              key={id}
+              type="button"
+              data-testid={`dataset-chip-${id}`}
+              data-selected={isOn ? "true" : "false"}
+              className={`rounded-md border px-2 py-1 font-mono text-xs transition-colors ${
+                isOn
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:bg-muted/50"
+              }`}
+              onClick={() => {
+                // First click on a chip when "all" is implicit explicit-
+                // izes the set so subsequent clicks toggle individual
+                // ids rather than the all-or-nothing flip.
+                const base = allSelected ? new Set(available) : selectedSet
+                const next = new Set(base)
+                if (next.has(id)) next.delete(id)
+                else next.add(id)
+                onChange(Array.from(next).sort())
+              }}
+            >
+              {id}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 const DEFAULT_BUCKET = "gemini"
@@ -828,6 +915,28 @@ export function RunDetail() {
       ),
     [rawImagesQuery.data],
   )
+
+  // Distinct dataset short-ids observed at the run's scope. Walks every
+  // image key under rawScopePrefix and pulls the segment immediately
+  // before `Images`. Legacy paths (no short-id) are omitted from the
+  // multi-select but still flow through "all datasets" listing.
+  const availableShortIds = useMemo<string[]>(() => {
+    if (!scope) return []
+    const prefix = rawScopePrefix(scope)
+    const set = new Set<string>()
+    for (const f of imageFiles) {
+      const name = f.object_name ?? ""
+      if (!name.startsWith(prefix)) continue
+      // After the scope prefix:
+      //   {shortId}/Images/{file}    (new layout)
+      //   Images/{file}              (legacy, no short-id)
+      const tail = name.slice(prefix.length).split("/")
+      if (tail.length >= 3 && tail[1] === "Images" && /^[0-9a-f]{8}$/.test(tail[0])) {
+        set.add(tail[0])
+      }
+    }
+    return Array.from(set).sort()
+  }, [scope, imageFiles])
 
   // List the Processed/ prefix so OrthoVersionsPanel can derive the
   // version table from on-disk files. Refetch on RUN_ODM completion via
@@ -1532,16 +1641,33 @@ export function RunDetail() {
                             onOpenImport={() => setImportDialogOpen(true)}
                           />
                         ) : (
-                          <OrthomosaicOptions
-                            params={orthoParams}
-                            onChange={setOrthoParams}
-                            onOpenImport={() => setImportDialogOpen(true)}
-                            hasUploadedOrthos={(
-                              uploadedOrthosQuery.data ?? []
-                            ).some((f) =>
-                              /\.tiff?$/i.test(f.object_name ?? ""),
-                            )}
-                          />
+                          <div className="space-y-3">
+                            <DatasetMultiSelect
+                              available={availableShortIds}
+                              selected={
+                                run.uploadScope?.datasetShortIds ?? []
+                              }
+                              onChange={(next) =>
+                                run.uploadScope &&
+                                updateRun(run.id, {
+                                  uploadScope: {
+                                    ...run.uploadScope,
+                                    datasetShortIds: next,
+                                  },
+                                })
+                              }
+                            />
+                            <OrthomosaicOptions
+                              params={orthoParams}
+                              onChange={setOrthoParams}
+                              onOpenImport={() => setImportDialogOpen(true)}
+                              hasUploadedOrthos={(
+                                uploadedOrthosQuery.data ?? []
+                              ).some((f) =>
+                                /\.tiff?$/i.test(f.object_name ?? ""),
+                              )}
+                            />
+                          </div>
                         )
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />
