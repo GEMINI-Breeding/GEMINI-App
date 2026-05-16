@@ -1,7 +1,10 @@
 /**
  * `image_filter.txt` — sidecar listing image basenames the user has
- * excluded from ODM. Lives at `Raw/{scope}/Images/image_filter.txt`
- * alongside `gcp_list.txt` and `geo.txt`.
+ * excluded from ODM. Lives at the scope root
+ * `Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/image_filter.txt`
+ * — sibling of every per-dataset subdir, alongside `gcp_list.txt` and
+ * `geo.txt`. The exclusion applies across whichever datasets the
+ * Run wizard's multi-select feeds into ODM.
  *
  * Format: one basename per line. Lines beginning with `#` are comments.
  * Blank lines are ignored. The ODM worker honors this list when

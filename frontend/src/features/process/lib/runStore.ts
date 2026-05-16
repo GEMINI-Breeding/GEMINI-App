@@ -83,10 +83,12 @@ export interface Pipeline {
 /**
  * Scope captured at run-creation time from a single uploaded dataset row.
  * The MinIO path is `Raw/{year}/{experiment}/{location}/{population}/
- * {date}/{platform}/{sensor}/Images/...` — every field here is a verbatim
- * path component. The experiment / site / population *names* are what's
- * stored on disk; `experimentId` is the GEMINIbase Experiment.id resolved
- * once at pick time so step submissions don't have to re-resolve it.
+ * {date}/{platform}/{sensor}/{datasetShortId}/Images/...` — every field
+ * here is a verbatim path component. The experiment / site / population
+ * *names* are what's stored on disk; `experimentId` is the GEMINIbase
+ * Experiment.id resolved once at pick time so step submissions don't
+ * have to re-resolve it. `datasetShortId` is per-row and lives on
+ * `RunUploadScope.datasetShortIds` (one or many — see field below).
  */
 export interface RunUploadScope {
   year: string
