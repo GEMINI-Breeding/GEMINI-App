@@ -18,7 +18,10 @@ import {
   type UploadTask,
   useUploadQueue,
 } from "@/features/files/hooks/useUploadQueue"
-import { createOrGetDatasetForUpload } from "@/features/files/lib/datasetForUpload"
+import {
+  createOrGetDatasetForUpload,
+  extractDatasetShortId,
+} from "@/features/files/lib/datasetForUpload"
 import { idAsString } from "@/features/admin/lib/ids"
 import type {
   SensorClassification,
@@ -77,9 +80,23 @@ interface UploadListProps {
   disabledReason?: string
 }
 
+/**
+ * Build the MinIO directory uploads land in.
+ *
+ * For data types whose `directory` config ends in the literal `Images`
+ * (today: just "Image Data"), the dataset's 8-char short-id is spliced
+ * in just before that segment so two uploads at the same scope land in
+ * distinct subdirectories — `Raw/.../{sensor}/{shortId}/Images/` rather
+ * than the pre-migration `Raw/.../{sensor}/Images/` shape.
+ *
+ * Other data types (Trait Data, Genomic Data, Ardupilot Logs, etc.)
+ * are unchanged: each is keyed by a different DB entity and doesn't
+ * have the commingling problem.
+ */
 function buildTargetRootDir(
   dataType: string,
   formValues: Record<string, string>,
+  datasetShortId: string | null,
   subDir?: string,
 ): string | null {
   const cfg = dataTypes[dataType as keyof typeof dataTypes]
@@ -88,9 +105,16 @@ function buildTargetRootDir(
   // listing endpoints find the uploads under a predictable prefix.
   const values = { ...formValues }
   if (values.date) values.year = values.date.split("-")[0]
-  let root = cfg.directory
-    .map((field) => values[field.toLowerCase()] || field)
-    .join("/")
+  const segs = cfg.directory.map(
+    (field) => values[field.toLowerCase()] || field,
+  )
+  // Only data types whose tail bucket is `Images` get the per-dataset
+  // segment — others have their own per-entity DB keying that already
+  // prevents disk-level commingling.
+  if (datasetShortId && segs[segs.length - 1] === "Images") {
+    segs.splice(segs.length - 1, 0, datasetShortId)
+  }
+  let root = segs.join("/")
   if (subDir) root += `/${subDir}`
   return root
 }
@@ -329,7 +353,61 @@ export function UploadList({
         if (r) merged[field] = r.name
       }
 
-      const targetRootDir = buildTargetRootDir(dataType, merged, subDir)
+      // Create the dataset BEFORE the path build so we can splice the
+      // dataset's 8-char short-id into the upload prefix
+      // (`Raw/.../{sensor}/{shortId}/Images/`). One submit click = one
+      // dataset row. The chunked-upload finalize stamps every
+      // `experiment_files` row with the resulting dataset_id; for
+      // farm-ng .bin uploads the same id is forwarded to the
+      // EXTRACT_BINARY job so the amiga worker can register its
+      // extracted outputs against the same batch. End result: the user
+      // can delete just this submission via the per-dataset trash icon
+      // in Manage Data, and two uploads at the same scope no longer
+      // commingle on disk.
+      setResolveStatus(null)
+      const experimentName =
+        resolved.experiment?.name ?? merged.experiment ?? ""
+      let datasetId: string | undefined
+      let datasetShortId: string | null = null
+      if (experimentName) {
+        try {
+          const ds = await createOrGetDatasetForUpload({
+            experimentName,
+            dataTypeLabel: dataType,
+          })
+          datasetId = idAsString(ds.dataset.id) ?? undefined
+          if (datasetId) {
+            datasetShortId = extractDatasetShortId(datasetId)
+          }
+          // Only flag for cleanup if we *created* the row. An
+          // existing row (name collision) may already own data
+          // from a prior submission; auto-deleting that on failure
+          // would clobber data the user expected to keep.
+          if (ds.wasCreated && datasetId) {
+            createdDatasetIdForCleanup = datasetId
+          }
+        } catch (err) {
+          // Soft-failure: the upload still works; it just lands as
+          // legacy "experiment-owned, dataset-orphaned" and the user
+          // can only delete it via the experiment cascade. Without
+          // a dataset short-id the upload uses the legacy shape
+          // (`Raw/.../{sensor}/Images/`) — at the cost of
+          // commingling with any prior upload at the same scope.
+          // Surfaced as a toast so the user sees what happened.
+          const message = err instanceof Error ? err.message : String(err)
+          showErrorToastWithCopy(
+            `Could not create the upload's dataset (${message}). ` +
+              `The upload will continue without per-batch grouping.`,
+          )
+        }
+      }
+
+      const targetRootDir = buildTargetRootDir(
+        dataType,
+        merged,
+        datasetShortId,
+        subDir,
+      )
       if (!targetRootDir) {
         setRejection({
           title: `Unknown data type: ${dataType}`,
@@ -347,45 +425,6 @@ export function UploadList({
         followUpJob,
       }))
 
-      // Create the dataset that owns this batch. One submit click =
-      // one dataset row. The chunked-upload finalize stamps every
-      // `experiment_files` row with the resulting dataset_id; for
-      // farm-ng .bin uploads the same id is forwarded to the
-      // EXTRACT_BINARY job so the amiga worker can register its
-      // extracted outputs against the same batch. End result: the
-      // user can delete just this submission via the per-dataset
-      // trash icon in Manage Data.
-      setResolveStatus(null)
-      const experimentName =
-        resolved.experiment?.name ?? merged.experiment ?? ""
-      let datasetId: string | undefined
-      if (experimentName) {
-        try {
-          const ds = await createOrGetDatasetForUpload({
-            experimentName,
-            dataTypeLabel: dataType,
-          })
-          datasetId = idAsString(ds.dataset.id) ?? undefined
-          // Only flag for cleanup if we *created* the row. An
-          // existing row (name collision) may already own data
-          // from a prior submission; auto-deleting that on failure
-          // would clobber data the user expected to keep.
-          if (ds.wasCreated && datasetId) {
-            createdDatasetIdForCleanup = datasetId
-          }
-        } catch (err) {
-          // Soft-failure: the upload still works; it just lands as
-          // legacy "experiment-owned, dataset-orphaned" and the user
-          // can only delete it via the experiment cascade. Surfaced
-          // as a toast so the user sees what happened.
-          const message = err instanceof Error ? err.message : String(err)
-          showErrorToastWithCopy(
-            `Could not create the upload's dataset (${message}). ` +
-              `The upload will continue without per-batch grouping.`,
-          )
-        }
-      }
-
       // The experiment is required by the Files-page UI gate, so by the
       // time we get here `resolved.experiment` exists. Forward its id
       // so the chunked-upload finalize handler can write the
@@ -393,12 +432,10 @@ export function UploadList({
       // cascade reads from.
       // Build the per-batch THERMAL_EXTRACT submission when the
       // upload form's calibration block is set. The worker expects
-      // the *dataset* prefix (the sensor-level directory whose
-      // siblings are `Images/` and `RawThermal/`), not the
-      // `…/Images/` directory the files themselves landed in.
-      // `buildTargetRootDir` appends `Images` for the "Image Data"
-      // data type per `frontend/src/config/dataTypes.ts:23-33`, so
-      // strip that one segment.
+      // the *dataset* prefix (the per-batch directory whose siblings
+      // are `Images/` and `RawThermal/`), not the `…/Images/`
+      // directory the files themselves landed in. `buildTargetRootDir`
+      // appends `Images` for the "Image Data" data type — strip it.
       const datasetPrefix = targetRootDir.replace(/\/Images$/, "") + "/"
       const postUploadJob: PostUploadJob | undefined = thermalCalibration
         ? {

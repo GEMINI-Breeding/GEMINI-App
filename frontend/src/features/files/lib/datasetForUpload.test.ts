@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { autoDatasetName } from "./datasetForUpload"
+import { autoDatasetName, extractDatasetShortId } from "./datasetForUpload"
 
 describe("autoDatasetName", () => {
   it("builds {experiment}__{slug}__{date}__{time}__{rand}", () => {
@@ -27,5 +27,35 @@ describe("autoDatasetName", () => {
     // contract.
     expect(a.split("__").length).toBe(5)
     expect(b.split("__").length).toBe(5)
+  })
+})
+
+describe("extractDatasetShortId", () => {
+  it("returns the first 8 hex chars of a hyphenated UUID", () => {
+    expect(extractDatasetShortId("a2f31b04-1234-4abc-8def-0123456789ab")).toBe(
+      "a2f31b04",
+    )
+  })
+
+  it("works for unhyphenated hex strings", () => {
+    expect(extractDatasetShortId("a2f31b0412344abc8def0123456789ab")).toBe(
+      "a2f31b04",
+    )
+  })
+
+  it("normalizes uppercase to lowercase", () => {
+    expect(extractDatasetShortId("A2F31B04-1234-4ABC-8DEF-0123456789AB")).toBe(
+      "a2f31b04",
+    )
+  })
+
+  it("throws on empty input", () => {
+    expect(() => extractDatasetShortId("")).toThrow(/empty datasetId/)
+  })
+
+  it("throws on non-hex input", () => {
+    expect(() => extractDatasetShortId("not-a-uuid-at-all")).toThrow(
+      /not a hex UUID/,
+    )
   })
 })

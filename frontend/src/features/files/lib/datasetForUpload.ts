@@ -82,6 +82,27 @@ export type CreateOrGetDatasetResult = {
 }
 
 /**
+ * 8-char hex segment used as the dataset's MinIO subdir under
+ * `Raw/.../{sensor}/`. Derived from the first 8 hex chars of the
+ * dataset's UUID — collision-free per UUID strength even across rapid
+ * resubmits, URL-safe lowercase hex.
+ *
+ * Throws on bad input rather than silently returning a path-breaking
+ * fallback: callers depend on this for path construction and a quiet
+ * "" would land everything at `Raw/.../{sensor}//Images/...`.
+ */
+export function extractDatasetShortId(datasetId: string): string {
+  if (!datasetId) {
+    throw new Error("extractDatasetShortId: empty datasetId")
+  }
+  const hex = datasetId.replace(/-/g, "").toLowerCase()
+  if (hex.length < 8 || !/^[0-9a-f]{8}/.test(hex)) {
+    throw new Error(`extractDatasetShortId: ${datasetId} is not a hex UUID`)
+  }
+  return hex.slice(0, 8)
+}
+
+/**
  * Create the dataset for an upload batch, or return the existing one
  * if a previous submission collided on name. Returns the resolved
  * `DatasetOutput` plus a `wasCreated` flag so callers can clean up

@@ -6,6 +6,17 @@
  * MinIO inputs by listing the resulting prefix. The frontend is responsible
  * for building those scope tuples from the user's experiment/season/site/
  * population picks plus a date and a platform/sensor pair.
+ *
+ * Per-dataset isolation: post Option-A migration, raw images live under
+ * `Raw/.../{sensor}/{datasetShortId}/Images/` instead of
+ * `Raw/.../{sensor}/Images/`. The `datasetShortId` is a separate explicit
+ * parameter to the raw-image builders so the type system catches "I forgot
+ * which dataset" mistakes — there is no single right answer when a scope
+ * has multiple uploads.
+ *
+ * Scope-wide artifacts (image_filter.txt, gcp_list.txt, geo.txt,
+ * gcp_locations.csv, gcp_image_groups.json) live at the scope root —
+ * see `rawScopePrefix`.
  */
 
 export type AerialScope = {
@@ -29,6 +40,10 @@ export function yearFromDate(date: string | null | undefined): string {
 /**
  * Derive the MinIO prefix the ODM worker writes to for a given scope.
  * Matches `_build_output_prefix` in `backend/gemini/workers/odm/worker.py`.
+ *
+ * `dataset_short_id` is intentionally NOT included: outputs (orthophoto,
+ * COG, log, traits, plot-boundaries) are scope-wide products of one or
+ * more datasets fed to the same job.
  */
 export function processedPrefix(scope: AerialScope): string {
   const { year, experiment, location, population, date, platform, sensor } =
@@ -36,10 +51,40 @@ export function processedPrefix(scope: AerialScope): string {
   return `Processed/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
 }
 
-export function rawImagesPrefix(scope: AerialScope): string {
+/**
+ * Scope-root prefix `Raw/.../{sensor}/` (no `Images`, no `datasetShortId`).
+ *
+ * This is where scope-wide artifacts live: `image_filter.txt`,
+ * `gcp_list.txt`, `geo.txt`, `gcp_locations.csv`, `gcp_image_groups.json`.
+ * The Image Review and GCP Picker tools write them here so they survive
+ * multi-dataset selection in the Run wizard. Mirrors
+ * `_build_scope_prefix` in `backend/gemini/workers/odm/worker.py`.
+ */
+export function rawScopePrefix(scope: AerialScope): string {
   const { year, experiment, location, population, date, platform, sensor } =
     scope
-  return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/Images/`
+  return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+}
+
+/**
+ * Per-dataset raw-images prefix. `datasetShortId` is required — pass the
+ * short-id of the dataset whose images you want.
+ *
+ * Throws if `datasetShortId` is empty: the post-migration layout has no
+ * single canonical "Images" directory per scope, so callers must say
+ * which dataset they mean.
+ */
+export function rawImagesPrefix(
+  scope: AerialScope,
+  datasetShortId: string,
+): string {
+  if (!datasetShortId) {
+    throw new Error(
+      "rawImagesPrefix: datasetShortId is required (the scope alone is " +
+        "ambiguous when multiple uploads exist).",
+    )
+  }
+  return `${rawScopePrefix(scope)}${datasetShortId}/Images/`
 }
 
 export function plotImagesPrefix(scope: AerialScope): string {

@@ -7,6 +7,7 @@ import {
   plotImagesPrefix,
   processedPrefix,
   rawImagesPrefix,
+  rawScopePrefix,
   yearFromDate,
 } from "./paths"
 
@@ -39,10 +40,24 @@ describe("processedPrefix", () => {
   })
 })
 
+describe("rawScopePrefix", () => {
+  it("returns Raw/.../{sensor}/ — sibling of every dataset subdir", () => {
+    expect(rawScopePrefix(SCOPE)).toBe(
+      "Raw/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/",
+    )
+  })
+})
+
 describe("rawImagesPrefix", () => {
-  it("ends in Images/ under Raw/", () => {
-    expect(rawImagesPrefix(SCOPE)).toBe(
-      "Raw/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/Images/",
+  it("inserts the dataset short-id between sensor and Images", () => {
+    expect(rawImagesPrefix(SCOPE, "a2f31b04")).toBe(
+      "Raw/2026/ExpA/FieldX/P1/2026-04-26/Drone/RGB/a2f31b04/Images/",
+    )
+  })
+
+  it("throws when datasetShortId is empty (scope alone is ambiguous)", () => {
+    expect(() => rawImagesPrefix(SCOPE, "")).toThrow(
+      /datasetShortId is required/,
     )
   })
 })
