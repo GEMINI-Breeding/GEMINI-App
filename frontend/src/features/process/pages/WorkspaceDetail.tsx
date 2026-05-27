@@ -298,7 +298,7 @@ export function WorkspaceDetail() {
 
   if (!workspace) {
     return (
-      <div className="bg-background min-h-screen">
+      <div className="bg-background">
         <div className="mx-auto max-w-5xl p-8 flex flex-col items-center justify-center py-24 text-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           <p className="text-muted-foreground text-sm">
@@ -319,7 +319,7 @@ export function WorkspaceDetail() {
   const description = workspace.description
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background">
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-8 flex items-center gap-4">
           <Button

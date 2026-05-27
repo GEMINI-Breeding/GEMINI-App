@@ -49,6 +49,7 @@ import { UploadZone } from "./UploadZone"
 // language). Used to translate the scope map the parent passes in.
 const FORM_FIELD_TO_SCOPE_KEY: Record<string, keyof UploadScopeChoices> = {
   experiment: "experiment",
+  season: "season",
   location: "site",
   population: "population",
   platform: "sensorPlatform",
@@ -103,10 +104,14 @@ function buildTargetRootDir(
   if (!cfg) return null
   // Preserve the existing MinIO path convention so the new FilesService
   // listing endpoints find the uploads under a predictable prefix.
-  const values = { ...formValues }
-  if (values.date) values.year = values.date.split("-")[0]
+  // Each template segment lower-cases to a form field key
+  // (`"Season"` → `values.season`, `"Date"` → `values.date`, etc.).
+  // Pre-A.1: the first slot was "Year" and was silently filled with
+  // `values.date.split("-")[0]`, coupling season identity to the
+  // upload date. The slot is now "Season" and `values.season` carries
+  // the season name the user picked or created.
   const segs = cfg.directory.map(
-    (field) => values[field.toLowerCase()] || field,
+    (field) => formValues[field.toLowerCase()] || field,
   )
   // Only data types whose tail bucket is `Images` get the per-dataset
   // segment — others have their own per-entity DB keying that already

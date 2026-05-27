@@ -120,12 +120,12 @@ describe("humanizeJobError", () => {
       "ODM processing failed: Cannot process dataset — likely cause: " +
       "OpenMVS rejected every image during dense reconstruction — " +
       "the quality preset is likely too aggressive for this dataset. " +
-      "Retry with a higher Reconstruction quality (e.g. Low or Medium " +
-      "instead of Lowest)\n" +
+      "Retry with a higher Reconstruction quality (e.g. Standard or " +
+      "High Quality instead of Draft)\n" +
       "Full ODM log: gemini/Processed/2026/X/Y/Z/2026-05-04/Drone/RGB/odm_log.txt"
     const r = humanizeJobError("orthomosaic", raw)
     expect(r.headline).toMatch(/quality preset too aggressive/i)
-    expect(r.hint).toMatch(/low or medium/i)
+    expect(r.hint).toMatch(/standard or higher/i)
     expect(r.details).toBe(raw)
   })
 

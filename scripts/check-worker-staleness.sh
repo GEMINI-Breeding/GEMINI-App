@@ -42,6 +42,7 @@ SERVICES=(
 
 YELLOW=$'\033[33m'
 RED=$'\033[31m'
+BOLD_RED=$'\033[1;31m'
 GREEN=$'\033[32m'
 DIM=$'\033[2m'
 RESET=$'\033[0m'
@@ -118,8 +119,8 @@ for entry in "${SERVICES[@]}"; do
 done
 
 if [[ "$running_count" == 0 ]]; then
-  echo "${DIM}ℹ Backend stack not running. Start with:${RESET}"
-  echo "${DIM}    docker compose -p geminibase up -d${RESET}"
+  echo "${BOLD_RED}⚠ Backend stack not running. Start with:${RESET}"
+  echo "    ${YELLOW}docker compose up -d${RESET}"
   exit 0
 fi
 
@@ -140,13 +141,17 @@ for s in "${stale[@]}"; do
 done
 
 # Build a single rebuild command the developer can copy/paste. Use
-# the absolute compose-file path so the command works regardless of
-# which directory `npm run dev` was invoked from (typically frontend/,
-# where a bare `-f docker-compose.yaml` would not resolve).
-COMPOSE_FILE="$BACKEND_DIR/gemini/pipeline/docker-compose.yaml"
+# the absolute top-level compose path so the command works regardless
+# of which directory `npm run dev` was invoked from (typically frontend/,
+# where a bare `-f docker-compose.yaml` would not resolve). Point at the
+# top-level file (not the submodule's pipeline compose) so the project
+# name matches the one `docker compose up -d` produces at the repo root —
+# otherwise the rebuild lands in a different project and collides on
+# container names.
+COMPOSE_FILE="$REPO_ROOT/docker-compose.yaml"
 echo
 echo "${DIM}To refresh:${RESET}"
-echo "  docker compose -p geminibase -f $COMPOSE_FILE up -d --build ${short_names[*]}"
+echo "  docker compose -f $COMPOSE_FILE up -d --build ${short_names[*]}"
 echo "${DIM}(set SKIP_STALE_CHECK=1 to suppress this check)${RESET}"
 echo
 

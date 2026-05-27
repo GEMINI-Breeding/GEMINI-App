@@ -22,6 +22,7 @@ describe("requiredFormFields", () => {
   it("matches the dataTypes config for a multi-field type", () => {
     expect(requiredFormFields("Image Data")).toEqual([
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -76,6 +77,7 @@ describe("missingFormFields", () => {
   it("returns every field for a fresh form", () => {
     expect(missingFormFields("Image Data", {}, {})).toEqual([
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -84,13 +86,14 @@ describe("missingFormFields", () => {
     ])
   })
 
-  it("only flags experiment when site/population are still empty (the bug)", () => {
+  it("only flags non-experiment fields when site/population are still empty (the bug)", () => {
     const scope: Record<string, EntityChoice> = {
       experiment: { kind: "existing", id: "exp-1", name: "Demo" },
     }
     const missing = missingFormFields("Image Data", {}, scope)
     expect(missing).not.toContain("experiment")
     expect(missing).toEqual([
+      "season",
       "location",
       "population",
       "date",
@@ -102,6 +105,7 @@ describe("missingFormFields", () => {
   it("returns empty when every field is filled", () => {
     const scope: Record<string, EntityChoice> = {
       experiment: { kind: "existing", id: "exp-1", name: "Demo" },
+      season: { kind: "new", name: "2024" },
       location: { kind: "new", name: "Davis" },
       population: { kind: "existing", id: "pop-1", name: "P1" },
       platform: { kind: "existing", id: "plat-1", name: "Plat" },

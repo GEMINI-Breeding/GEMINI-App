@@ -116,3 +116,11 @@ services:
           path: ./backend/pyproject.toml
         - action: rebuild
           path: ./backend/poetry.lock
+
+  # The submodule ships its own React UI (port 3000). We use the Vite app under
+  # `frontend/` instead, and the submodule's gemini-ui source is currently
+  # broken (missing src/lib/), so its image build fails. Park it behind an
+  # opt-in profile so `docker compose up -d` skips it. To run it anyway:
+  #     docker compose --profile geminibase-ui up -d
+  geminibase-ui:
+    profiles: ["geminibase-ui"]

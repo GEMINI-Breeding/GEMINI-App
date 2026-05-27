@@ -40,6 +40,10 @@ const ENTITY_FIELDS: Record<
   { label: string; scopeKey: keyof ReturnType<typeof useScopeOptions> }
 > = {
   experiment: { label: "Experiment", scopeKey: "experiment" },
+  // Season is the first path segment under Raw/. Until A.1 this was
+  // silently derived from the calendar year of the date input, which
+  // coupled the season identity to the upload date.
+  season: { label: "Season", scopeKey: "season" },
   // The form has historically called it "location" but the entity is
   // a Site row in the DB. Surface both names to avoid surprising users.
   location: { label: "Site (location)", scopeKey: "site" },

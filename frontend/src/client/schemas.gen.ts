@@ -3913,6 +3913,93 @@ export const ModelUpdateSchema = {
     title: 'ModelUpdate'
 } as const;
 
+export const MultivariateRequestSchema = {
+    properties: {
+        trait_names: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            minItems: 1
+        },
+        experiment_names: {
+            oneOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        season_names: {
+            oneOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        site_names: {
+            oneOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        populations: {
+            oneOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        aggregation: {
+            type: 'string',
+            enum: ['mean', 'latest', 'max', 'min', 'first', 'date'],
+            default: 'mean'
+        },
+        aggregation_date: {
+            oneOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        collapse_replicates: {
+            type: 'boolean',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['trait_names'],
+    title: 'MultivariateRequest'
+} as const;
+
 export const PaginatedFileListSchema = {
     properties: {
         files: {

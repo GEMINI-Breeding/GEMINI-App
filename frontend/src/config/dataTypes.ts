@@ -9,10 +9,19 @@ type DataTypeConfig = {
   customUpload?: true
 }
 
+// Path segment templates use literal placeholders ("Season", "Experiment",
+// etc.) that `buildTargetRootDir` lower-cases and looks up in the form
+// values. Historically the first path slot was "Year" and silently
+// derived from the calendar year of the date input; that coupled season
+// identity to the upload date and broke whenever the two diverged (e.g.
+// uploading 2022 archival data in 2026, or a Northern-Hemisphere winter
+// wheat season that spans two years). The slot is now "Season" and the
+// user picks/creates the season explicitly, just like every other entity.
 export const dataTypes: Record<string, DataTypeConfig> = {
   "Image Data": {
     fields: [
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -22,7 +31,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: "image/*",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -35,6 +44,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   "Ardupilot Logs": {
     fields: [
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -44,7 +54,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: "*",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -57,6 +67,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   "Synced Metadata": {
     fields: [
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -66,7 +77,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".csv",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -77,11 +88,11 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Farm-ng Binary File": {
-    fields: ["experiment", "location", "population", "date"],
+    fields: ["experiment", "season", "location", "population", "date"],
     fileType: "*",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -96,6 +107,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   Orthomosaic: {
     fields: [
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -105,7 +117,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".tif",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -118,6 +130,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   "Orthomosaic DEM": {
     fields: [
       "experiment",
+      "season",
       "location",
       "population",
       "date",
@@ -127,7 +140,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".tif",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -139,11 +152,11 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     hidden: true,
   },
   "Weather Data": {
-    fields: ["experiment", "location", "population", "date"],
+    fields: ["experiment", "season", "location", "population", "date"],
     fileType: "*",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -152,11 +165,11 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Field Design": {
-    fields: ["experiment", "location", "population", "date"],
+    fields: ["experiment", "season", "location", "population", "date"],
     fileType: ".csv",
     directory: [
       "Raw",
-      "Year",
+      "Season",
       "Experiment",
       "Location",
       "Population",
@@ -164,7 +177,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Reference Data": {
-    fields: ["name", "experiment", "location", "population", "date"],
+    fields: ["name", "experiment", "season", "location", "population", "date"],
     fileType: ".csv,.xlsx,.xls",
     directory: ["ReferenceData"],
   },

@@ -734,6 +734,19 @@ export type ModelUpdate = {
 } | null);
 };
 
+export type MultivariateRequest = {
+    trait_names: Array<(string)>;
+    experiment_names?: (Array<(string)> | null);
+    season_names?: (Array<(string)> | null);
+    site_names?: (Array<(string)> | null);
+    populations?: (Array<(string)> | null);
+    aggregation?: 'mean' | 'latest' | 'max' | 'min' | 'first' | 'date';
+    aggregation_date?: (string | null);
+    collapse_replicates?: boolean;
+};
+
+export type aggregation = 'mean' | 'latest' | 'max' | 'min' | 'first' | 'date';
+
 export type PaginatedFileList = {
     files: Array<FileMetadata>;
     total_count: number;
@@ -2488,6 +2501,10 @@ export type ApiLinesAllGetAllLinesData = {
 
 export type ApiLinesAllGetAllLinesResponse = (Array<LineOutput>);
 
+export type ApiMigrateDatasetPathsRunMigrationResponse = (({
+    [key: string]: unknown;
+} | unknown));
+
 export type ApiModelManagementBestLocateBestLocateFileData = {
     requestBody: unknown;
 };
@@ -2644,6 +2661,54 @@ export type ApiModelsIdModelIdExperimentsGetModelExperimentsData = {
 };
 
 export type ApiModelsIdModelIdExperimentsGetModelExperimentsResponse = (Array<(string)>);
+
+export type ApiMultivariateAnalysisAnovaAnovaData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisAnovaAnovaResponse = (unknown);
+
+export type ApiMultivariateAnalysisCorrelationCorrelationData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisCorrelationCorrelationResponse = (unknown);
+
+export type ApiMultivariateAnalysisGgeGgeData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisGgeGgeResponse = (unknown);
+
+export type ApiMultivariateAnalysisHeritabilityHeritabilityData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisHeritabilityHeritabilityResponse = (unknown);
+
+export type ApiMultivariateAnalysisManovaManovaData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisManovaManovaResponse = (unknown);
+
+export type ApiMultivariateAnalysisMatrixMatrixData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisMatrixMatrixResponse = (unknown);
+
+export type ApiMultivariateAnalysisPcaPcaData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisPcaPcaResponse = (unknown);
+
+export type ApiMultivariateAnalysisSpatialSpatialData = {
+    requestBody: MultivariateRequest;
+};
+
+export type ApiMultivariateAnalysisSpatialSpatialResponse = (unknown);
 
 export type ApiPlotGeometryVersionsActivateActivateVersionData = {
     requestBody: VersionTargetRequest;
@@ -2895,6 +2960,16 @@ export type ApiPlotsIdPlotIdSiteGetPlotSiteData = {
 };
 
 export type ApiPlotsIdPlotIdSiteGetPlotSiteResponse = (SiteOutput);
+
+export type ApiPlotsGeojsonGetPlotsGeojsonData = {
+    experimentId: string;
+    seasonId: string;
+    siteId: string;
+};
+
+export type ApiPlotsGeojsonGetPlotsGeojsonResponse = ({
+    [key: string]: unknown;
+});
 
 export type ApiPopulationsGetPopulationsData = {
     experimentName?: (string | null);

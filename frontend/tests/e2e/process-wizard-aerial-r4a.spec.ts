@@ -53,10 +53,13 @@ const DRONE_IMAGES = [
 const HEAVY_E2E = process.env.RUN_HEAVY_E2E === "1"
 
 test.describe("R4a: aerial wizard happy path", () => {
-  test.setTimeout(ODM_TIMEOUT_MS + 3 * 60_000)
+  // ODM cap + slack for upload/wizard navigation + 5 min for the trait
+  // extraction phase (sub-30s in practice for a 5-image / 4-plot job)
+  // + 1 min for the analyze-map verification phase at the end.
+  test.setTimeout(ODM_TIMEOUT_MS + 9 * 60_000)
   test.skip(!HEAVY_E2E, "Set RUN_HEAVY_E2E=1 to run the ODM-bound spec")
 
-  test("upload → workspace → pipeline → run → orthomosaic → step settles", async ({
+  test("upload → workspace → pipeline → run → orthomosaic → boundary → trait extraction → analyze map heatmap", async ({
     page,
     request,
     baseURL,
@@ -238,8 +241,14 @@ test.describe("R4a: aerial wizard happy path", () => {
     )
     expect(mapMounted).toBe(true)
     // Close the dialog. Outside-clicks are globally blocked by the dialog
-    // primitive, so use Escape.
-    await page.keyboard.press("Escape")
+    // primitive; Escape is unreliable because the Leaflet map div is
+    // tabindex=0 and steals keypresses while it has focus. Click the
+    // Radix-provided × close button instead — it's scoped to the only
+    // open dialog at this point in the spec.
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /close/i })
+      .click()
     await expect(page.getByTestId("ortho-viewer-map")).not.toBeVisible()
 
     // ── R4c assertion: trait_extraction step row is gated by boundaries. ─
@@ -337,10 +346,48 @@ test.describe("R4a: aerial wizard happy path", () => {
         { timeout: 20_000 },
       )
       .toBe(true)
+    // The ODM worker writes the orthomosaic under a UUID-suffixed name
+    // (`odm_orthophoto-<uuid>.tif`) so re-runs don't clobber prior versions.
+    // Hardcoding `odm_orthophoto.tif` here used to work pre-versioning and
+    // now reliably 404s on the tilejson endpoint. Discover the actual
+    // filename from the same listing the orthomosaic-output assertion
+    // below uses, so both surfaces stay in sync with the worker.
+    const earlyTokenRes = await request.post(
+      new URL("/api/users/login/access-token", baseURL).toString(),
+      {
+        data: { email: firstSuperuser, password: firstSuperuserPassword },
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+    expect(earlyTokenRes.ok()).toBe(true)
+    const earlyToken = (
+      (await earlyTokenRes.json()) as { access_token: string }
+    ).access_token
+    const earlyProcessedPrefix = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const earlyListRes = await request.get(
+      new URL(
+        `/api/files/list/gemini/${earlyProcessedPrefix}`,
+        baseURL,
+      ).toString(),
+      { headers: { Authorization: `Bearer ${earlyToken}` } },
+    )
+    expect(earlyListRes.ok()).toBe(true)
+    const earlyFiles = (await earlyListRes.json()) as Array<{
+      object_name: string
+    }>
+    const orthoObjectName = earlyFiles
+      .map((f) => f.object_name ?? "")
+      .find((n) => /\/odm_orthophoto[^/]*\.tif$/i.test(n))
+    expect(
+      orthoObjectName,
+      `expected an odm_orthophoto*.tif under ${earlyProcessedPrefix}, got ${JSON.stringify(
+        earlyFiles.map((f) => f.object_name),
+      )}`,
+    ).toBeTruthy()
     const tilejsonProbe = await request.get(
       new URL(
         `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(
-          `s3://gemini/Processed/2022/${experiment}/${location}/${population}/${date}/DJI/FC6310S/odm_orthophoto.tif`,
+          `s3://gemini/${orthoObjectName}`,
         )}`,
         // The /titiler proxy is only available on the dev server; from
         // Playwright's `request` we hit the dev server's port directly.
@@ -547,12 +594,15 @@ test.describe("R4a: aerial wizard happy path", () => {
     )
     expect(listRes.ok()).toBe(true)
     const files = (await listRes.json()) as Array<{ object_name: string }>
+    // Match either the legacy `odm_orthophoto.tif` (no suffix) or the
+    // current UUID-tagged name `odm_orthophoto-<uuid>.tif`. See the
+    // discovery block earlier in this spec for the worker behavior.
     const orthoNames = files
       .map((f) => f.object_name ?? "")
-      .filter((n) => n.endsWith("odm_orthophoto.tif"))
+      .filter((n) => /\/odm_orthophoto[^/]*\.tif$/i.test(n))
     expect(
       orthoNames.length,
-      `expected odm_orthophoto.tif under ${processedPrefix}, got ${JSON.stringify(
+      `expected an odm_orthophoto*.tif under ${processedPrefix}, got ${JSON.stringify(
         files.map((f) => f.object_name),
       )}`,
     ).toBeGreaterThan(0)
@@ -720,5 +770,272 @@ test.describe("R4a: aerial wizard happy path", () => {
         loaded.state_snapshot.boundaries.features.map((f) => f.properties),
       )}`,
     ).toBeGreaterThan(0)
+
+    // ── 9. Trait extraction: drive the dialog and wait for COMPLETED. ────
+    // Regression test for the "toast says complete but the row says pending"
+    // bug from 2026-05-16: the worker actually finished the EXTRACT_TRAITS
+    // job and PATCHed status=COMPLETED with a real result payload, but
+    // TraitRecordsPanel kept rendering the stale PENDING/RUNNING status
+    // from its initial fetch because the WS terminal event didn't
+    // invalidate ["jobs", jobId]. This phase exercises the full flow:
+    //
+    //   a. trait_extraction step row flips from "locked" to "ready" once
+    //      plot_boundary_prep activates.
+    //   b. Clicking Run Step opens TraitExtractionDialog with the ortho
+    //      and active boundary pre-populated.
+    //   c. Submitting fires EXTRACT_TRAITS — the step row goes "running"
+    //      and TraitRecordsPanel mounts a new row.
+    //   d. The panel row's status flips to "COMPLETED" within the worker
+    //      timeout, the output path renders, and the step row goes
+    //      "completed". The status flip is the bug-reproduction surface:
+    //      pre-fix it would stay on "PENDING"/"RUNNING" indefinitely.
+    //   e. Backend assertion: the traits GeoJSON exists in MinIO at the
+    //      worker-written path.
+    //
+    // 5-min ceiling for a 5-image ortho × 4-plot boundary trait job —
+    // the actual compute is ~10s; the rest is WS/poll settling slack.
+    const TRAIT_TIMEOUT_MS = 5 * 60_000
+
+    const traitRowReady = page.getByTestId("step-row-trait_extraction")
+    await expect(traitRowReady).toHaveAttribute("data-status", "ready", {
+      timeout: 15_000,
+    })
+    await traitRowReady.getByRole("button", { name: /run step/i }).click()
+
+    // Dialog pre-populates ortho v1 and the active boundary; the submit
+    // button is enabled because both are set.
+    await expect(
+      page.getByRole("heading", { name: /configure trait extraction/i }),
+    ).toBeVisible()
+    await expect(page.getByTestId("trait-ortho-version")).toBeVisible()
+    await expect(page.getByTestId("trait-boundary-version")).toBeVisible()
+    const submitTraitBtn = page.getByRole("button", {
+      name: /^run trait extraction$/i,
+    })
+    await expect(submitTraitBtn).toBeEnabled()
+    await submitTraitBtn.click()
+
+    // Submission toast + step row flips to running. The toast wording
+    // ("submitted", not "complete") is intentional after the fix.
+    await expect(traitRowReady).toHaveAttribute("data-status", "running", {
+      timeout: 15_000,
+    })
+
+    // TraitRecordsPanel renders exactly one row for the just-submitted
+    // job. We don't know the jobId up front; match the row by its
+    // data-testid prefix.
+    const panel = page.getByTestId("trait-records-panel")
+    await expect(panel).toBeVisible({ timeout: 15_000 })
+    const traitRecordRow = panel
+      .locator('[data-testid^="trait-record-row-"]')
+      .first()
+    await expect(traitRecordRow).toBeVisible({ timeout: 15_000 })
+
+    // Bug-reproduction surface. Before the fix:
+    //   - TraitRecordsPanel cached PENDING/RUNNING for 30s with no refetch
+    //   - The WS terminal event updated runStore but not the query cache
+    //   - This assertion would hang on "PENDING" until staleTime expired
+    //     even though the backend had long since written status=COMPLETED.
+    await expect(traitRecordRow).toContainText("COMPLETED", {
+      timeout: TRAIT_TIMEOUT_MS,
+    })
+
+    // Output GeoJSON path renders in the panel. The worker writes a v1-b1
+    // traits.geojson under the run's processed prefix; the panel reads
+    // result.output_traits_geojson_path from the job row.
+    await expect(traitRecordRow).toContainText("traits/")
+    await expect(traitRecordRow).toContainText(/\.geojson/)
+
+    // Step row also flips to completed (driven by the WS terminal handler
+    // calling setStepState — independent code path from the panel cache).
+    await expect(traitRowReady).toHaveAttribute("data-status", "completed", {
+      timeout: 30_000,
+    })
+
+    // Backend assertion: the traits GeoJSON actually landed in MinIO.
+    // Mirrors the orthomosaic check above — proves the COMPLETED status
+    // wasn't a false positive from a worker that wrote a result row but
+    // failed to upload the artifact.
+    const traitsPrefix = `${processedPrefix}traits/`
+    const traitsListRes = await request.get(
+      new URL(`/api/files/list/gemini/${traitsPrefix}`, baseURL).toString(),
+      { headers: { Authorization: `Bearer ${access_token}` } },
+    )
+    expect(traitsListRes.ok()).toBe(true)
+    const traitsFiles = (await traitsListRes.json()) as Array<{
+      object_name: string
+    }>
+    const geojsonFiles = traitsFiles
+      .map((f) => f.object_name ?? "")
+      .filter((n) => n.endsWith(".geojson"))
+    expect(
+      geojsonFiles.length,
+      `expected a *.geojson under ${traitsPrefix}; got ${JSON.stringify(
+        traitsFiles.map((f) => f.object_name),
+      )}`,
+    ).toBeGreaterThan(0)
+
+    // ── 10. Analyze map: polygons + Vegetation_Fraction heatmap. ─────────
+    // Regression test for the data-orphan symptom that prompted the
+    // geospatial-viewer work on 2026-05-17: the worker wrote a GeoJSON
+    // to MinIO but the Analyze page had no way to see it. After Slices
+    // 2 + 3, EXTRACT_TRAITS auto-ingests into `trait_records`, plots
+    // are materialized with polygon geometry, and the Analyze map
+    // joins both. This phase exercises that full path through the UI.
+    //
+    // Look up experiment/season/site IDs from the backend (read-only)
+    // so we can seed `gemini.process.scope` localStorage before the
+    // page mounts. The R4a flow's earlier wizard steps never touched
+    // ProcessScopeSelectors (that store is process-tool local), so
+    // without seeding the user would have to drive every selector by
+    // click — which races with deck.gl/Radix layout under headless
+    // Chromium (Radix's z-stacked select triggers occasionally
+    // intercept their neighbors' pointer events when WebGL fallback
+    // is in play). Seeding the scope is read-only UI persistence, not
+    // domain-data seeding — same as what useProcessScope itself does
+    // when the user manually picks values.
+    const expLookup = await request.get(
+      new URL(
+        `/api/experiments?experiment_name=${encodeURIComponent(experiment)}`,
+        baseURL,
+      ).toString(),
+      { headers: { Authorization: `Bearer ${access_token}` } },
+    )
+    expect(expLookup.ok()).toBe(true)
+    const expHits = (await expLookup.json()) as Array<{
+      id?: string
+      experiment_name?: string
+    }>
+    const expId =
+      expHits.find((e) => e.experiment_name === experiment)?.id ?? null
+    expect(
+      expId,
+      `expected to find experiment ${experiment} in /api/experiments`,
+    ).toBeTruthy()
+
+    const seasonLookup = await request.get(
+      new URL(
+        `/api/seasons?season_name=${encodeURIComponent("2022")}&experiment_name=${encodeURIComponent(experiment)}`,
+        baseURL,
+      ).toString(),
+      { headers: { Authorization: `Bearer ${access_token}` } },
+    )
+    expect(seasonLookup.ok()).toBe(true)
+    const seasonHits = (await seasonLookup.json()) as Array<{
+      id?: string
+      season_name?: string
+    }>
+    const seasonId =
+      seasonHits.find((s) => s.season_name === "2022")?.id ?? null
+    expect(
+      seasonId,
+      "expected season 2022 to exist (Plot materialization auto-creates)",
+    ).toBeTruthy()
+
+    // GET /api/sites defaults experiment_name='Experiment A' when no
+    // experiment is supplied (Litestar query-param default), so we have
+    // to pass our test experiment explicitly to find sites it owns.
+    const siteLookup = await request.get(
+      new URL(
+        `/api/sites?site_name=${encodeURIComponent(location)}&experiment_name=${encodeURIComponent(experiment)}`,
+        baseURL,
+      ).toString(),
+      { headers: { Authorization: `Bearer ${access_token}` } },
+    )
+    expect(siteLookup.ok()).toBe(true)
+    const siteHits = (await siteLookup.json()) as Array<{
+      id?: string
+      site_name?: string
+    }>
+    const siteId = siteHits.find((s) => s.site_name === location)?.id ?? null
+    expect(siteId, `expected site ${location} to exist`).toBeTruthy()
+
+    // Seed scope + the analyze-map local fields BEFORE navigation so the
+    // /api/plots/geojson call fires on first render with the right
+    // scope. The traitId is left empty here; we click the dropdown to
+    // pick Vegetation_Fraction so the test also covers the trait selector.
+    await page.addInitScript(
+      (args) => {
+        try {
+          localStorage.setItem(
+            "gemini.process.scope",
+            JSON.stringify({
+              experimentId: args.expId,
+              seasonId: args.seasonId,
+              siteId: args.siteId,
+              populationId: "",
+            }),
+          )
+          localStorage.setItem(
+            "gemini.analyze.map.fields.v1",
+            JSON.stringify({
+              date: "",
+              platform: "",
+              sensor: "",
+              traitId: "",
+            }),
+          )
+        } catch {}
+      },
+      { expId, seasonId, siteId },
+    )
+
+    // Polygons should land via /api/plots/geojson on first render. R4a's
+    // boundary save triggered Plot.upsert_from_features through the
+    // activate() hook (Slice 2), so the experiment's plots now have
+    // polygon geometry. Arm the listener BEFORE navigation — `goto`
+    // resolves on DOMContentLoaded but the fetch fires later (after the
+    // /api/users/me + /api/experiments/id/.../seasons / .../sites chain
+    // settles), so a post-goto await wouldn't catch this on slow CI.
+    const geojsonPromise = page.waitForResponse(
+      (r) => r.url().includes("/api/plots/geojson") && r.ok(),
+      { timeout: 30_000 },
+    )
+    await page.goto("/analyze?view=map")
+    await expect(page.getByTestId("analyze-tab-map")).toBeVisible()
+    await expect(page.getByTestId("analyze-map")).toBeVisible()
+
+    const geojsonResp = await geojsonPromise
+    const geojsonBody = (await geojsonResp.json()) as {
+      features?: unknown[]
+    }
+    expect(
+      Array.isArray(geojsonBody.features) ? geojsonBody.features.length : 0,
+      "expected /api/plots/geojson to return at least one polygon for the test's experiment",
+    ).toBeGreaterThan(0)
+
+    // The map's container mounts and the outline-only legend appears.
+    await expect(page.getByTestId("trait-map-container")).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId("trait-map-legend")).toContainText(/plots?/)
+
+    // Pick Vegetation_Fraction from the trait dropdown. The worker just
+    // ingested it, so it's in the global trait list. Arm the
+    // waitForResponse BEFORE the click that fires it — Playwright's
+    // promise-style listeners must be set up first or the response
+    // arrives before the wait starts.
+    const recordsResp = page.waitForResponse(
+      (r) => /\/api\/traits\/id\/[^/]+\/records/.test(r.url()) && r.ok(),
+      { timeout: 30_000 },
+    )
+    const traitSelect = page.getByTestId("analyze-map-trait")
+    await traitSelect.scrollIntoViewIfNeeded()
+    await traitSelect.click({ force: true })
+    await page.getByRole("option", { name: /Vegetation_Fraction/ }).click()
+    await recordsResp
+
+    const legend = page.getByTestId("trait-map-legend")
+    await expect(legend).toContainText("Vegetation_Fraction", {
+      timeout: 15_000,
+    })
+    const lo = await legend.getAttribute("data-min")
+    const hi = await legend.getAttribute("data-max")
+    expect(lo).not.toBeNull()
+    expect(hi).not.toBeNull()
+    expect(
+      Number(hi),
+      `legend range should be non-degenerate; got [${lo}, ${hi}]`,
+    ).toBeGreaterThan(Number(lo))
   })
 })

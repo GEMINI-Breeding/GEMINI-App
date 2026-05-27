@@ -163,39 +163,24 @@ const GROUND_DEFAULT_CONFIG = {
 // keep in sync if you tweak the worker side. The pipeline-level pick is
 // the *default* used by every Run; users can still override per-run on
 // the orthomosaic step in RunDetail.
-type OdmPreset =
-  | "Default"
-  | "Lowest"
-  | "Low"
-  | "Medium"
-  | "High"
-  | "Ultra"
-  | "Custom"
+type OdmPreset = "Draft" | "Standard" | "High Quality" | "Ultra" | "Custom"
 
 const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
-  Default: {
-    label: "Default",
-    desc: "Worker defaults — full-quality reconstruction.",
+  Draft: {
+    label: "Draft",
+    desc: "Fastest, lowest quality — good for quick previews (5 cm/px, pc-quality lowest, feature-quality low).",
   },
-  Lowest: {
-    label: "Lowest",
-    desc: "Memory-friendly: feature/pc/depthmap all 'lowest', max 4 cores. Fits in a 7–8 GiB Docker engine.",
+  Standard: {
+    label: "Standard",
+    desc: "Balanced speed and quality — recommended for most surveys (3 cm/px, pc-quality medium, feature-quality high).",
   },
-  Low: {
-    label: "Low",
-    desc: "feature/pc-quality 'low', depthmap 512px. Faster + lower RAM than Default.",
-  },
-  Medium: {
-    label: "Medium",
-    desc: "feature/pc-quality 'medium', depthmap 640px. Balanced; safest first try on large flights.",
-  },
-  High: {
-    label: "High",
-    desc: "feature/pc-quality 'high'. Higher detail, ~2× more RAM than Default.",
+  "High Quality": {
+    label: "High Quality",
+    desc: "Slower but detailed — suitable for final deliverables (2 cm/px, pc-quality high, feature-quality ultra).",
   },
   Ultra: {
     label: "Ultra",
-    desc: "feature/pc-quality 'ultra', depthmap 1280px. Highest detail; needs 16–32 GiB+ RAM headroom.",
+    desc: "Maximum quality, very slow — use for critical analysis (1 cm/px, pc-quality ultra, feature-quality ultra).",
   },
   Custom: {
     label: "Custom",
@@ -204,7 +189,7 @@ const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
 }
 
 const AERIAL_DEFAULT_CONFIG = {
-  reconstruction_quality: "Default" as OdmPreset,
+  reconstruction_quality: "Standard" as OdmPreset,
   custom_odm_options: "",
 }
 
@@ -257,18 +242,29 @@ export function ProcessingPipeline() {
     } else {
       // Migrate legacy {odm_preset: "standard", dem_resolution, ...} shapes
       // saved by the pre-Apr 2026 wizard into the new single-string preset.
+      // Also map the short-lived "Lowest/Low/Medium/High" labels that
+      // shipped briefly on this branch before the rename to match main.
       const legacyPreset = cfg.odm_preset as string | undefined
       const legacyMap: Record<string, OdmPreset> = {
-        draft: "Lowest",
-        standard: "Default",
-        high: "High",
+        draft: "Draft",
+        standard: "Standard",
+        high: "High Quality",
         ultra: "Ultra",
         custom: "Custom",
+        Lowest: "Draft",
+        Low: "Standard",
+        Default: "Standard",
+        Medium: "Standard",
+        High: "High Quality",
       }
       const fromLegacy = legacyPreset ? legacyMap[legacyPreset] : undefined
+      const rawQuality = cfg.reconstruction_quality as string | undefined
+      const migratedQuality =
+        rawQuality && rawQuality in legacyMap
+          ? legacyMap[rawQuality]
+          : (rawQuality as OdmPreset | undefined)
       setAerialConfig({
-        reconstruction_quality:
-          (cfg.reconstruction_quality as OdmPreset) ?? fromLegacy ?? "Default",
+        reconstruction_quality: migratedQuality ?? fromLegacy ?? "Standard",
         custom_odm_options:
           (cfg.custom_odm_options as string) ??
           (cfg.custom_options as string) ??
@@ -375,7 +371,7 @@ export function ProcessingPipeline() {
   }
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background">
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-8 flex items-center gap-4">
           <Button

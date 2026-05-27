@@ -141,7 +141,7 @@ describe("executeStep", () => {
       const result = await executeStep({
         ...baseInput(run, "orthomosaic"),
         orthomosaic: {
-          reconstruction_quality: "High",
+          reconstruction_quality: "High Quality",
           custom_options: "--fast",
         },
       })
@@ -158,7 +158,7 @@ describe("executeStep", () => {
         platform: "Drone",
         sensor: "RGB",
         dataset_short_ids: [SHORT_ID],
-        reconstruction_quality: "High",
+        reconstruction_quality: "High Quality",
         custom_options: "--fast",
       })
       expect(result).toEqual({ jobId: "ortho-job-1", done: false })
@@ -247,11 +247,10 @@ describe("executeStep", () => {
       expect(submitMock).not.toHaveBeenCalled()
     })
 
-    it("auto-applies the Medium preset for thermal datasets with GPS", async () => {
-      // Radiometric thermal previews are low-contrast; the High
-      // preset over-detects features. Worker plan calls for a
-      // per-sensor default of `reconstruction_quality=Medium` when
-      // the caller didn't pass an explicit preset.
+    it("auto-applies the Standard preset for thermal datasets with GPS", async () => {
+      // Radiometric thermal previews are low-contrast; pushing them
+      // to High Quality / Ultra over-detects features. Auto-pick
+      // Standard when the caller didn't pass an explicit preset.
       const run = seedRun()
       vi.stubGlobal(
         "fetch",
@@ -275,8 +274,41 @@ describe("executeStep", () => {
         requestBody: { parameters: Record<string, unknown> }
       }
       expect(call.requestBody.parameters.reconstruction_quality).toBe(
-        "Medium",
+        "Standard",
       )
+    })
+
+    it("sends skip_gcps=true when the gcp_selection step was skipped", async () => {
+      // The "Skip" affordance in the GcpPicker sets the step to
+      // status="skipped" in the run store. Without forwarding that
+      // state to the worker, any gcp_list.txt / geo.txt left in MinIO
+      // from a prior session silently re-applies — the worker auto-
+      // sniffs the scope root for sidecars. The user reasonably
+      // expects "Skip" to mean "no GCPs this run."
+      const run = seedRun()
+      // Run the gcp_selection skip path so the step status flips.
+      await executeStep(baseInput(run, "gcp_selection"))
+      submitMock.mockResolvedValue({
+        id: "ortho-no-gcps",
+      } as unknown as JobOutput)
+      await executeStep(baseInput(run, "orthomosaic"))
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters.skip_gcps).toBe(true)
+    })
+
+    it("omits skip_gcps when the gcp_selection step was not skipped", async () => {
+      const run = seedRun()
+      // Don't touch gcp_selection — its status stays "pending".
+      submitMock.mockResolvedValue({
+        id: "ortho-with-gcps",
+      } as unknown as JobOutput)
+      await executeStep(baseInput(run, "orthomosaic"))
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters).not.toHaveProperty("skip_gcps")
     })
 
     it("respects an explicit reconstruction_quality even for thermal", async () => {

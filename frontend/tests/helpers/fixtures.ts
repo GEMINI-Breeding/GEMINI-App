@@ -67,16 +67,16 @@ async function cleanupByPrefix(prefix: string): Promise<void> {
  * should pass that exact string into the entity names they create —
  * the auto-fixture will sweep using the same string.
  */
+// Declaration order matters: Playwright tears fixtures down in reverse,
+// so the LAST fixture declared here runs its cleanup FIRST. We want
+// runPrefix's cleanupByPrefix (which DELETEs entities) to run AFTER
+// consoleErrorGuard.assertClean — otherwise a still-mounted page can
+// fire a poll against an already-deleted entity, log a 404 to console,
+// and trip the guard during teardown. Declare runPrefix FIRST so its
+// teardown is LAST.
 export const test = base.extend<Fixtures>({
-  consoleErrorGuard: [
-    async ({ page }, use) => {
-      const guard = attachConsoleErrorGuard(page)
-      await use(guard)
-      guard.assertClean()
-    },
-    { auto: true },
-  ],
   runPrefix: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright fixture API requires an object destructure even when no fixtures are injected
     async ({}, use, info) => {
       const prefix = makePrefix(info)
       await use(prefix)
@@ -87,7 +87,9 @@ export const test = base.extend<Fixtures>({
       // test's MinIO + DB entities around so the produced artifacts can
       // be inspected.
       if (process.env.KEEP_E2E_DATA === "1") {
-        console.warn(`[fixtures] KEEP_E2E_DATA=1 — skipping cleanup for ${prefix}`)
+        console.warn(
+          `[fixtures] KEEP_E2E_DATA=1 — skipping cleanup for ${prefix}`,
+        )
         return
       }
       try {
@@ -95,6 +97,14 @@ export const test = base.extend<Fixtures>({
       } catch (err) {
         console.warn(`[fixtures] cleanup failed for ${prefix}:`, err)
       }
+    },
+    { auto: true },
+  ],
+  consoleErrorGuard: [
+    async ({ page }, use) => {
+      const guard = attachConsoleErrorGuard(page)
+      await use(guard)
+      guard.assertClean()
     },
     { auto: true },
   ],

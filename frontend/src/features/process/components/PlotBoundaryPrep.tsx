@@ -18,7 +18,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -40,10 +40,14 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NumberField } from "@/components/ui/number-field"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
+import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
 import { VersionPicker } from "@/features/process/components/VersionPicker"
+import { useDraftPersistence } from "@/features/process/hooks/useDraftPersistence"
+import { useHistory } from "@/features/process/hooks/useHistory"
 import {
   type PlotGeometryStateSnapshot,
   useActivatePlotGeometryVersion,
@@ -64,26 +68,28 @@ import {
   mergeLabelsIntoExisting,
 } from "@/features/process/lib/fieldDesign"
 import { generateGridFeatures } from "@/features/process/lib/grid"
+import { rotateFeatures } from "@/features/process/lib/groupTransform"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
+import {
+  type BlockParams,
+  DEFAULT_BLOCK_PARAMS,
+  INITIAL_EDITOR_STATE,
+  type PlotBoundaryEditorState,
+} from "@/features/process/lib/plotBoundaryEditorState"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const DEFAULT_BUCKET = "gemini"
 
-type BlockParams = {
-  label: string
-  rows: number
-  cols: number
-  angle: number
-  gapMeters: number
-}
-
-const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
-  rows: 4,
-  cols: 10,
-  angle: 0,
-  gapMeters: 0,
+function nextSelection(
+  prev: ReadonlyArray<string>,
+  id: string,
+  mode: "replace" | "toggle" | "add",
+): string[] {
+  if (mode === "replace") return [id]
+  if (mode === "add") return prev.includes(id) ? [...prev] : [...prev, id]
+  return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
 }
 
 function bboxOuterFromFeatures(
@@ -141,33 +147,42 @@ export function PlotBoundaryPrep({
 }: PlotBoundaryPrepProps) {
   const directory = useMemo(() => processedPrefix(scope), [scope])
 
-  const [features, setFeaturesRaw] = useState<GeoJSON.Feature[]>([])
+  const history = useHistory<PlotBoundaryEditorState>(INITIAL_EDITOR_STATE, {
+    limit: 50,
+  })
+  const {
+    features,
+    blocks,
+    activeBlockId,
+    pendingDefaultParams,
+    gridMode,
+    fieldDesign,
+  } = history.state
+
+  // UI-only state — not part of editor history.
   const [versionToLoad, setVersionToLoad] = useState<number | null>(null)
   const [versionName, setVersionName] = useState("")
-  // Per-block grid params. The user can draw multiple outer boundaries
-  // ("blocks"), each with its own rows/cols/angle/gap. The grid panel
-  // edits the active block; switching blocks via the map swaps which
-  // params are visible.
-  const [blocks, setBlocks] = useState<Record<string, BlockParams>>({})
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
-  const [fieldDesign, setFieldDesign] = useState<FieldDesign | null>(null)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
-  // Default rows/cols for the *next* block to be drawn. Set when the
-  // user uploads a field design before drawing any boundary — otherwise
-  // the first block they draw would get the manual defaults (4×10)
-  // instead of the fd dimensions.
-  const [pendingDefaultParams, setPendingDefaultParams] = useState<{
-    rows: number
-    cols: number
-  } | null>(null)
+  const [draftBanner, setDraftBanner] = useState<{
+    visible: boolean
+    lastModifiedAt?: string
+  }>({ visible: false })
 
-  // Grid generation has two modes: "manual" (user picks rows/cols) and
-  // "fd" (rows/cols come from an uploaded field-design CSV, which also
-  // tags each polygon with the CSV's plot metadata). The user toggles
-  // between them; switching back to "manual" doesn't discard the loaded
-  // field design (so re-toggling restores it without re-upload).
-  const [gridMode, setGridMode] = useState<"manual" | "fd">("manual")
+  // Auto-save the editor state to localStorage on every change, with a
+  // mount-time restore banner. Survives refresh, back button, and tab
+  // close as long as the user hasn't explicitly discarded.
+  const draftStorageKey = `gemini.plotBoundaryPrep.draft.v1::${directory}`
+  const draftApi = useDraftPersistence<PlotBoundaryEditorState>({
+    storageKey: draftStorageKey,
+    state: history.state,
+    runId: run.id,
+    directory,
+    isDirty: (s) =>
+      s.features.length > 0 ||
+      Object.keys(s.blocks).length > 0 ||
+      s.fieldDesign !== null,
+  })
 
   // Derived active-block params. Falls back to pending defaults (set
   // when a field design is loaded before any boundary is drawn), then
@@ -182,21 +197,50 @@ export function PlotBoundaryPrep({
         }
   const { rows, cols, angle, gapMeters } = activeParams
 
+  // History.state can change after a setter runs in this render; use a
+  // ref to get the latest state inside callbacks without re-binding.
+  const stateRef = useRef(history.state)
+  stateRef.current = history.state
+
   function updateActiveParams(patch: Partial<BlockParams>) {
-    if (activeBlockId) {
-      setBlocks((prev) => ({
-        ...prev,
-        [activeBlockId]: { ...(prev[activeBlockId] ?? activeParams), ...patch },
-      }))
+    const s = stateRef.current
+    if (s.activeBlockId) {
+      const prev = s.blocks[s.activeBlockId] ?? {
+        label: s.blocks[s.activeBlockId]?.label ?? "",
+        ...DEFAULT_BLOCK_PARAMS,
+        ...(s.pendingDefaultParams ?? {}),
+      }
+      history.set(
+        {
+          ...s,
+          blocks: {
+            ...s.blocks,
+            [s.activeBlockId]: { ...prev, ...patch },
+          },
+        },
+        { tag: "params" },
+      )
       return
     }
     // No active block — apply rows/cols to pendingDefaultParams so the
     // value sticks until the user draws a boundary.
     if (patch.rows !== undefined || patch.cols !== undefined) {
-      setPendingDefaultParams((prev) => ({
-        rows: patch.rows ?? prev?.rows ?? DEFAULT_BLOCK_PARAMS.rows,
-        cols: patch.cols ?? prev?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
-      }))
+      history.set(
+        {
+          ...s,
+          pendingDefaultParams: {
+            rows:
+              patch.rows ??
+              s.pendingDefaultParams?.rows ??
+              DEFAULT_BLOCK_PARAMS.rows,
+            cols:
+              patch.cols ??
+              s.pendingDefaultParams?.cols ??
+              DEFAULT_BLOCK_PARAMS.cols,
+          },
+        },
+        { tag: "params" },
+      )
     }
   }
   const setRows = (v: number) => updateActiveParams({ rows: v })
@@ -204,88 +248,214 @@ export function PlotBoundaryPrep({
   const setAngle = (v: number) => updateActiveParams({ angle: v })
   const setGapMeters = (v: number) => updateActiveParams({ gapMeters: v })
 
-  // Wrap setFeatures so every incoming feature list (from the map or
-  // from grid generation/load) is reconciled with the per-block state.
-  // Three concerns:
-  //   1. Tag any newly-drawn polygon (no role, no blockId, no row/col)
-  //      as a new outer with a fresh blockId + auto label.
-  //   2. Drop any blockId from `blocks` whose outer polygon was deleted,
-  //      and discard cells that referenced the dead block.
-  //   3. Auto-select the most recently added outer.
-  function setFeatures(next: GeoJSON.Feature[]) {
-    let nextActive: string | null = activeBlockId
-    let newBlocks: Record<string, BlockParams> | null = null
-    let highestNum = 0
-    for (const id of Object.keys(blocks)) {
-      const m = id.match(/^block-(\d+)$/)
-      if (m) highestNum = Math.max(highestNum, Number(m[1]))
-    }
-    // Pass 1: stamp fresh outers.
-    const stamped = next.map((f) => {
-      if (f.geometry?.type !== "Polygon") return f
-      const props = (f.properties ?? {}) as Record<string, unknown>
-      if (props.role === "outer" || typeof props.blockId === "string") return f
-      if (props.row !== undefined || props.col !== undefined) return f
-      highestNum += 1
-      const newId = `block-${highestNum}`
-      const label = `Block ${highestNum}`
-      if (!newBlocks) newBlocks = { ...blocks }
-      newBlocks[newId] = {
-        label,
-        ...DEFAULT_BLOCK_PARAMS,
-        ...(pendingDefaultParams ?? {}),
+  // Reconcile an incoming feature list (from the map or grid generation)
+  // with per-block state, returning the next EditorState. Mirrors the
+  // three concerns of the original setFeatures: stamp fresh outers, drop
+  // dead blocks, auto-select most-recently added outer.
+  const buildNextStateForFeatures = useCallback(
+    (
+      base: PlotBoundaryEditorState,
+      next: GeoJSON.Feature[],
+    ): PlotBoundaryEditorState => {
+      let nextActive: string | null = base.activeBlockId
+      let newBlocks: Record<string, BlockParams> | null = null
+      let highestNum = 0
+      for (const id of Object.keys(base.blocks)) {
+        const m = id.match(/^block-(\d+)$/)
+        if (m) highestNum = Math.max(highestNum, Number(m[1]))
       }
-      nextActive = newId
-      return {
-        ...f,
-        properties: {
-          ...(f.properties ?? {}),
-          role: "outer",
-          blockId: newId,
+      // Pass 1: stamp fresh outers.
+      const stamped = next.map((f) => {
+        if (f.geometry?.type !== "Polygon") return f
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (props.role === "outer" || typeof props.blockId === "string")
+          return f
+        if (props.row !== undefined || props.col !== undefined) return f
+        highestNum += 1
+        const newId = `block-${highestNum}`
+        const label = `Block ${highestNum}`
+        if (!newBlocks) newBlocks = { ...base.blocks }
+        newBlocks[newId] = {
           label,
-        },
-      }
-    })
-    // Pass 2: figure out which blocks still have a surviving outer.
-    const surviving = new Set<string>()
-    for (const f of stamped) {
-      const props = (f.properties ?? {}) as Record<string, unknown>
-      if (props.role === "outer" && typeof props.blockId === "string") {
-        surviving.add(props.blockId as string)
-      }
-    }
-    // Pass 3: drop cells whose parent block is gone.
-    const pruned = stamped.filter((f) => {
-      const props = (f.properties ?? {}) as Record<string, unknown>
-      if (props.role === "outer") return true
-      const bid = typeof props.blockId === "string" ? props.blockId : null
-      // Cells without a blockId are legacy/loaded features — keep them.
-      if (!bid) return true
-      return surviving.has(bid)
-    })
-    // Reconcile blocks dict.
-    const baseBlocks = newBlocks ?? blocks
-    let prunedBlocks: Record<string, BlockParams> = baseBlocks
-    let blocksChanged = newBlocks !== null
-    for (const id of Object.keys(baseBlocks)) {
-      if (!surviving.has(id)) {
-        if (!blocksChanged) {
-          prunedBlocks = { ...baseBlocks }
-          blocksChanged = true
+          ...DEFAULT_BLOCK_PARAMS,
+          ...(base.pendingDefaultParams ?? {}),
         }
-        delete prunedBlocks[id]
+        nextActive = newId
+        return {
+          ...f,
+          properties: {
+            ...(f.properties ?? {}),
+            role: "outer",
+            blockId: newId,
+            label,
+          },
+        }
+      })
+      // Pass 2: surviving block ids.
+      const surviving = new Set<string>()
+      for (const f of stamped) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (props.role === "outer" && typeof props.blockId === "string") {
+          surviving.add(props.blockId as string)
+        }
+      }
+      // Pass 3: drop cells whose parent block is gone, then stamp a
+      // stable cellId on every surviving cell so the selection state in
+      // EditorState can reference cells by identity across edits. Prefer
+      // a deterministic `${blockId}:${row}:${col}` so snapshots stay
+      // diffable; fall back to a UUID when row/col are missing (legacy
+      // imports / hand-drawn cells).
+      const pruned = stamped
+        .filter((f) => {
+          const props = (f.properties ?? {}) as Record<string, unknown>
+          if (props.role === "outer") return true
+          const bid = typeof props.blockId === "string" ? props.blockId : null
+          if (!bid) return true
+          return surviving.has(bid)
+        })
+        .map((f) => {
+          const props = (f.properties ?? {}) as Record<string, unknown>
+          if (props.role === "outer") return f
+          if (typeof props.cellId === "string") return f
+          const bid = typeof props.blockId === "string" ? props.blockId : null
+          const r = props.row
+          const c = props.col
+          const stable =
+            bid &&
+            (typeof r === "number" || typeof r === "string") &&
+            (typeof c === "number" || typeof c === "string")
+              ? `${bid}:${r}:${c}`
+              : typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? (crypto as { randomUUID: () => string }).randomUUID()
+                : `cell-${Math.random().toString(36).slice(2, 10)}`
+          return {
+            ...f,
+            properties: { ...(f.properties ?? {}), cellId: stable },
+          }
+        })
+      // Reconcile blocks dict.
+      const baseBlocks = newBlocks ?? base.blocks
+      let prunedBlocks: Record<string, BlockParams> = baseBlocks
+      let blocksChanged = newBlocks !== null
+      for (const id of Object.keys(baseBlocks)) {
+        if (!surviving.has(id)) {
+          if (!blocksChanged) {
+            prunedBlocks = { ...baseBlocks }
+            blocksChanged = true
+          }
+          delete prunedBlocks[id]
+        }
+      }
+      if (nextActive && !surviving.has(nextActive)) {
+        nextActive = surviving.values().next().value ?? null
+      }
+      // Prune selection to cells that still exist.
+      const survivingCellIds = new Set<string>()
+      for (const f of pruned) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (typeof props.cellId === "string")
+          survivingCellIds.add(props.cellId as string)
+      }
+      const nextSelected = base.selectedCellIds.filter((id) =>
+        survivingCellIds.has(id),
+      )
+      return {
+        ...base,
+        features: pruned,
+        blocks: blocksChanged ? prunedBlocks : base.blocks,
+        activeBlockId: nextActive,
+        pendingDefaultParams: newBlocks ? null : base.pendingDefaultParams,
+        selectedCellIds:
+          nextSelected.length === base.selectedCellIds.length
+            ? base.selectedCellIds
+            : nextSelected,
+      }
+    },
+    [],
+  )
+
+  const setFeatures = useCallback(
+    (next: GeoJSON.Feature[]) => {
+      const nextState = buildNextStateForFeatures(stateRef.current, next)
+      history.set(nextState, { tag: "features" })
+    },
+    [buildNextStateForFeatures, history],
+  )
+
+  // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z (or Ctrl+Y) redo. The focus check
+  // is what keeps native text-undo working inside form inputs: when the
+  // user is typing in a textbox, this handler bails and the browser (or
+  // Tauri WebView) handles undo as a text-edit operation.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return
+      }
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      const k = e.key.toLowerCase()
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault()
+        history.undo()
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault()
+        history.redo()
       }
     }
-    if (blocksChanged) setBlocks(prunedBlocks)
-    // Active block must still exist; otherwise pick any survivor or null.
-    if (nextActive && !surviving.has(nextActive)) {
-      nextActive = surviving.values().next().value ?? null
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [history.undo, history.redo])
+
+  // Tauri Edit menu (when present): listen for editor:undo / editor:redo
+  // events emitted by the native menu. The menu items don't register
+  // accelerators, so Cmd-Z still flows through the window keydown above
+  // (and so native text-undo inside form inputs keeps working).
+  useEffect(() => {
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+    if (!w.__TAURI_INTERNALS__) return
+    let unlistenUndo: (() => void) | undefined
+    let unlistenRedo: (() => void) | undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event")
+        if (cancelled) return
+        unlistenUndo = await listen("editor:undo", () => history.undo())
+        unlistenRedo = await listen("editor:redo", () => history.redo())
+      } catch {
+        // Tauri APIs unavailable — fine, browser path covers it.
+      }
+    })()
+    return () => {
+      cancelled = true
+      unlistenUndo?.()
+      unlistenRedo?.()
     }
-    if (nextActive !== activeBlockId) setActiveBlockId(nextActive)
-    // We consumed pendingDefaultParams when creating new blocks above.
-    if (newBlocks && pendingDefaultParams) setPendingDefaultParams(null)
-    setFeaturesRaw(pruned)
-  }
+  }, [history.undo, history.redo])
+
+  // One-time draft restore. If localStorage holds an unsaved draft for
+  // this directory and the runId matches, hydrate the editor with it
+  // and surface a banner so the user can opt out. `initialDraft` is
+  // stable across renders (read once at mount), so an empty deps array
+  // is correct here.
+  const restoredRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only restore
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    const d = draftApi.initialDraft
+    if (d && d.runId === run.id) {
+      history.replace(d.state)
+      history.clearHistory(d.state)
+      setDraftBanner({ visible: true, lastModifiedAt: d.lastModifiedAt })
+    }
+  }, [])
 
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
@@ -362,6 +532,7 @@ export function PlotBoundaryPrep({
     const grid = loaded.data.state_snapshot.grid
     const fd = loaded.data.state_snapshot.field_design
 
+    let nextState: PlotBoundaryEditorState = stateRef.current
     if (fc?.features) {
       const loadedFeatures = fc.features as GeoJSON.Feature[]
       // Group loaded cells by blockId. Snapshots saved before multi-block
@@ -377,9 +548,6 @@ export function PlotBoundaryPrep({
         arr.push(f)
         byBlock.set(key, arr)
       }
-      // Reconstruct an outer for each block from the bbox of its cells.
-      // Snapshots strip outers at save time, so we always recompute on
-      // load — otherwise regenerateGrid would inscribe into a cell.
       const outers: GeoJSON.Feature[] = []
       const taggedCells: GeoJSON.Feature[] = []
       const blockEntries: Record<string, BlockParams> = {}
@@ -399,16 +567,12 @@ export function PlotBoundaryPrep({
           }
           outers.push(outer)
         }
-        // Stamp cells with blockId so they group correctly going forward.
         for (const c of cells) {
           taggedCells.push({
             ...c,
             properties: { ...(c.properties ?? {}), blockId: bid, block: label },
           })
         }
-        // Per-block grid params: prefer values saved on each cell (none
-        // today, but reserved for future), then the snapshot-wide grid,
-        // then defaults.
         blockEntries[bid] = {
           label,
           rows: grid?.rows ?? DEFAULT_BLOCK_PARAMS.rows,
@@ -417,17 +581,35 @@ export function PlotBoundaryPrep({
           gapMeters: grid?.spacing_m ?? DEFAULT_BLOCK_PARAMS.gapMeters,
         }
       }
-      setBlocks(blockEntries)
-      setActiveBlockId(Object.keys(blockEntries)[0] ?? null)
-      setFeaturesRaw([...outers, ...taggedCells])
+      nextState = {
+        ...nextState,
+        features: [...outers, ...taggedCells],
+        blocks: blockEntries,
+        activeBlockId: Object.keys(blockEntries)[0] ?? null,
+        selectedCellIds: [],
+      }
     }
     if (fd) {
-      setFieldDesign(fd)
-      // The version was saved with a field design, so default the UI to
-      // the field-design tab on reload.
-      setGridMode("fd")
+      nextState = { ...nextState, fieldDesign: fd, gridMode: "fd" }
     }
-  }, [loaded.data])
+    // Run the reconciled features through buildNextStateForFeatures so
+    // cellIds get stamped on loaded cells (older snapshots predate the
+    // cellId convention; without this, loaded grids would be unselectable).
+    nextState = buildNextStateForFeatures(nextState, nextState.features)
+    // Loading a version is a fresh baseline — wipe past/future so the
+    // user can't undo back to "empty" through a load, and clear any
+    // stale draft (the loaded version supersedes it).
+    history.replace(nextState)
+    history.clearHistory(nextState)
+    draftApi.discardDraft()
+    setDraftBanner({ visible: false })
+  }, [
+    loaded.data,
+    history.replace,
+    history.clearHistory,
+    draftApi.discardDraft,
+    buildNextStateForFeatures,
+  ])
 
   function regenerateGrid() {
     if (!activeBlockId) {
@@ -477,58 +659,101 @@ export function PlotBoundaryPrep({
       if (props.role === "outer") return true
       return props.blockId !== activeBlockId
     })
-    setFeaturesRaw([...keep, ...tagged])
+    // Run through the reconciler so each fresh cell picks up a stable
+    // `cellId` (deterministic `${blockId}:${row}:${col}` when row/col
+    // exist, UUID otherwise). Selection / group ops in the UI reference
+    // cells by cellId, so skipping the reconciler would leave the new
+    // grid unselectable.
+    const reconciled = buildNextStateForFeatures(stateRef.current, [
+      ...keep,
+      ...tagged,
+    ])
+    history.set(reconciled, { tag: "grid-regenerate" })
   }
 
   function setFdTransform(transform: FdTransform) {
-    if (!fieldDesign) return
-    const next: FieldDesign = { ...fieldDesign, transform }
-    setFieldDesign(next)
+    const s = stateRef.current
+    if (!s.fieldDesign) return
+    const next: FieldDesign = { ...s.fieldDesign, transform }
     // Re-label the existing geometry live without redrawing. The outer
     // boundary (role="outer") is excluded — it isn't a plot and would
     // otherwise get spurious CSV row/col props bootstrapped onto it.
-    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    const plotFeatures = s.features.filter(
+      (f) => f.properties?.role !== "outer",
+    )
     if (plotFeatures.length > 0) {
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features: plotFeatures,
       }
       const merged = mergeLabelsIntoExisting(fc, next)
-      const outerFeatures = features.filter(
+      const outerFeatures = s.features.filter(
         (f) => f.properties?.role === "outer",
       )
-      setFeatures([...outerFeatures, ...(merged.features as GeoJSON.Feature[])])
+      const nextFeatures = [
+        ...outerFeatures,
+        ...(merged.features as GeoJSON.Feature[]),
+      ]
+      const reconciled = buildNextStateForFeatures(
+        { ...s, fieldDesign: next },
+        nextFeatures,
+      )
+      history.set(reconciled, { tag: "fd-transform" })
+    } else {
+      history.set({ ...s, fieldDesign: next }, { tag: "fd-transform" })
     }
   }
 
   function handleFieldDesignSaved(fd: FieldDesign) {
-    setFieldDesign(fd)
     setFdDialogOpen(false)
-    setGridMode("fd")
+    const s = stateRef.current
     const dims = dimensionsFromDesign(fd)
-    if (activeBlockId) {
-      setRows(dims.rows)
-      setCols(dims.cols)
-    } else {
-      // No block yet — stash dims so the next-drawn block uses them.
-      setPendingDefaultParams({ rows: dims.rows, cols: dims.cols })
+    let next: PlotBoundaryEditorState = {
+      ...s,
+      fieldDesign: fd,
+      gridMode: "fd",
     }
-    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    if (s.activeBlockId && next.blocks[s.activeBlockId]) {
+      next = {
+        ...next,
+        blocks: {
+          ...next.blocks,
+          [s.activeBlockId]: {
+            ...next.blocks[s.activeBlockId],
+            rows: dims.rows,
+            cols: dims.cols,
+          },
+        },
+      }
+    } else {
+      next = {
+        ...next,
+        pendingDefaultParams: { rows: dims.rows, cols: dims.cols },
+      }
+    }
+    const plotFeatures = next.features.filter(
+      (f) => f.properties?.role !== "outer",
+    )
     if (plotFeatures.length === 0) {
+      history.set(next, { tag: "field-design" })
       showSuccessToast(
         `Field design loaded — ${fd.rows.length} plots (${dims.rows} × ${dims.cols}).`,
       )
     } else {
-      // Re-label existing geometry against the newly uploaded design.
       const fc: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features: plotFeatures,
       }
       const merged = mergeLabelsIntoExisting(fc, fd)
-      const outerFeatures = features.filter(
+      const outerFeatures = next.features.filter(
         (f) => f.properties?.role === "outer",
       )
-      setFeatures([...outerFeatures, ...(merged.features as GeoJSON.Feature[])])
+      const nextFeatures = [
+        ...outerFeatures,
+        ...(merged.features as GeoJSON.Feature[]),
+      ]
+      const reconciled = buildNextStateForFeatures(next, nextFeatures)
+      history.set(reconciled, { tag: "field-design" })
       showSuccessToast(
         `Field design loaded — ${fd.rows.length} plots applied to existing geometry.`,
       )
@@ -562,6 +787,10 @@ export function PlotBoundaryPrep({
           activeVersionName: v.name ?? null,
         },
       })
+      // Saved + activated — clear the in-flight draft so the recovery
+      // banner doesn't reappear on the next mount.
+      draftApi.discardDraft()
+      setDraftBanner({ visible: false })
       showSuccessToast(`Saved + activated v${v.version}`)
       onSaved?.()
     } catch (err) {
@@ -602,6 +831,52 @@ export function PlotBoundaryPrep({
 
   return (
     <div className="space-y-4">
+      {draftBanner.visible ? (
+        <Card
+          className="border-amber-300 bg-amber-50/40 dark:bg-amber-950/20"
+          data-testid="draft-banner"
+        >
+          <CardContent className="flex flex-wrap items-center gap-3 py-3">
+            <span className="text-sm">
+              Restored unsaved changes
+              {draftBanner.lastModifiedAt ? (
+                <>
+                  {" "}
+                  from{" "}
+                  <span className="font-medium">
+                    {new Date(draftBanner.lastModifiedAt).toLocaleString()}
+                  </span>
+                </>
+              ) : null}
+              . Save now to keep them, or discard to return to the active
+              version.
+            </span>
+            <div className="ml-auto flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="draft-discard"
+                onClick={() => {
+                  draftApi.discardDraft()
+                  history.replace(INITIAL_EDITOR_STATE)
+                  history.clearHistory(INITIAL_EDITOR_STATE)
+                  setDraftBanner({ visible: false })
+                }}
+              >
+                Discard
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="draft-dismiss"
+                onClick={() => setDraftBanner({ visible: false })}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Scope</CardTitle>
@@ -627,8 +902,123 @@ export function PlotBoundaryPrep({
               orthoTileUrl={orthoTileUrl}
               orthoBounds={orthoBounds}
               selectedBlockId={activeBlockId}
-              onSelectBlock={setActiveBlockId}
+              onSelectBlock={(id) =>
+                history.set(
+                  {
+                    ...stateRef.current,
+                    activeBlockId: id,
+                    selectedCellIds: [],
+                  },
+                  { tag: "select-block" },
+                )
+              }
+              selectedCellIds={history.state.selectedCellIds}
+              onCellSelect={(id, mode) =>
+                history.set(
+                  {
+                    ...stateRef.current,
+                    selectedCellIds: nextSelection(
+                      stateRef.current.selectedCellIds,
+                      id,
+                      mode,
+                    ),
+                  },
+                  { tag: "select", coalesce: true },
+                )
+              }
+              onSelectionClear={() =>
+                history.set(
+                  { ...stateRef.current, selectedCellIds: [] },
+                  { tag: "select", coalesce: true },
+                )
+              }
             />
+            {history.state.selectedCellIds.length > 0 ? (
+              <div className="mt-3">
+                <SelectionActionBar
+                  count={history.state.selectedCellIds.length}
+                  hasActiveBlock={activeBlockId != null}
+                  onRotate={(deg) => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: rotateFeatures(
+                          stateRef.current.features,
+                          sel,
+                          deg,
+                        ),
+                      },
+                      { tag: "rotate" },
+                    )
+                  }}
+                  onDelete={() => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: stateRef.current.features.filter((f) => {
+                          const id = (f.properties as Record<string, unknown>)
+                            ?.cellId
+                          return typeof id !== "string" || !sel.has(id)
+                        }),
+                        selectedCellIds: [],
+                      },
+                      { tag: "delete" },
+                    )
+                  }}
+                  onClear={() =>
+                    history.set(
+                      { ...stateRef.current, selectedCellIds: [] },
+                      { tag: "select" },
+                    )
+                  }
+                  onSelectAllInBlock={() => {
+                    const s = stateRef.current
+                    if (!s.activeBlockId) return
+                    const ids = s.features
+                      .filter(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.blockId ===
+                            s.activeBlockId &&
+                          (f.properties as Record<string, unknown>)?.role !==
+                            "outer",
+                      )
+                      .map(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.cellId as
+                            | string
+                            | undefined,
+                      )
+                      .filter((id): id is string => typeof id === "string")
+                    history.set(
+                      { ...s, selectedCellIds: ids },
+                      { tag: "select" },
+                    )
+                  }}
+                  onSelectAll={() => {
+                    const s = stateRef.current
+                    const ids = s.features
+                      .filter(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.role !==
+                          "outer",
+                      )
+                      .map(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.cellId as
+                            | string
+                            | undefined,
+                      )
+                      .filter((id): id is string => typeof id === "string")
+                    history.set(
+                      { ...s, selectedCellIds: ids },
+                      { tag: "select" },
+                    )
+                  }}
+                />
+              </div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between text-xs">
               <p className="text-muted-foreground">
                 {plotFeatureCount} plot{plotFeatureCount === 1 ? "" : "s"}{" "}
@@ -675,7 +1065,16 @@ export function PlotBoundaryPrep({
                       key={id}
                       size="sm"
                       variant={id === activeBlockId ? "default" : "outline"}
-                      onClick={() => setActiveBlockId(id)}
+                      onClick={() =>
+                        history.set(
+                          {
+                            ...stateRef.current,
+                            activeBlockId: id,
+                            selectedCellIds: [],
+                          },
+                          { tag: "select-block" },
+                        )
+                      }
                       data-testid={`block-switch-${id}`}
                     >
                       {p.label}
@@ -685,7 +1084,15 @@ export function PlotBoundaryPrep({
               ) : null}
               <Tabs
                 value={gridMode}
-                onValueChange={(v) => setGridMode(v as "manual" | "fd")}
+                onValueChange={(v) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      gridMode: v as "manual" | "fd",
+                    },
+                    { tag: "grid-mode" },
+                  )
+                }
               >
                 <TabsList className="w-full">
                   <TabsTrigger value="manual" data-testid="grid-mode-manual">
@@ -702,51 +1109,54 @@ export function PlotBoundaryPrep({
                       <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
                         Rows
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-rows"
                         data-testid="boundary-rows"
-                        type="number"
+                        integer
                         min={1}
+                        step={1}
                         value={rows}
-                        onChange={(e) => setRows(Number(e.target.value) || 1)}
+                        onCommit={setRows}
                       />
                     </div>
                     <div>
                       <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
                         Cols
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-cols"
                         data-testid="boundary-cols"
-                        type="number"
+                        integer
                         min={1}
+                        step={1}
                         value={cols}
-                        onChange={(e) => setCols(Number(e.target.value) || 1)}
+                        onCommit={setCols}
                       />
                     </div>
                     <div>
                       <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
                         Angle (°)
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-angle"
-                        type="number"
+                        data-testid="boundary-angle"
+                        allowNegative
+                        step={1}
                         value={angle}
-                        onChange={(e) => setAngle(Number(e.target.value) || 0)}
+                        onCommit={setAngle}
                       />
                     </div>
                     <div>
                       <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
                         Gap (m)
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-gap"
-                        type="number"
+                        data-testid="boundary-gap"
                         min={0}
+                        step={0.1}
                         value={gapMeters}
-                        onChange={(e) =>
-                          setGapMeters(Number(e.target.value) || 0)
-                        }
+                        onCommit={setGapMeters}
                       />
                     </div>
                   </div>
@@ -856,25 +1266,26 @@ export function PlotBoundaryPrep({
                       <Label htmlFor="grid-angle-fd" className="mb-1.5 text-xs">
                         Angle (°)
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-angle-fd"
-                        type="number"
+                        data-testid="boundary-angle-fd"
+                        allowNegative
+                        step={1}
                         value={angle}
-                        onChange={(e) => setAngle(Number(e.target.value) || 0)}
+                        onCommit={setAngle}
                       />
                     </div>
                     <div>
                       <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
                         Gap (m)
                       </Label>
-                      <Input
+                      <NumberField
                         id="grid-gap-fd"
-                        type="number"
+                        data-testid="boundary-gap-fd"
                         min={0}
+                        step={0.1}
                         value={gapMeters}
-                        onChange={(e) =>
-                          setGapMeters(Number(e.target.value) || 0)
-                        }
+                        onCommit={setGapMeters}
                       />
                     </div>
                   </div>
@@ -990,7 +1401,7 @@ export function PlotBoundaryPrep({
               This removes the {features.length} polygon
               {features.length === 1 ? "" : "s"} currently drawn on the map.
               You'll need to draw an outer boundary again before regenerating
-              the grid. This cannot be undone (until you save again).
+              the grid. You can undo this with Cmd/Ctrl+Z.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1004,7 +1415,14 @@ export function PlotBoundaryPrep({
               variant="destructive"
               data-testid="boundary-clear-all-confirm"
               onClick={() => {
-                setFeatures([])
+                history.set(
+                  {
+                    ...INITIAL_EDITOR_STATE,
+                    gridMode: stateRef.current.gridMode,
+                    fieldDesign: stateRef.current.fieldDesign,
+                  },
+                  { tag: "clear" },
+                )
                 setClearConfirmOpen(false)
               }}
             >

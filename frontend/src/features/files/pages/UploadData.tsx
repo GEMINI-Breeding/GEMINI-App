@@ -169,8 +169,18 @@ export function UploadData() {
     setFormValues((prev) => {
       const next = { ...prev, [field]: name }
       if (field === "experiment") {
-        // Wipe the dependent fields' mirrored names too.
-        for (const k of ["location", "population", "platform", "sensor"])
+        // Wipe the dependent fields' mirrored names too. Season is
+        // experiment-scoped (Season FK includes experiment_id), so it
+        // belongs in this list — picking a "+ Create new" season under
+        // experiment A then switching to experiment B would otherwise
+        // leak the A-scoped name into the B-scoped path.
+        for (const k of [
+          "season",
+          "location",
+          "population",
+          "platform",
+          "sensor",
+        ])
           delete next[k]
       }
       return next

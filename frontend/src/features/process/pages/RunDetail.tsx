@@ -60,8 +60,8 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
-import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
+import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import {
   type TraitDialogState,
   TraitExtractionDialog,
@@ -88,10 +88,6 @@ import {
   stopStep,
 } from "@/features/process/lib/runApi"
 import {
-  isThermalGpsRequiredError,
-  type ThermalGpsRequiredError,
-} from "@/features/process/lib/thermalGpsPreflight"
-import {
   closeJobConnection,
   type RunProgressEvent,
   subscribeJobAsRunEvent,
@@ -104,6 +100,10 @@ import {
   useRun,
   useWorkspace,
 } from "@/features/process/lib/runStore"
+import {
+  isThermalGpsRequiredError,
+  type ThermalGpsRequiredError,
+} from "@/features/process/lib/thermalGpsPreflight"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -645,25 +645,22 @@ function RunScopeSummary({ scope }: { scope: AerialScope }) {
 // ── Orthomosaic options card (shown next to the orthomosaic step) ───────────
 
 const RECONSTRUCTION_QUALITY = [
-  "Default",
-  "Lowest",
-  "Low",
-  "Medium",
-  "High",
+  "Draft",
+  "Standard",
+  "High Quality",
   "Ultra",
   "Custom",
 ] as const
 
 const QUALITY_HINTS: Record<(typeof RECONSTRUCTION_QUALITY)[number], string> = {
-  Default: "Worker defaults (full-quality reconstruction).",
-  Lowest:
-    "Memory-friendly: feature/pc/depthmap all 'lowest', max 4 cores. Designed to fit in a 7-8 GiB Docker engine.",
-  Low: "feature/pc-quality 'low', depthmap 512px. Faster + lower RAM than Default.",
-  Medium:
-    "feature/pc-quality 'medium', depthmap 640px. Balanced; the safest first try on large flights.",
-  High: "feature/pc-quality 'high'. Higher detail, ~2x more RAM than Default.",
+  Draft:
+    "Fastest, lowest quality — good for quick previews (5 cm/px, pc-quality lowest, feature-quality low).",
+  Standard:
+    "Balanced speed and quality — recommended for most surveys (3 cm/px, pc-quality medium, feature-quality high).",
+  "High Quality":
+    "Slower but detailed — suitable for final deliverables (2 cm/px, pc-quality high, feature-quality ultra).",
   Ultra:
-    "feature/pc-quality 'ultra', depthmap 1280px. Highest detail; needs 16-32 GiB+ RAM headroom.",
+    "Maximum quality, very slow — use for critical analysis (1 cm/px, pc-quality ultra, feature-quality ultra).",
   Custom: "Use the textbox below to pass raw NodeODM CLI flags.",
 }
 
@@ -680,7 +677,7 @@ function OrthomosaicOptions({
 }) {
   const quality =
     (params.reconstruction_quality as (typeof RECONSTRUCTION_QUALITY)[number]) ??
-    "Default"
+    "Standard"
   return (
     <div className="space-y-3 rounded-md border bg-card p-3">
       {hasUploadedOrthos && (
@@ -852,7 +849,7 @@ export function RunDetail() {
   // pipeline record loads (it's a hook, so it can be undefined on first
   // render). The user can still override per-run on this page.
   const [orthoParams, setOrthoParams] = useState<OrthomosaicParams>({
-    reconstruction_quality: "Default",
+    reconstruction_quality: "Standard",
   })
   const orthoSeededRef = useRef(false)
   useEffect(() => {
@@ -861,7 +858,7 @@ export function RunDetail() {
     const cfg = pipeline.params
     setOrthoParams({
       reconstruction_quality:
-        (cfg.reconstruction_quality as string) ?? "Default",
+        (cfg.reconstruction_quality as string) ?? "Standard",
       ...(typeof cfg.custom_odm_options === "string" &&
       (cfg.custom_odm_options as string).trim()
         ? { custom_options: cfg.custom_odm_options as string }
@@ -931,7 +928,11 @@ export function RunDetail() {
       //   {shortId}/Images/{file}    (new layout)
       //   Images/{file}              (legacy, no short-id)
       const tail = name.slice(prefix.length).split("/")
-      if (tail.length >= 3 && tail[1] === "Images" && /^[0-9a-f]{8}$/.test(tail[0])) {
+      if (
+        tail.length >= 3 &&
+        tail[1] === "Images" &&
+        /^[0-9a-f]{8}$/.test(tail[0])
+      ) {
         set.add(tail[0])
       }
     }
@@ -1478,7 +1479,7 @@ export function RunDetail() {
 
   if (!workspace) {
     return (
-      <div className="bg-background min-h-screen">
+      <div className="bg-background flex h-full min-h-[60vh] items-center justify-center">
         <div className="mx-auto max-w-5xl p-8 text-center text-muted-foreground">
           Workspace not found.
         </div>
@@ -1487,7 +1488,7 @@ export function RunDetail() {
   }
   if (!run) {
     return (
-      <div className="bg-background min-h-screen">
+      <div className="bg-background flex h-full min-h-[60vh] items-center justify-center">
         <div className="mx-auto max-w-5xl p-8 text-center text-muted-foreground">
           Run not found.
         </div>
@@ -1496,7 +1497,7 @@ export function RunDetail() {
   }
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background">
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-6 flex items-center gap-4">
           <Button
@@ -1644,9 +1645,7 @@ export function RunDetail() {
                           <div className="space-y-3">
                             <DatasetMultiSelect
                               available={availableShortIds}
-                              selected={
-                                run.uploadScope?.datasetShortIds ?? []
-                              }
+                              selected={run.uploadScope?.datasetShortIds ?? []}
                               onChange={(next) =>
                                 run.uploadScope &&
                                 updateRun(run.id, {

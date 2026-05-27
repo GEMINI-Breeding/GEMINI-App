@@ -82,13 +82,13 @@ export function humanizeJobError(
   // ── Orthomosaic: OpenMVS rejected every image during densification ─────
   // Fires when the worker's _diagnose_odm_failure attached the
   // "OpenMVS rejected every image during dense reconstruction" hint.
-  // The actionable next step is in the UI: switch the Reconstruction
-  // quality dropdown off Lowest. We surface that explicitly.
+  // The actionable next step is in the UI: pick a higher tier so MVS
+  // has the per-image work it needs.
   if (/OpenMVS rejected every image/i.test(details)) {
     return {
       headline:
         "Orthomosaic failed: quality preset too aggressive for this dataset.",
-      hint: "Re-run with Reconstruction quality set to Low or Medium (the Lowest preset uses depthmap-resolution=320 + pc-quality=lowest, which can reject every image on some flights).",
+      hint: "Re-run with Reconstruction quality set to Standard or higher; the low-tier pc-quality + depthmap settings can reject every image on some flights.",
       details,
     }
   }

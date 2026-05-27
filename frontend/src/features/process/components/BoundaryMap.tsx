@@ -45,6 +45,19 @@ export type BoundaryMapProps = {
    * lift the selected block into the parent component.
    */
   onSelectBlock?: (blockId: string) => void
+  /**
+   * Currently-selected cell ids. Cells in this set draw with a yellow
+   * highlight stroke so the user can see what bulk action will apply.
+   */
+  selectedCellIds?: ReadonlyArray<string>
+  /**
+   * Fires when the user clicks a grid cell. `mode` reflects the
+   * keyboard modifiers used during the click: replace (no modifier),
+   * add (shift), or toggle (cmd/ctrl).
+   */
+  onCellSelect?: (cellId: string, mode: "replace" | "toggle" | "add") => void
+  /** Fires when the user clicks the map background — used to clear cell selection. */
+  onSelectionClear?: () => void
 }
 
 /**
@@ -71,6 +84,9 @@ export function BoundaryMap({
   orthoOpacity,
   selectedBlockId,
   onSelectBlock,
+  selectedCellIds,
+  onCellSelect,
+  onSelectionClear,
 }: BoundaryMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -79,6 +95,24 @@ export function BoundaryMap({
   const didFitOrthoRef = useRef(false)
   const onChangeRef = useRef(onFeaturesChange)
   const onSelectBlockRef = useRef(onSelectBlock)
+  const onCellSelectRef = useRef(onCellSelect)
+  const onSelectionClearRef = useRef(onSelectionClear)
+  // Mirror selectedCellIds into a ref so the Geoman drag handler can
+  // read the latest set without re-binding the listeners.
+  const selectedCellIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    selectedCellIdsRef.current = new Set(selectedCellIds ?? [])
+  }, [selectedCellIds])
+  // Timestamp of the last layer (cell/outer) click. The map's
+  // background click handler uses this to tell whether a click bubbled
+  // up from a layer it should have ignored.
+  const lastLayerClickRef = useRef<number>(0)
+  // Timestamp of the last Geoman drag-end. Some browsers fire a synthetic
+  // click event after the mouseup that ends a drag — if we let that
+  // click fire selection (and therefore a re-render), the layer rebuild
+  // would snap the just-dragged polygon back to its pre-drag coords
+  // before React has committed the drag's geometry change.
+  const lastDragEndRef = useRef<number>(0)
   // Latest orthoTileUrl available at map-init time. Refs let the one-time
   // init effect read the current prop without depending on it.
   useEffect(() => {
@@ -87,6 +121,12 @@ export function BoundaryMap({
   useEffect(() => {
     onSelectBlockRef.current = onSelectBlock
   }, [onSelectBlock])
+  useEffect(() => {
+    onCellSelectRef.current = onCellSelect
+  }, [onCellSelect])
+  useEffect(() => {
+    onSelectionClearRef.current = onSelectionClear
+  }, [onSelectionClear])
   // Track the feature-count signature so we can refit the map only when
   // polygons are added/removed — not on every pm:edit. Without this
   // guard, dragging a vertex causes a refit that yanks the view.
@@ -225,6 +265,111 @@ export function BoundaryMap({
     map.on("pm:edit", emit)
     editable.on("pm:edit", emit)
 
+    // Drag-time highlight + group-drag. When Geoman's drag tool grabs a
+    // polygon: always paint it yellow so the user can see what they're
+    // holding. If the dragged cell is part of a multi-cell selection,
+    // also snapshot every other selected cell's coords and translate
+    // them in lockstep on pm:drag — that's how the "move the whole
+    // grid" UX works without needing a separate translate-mode toggle.
+    //
+    // After dragend, Geoman fires pm:edit, which calls emit() and
+    // rebuilds layers from React state — so the temporary in-flight
+    // setLatLngs writes are picked up naturally as one history entry.
+    let dragGroup: {
+      others: Array<{
+        layer: L.Polygon
+        baseRings: Array<Array<[number, number]>>
+      }>
+      startLatLng: { lat: number; lng: number }
+    } | null = null
+
+    function getCellId(l: L.Layer): string | null {
+      const gj = (
+        l as L.Layer & { toGeoJSON?: () => GeoJSON.Feature }
+      ).toGeoJSON?.()
+      const id = (gj?.properties as Record<string, unknown> | undefined)?.cellId
+      return typeof id === "string" ? id : null
+    }
+
+    function getRings(l: L.Polygon): Array<Array<[number, number]>> {
+      const gj = l.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>
+      return gj.geometry.coordinates.map((ring) =>
+        (ring as Array<[number, number]>).map(([x, y]) => [x, y]),
+      )
+    }
+
+    editable.on("pm:dragstart", (e) => {
+      const layer = (e as { layer: L.Layer }).layer as L.Path
+      layer.setStyle?.({ color: "#facc15", weight: 3, fillOpacity: 0.5 })
+      const draggedId = getCellId(layer as L.Layer)
+      const sel = selectedCellIdsRef.current
+      if (!draggedId || !sel.has(draggedId) || sel.size < 2) {
+        dragGroup = null
+        return
+      }
+      const others: NonNullable<typeof dragGroup>["others"] = []
+      editable.eachLayer((other) => {
+        if (other === layer) return
+        const oid = getCellId(other)
+        if (oid && sel.has(oid)) {
+          others.push({
+            layer: other as L.Polygon,
+            baseRings: getRings(other as L.Polygon),
+          })
+        }
+      })
+      const c = (layer as L.Polygon).getBounds().getCenter()
+      dragGroup = { others, startLatLng: { lat: c.lat, lng: c.lng } }
+    })
+
+    editable.on("pm:drag", (e) => {
+      if (!dragGroup) return
+      const layer = (e as { layer: L.Layer }).layer as L.Polygon
+      const c = layer.getBounds().getCenter()
+      const dLat = c.lat - dragGroup.startLatLng.lat
+      const dLng = c.lng - dragGroup.startLatLng.lng
+      for (const o of dragGroup.others) {
+        const moved: L.LatLngTuple[][] = o.baseRings.map((ring) =>
+          ring.map(([x, y]) => [y + dLat, x + dLng] as L.LatLngTuple),
+        )
+        // Leaflet polygons accept LatLngs in [[ring1], [ring2], ...] shape
+        // for polygons with holes; single-ring polygons just use [ring].
+        o.layer.setLatLngs(moved.length === 1 ? moved[0] : moved)
+      }
+    })
+
+    editable.on("pm:dragend", () => {
+      dragGroup = null
+      lastDragEndRef.current = Date.now()
+      // Force-emit on dragend: Geoman's pm:edit timing varies by version
+      // and event source (map vs layer vs editable group) — calling
+      // emit() here guarantees the dragged layer's new lat/lngs land in
+      // React state before the next render cycle re-creates layers from
+      // (stale) features and snaps them back to the old position.
+      emit()
+    })
+
+    // Clicking the map background (not a polygon) clears cell selection.
+    // Cell and outer click handlers stamp this ref AND we sniff the DOM
+    // event target — Leaflet dispatches map "click" regardless of what
+    // the click originally hit, so we need both checks. The target check
+    // catches the case where the polygon click hasn't fired yet (some
+    // Leaflet versions dispatch map clicks first); the timestamp guards
+    // against synthetic clicks fired after a drag.
+    map.on("click", (ev) => {
+      const lastLayerClick = lastLayerClickRef.current
+      if (lastLayerClick && Date.now() - lastLayerClick < 300) return
+      if (Date.now() - lastDragEndRef.current < 300) return
+      const oe = (ev as L.LeafletMouseEvent).originalEvent
+      const target = oe?.target as Element | null
+      // Polygon SVG paths live inside the overlay pane. Background
+      // clicks land on the map container itself or on tile/leaflet-pane
+      // elements. If the click target is anywhere under an svg <path>
+      // that we drew, ignore it.
+      if (target?.closest?.("path")) return
+      onSelectionClearRef.current?.()
+    })
+
     return () => {
       map.remove()
       mapRef.current = null
@@ -293,17 +438,24 @@ export function BoundaryMap({
     const layer = layerRef.current
     if (!map || !layer) return
 
+    const selectedCellSet = new Set(selectedCellIds ?? [])
     layer.clearLayers()
     for (const f of features) {
       const props = (f.properties ?? {}) as Record<string, unknown>
       const blockId =
         typeof props.blockId === "string" ? (props.blockId as string) : null
+      const cellId =
+        typeof props.cellId === "string" ? (props.cellId as string) : null
       const isOuter = props.role === "outer"
       const isSelected = blockId != null && blockId === selectedBlockId
+      const isCellSelected = cellId != null && selectedCellSet.has(cellId)
       const accent = blockId ? colorForBlockId(blockId) : "#2563eb"
       // Outer boundaries draw with a thicker stroke and minimal fill so
       // the user can see what's inside; grid cells draw with the block's
       // accent at a higher fill so they read as one cohesive group.
+      // A selected cell overrides the block accent with a yellow stroke
+      // so the user can see exactly which cells the next bulk action
+      // will affect.
       const baseStyle: L.PathOptions = isOuter
         ? {
             color: isSelected ? "#facc15" : accent,
@@ -312,9 +464,9 @@ export function BoundaryMap({
             dashArray: isSelected ? undefined : "4 4",
           }
         : {
-            color: accent,
-            weight: 1,
-            fillOpacity: isSelected ? 0.35 : 0.2,
+            color: isCellSelected ? "#facc15" : accent,
+            weight: isCellSelected ? 3 : 1,
+            fillOpacity: isCellSelected ? 0.55 : isSelected ? 0.35 : 0.2,
           }
       L.geoJSON(f as GeoJSON.GeoJsonObject, { style: baseStyle }).eachLayer(
         (l) => {
@@ -325,6 +477,8 @@ export function BoundaryMap({
               // Stop the click from propagating to the map background so
               // it doesn't deselect or interfere with Geoman tooling.
               L.DomEvent.stopPropagation(ev.originalEvent)
+              if (Date.now() - lastDragEndRef.current < 300) return
+              lastLayerClickRef.current = Date.now()
               onSelectBlockRef.current?.(blockId)
             })
             // Tooltip with the block label so the user can identify
@@ -338,16 +492,36 @@ export function BoundaryMap({
                 className: "boundary-block-label",
               })
             }
+          } else if (!isOuter && cellId) {
+            // Clicking a grid cell selects it. Shift = add to selection,
+            // Cmd/Ctrl = toggle, otherwise = replace.
+            ;(l as L.Path).on?.("click", (ev: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(ev.originalEvent)
+              // Suppress synthetic clicks generated by the mouseup that
+              // ends a Geoman drag.
+              if (Date.now() - lastDragEndRef.current < 300) return
+              lastLayerClickRef.current = Date.now()
+              const oe = ev.originalEvent
+              const mode = oe.shiftKey
+                ? "add"
+                : oe.metaKey || oe.ctrlKey
+                  ? "toggle"
+                  : "replace"
+              onCellSelectRef.current?.(cellId, mode)
+            })
           }
           layer.addLayer(l)
         },
       )
     }
-    // Refit only when the polygon count changes — i.e. when polygons are
-    // added or removed. pm:edit produces the same count, so dragging a
-    // vertex no longer yanks the user's view.
-    const signature = String(features.length)
-    if (features.length > 0 && signature !== lastFitSignatureRef.current) {
+    // Refit only on empty <-> non-empty transitions so undo back to an
+    // empty state doesn't yank the user's view.
+    const signature = features.length === 0 ? "empty" : "nonempty"
+    if (
+      features.length > 0 &&
+      signature !== lastFitSignatureRef.current &&
+      lastFitSignatureRef.current === "empty"
+    ) {
       lastFitSignatureRef.current = signature
       try {
         const bounds = layer.getBounds()
@@ -355,8 +529,10 @@ export function BoundaryMap({
       } catch {
         // ignore
       }
+    } else {
+      lastFitSignatureRef.current = signature
     }
-  }, [features, selectedBlockId])
+  }, [features, selectedBlockId, selectedCellIds])
 
   return (
     <div

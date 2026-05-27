@@ -106,7 +106,7 @@ export function RunTool() {
   const description = STEP_DESCRIPTIONS[step] ?? ""
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background">
       <div className="mx-auto max-w-[1600px] px-6 py-6">
         <div className="mb-6 flex items-center gap-4">
           <Button

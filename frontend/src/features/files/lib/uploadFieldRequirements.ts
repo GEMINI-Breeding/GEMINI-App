@@ -51,6 +51,7 @@ export function missingFormFields(
 
 const FIELD_LABELS: Record<string, string> = {
   experiment: "experiment",
+  season: "season",
   location: "site",
   population: "population",
   platform: "sensor platform",

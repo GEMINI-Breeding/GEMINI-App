@@ -166,6 +166,14 @@ export async function executeStep(
           preflight = result
         }
       }
+      // If the user clicked "Skip" in the GCP picker, tell the worker
+      // to ignore any gcp_list.txt / geo.txt sidecars sitting in MinIO
+      // from a prior session. Without this the worker forwards
+      // whatever it finds at the scope root and the GCPs silently
+      // re-apply across runs — there is no UI to delete sidecars and
+      // the user should never have to touch MinIO.
+      const gcpSkipped =
+        getRun(runId)?.steps.gcp_selection?.status === "skipped"
       const params: Record<string, unknown> = {
         year: scope.year,
         experiment: scope.experiment,
@@ -180,15 +188,16 @@ export async function executeStep(
         ...(datasetShortIds.length > 0
           ? { dataset_short_ids: datasetShortIds }
           : {}),
-        // Default Medium quality for radiometric thermal scopes — the
-        // low-contrast, narrow-temperature-range raw previews
-        // over-detect features at the default High preset. The user
-        // can still override via the orthomosaic params input.
+        ...(gcpSkipped ? { skip_gcps: true } : {}),
+        // Default Standard quality for radiometric thermal scopes — the
+        // low-contrast, narrow-temperature-range raw previews over-detect
+        // features if pushed to higher tiers. The user can still override
+        // via the orthomosaic params input.
         ...(preflight.kind === "ok" &&
         preflight.thermal &&
         !orthomosaic?.reconstruction_quality &&
         !orthomosaic?.custom_options
-          ? { reconstruction_quality: "Medium" }
+          ? { reconstruction_quality: "Standard" }
           : {}),
         ...(orthomosaic?.reconstruction_quality
           ? { reconstruction_quality: orthomosaic.reconstruction_quality }

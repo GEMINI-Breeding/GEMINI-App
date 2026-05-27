@@ -11,7 +11,7 @@
  * R5 may extend this with deeper integration (per-plot image previews,
  * trait-record naming) once analyzeApi has a GEMINIbase-backed equivalent.
  */
-import { useQueries } from "@tanstack/react-query"
+import { type Query, useQueries } from "@tanstack/react-query"
 import { Download, Loader2 } from "lucide-react"
 
 import { type JobOutput, JobsService } from "@/client"
@@ -65,6 +65,14 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
         }
       },
       staleTime: 30_000,
+      // Without this, the initial PENDING/RUNNING fetch sits in cache and the
+      // status cell shows "PENDING" long after the worker has finished — the
+      // WS terminal event updates runStore but doesn't invalidate this query.
+      // Poll until the job reaches a terminal state, then stop.
+      refetchInterval: (q: Query<JobOutput | null, Error>) => {
+        const s = q.state.data?.status
+        return s === "PENDING" || s === "RUNNING" ? 3_000 : false
+      },
     })),
   })
 

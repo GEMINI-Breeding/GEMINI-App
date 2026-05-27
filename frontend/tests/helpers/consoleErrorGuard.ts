@@ -19,6 +19,13 @@ const KNOWN_BENIGN_PATTERNS: RegExp[] = [
   // already swallows these via `tileerror`; Chromium still logs the
   // network 404. This is cosmetic, not a real failure.
   /\/titiler\/cog\/tiles\/[^)\s]*\)/,
+  // luma.gl (deck.gl's WebGL backend) probes the WebGPU adapter on resize
+  // for `maxTextureDimension2D`. Headless Chromium's GPU stack returns an
+  // `undefined` adapter info object, so the read throws. Real-browser
+  // sessions have a populated adapter and don't hit this. The page still
+  // renders correctly (deck.gl falls back to WebGL2 limits) — this is a
+  // benign console-only artifact of running tests under headless Chromium.
+  /Cannot read properties of undefined \(reading 'maxTextureDimension2D'\)/,
 ]
 
 export interface ConsoleErrorGuardHandle {

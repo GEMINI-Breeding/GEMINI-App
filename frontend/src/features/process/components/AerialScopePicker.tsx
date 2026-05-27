@@ -107,7 +107,12 @@ export function buildAerialScope(
   fields: AerialScopeFields,
 ): AerialScope {
   return {
-    year: yearFromDate(fields.date) || ctx.seasonName,
+    // `year` is the first MinIO path segment (`Raw/{year}/...`). Since
+    // A.1 it carries the *season name* the user picked at upload time,
+    // not a calendar year derived from `fields.date`. Falling back to
+    // the calendar year on a season-less context would re-introduce
+    // the silent year→season coupling Phase A.1 removed.
+    year: ctx.seasonName || yearFromDate(fields.date),
     experiment: fields.experimentOverride?.trim() || ctx.experimentName,
     location: fields.locationOverride?.trim() || ctx.siteName,
     population: fields.populationOverride?.trim() || ctx.populationName,

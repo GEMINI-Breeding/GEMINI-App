@@ -2,6 +2,39 @@
 #[cfg(not(debug_assertions))]
 mod sidecar_manager;
 
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Runtime};
+
+/// Build a native Edit menu with custom Undo / Redo items. The items
+/// deliberately don't register keyboard accelerators — `Cmd/Ctrl+Z`
+/// stays handled by the WebView (so native text-undo inside form
+/// inputs keeps working), and the editor's window keydown listener
+/// catches the same shortcut when focus is outside an input. The menu
+/// items emit `editor:undo` / `editor:redo` Tauri events that the
+/// frontend subscribes to in PlotBoundaryPrep.
+fn install_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let undo = MenuItemBuilder::with_id("editor_undo", "Undo")
+        .build(app)?;
+    let redo = MenuItemBuilder::with_id("editor_redo", "Redo")
+        .build(app)?;
+    let edit_submenu = SubmenuBuilder::new(app, "Edit")
+        .item(&undo)
+        .item(&redo)
+        .build()?;
+    let menu = MenuBuilder::new(app).item(&edit_submenu).build()?;
+    app.set_menu(menu)?;
+    app.on_menu_event(move |handle, event| match event.id().as_ref() {
+        "editor_undo" => {
+            let _ = handle.emit("editor:undo", ());
+        }
+        "editor_redo" => {
+            let _ = handle.emit("editor:redo", ());
+        }
+        _ => {}
+    });
+    Ok(())
+}
+
 /// Fetch `url` (GET or POST) and write the response body to `dest` on disk.
 #[tauri::command]
 async fn download_to_file(url: String, dest: String, method: Option<String>) -> Result<(), String> {
@@ -80,6 +113,8 @@ pub fn run() {
                         .build(),
                 )?;
 
+                install_app_menu(app.handle())?;
+
                 const DEVTOOLS_SCRIPT: &str = r#"
                     document.addEventListener('keydown', function(e) {
                         if (e.metaKey && e.altKey && e.key === 'i') {
@@ -126,6 +161,8 @@ pub fn run() {
             .invoke_handler(tauri::generate_handler![download_to_file, read_sidecar_log])
             .setup(move |app| {
                 let app_handle = app.handle().clone();
+
+                install_app_menu(&app_handle)?;
 
                 // Spawn the sidecar — returns the port immediately after the
                 // process starts (does NOT wait for the HTTP server to be ready).

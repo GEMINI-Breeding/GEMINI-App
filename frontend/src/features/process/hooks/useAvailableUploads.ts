@@ -81,8 +81,14 @@ const SHORT_ID_RE = /^[0-9a-f]{8}$/
 function parseRawObjectName(objectName: string): ParsedRawObject | null {
   if (!objectName.startsWith("Raw/")) return null
   const parts = objectName.split("/")
-  // New:    [Raw, year, exp, site, pop, date, platform, sensor, SHORTID, bucketKind, ...rest, filename]
-  // Legacy: [Raw, year, exp, site, pop, date, platform, sensor, bucketKind,           ...rest, filename]
+  // New:    [Raw, season, exp, site, pop, date, platform, sensor, SHORTID, bucketKind, ...rest, filename]
+  // Legacy: [Raw, season, exp, site, pop, date, platform, sensor, bucketKind,           ...rest, filename]
+  //
+  // The "season" slot used to be called "year" and was derived from the
+  // calendar year of the upload date. Variable names below still use
+  // `year` for backwards compatibility with the worker job-param
+  // contract, but the value is the season name the user picked at
+  // upload time.
   if (parts.length < 10) return null
   const [
     ,

@@ -82,6 +82,16 @@ export function useJobs(opts: {
   })
 }
 
+/** Job statuses past which there is no point polling. */
+const TERMINAL_JOB_STATUSES = new Set([
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "completed",
+  "failed",
+  "cancelled",
+])
+
 export function useJob(jobId: string | null | undefined) {
   return useQuery<JobOutput, Error>({
     queryKey: ["jobs", jobId],
@@ -90,6 +100,16 @@ export function useJob(jobId: string | null | undefined) {
       return JobsService.apiJobsJobIdGetJob({ jobId })
     },
     enabled: isLoggedIn() && Boolean(jobId),
-    refetchInterval: 5_000,
+    // Poll only while the job is still in-flight. Once it reaches a
+    // terminal state there's no point hammering the backend every 5s —
+    // and continuing to do so causes 404s if the job row is later
+    // deleted (e.g. user navigates away after a test deletes entities,
+    // page is still mounted, refetch fires).
+    refetchInterval: (q) => {
+      const status = String(
+        (q.state.data as JobOutput | undefined)?.status ?? "",
+      )
+      return TERMINAL_JOB_STATUSES.has(status) ? false : 5_000
+    },
   })
 }
