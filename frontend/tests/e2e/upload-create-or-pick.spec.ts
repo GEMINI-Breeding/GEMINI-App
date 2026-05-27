@@ -55,6 +55,7 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
   }) => {
     const stamp = runPrefix
     const experimentName = `${stamp}-exp`
+    const seasonName = `${stamp}-season`
     const siteName = `${stamp}-site`
     const populationName = `${stamp}-pop`
     const platformName = `${stamp}-platform`
@@ -70,6 +71,7 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
 
     // 1. Pick Create-new for every entity field.
     await pickCreateNew(page, "experiment", experimentName)
+    await pickCreateNew(page, "season", seasonName)
     await pickCreateNew(page, "site", siteName)
     await pickCreateNew(page, "population", populationName)
     await page.locator("input#date").fill(date)
@@ -135,6 +137,7 @@ test.describe("Upload form: select-or-create entity dropdowns", () => {
       .click()
 
     await pickExisting(page, "experiment", experimentName)
+    await pickExisting(page, "season", seasonName)
     await pickExisting(page, "site", siteName)
     await pickExisting(page, "population", populationName)
     await page.locator("input#date").fill("2024-06-02")

@@ -26,6 +26,7 @@ export async function selectDataType(page: Page, label: string): Promise<void> {
 
 export interface UploadFormValues {
   experiment?: string
+  season?: string
   location?: string
   population?: string
   date?: string
@@ -47,6 +48,7 @@ export interface UploadFormValues {
  */
 const FORM_FIELD_TO_SELECT_TESTID: Record<string, string> = {
   experiment: "entity-select-experiment",
+  season: "entity-select-season",
   location: "entity-select-site",
   population: "entity-select-population",
   platform: "entity-select-sensorplatform",
@@ -54,6 +56,7 @@ const FORM_FIELD_TO_SELECT_TESTID: Record<string, string> = {
 }
 const FORM_FIELD_TO_NEW_INPUT_TESTID: Record<string, string> = {
   experiment: "entity-new-experiment",
+  season: "entity-new-season",
   location: "entity-new-site",
   population: "entity-new-population",
   platform: "entity-new-sensorplatform",
@@ -66,6 +69,7 @@ export async function fillUploadForm(
 ): Promise<void> {
   const fieldOrder: (keyof UploadFormValues)[] = [
     "experiment",
+    "season",
     "location",
     "population",
     "date",
@@ -73,7 +77,15 @@ export async function fillUploadForm(
     "sensor",
   ]
   for (const field of fieldOrder) {
-    const value = values[field]
+    // Season replaced the silently-derived "Year" slot in 2026-05. Most
+    // pre-existing specs don't pass one; default to "S1" so the dropzone
+    // gate clears. Safe across specs because Season is experiment-scoped
+    // (Season FK includes experiment_id) and every spec uses a stamped
+    // experiment, so "S1" never collides. Specs that care about season
+    // identity (e.g. season-rename, multi-season selection) can still
+    // pass an explicit value.
+    const value =
+      field === "season" && !values.season ? "S1" : values[field]
     if (!value) continue
 
     if (field === "date") {
