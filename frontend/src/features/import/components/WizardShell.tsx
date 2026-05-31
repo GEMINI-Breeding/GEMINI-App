@@ -216,7 +216,7 @@ export function WizardShell({
   }
 
   return (
-    <div className="space-y-6" data-testid="import-wizard">
+    <div className="min-w-0 space-y-6" data-testid="import-wizard">
       <nav
         className="flex items-center justify-center gap-2"
         data-testid="import-stepper"

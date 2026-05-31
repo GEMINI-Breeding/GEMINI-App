@@ -45,12 +45,18 @@ import { useUploadQueue } from "@/features/files/hooks/useUploadQueue"
 import { createOrGetDatasetForUpload } from "@/features/files/lib/datasetForUpload"
 import { germplasmMappingMode } from "@/features/import/lib/germplasmMode"
 import {
+  humanizeImportError,
+  type ImportErrorHint,
+} from "@/features/import/lib/importErrorHints"
+import {
   buildTraitRecords,
   collectPlotSpecs,
   collectPopulationNames,
   collectSeasonAndSiteNames,
   collectTraitUnits,
+  type PlotSpec,
 } from "@/features/import/lib/recordBuilder"
+import { rollbackCreatedPlots } from "@/features/import/lib/rollbackPlots"
 import type {
   ColumnMapping,
   FileWithPath,
@@ -145,7 +151,7 @@ function commonParentPrefix(paths: string[]): string {
     if (dirs.every((d) => d[i] === seg)) common.push(seg)
     else break
   }
-  return common.length === 0 ? "" : common.join("/") + "/"
+  return common.length === 0 ? "" : `${common.join("/")}/`
 }
 
 export function StepUpload({
@@ -163,6 +169,7 @@ export function StepUpload({
   const [ingestionTotal, setIngestionTotal] = useState(0)
   const [ingestionDone, setIngestionDone] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [errorHint, setErrorHint] = useState<ImportErrorHint | null>(null)
   const [uploadedCount, setUploadedCount] = useState(0)
   const [uploadFailed, setUploadFailed] = useState(0)
 
@@ -170,6 +177,16 @@ export function StepUpload({
   const abortedRef = useRef(false)
   const expIdRef = useRef<string | null>(metadata.experimentId)
   const createdRef = useRef<UploadResults["createdEntities"]>([])
+  // Plots committed during this run, recorded so a mid-flight failure can
+  // roll them back (they persist before the records that may fail).
+  const createdPlotSpecsRef = useRef<PlotSpec[]>([])
+  // True when the target experiment had ZERO plots before this run started.
+  // That's the safe gate for bulk-rolling-back created plots on failure:
+  // every plot now in the experiment is ours, so deleting them can't touch
+  // anyone else's data. (`metadata.createNew.experiment` can't be used —
+  // the Files page materializes "+ Create new" into an existing-experiment
+  // choice via resolveScope before the wizard mounts.)
+  const experimentWasEmptyRef = useRef(false)
 
   const uploadQueue = useUploadQueue()
   const queryClient = useQueryClient()
@@ -379,7 +396,10 @@ export function StepUpload({
           // lists thermal-extensioned objects under that prefix and
           // writes RGB previews + raw + JSON sidecars alongside.
           let postUploadJob:
-            | { jobType: "THERMAL_EXTRACT"; parameters: Record<string, unknown> }
+            | {
+                jobType: "THERMAL_EXTRACT"
+                parameters: Record<string, unknown>
+              }
             | undefined
           if (metadata.thermalCalibration && tasks.length > 0) {
             const datasetPrefix = commonParentPrefix(
@@ -421,6 +441,11 @@ export function StepUpload({
         }
 
         setPhase("ingesting")
+        // Snapshot whether the experiment is empty BEFORE we create any
+        // plots — gates the on-failure rollback (see experimentWasEmptyRef).
+        experimentWasEmptyRef.current = await experimentHasNoPlots(
+          metadata.experimentName,
+        )
         await ingestTraitRecords({
           mapping: columnMapping,
           metadata,
@@ -430,12 +455,30 @@ export function StepUpload({
           setIngestionTotal,
           setIngestionDone,
           abortedRef,
+          onPlotsCreated: (specs) => {
+            createdPlotSpecsRef.current = specs
+          },
         })
         if (abortedRef.current) return
         setPhase("done")
       } catch (err) {
         const msg = extractApiErrorMessage(err)
-        setErrorMessage(msg)
+        // Roll back plots this run committed before the failure — they
+        // persist ahead of the records, and the backend never updates an
+        // existing plot's accession, so leaving them poisons a corrected
+        // retry. Only safe to bulk-delete when the experiment had NO plots
+        // before this run (every plot in it is then ours). For experiments
+        // that already had plots we can't tell ours from prior ones, so we
+        // skip auto-delete and tell the user to retry in a fresh experiment.
+        const finalMsg = await maybeRollbackPlots({
+          rawMessage: msg,
+          experimentCreatedThisRun: experimentWasEmptyRef.current,
+          experimentName: metadata.experimentName,
+          specs: createdPlotSpecsRef.current,
+          abortedRef,
+        })
+        setErrorMessage(finalMsg)
+        setErrorHint(humanizeImportError(finalMsg))
         setPhase("error")
         setCreationSteps((prev) => {
           const next = [...prev]
@@ -485,11 +528,35 @@ export function StepUpload({
         )}
 
       {phase === "error" && errorMessage && (
-        <div className="border-destructive/50 bg-destructive/5 flex items-start gap-2 rounded-md border p-4">
+        <div
+          className="border-destructive/50 bg-destructive/5 flex items-start gap-2 rounded-md border p-4"
+          data-testid="upload-error"
+        >
           <AlertTriangle className="text-destructive mt-0.5 h-4 w-4 shrink-0" />
-          <div className="text-sm">
+          <div className="space-y-2 text-sm">
             <p className="text-destructive font-medium">Upload failed</p>
-            <p className="text-destructive/80">{errorMessage}</p>
+            {errorHint ? (
+              <>
+                <p
+                  className="text-destructive/90"
+                  data-testid="upload-error-hint"
+                >
+                  {errorHint.summary}
+                </p>
+                <p className="text-destructive/90 font-medium">
+                  What to do:{" "}
+                  <span className="font-normal">{errorHint.action}</span>
+                </p>
+                <details className="text-destructive/70">
+                  <summary className="cursor-pointer select-none">
+                    Technical detail
+                  </summary>
+                  <p className="mt-1 break-words">{errorHint.detail}</p>
+                </details>
+              </>
+            ) : (
+              <p className="text-destructive/80">{errorMessage}</p>
+            )}
           </div>
         </div>
       )}
@@ -721,6 +788,11 @@ interface IngestArgs {
   setIngestionTotal: (n: number) => void
   setIngestionDone: (n: number | ((prev: number) => number)) => void
   abortedRef: React.MutableRefObject<boolean>
+  /** Called once the plot bulk-create has committed, with the specs that
+   *  were submitted. Lets the orchestrator roll those plots back if a
+   *  later record-insert fails (plots commit before records, so a failed
+   *  import would otherwise leave orphan plots that poison a retry). */
+  onPlotsCreated?: (specs: PlotSpec[]) => void
 }
 
 async function ingestTraitRecords({
@@ -732,6 +804,7 @@ async function ingestTraitRecords({
   setIngestionTotal,
   setIngestionDone,
   abortedRef,
+  onPlotsCreated,
 }: IngestArgs): Promise<void> {
   const { experimentName, datasetNames } = {
     experimentName: metadata.experimentName,
@@ -905,6 +978,9 @@ async function ingestTraitRecords({
   }
   await runWithConcurrency(plotChunkTasks, PLOT_CHUNK_CONCURRENCY)
   if (abortedRef.current) return
+  // Record what we committed so the orchestrator can roll these plots
+  // back if a record-insert fails below (plots are already persisted).
+  if (plotSpecs.length > 0) onPlotsCreated?.(plotSpecs)
 
   // Build trait-record groups.
   const { groups, grandTotal } = buildTraitRecords(mapping)
@@ -925,6 +1001,7 @@ async function ingestTraitRecords({
     traitId: string
     season: string
     site: string
+    population?: string
     collectionDate?: string
     records: Array<{ [key: string]: unknown }>
   }
@@ -946,6 +1023,7 @@ async function ingestTraitRecords({
           traitId,
           season: groupSeason,
           site: groupSite,
+          population: group.population,
           collectionDate: group.collectionDate,
           records: slice as unknown as Array<{ [key: string]: unknown }>,
         })
@@ -963,6 +1041,7 @@ async function ingestTraitRecords({
         experiment_name: experimentName,
         season_name: b.season,
         site_name: b.site,
+        population_name: b.population,
         dataset_name: datasetNames[0] || undefined,
         collection_date: b.collectionDate,
       },
@@ -1029,4 +1108,75 @@ async function PlotsServiceCreateBulk(
       ),
     },
   })
+}
+
+/** True when the experiment currently has no plots — used to decide
+ *  whether an on-failure rollback can safely bulk-delete created plots.
+ *  Errs on the side of `false` (no rollback) if the lookup fails. */
+async function experimentHasNoPlots(experimentName: string): Promise<boolean> {
+  try {
+    const { PlotsService } = await import("@/client")
+    const plots = await PlotsService.apiPlotsGetPlots({ experimentName })
+    return Array.isArray(plots) && plots.length === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * On a failed import, roll back the plots this run committed (so a retry
+ * starts clean) and return a message that tells the user the cleanup
+ * outcome. Only auto-deletes when the experiment had no plots before this
+ * run; otherwise it returns guidance to retry in a fresh experiment.
+ */
+async function maybeRollbackPlots(args: {
+  rawMessage: string
+  experimentCreatedThisRun: boolean
+  experimentName: string
+  specs: PlotSpec[]
+  abortedRef: React.MutableRefObject<boolean>
+}): Promise<string> {
+  const { rawMessage, experimentCreatedThisRun, experimentName, specs } = args
+  if (specs.length === 0) return rawMessage
+
+  if (!experimentCreatedThisRun) {
+    return (
+      `${rawMessage}\n\n` +
+      `Note: this import added plots to an existing experiment, so they ` +
+      `were left in place. If you retry, do it in a brand-new experiment ` +
+      `(or delete the partially-imported plots first) — otherwise the ` +
+      `leftover plots from this attempt can cause the same error again.`
+    )
+  }
+
+  try {
+    const { PlotsService } = await import("@/client")
+    const result = await rollbackCreatedPlots(
+      PlotsService as Parameters<typeof rollbackCreatedPlots>[0],
+      experimentName,
+      specs,
+      {
+        signal: {
+          get aborted() {
+            return args.abortedRef.current
+          },
+        },
+      },
+    )
+    if (result.failed > 0) {
+      return (
+        `${rawMessage}\n\n` +
+        `Cleaned up ${result.deleted} of ${result.deleted + result.failed} ` +
+        `plots created during this attempt (${result.failed} could not be ` +
+        `removed automatically). You can safely fix the mapping and retry.`
+      )
+    }
+    return (
+      `${rawMessage}\n\n` +
+      `The ${result.deleted} plots created during this attempt were rolled ` +
+      `back, so you can fix the mapping and retry cleanly.`
+    )
+  } catch {
+    return rawMessage
+  }
 }
