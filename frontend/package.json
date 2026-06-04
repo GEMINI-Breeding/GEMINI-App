@@ -24,6 +24,7 @@
     "test:e2e:legacy": "playwright test --project=setup --project=chromium"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.3.3",
     "@deck.gl/layers": "^9.2.11",
     "@deck.gl/react": "^9.2.11",
     "@geoman-io/leaflet-geoman-free": "^2.19.2",
