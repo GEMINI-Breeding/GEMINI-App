@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir \
 # Remaining runtime dependencies
 RUN pip install --no-cache-dir \
       farm-ng-amiga \
-      kornia \
       opencv-python-headless \
       tqdm \
       numpy \

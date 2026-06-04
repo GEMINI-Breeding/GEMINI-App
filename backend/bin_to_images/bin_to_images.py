@@ -3,7 +3,6 @@ import cv2
 import os
 import json
 import torch
-import kornia as K
 import numpy as np
 import pandas as pd
 import torch.nn.functional as F
@@ -18,7 +17,7 @@ from datetime import datetime, timezone
 from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 from google.protobuf import json_format
-from kornia.core import tensor
+from torch import tensor
 from typing import List, Dict, Optional
 
 from farm_ng.oak import oak_pb2
