@@ -692,19 +692,20 @@ def _extract_bins_batch_inline(
             try:
                 evt = event_q.get(timeout=1.0)
             except queue.Empty:
-                # No event yet — send a keepalive comment so the connection
-                # doesn't time out during long Docker builds.
-                yield ": keepalive\n\n"
+                # No event yet — send a real data event (not a comment) so the
+                # connection stays alive. Some HTTP clients (Windows WinHTTP,
+                # Tauri/reqwest) only reset their idle timer on data: frames.
+                yield _sse_event({"event": "keepalive"})
                 continue
             if evt is None:
                 break
             idx = evt.get("index", -1)
             if idx == -1:
                 # Batch-level coordinator message (e.g. Docker build progress).
-                # Yield an SSE comment so the connection stays alive during long
-                # operations like the first-time Docker image build (~1-2 min).
+                # Forward as a real data event so Windows HTTP clients don't
+                # consider the connection idle.
                 msg = evt.get("message", "")
-                yield f": {msg}\n\n" if msg else ": keepalive\n\n"
+                yield _sse_event({"event": "docker_build", "message": msg})
                 continue
             yield _sse_event({
                 "event": "extraction_progress",

@@ -176,6 +176,15 @@ export function useFileUpload() {
                   }
                   break;
 
+                case "keepalive":
+                  break;
+
+                case "docker_build":
+                  updateProcess(processId, {
+                    message: data.message || "Building extraction tool…",
+                  });
+                  break;
+
                 case "complete":
                   if (data.has_errors) {
                     updateProcess(processId, {
