@@ -14,7 +14,6 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
       farm-ng-amiga \
       kornia \
-      kornia-rs \
       opencv-python-headless \
       tqdm \
       numpy \

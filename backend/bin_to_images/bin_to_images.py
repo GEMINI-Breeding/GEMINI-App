@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 from google.protobuf import json_format
-from kornia_rs import ImageDecoder
 from kornia.core import tensor
 from typing import List, Dict, Optional
 
@@ -270,9 +269,6 @@ def extract_images(
     cols = ['sequence_num'] + image_topics_location
     ts_df: pd.DataFrame = pd.DataFrame(columns=cols) 
     
-    # define image decoder
-    image_decoder = ImageDecoder()
-
     # loop through each topic
     for topic_name in image_topics:
         
@@ -309,7 +305,7 @@ def extract_images(
 
             # save image
             if "disparity" in topic_name:
-                img = image_decoder.decode(sample.image_data)
+                img = cv2.imdecode(np.frombuffer(sample.image_data, dtype="uint8"), cv2.IMREAD_UNCHANGED)
                 
                 if calibrations is None or camera_name not in calibrations:
                     # Just save the raw disparity image if no calibration is available
