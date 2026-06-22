@@ -126,7 +126,8 @@ except Exception as e:
     warnings.warn(f"lightglue not found — stitching will be broken in the built app: {e}", stacklevel=1)
 
 # PyTorch — required by AgRowStitch for image matching
-# CUDA DLLs are stripped post-analysis on Windows (see below) due to NSIS size limits
+# CUDA DLLs are stripped from a.binaries after Analysis (see below) — machines
+# without NVIDIA CUDA runtime get [WinError 127] if they are present.
 try:
     hiddenimports += collect_submodules('torch')
     hiddenimports += collect_submodules('torchvision')
@@ -209,16 +210,20 @@ if os.path.exists(_ars_src):
 if os.path.exists(_ars_cfg):
     datas += [(_ars_cfg, 'vendor/AgRowStitch')]
 
-# AgRowStitch / LightGlue data files
+# AgRowStitch / LightGlue data files + Python source files.
+# LightGlue imports kornia which uses torch.jit.script — include source for same reason.
 try:
-    datas += collect_data_files('lightglue')
+    datas += collect_data_files('lightglue', include_py_files=True)
 except Exception as e:
     import warnings
     warnings.warn(f"lightglue data files not found — stitching will be broken in the built app: {e}", stacklevel=1)
 
-# kornia / kornia_rs data files
+# kornia / kornia_rs data files + Python source files.
+# kornia uses @torch.jit.script at import time, which calls inspect.getsource().
+# PyInstaller freezes .py to .pyc so source lookup fails unless we also ship the
+# originals. include_py_files=True copies them as data alongside the bytecode.
 try:
-    datas += collect_data_files('kornia')
+    datas += collect_data_files('kornia', include_py_files=True)
 except Exception:
     pass
 try:
@@ -252,7 +257,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=['hooks'],
     hooksconfig={},
-    runtime_hooks=['hooks/rthook_patch_jaraco.py', 'hooks/rthook_proj.py'],
+    runtime_hooks=['hooks/rthook_patch_jaraco.py', 'hooks/rthook_proj.py', 'hooks/rthook_pytorch_jit.py'],
     excludes=[
         # Exclude heavy optional packages not needed at runtime
         # NOTE: matplotlib is NOT excluded — supervision/draw/color.py imports it at top level
@@ -268,6 +273,23 @@ a = Analysis(
     noarchive=False,
 )
 
+
+# Strip CUDA DLLs from the Windows bundle.
+# torch_cuda.dll and its siblings depend on nvcuda.dll from the NVIDIA driver,
+# which is NOT present on machines without a GPU or without the matching CUDA
+# toolkit. If bundled, Windows raises [WinError 127] at startup.
+# The runtime hook sets CUDA_VISIBLE_DEVICES="" so PyTorch doesn't need them.
+if sys.platform == 'win32':
+    _cuda_prefixes = (
+        'torch_cuda', 'libcuda', 'libcublas', 'libcufft', 'libcurand',
+        'libcusolver', 'libcusparse', 'libcudnn', 'cudart', 'cufft64_',
+        'cublas64_', 'cublaslt64_', 'curand64_', 'cusolver64_',
+        'cusparse64_', 'cudnn64_', 'nvrtc', 'nvToolsExt',
+    )
+    a.binaries = [
+        b for b in a.binaries
+        if not any(os.path.basename(b[0]).lower().startswith(p.lower()) for p in _cuda_prefixes)
+    ]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
