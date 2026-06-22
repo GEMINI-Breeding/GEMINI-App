@@ -39,9 +39,7 @@ function Build-Backend {
 
     if (Test-Path "vendor\AgRowStitch")   { uv pip install -e vendor\AgRowStitch --no-build-isolation }
     else                                  { Log "WARNING: vendor\AgRowStitch not found" }
-
-    if (Test-Path "vendor\LightGlue")     { uv pip install vendor\LightGlue }
-    else                                  { Log "WARNING: vendor\LightGlue not found" }
+    # LightGlue is declared in pyproject.toml and installed by uv sync above
 
     # farm-ng-amiga: attempt source build — no Windows wheels on PyPI
     Log "Attempting farm-ng-core source build for farm-ng-amiga..."

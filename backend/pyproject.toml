@@ -39,6 +39,7 @@ dependencies = [
     "psutil>=6.0.0",
     "torch>=2.0.0",
     "kornia>=0.7.0",
+    "lightglue @ git+https://github.com/cvg/LightGlue.git",
 ]
 
 [tool.uv]
@@ -50,6 +51,9 @@ dev-dependencies = [
     "types-passlib<2.0.0.0,>=1.7.7.20240106",
     "coverage<8.0.0,>=7.4.3",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [build-system]
 requires = ["hatchling"]

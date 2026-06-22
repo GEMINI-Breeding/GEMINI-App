@@ -118,11 +118,12 @@ try:
     hiddenimports += ['AgRowStitch']
 except Exception:
     pass
-# LightGlue (dependency of AgRowStitch)
+# LightGlue (dependency of AgRowStitch) — installed via pyproject.toml (git dep)
 try:
     hiddenimports += collect_submodules('lightglue')
-except Exception:
-    pass
+except Exception as e:
+    import warnings
+    warnings.warn(f"lightglue not found — stitching will be broken in the built app: {e}", stacklevel=1)
 
 # PyTorch — required by AgRowStitch for image matching
 # CUDA DLLs are stripped post-analysis on Windows (see below) due to NSIS size limits
@@ -211,8 +212,9 @@ if os.path.exists(_ars_cfg):
 # AgRowStitch / LightGlue data files
 try:
     datas += collect_data_files('lightglue')
-except Exception:
-    pass
+except Exception as e:
+    import warnings
+    warnings.warn(f"lightglue data files not found — stitching will be broken in the built app: {e}", stacklevel=1)
 
 # kornia / kornia_rs data files
 try:
