@@ -153,11 +153,13 @@ export function EdgeCropTool({ pipelineId, initialMask, directions, headings, fi
     setCropBottom(Math.round(nc.bottom * dh / nh))
   }
 
-  // Convert display-pixel crop → natural image pixels (what gets saved)
-  const maskLeft   = naturalSize && dims ? Math.round(cropLeft   * naturalSize.w / dims.w) : 0
-  const maskRight  = naturalSize && dims ? Math.round(cropRight  * naturalSize.w / dims.w) : 0
-  const maskTop    = naturalSize && dims ? Math.round(cropTop    * naturalSize.h / dims.h) : 0
-  const maskBottom = naturalSize && dims ? Math.round(cropBottom * naturalSize.h / dims.h) : 0
+  // Convert display-pixel crop → natural image pixels (what gets saved).
+  // Fall back to initialMask before the image loads so the readout shows
+  // the existing config immediately rather than zeros.
+  const maskLeft   = naturalSize && dims ? Math.round(cropLeft   * naturalSize.w / dims.w) : initialMask.mask_left
+  const maskRight  = naturalSize && dims ? Math.round(cropRight  * naturalSize.w / dims.w) : initialMask.mask_right
+  const maskTop    = naturalSize && dims ? Math.round(cropTop    * naturalSize.h / dims.h) : initialMask.mask_top
+  const maskBottom = naturalSize && dims ? Math.round(cropBottom * naturalSize.h / dims.h) : initialMask.mask_bottom
 
   // Keep naturalCropRef in sync so navigation preserves the latest drag position
   useEffect(() => {
