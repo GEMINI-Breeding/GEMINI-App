@@ -2284,10 +2284,10 @@ def extract_bin_files_batch(
     from concurrent.futures import ThreadPoolExecutor
 
     extract_binary = _import_extract_binary()
-    use_docker = (
-        extract_binary is None
-        and (sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1")
-    )
+    # Fall back to Docker on any platform when farm_ng SDK isn't available.
+    # On Windows it's never available (no build wheels). On macOS/Linux it
+    # may not be installed in the dev venv — Docker Desktop is the reliable fallback.
+    use_docker = extract_binary is None
 
     if extract_binary is None and not use_docker:
         msg = (
@@ -2491,8 +2491,8 @@ def extract_bin_file(
     Output lives in Raw/ (not Intermediate/Processed) — extraction is not a
     processing step, it's making the raw data available.
 
-    On Linux/macOS: uses the farm_ng SDK directly from the Python environment.
-    On Windows:     falls back to a Docker container (gemi-bin-extractor image).
+    Uses the farm_ng SDK when available; falls back to Docker on any platform
+    when it is not (farm_ng is not in pyproject.toml and may not be installed).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     emit({"event": "start", "message": f"Extracting {bin_path.name}…"})
@@ -2521,24 +2521,15 @@ def extract_bin_file(
                 emit({"event": "error", "message": str(exc)})
                 raise
 
-        elif sys.platform == "win32" or os.environ.get("GEMI_FORCE_DOCKER") == "1":
-            # Windows fallback — Docker container
+        else:
+            # farm_ng SDK unavailable — fall back to Docker on any platform.
+            # Docker Desktop is available on both Windows and macOS dev setups.
             try:
                 _extract_binary_via_docker(bin_path, output_dir, emit)
             except RuntimeError as exc:
                 logger.error("Docker extraction failed for %s: %s", bin_path, exc)
                 emit({"event": "error", "message": str(exc)})
                 raise
-
-        else:
-            msg = (
-                "farm_ng SDK / bin_to_images is not available in this environment.\n"
-                "Run: uv pip install farm-ng-amiga kornia kornia_rs\n"
-                "bin_to_images is at backend/bin_to_images/ and is found automatically."
-            )
-            logger.error(msg)
-            emit({"event": "error", "message": msg})
-            raise RuntimeError(msg)
 
     except Exception:
         # Keep the .bin file on failure so the user can retry without re-uploading.
