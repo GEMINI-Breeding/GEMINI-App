@@ -661,6 +661,26 @@ export function ProcessingPipeline() {
                 <div className="border-t pt-4 space-y-5">
                   <p className="text-sm font-semibold">Stitching Parameters</p>
 
+                  {/* Edge crop / mask */}
+                  <div className="space-y-1.5">
+                    <Label>
+                      Edge Crop (pixels)
+                      <InfoTooltip text="Removes pixels from each image edge before stitching. Add multiple rules to apply different crops based on the rover's direction of travel — e.g. different shade positions when going up vs. down a row." />
+                    </Label>
+                    <CropRuleList
+                      rules={groundConfig.agrowstitch_params.crop_rules}
+                      onChange={(rules) =>
+                        setGroundConfig({
+                          ...groundConfig,
+                          platform: "custom",
+                          agrowstitch_params: { ...groundConfig.agrowstitch_params, crop_rules: rules },
+                        })
+                      }
+                      onEdit={(ruleId) => setCropToolRuleId(ruleId)}
+                      hasMsgsData={hasMsgsData}
+                    />
+                  </div>
+
                   {/* Look-ahead frames */}
                   <div className="space-y-1.5">
                     <div className="flex items-baseline justify-between gap-2">
@@ -708,26 +728,6 @@ export function ProcessingPipeline() {
                     {groundConfig.agrowstitch_params.max_reprojection_error > 5 && (
                       <p className="text-amber-600 dark:text-amber-400 text-xs">⚠ Very high tolerance — may allow poor image alignments.</p>
                     )}
-                  </div>
-
-                  {/* Edge crop / mask */}
-                  <div className="space-y-1.5">
-                    <Label>
-                      Edge Crop (pixels)
-                      <InfoTooltip text="Removes pixels from each image edge before stitching. Add multiple rules to apply different crops based on the rover's direction of travel — e.g. different shade positions when going up vs. down a row." />
-                    </Label>
-                    <CropRuleList
-                      rules={groundConfig.agrowstitch_params.crop_rules}
-                      onChange={(rules) =>
-                        setGroundConfig({
-                          ...groundConfig,
-                          platform: "custom",
-                          agrowstitch_params: { ...groundConfig.agrowstitch_params, crop_rules: rules },
-                        })
-                      }
-                      onEdit={(ruleId) => setCropToolRuleId(ruleId)}
-                      hasMsgsData={hasMsgsData}
-                    />
                   </div>
 
                   {/* Advanced — collapsed by default */}

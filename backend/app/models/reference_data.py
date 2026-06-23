@@ -45,6 +45,9 @@ class ReferenceDataset(SQLModel, table=True):
     plot_count: int = Field(default=0)
     trait_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
+    # Original uploaded file (stored relative to data_root/reference_data/)
+    original_filename: str | None = Field(default=None, max_length=500)
+
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -59,6 +62,7 @@ class ReferenceDatasetPublic(SQLModel):
     date: str
     plot_count: int
     trait_columns: list[str]
+    original_filename: str | None
     created_at: str
 
 

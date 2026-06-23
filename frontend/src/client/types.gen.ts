@@ -350,6 +350,7 @@ export type ReferenceDatasetPublic = {
     date: string;
     plot_count: number;
     trait_columns: Array<(string)>;
+    original_filename: (string | null);
     created_at: string;
 };
 
@@ -362,6 +363,7 @@ export type ReferenceDatasetWithMatch = {
     date: string;
     plot_count: number;
     trait_columns: Array<(string)>;
+    original_filename: (string | null);
     created_at: string;
     match_report?: (MatchReport | null);
 };

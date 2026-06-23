@@ -18,13 +18,18 @@ Workspace association:
 """
 
 import json
+import shutil
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.config import settings
+from app.crud.app_settings import get_setting
 from app.models.reference_data import (
     MatchReport,
     ReferenceDataset,
@@ -131,6 +136,7 @@ async def upload_reference_data(
         column_mapping=column_mapping,
         plot_count=len(plots),
         trait_columns=trait_cols,
+        original_filename=filename,
     )
     session.add(dataset)
     session.flush()  # get dataset.id before inserting plots
@@ -141,6 +147,12 @@ async def upload_reference_data(
 
     session.commit()
     session.refresh(dataset)
+
+    # Persist original file to disk
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    ref_dir = data_root / "reference_data" / str(dataset.id)
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    (ref_dir / filename).write_bytes(content)
 
     return ReferenceDatasetWithMatch(
         **ReferenceDatasetPublic.model_validate(dataset).model_dump(),
@@ -286,6 +298,26 @@ def aggregate_dataset(
     }
 
 
+@router.get("/{dataset_id}/download")
+def download_dataset(
+    session: SessionDep,
+    current_user: CurrentUser,
+    dataset_id: uuid.UUID,
+) -> FileResponse:
+    """Download the original uploaded file for a reference dataset."""
+    dataset = session.get(ReferenceDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Reference dataset not found")
+    if not dataset.original_filename:
+        raise HTTPException(status_code=404, detail="No original file stored for this dataset")
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    file_path = data_root / "reference_data" / str(dataset.id) / dataset.original_filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Original file not found on disk")
+    media_type = "text/csv" if dataset.original_filename.lower().endswith(".csv") else "application/octet-stream"
+    return FileResponse(path=str(file_path), media_type=media_type, filename=dataset.original_filename)
+
+
 @router.delete("/{dataset_id}")
 def delete_dataset(
     session: SessionDep,
@@ -295,6 +327,11 @@ def delete_dataset(
     dataset = session.get(ReferenceDataset, dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Reference dataset not found")
+    # Remove stored file directory if it exists
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    ref_dir = data_root / "reference_data" / str(dataset.id)
+    if ref_dir.is_dir():
+        shutil.rmtree(ref_dir, ignore_errors=True)
     session.delete(dataset)
     session.commit()
     return {"message": "Reference dataset deleted"}
