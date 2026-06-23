@@ -336,6 +336,82 @@ def list_upload_images(
     }
 
 
+# GET /files/{id}/msgs-metadata
+@router.get("/{id}/msgs-metadata")
+def get_msgs_metadata(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """
+    Return msgs_synced.csv metadata keyed by image basename.
+    Only the display-relevant columns are returned
+    (direction, heading_deg, lat, lon, timestamp).
+    """
+    import math
+    import pandas as pd
+
+    file = get_file_upload(session=session, id=id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not current_user.is_superuser and file.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    storage_dir = Path(data_root) / file.storage_path
+
+    # Find msgs_synced.csv — search recursively
+    candidates = list(storage_dir.rglob("msgs_synced.csv"))
+    if not candidates:
+        return {"rows": {}, "columns": []}
+
+    try:
+        df = pd.read_csv(candidates[0])
+        df.columns = df.columns.str.strip()
+    except Exception:
+        return {"rows": {}, "columns": []}
+
+    # Resolve image basename column
+    img_col = next(
+        (c for c in df.columns if c in ("/top/rgb_file", "rgb_file", "image_path")),
+        None,
+    )
+    if not img_col:
+        return {"rows": {}, "columns": []}
+
+    # Convert heading_motion (radians) to degrees 0–360
+    if "heading_motion" in df.columns:
+        df["heading_deg"] = df["heading_motion"].apply(
+            lambda r: round(math.degrees(float(r)) % 360, 1) if pd.notna(r) else None
+        )
+
+    # Normalise lat/lon column names
+    lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+    lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+
+    keep = ["direction", "heading_deg"]
+    if lat_col:
+        keep.append(lat_col)
+    if lon_col:
+        keep.append(lon_col)
+    if "timestamp" in df.columns:
+        keep.append("timestamp")
+
+    rows: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        basename = str(row[img_col]).split("/")[-1]
+        entry: dict = {}
+        for col in keep:
+            if col in df.columns:
+                val = row[col]
+                entry[col] = None if pd.isna(val) else (
+                    round(float(val), 6) if isinstance(val, float) else val
+                )
+        rows[basename] = entry
+
+    return {"rows": rows, "columns": keep}
+
+
 # GET /files/{id}/download-zip
 @router.get("/{id}/download-zip")
 def download_upload_zip(

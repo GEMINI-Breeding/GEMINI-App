@@ -463,8 +463,9 @@ def run_stitching(
     agrowstitch_dir = _find_agrowstitch_dir()
     if agrowstitch_dir is None:
         raise RuntimeError(
-            "AgRowStitch is not available. Clone the AgRowStitch git submodule and set "
-            "AGROWSTITCH_PATH to its root directory."
+            "AgRowStitch is not available. Initialize the git submodule with:\n"
+            "  git submodule update --init backend/vendor/AgRowStitch\n"
+            "Or set the AGROWSTITCH_PATH environment variable to its root directory."
         )
 
     paths = _get_paths(session, run_id)
@@ -540,14 +541,31 @@ def run_stitching(
     structured = pipeline_cfg.get("agrowstitch_params") or {}
     if structured:
         to_apply: dict = {}
-        mask_keys = {"mask_left", "mask_right", "mask_top", "mask_bottom"}
-        if mask_keys & set(structured):
+
+        # New format: crop_rules list. Use the default rule (directions=[]) as the
+        # global mask. Direction-aware cropping requires AgRowStitch changes — for now
+        # the default rule acts as the single global crop passed to AgRowStitch.
+        crop_rules = structured.get("crop_rules")
+        if crop_rules:
+            default_rule = next(
+                (r for r in crop_rules if not r.get("directions")),
+                crop_rules[0],
+            )
+            to_apply["mask"] = [
+                int(default_rule.get("mask_left", 0)),
+                int(default_rule.get("mask_right", 0)),
+                int(default_rule.get("mask_top", 0)),
+                int(default_rule.get("mask_bottom", 0)),
+            ]
+        # Legacy flat format (pipelines saved before crop_rules was introduced)
+        elif {"mask_left", "mask_right", "mask_top", "mask_bottom"} & set(structured):
             to_apply["mask"] = [
                 int(structured.get("mask_left", 0)),
                 int(structured.get("mask_right", 0)),
                 int(structured.get("mask_top", 0)),
                 int(structured.get("mask_bottom", 0)),
             ]
+
         for k in ("forward_limit", "max_reprojection_error", "batch_size", "min_inliers"):
             if k in structured:
                 to_apply[k] = structured[k]
@@ -581,6 +599,13 @@ def run_stitching(
     # but we want the viewer to show the real pipeline-level settings.
     base_config["device"] = agrowstitch_device
     base_config["num_cpu"] = cpu_count
+
+    # cv2.detail_HomographyBasedEstimator.apply() hard-crashes (SIGSEGV) in every
+    # PyPI ARM64 OpenCV wheel. Force partial-affine on macOS so the affine pipeline
+    # is used instead — it avoids that estimator entirely.
+    if sys.platform == "darwin" and base_config.get("camera") == "spherical":
+        base_config["camera"] = "partial_affine"
+        logger.info("[stitching] macOS ARM64: overriding camera=spherical → partial_affine (OpenCV detail API SIGSEGV workaround)")
 
     emit(
         {
@@ -686,9 +711,19 @@ def run_stitching(
     # Environment additions that prevent macOS fork-safety crashes in subprocesses
     # launched by a GUI app (Tauri). OBJC_DISABLE_INITIALIZE_FORK_SAFETY tells
     # the Obj-C runtime not to enforce single-initialiser checks across fork().
+    # PYTORCH_JIT=0 prevents TorchScript/kornia from calling inspect.getsource()
+    # at init time, which segfaults in subprocess contexts on macOS.
+    # OMP/MKL/OPENBLAS thread limits prevent OpenMP from spinning up threads that
+    # race with cv2 initialisation in a subprocess, also causing SIGSEGV.
     _subprocess_base_env: dict = {
         **os.environ,
         "OBJC_DISABLE_INITIALIZE_FORK_SAFETY": "YES",
+        "PYTORCH_JIT": "0",
+        "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "TOKENIZERS_PARALLELISM": "false",
     }
 
     if _preflight_python:
@@ -883,6 +918,69 @@ def run_stitching(
             logger.info(f"Temporary dir for plot {plot_id}: {plot_temp_dir} with {copied} images")
             config["device"] = agrowstitch_device
             config["stitching_direction"] = stitch_dir
+
+            # Per-plot crop rule selection: match by plot direction OR dominant GPS heading.
+            crop_rules = structured.get("crop_rules") if structured else None
+            if crop_rules:
+                matched_rule = None
+
+                # Try each rule in order — first match wins.
+                for rule in crop_rules:
+                    rule_mode = rule.get("filterMode", "heading")
+
+                    if rule_mode == "heading":
+                        # Match by dominant GPS heading of this plot's images.
+                        # Compute from msgs_synced 'direction' column if available.
+                        if msgs_df is not None and "direction" in msgs_df.columns:
+                            img_col = next(
+                                (c for c in msgs_df.columns if c in ("/top/rgb_file", "rgb_file", "image_path")),
+                                None,
+                            )
+                            if img_col:
+                                plot_rows = None
+                                start_mask = msgs_df.get("_basename", msgs_df[img_col].apply(
+                                    lambda x: str(x).split("/")[-1] if pd.notna(x) else None
+                                )) == start_img
+                                end_mask = msgs_df.get("_basename", msgs_df[img_col].apply(
+                                    lambda x: str(x).split("/")[-1] if pd.notna(x) else None
+                                )) == end_img
+                                if start_mask.any() and end_mask.any():
+                                    si = msgs_df.index[start_mask][0]
+                                    ei = msgs_df.index[end_mask][-1]
+                                    if si > ei:
+                                        si, ei = ei, si
+                                    plot_rows = msgs_df.loc[si:ei]
+                                if plot_rows is not None and not plot_rows.empty:
+                                    dominant = plot_rows["direction"].dropna().mode()
+                                    dominant_heading = dominant.iloc[0].strip().lower() if not dominant.empty else ""
+                                    rule_headings = [h.lower() for h in (rule.get("headings") or [])]
+                                    if not rule_headings or dominant_heading in rule_headings:
+                                        matched_rule = rule
+                                        logger.info(
+                                            "Plot %s: heading-mode crop matched '%s': %s",
+                                            plot_id, dominant_heading, rule.get("headings"),
+                                        )
+                                        break
+                    else:
+                        # Plot-direction mode
+                        rule_dirs = [d.lower() for d in (rule.get("directions") or [])]
+                        if not rule_dirs or ui_direction.lower() in rule_dirs:
+                            matched_rule = rule
+                            if rule_dirs:
+                                logger.info(
+                                    "Plot %s: plot-direction crop matched '%s'",
+                                    plot_id, ui_direction,
+                                )
+                            break
+
+                if matched_rule:
+                    config["mask"] = [
+                        int(matched_rule.get("mask_left", 0)),
+                        int(matched_rule.get("mask_right", 0)),
+                        int(matched_rule.get("mask_top", 0)),
+                        int(matched_rule.get("mask_bottom", 0)),
+                    ]
+                    logger.info("Plot %s: applying crop mask %s", plot_id, config["mask"])
 
             with tempfile.NamedTemporaryFile(
                 delete=False, mode="w", suffix=f"_plot_{plot_id}.yaml"

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Trash2, X } from "lucide-react"
 import { OpenAPI } from "@/client"
 
+type MsgsMeta = Record<string, Record<string, string | number | null>>
+
 interface ImageViewerDialogProps {
   uploadId: string
   title: string
@@ -34,10 +36,23 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
   const [imgSrc, setImgSrc] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [msgsMeta, setMsgsMeta] = useState<MsgsMeta>({})
 
   const blobUrlRef = useRef<string | null>(null)
   const onCloseRef = useRef(onClose)
   useEffect(() => { onCloseRef.current = onClose })
+
+  // Fetch msgs_synced metadata once for this upload
+  useEffect(() => {
+    authHeader().then((auth) => {
+      fetch(`${apiBase()}/api/v1/files/${uploadId}/msgs-metadata`, {
+        headers: auth ? { Authorization: auth } : {},
+      })
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data?.rows) setMsgsMeta(data.rows) })
+        .catch(() => {})
+    })
+  }, [uploadId])
 
   useEffect(() => {
     let cancelled = false
@@ -251,6 +266,33 @@ export function ImageViewerDialog({ uploadId, title, onClose }: ImageViewerDialo
             </>
           )}
         </div>
+
+        {/* msgs_synced metadata strip */}
+        {(() => {
+          const basename = filename ?? ""
+          const meta = msgsMeta[basename]
+          if (!meta) return null
+          const entries: { label: string; value: string }[] = []
+          if (meta.direction != null)
+            entries.push({ label: "Heading", value: String(meta.direction) })
+          if (meta.heading_deg != null)
+            entries.push({ label: "°", value: `${meta.heading_deg}°` })
+          const lat = meta.lat ?? meta.latitude
+          const lon = meta.lon ?? meta.longitude ?? meta.lng
+          if (lat != null) entries.push({ label: "Lat", value: Number(lat).toFixed(6) })
+          if (lon != null) entries.push({ label: "Lon", value: Number(lon).toFixed(6) })
+          if (entries.length === 0) return null
+          return (
+            <div className="border-t px-4 py-2 shrink-0 flex items-center gap-4 bg-muted/30 flex-wrap">
+              {entries.map(({ label, value }) => (
+                <span key={label} className="flex items-center gap-1.5 text-xs">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="font-mono font-medium">{value}</span>
+                </span>
+              ))}
+            </div>
+          )
+        })()}
 
         {/* Slider */}
         {!loading && images.length > 1 && (
