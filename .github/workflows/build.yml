@@ -13,7 +13,7 @@ jobs:
             target-triple: x86_64-unknown-linux-gnu
             artifact-glob: "frontend/src-tauri/target/release/bundle/deb/*.deb"
             artifact-name: gemi-linux-x86_64
-          - os: macos-latest
+          - os: macos-14
             target-triple: aarch64-apple-darwin
             artifact-glob: "frontend/src-tauri/target/release/bundle/dmg/*.dmg"
             artifact-name: gemi-macos-arm64

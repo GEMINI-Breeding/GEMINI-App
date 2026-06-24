@@ -784,7 +784,18 @@ def list_images(
     current_user: CurrentUser,
     id: uuid.UUID,
     extensions: str = "jpg,jpeg,png",
+    directions: str = "",
+    filter_mode: str = "plot",
 ) -> dict[str, Any]:
+    """
+    List raw images for a run.
+    - filter_mode="plot": filter by plot direction from plot_borders.csv (up/down/left/right)
+    - filter_mode="heading": filter by per-image GPS heading from msgs_synced.csv (north/south/east/west)
+    Falls back to all images if the required data is unavailable.
+    """
+    import csv as _csv
+    import pandas as _pd
+
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
 
@@ -817,12 +828,84 @@ def list_images(
     msgs_synced_path = _find_msgs_synced(paths)
     has_gps = msgs_synced_path is not None
 
+    direction_filter = {d.strip().lower() for d in directions.split(",") if d.strip()}
+    filtered = False
+    if direction_filter:
+        try:
+            if filter_mode == "heading":
+                # Filter by per-image GPS heading in msgs_synced.csv `direction` column
+                if msgs_synced_path and msgs_synced_path.exists():
+                    msgs_df = _pd.read_csv(msgs_synced_path)
+                    msgs_df.columns = msgs_df.columns.str.strip()
+                    img_col = next(
+                        (c for c in msgs_df.columns if c in ("/top/rgb_file", "rgb_file", "image_path")),
+                        None,
+                    )
+                    dir_col = next((c for c in msgs_df.columns if c == "direction"), None)
+                    if img_col and dir_col:
+                        matched = msgs_df[msgs_df[dir_col].str.strip().str.lower().isin(direction_filter)]
+                        allowed: set[str] = {
+                            str(x).split("/")[-1]
+                            for x in matched[img_col]
+                            if _pd.notna(x)
+                        }
+                        if allowed:
+                            images = [p for p in images if p.name in allowed]
+                            filtered = True
+            else:
+                # filter_mode == "plot": filter by plot direction from plot_borders.csv
+                active_version = (run.outputs or {}).get("active_plot_marking_version")
+                if active_version is not None:
+                    pb_path = paths.plot_borders_versioned(int(active_version))
+                    if not pb_path.exists():
+                        pb_path = paths.plot_borders
+                else:
+                    pb_path = paths.plot_borders
+
+                if pb_path.exists() and msgs_synced_path and msgs_synced_path.exists():
+                    with open(pb_path) as f:
+                        plots = list(_csv.DictReader(f))
+
+                    msgs_df = _pd.read_csv(msgs_synced_path)
+                    msgs_df.columns = msgs_df.columns.str.strip()
+                    img_col = next(
+                        (c for c in msgs_df.columns if c in ("/top/rgb_file", "rgb_file", "image_path")),
+                        None,
+                    )
+                    if img_col:
+                        msgs_df["_basename"] = msgs_df[img_col].apply(
+                            lambda x: str(x).split("/")[-1] if _pd.notna(x) else None
+                        )
+                        allowed = set()
+                        for plot in plots:
+                            plot_dir = (plot.get("direction") or "").strip().lower()
+                            if plot_dir not in direction_filter:
+                                continue
+                            start_img = (plot.get("start_image") or "").strip()
+                            end_img = (plot.get("end_image") or "").strip()
+                            start_mask = msgs_df["_basename"] == start_img
+                            end_mask = msgs_df["_basename"] == end_img
+                            if start_mask.any() and end_mask.any():
+                                start_idx = msgs_df.index[start_mask][0]
+                                end_idx = msgs_df.index[end_mask][-1]
+                                if start_idx > end_idx:
+                                    start_idx, end_idx = end_idx, start_idx
+                                allowed.update(
+                                    b for b in msgs_df.loc[start_idx:end_idx, "_basename"] if b
+                                )
+                        if allowed:
+                            images = [p for p in images if p.name in allowed]
+                            filtered = True
+        except Exception:
+            pass  # fall back to all images if anything goes wrong
+
     return {
         "images": [img.name for img in images],
         "count": len(images),
         "raw_dir": str(image_dir),
         "has_gps": has_gps,
         "msgs_synced": str(msgs_synced_path) if has_gps else None,
+        "direction_filtered": filtered,
     }
 
 

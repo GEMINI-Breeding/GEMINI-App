@@ -355,6 +355,7 @@ function AddReferenceDataDialog({
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [selectedId, setSelectedId] = useState<string>("")
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filters, setFilters] = useState({ experiment: "", location: "", population: "" })
   const setFilter = (k: keyof typeof filters, v: string) =>
     setFilters((prev) => ({ ...prev, [k]: v }))
@@ -393,13 +394,25 @@ function AddReferenceDataDialog({
     onError: () => showErrorToast("Failed to associate dataset"),
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (datasetId: string) =>
+      ReferenceDataService.deleteDataset({ datasetId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reference-data-all"] })
+      queryClient.invalidateQueries({ queryKey: ["workspace-ref-data", workspaceId] })
+      setDeletingId(null)
+      if (selectedId === deletingId) setSelectedId("")
+    },
+    onError: () => showErrorToast("Failed to delete dataset"),
+  })
+
   const filteredDatasets = allDatasets.filter(
     (d: ReferenceDatasetPublic) => !alreadyLinkedIds.has(d.id)
   )
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Add Reference Data</DialogTitle>
           <DialogDescription>
@@ -437,7 +450,7 @@ function AddReferenceDataDialog({
                   <thead className="bg-muted/60 sticky top-0">
                     <tr>
                       <th className="px-2 py-1.5 w-5" />
-                      {["Name", "Experiment", "Location", "Population", "Date", "Plots"].map((h) => (
+                      {["Name", "Experiment", "Location", "Population", "Date", "Plots", ""].map((h) => (
                         <th key={h} className="px-2 py-1.5 text-left font-medium text-muted-foreground">
                           {h}
                         </th>
@@ -469,6 +482,47 @@ function AddReferenceDataDialog({
                         <td className="px-2 py-1.5 text-muted-foreground">{d.population}</td>
                         <td className="px-2 py-1.5 text-muted-foreground">{d.date}</td>
                         <td className="px-2 py-1.5 tabular-nums text-right">{d.plot_count}</td>
+                        <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            {d.original_filename && (
+                              <a
+                                href={`/api/v1/reference-data/${d.id}/download`}
+                                download={d.original_filename}
+                                className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                title="Download original file"
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M12 12v6m0 0l-3-3m3 3l3-3M12 3v9" />
+                                </svg>
+                              </a>
+                            )}
+                            {deletingId === d.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  className="text-[10px] text-destructive font-medium px-1.5 py-0.5 rounded hover:bg-destructive/10"
+                                  onClick={() => deleteMutation.mutate(d.id)}
+                                  disabled={deleteMutation.isPending}
+                                >
+                                  {deleteMutation.isPending ? "…" : "Delete"}
+                                </button>
+                                <button
+                                  className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded hover:bg-muted"
+                                  onClick={() => setDeletingId(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Delete dataset"
+                                onClick={() => setDeletingId(d.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

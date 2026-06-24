@@ -35,6 +35,8 @@ def _run_column_migrations() -> None:
         # Detection results synced from inference CSV into PlotRecord rows
         ("plotrecord", "detection_count", "INTEGER"),
         ("plotrecord", "detection_class_summary", "JSON"),
+        # Original uploaded file path for reference datasets
+        ("referencedataset", "original_filename", "VARCHAR(500)"),
     ]
     with engine.connect() as conn:
         for table, col, definition in migrations:

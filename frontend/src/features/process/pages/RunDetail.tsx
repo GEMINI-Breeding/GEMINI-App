@@ -4850,7 +4850,21 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
               { label: "Device", value: cfg.device === "multiprocessing" ? `Multiprocessing${cfg.num_cpu > 0 ? ` (${cfg.num_cpu})` : ""}` : (cfg.device ?? "cpu").toUpperCase() },
               { label: "Forward limit", value: String(p.forward_limit ?? "—") },
               { label: "Alignment tolerance", value: String(p.max_reprojection_error ?? "—") },
-              { label: "Edge crop (L/R/T/B)", value: `${p.mask_left ?? 0} / ${p.mask_right ?? 0} / ${p.mask_top ?? 0} / ${p.mask_bottom ?? 0} px` },
+              {
+                label: "Edge crop",
+                value: (() => {
+                  if (Array.isArray(p.crop_rules) && p.crop_rules.length > 0) {
+                    return p.crop_rules.map((r: any) => {
+                      const dirs = r.directions?.length
+                        ? r.directions.map((d: string) => ({ up: "↑", down: "↓", left: "←", right: "→" }[d] ?? d)).join("")
+                        : "All"
+                      return `${dirs}: ${r.mask_left ?? 0}/${r.mask_right ?? 0}/${r.mask_top ?? 0}/${r.mask_bottom ?? 0}`
+                    }).join("  ·  ")
+                  }
+                  // Legacy flat fields
+                  return `${p.mask_left ?? 0} / ${p.mask_right ?? 0} / ${p.mask_top ?? 0} / ${p.mask_bottom ?? 0} px`
+                })()
+              },
               { label: "Batch size", value: String(p.batch_size ?? "—") },
               { label: "Min inliers", value: String(p.min_inliers ?? "—") },
             ];

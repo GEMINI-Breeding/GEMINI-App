@@ -29,6 +29,7 @@ import {
 import { dataTypes } from "@/config/dataTypes"
 import useCustomToast from "@/hooks/useCustomToast"
 import { getColumnsForDataType } from "../components/columns"
+import { ManageReferenceData } from "./ManageReferenceData"
 
 const DATA_TYPE_OPTIONS = Object.keys(dataTypes)
 
@@ -160,7 +161,7 @@ export function ManageData() {
             View and manage your uploaded data
           </p>
         </div>
-        <RefreshButton />
+        {selectedDataType !== "Reference Data" && <RefreshButton />}
       </div>
       <div className="flex items-center gap-3">
         <Select
@@ -178,7 +179,11 @@ export function ManageData() {
           </SelectContent>
         </Select>
       </div>
-      <ManageDataTable selectedDataType={selectedDataType} />
+      {selectedDataType === "Reference Data" ? (
+        <ManageReferenceData />
+      ) : (
+        <ManageDataTable selectedDataType={selectedDataType} />
+      )}
     </div>
   )
 }

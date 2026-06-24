@@ -12,7 +12,7 @@
 ;   iscc frontend\src-tauri\inno-setup.iss
 
 #define AppName      "GEMI"
-#define AppVersion   "0.0.4"
+#define AppVersion   "0.0.5"
 #define AppPublisher "GEMI"
 #define AppExeName   "app.exe"
 #define AppId        "com.gemi.app"

@@ -15,6 +15,9 @@ interface CropMask {
 interface EdgeCropToolProps {
   pipelineId: string | null
   initialMask: CropMask
+  directions?: string[]   // plot-direction filter (up/down/left/right)
+  headings?: string[]     // GPS heading filter (north/south/east/west)
+  filterMode?: "plot" | "heading"
   onApply: (mask: CropMask) => void
   onClose: () => void
 }
@@ -35,7 +38,7 @@ function clamp(v: number, min: number, max: number) {
   return Math.round(Math.max(min, Math.min(max, v)))
 }
 
-export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: EdgeCropToolProps) {
+export function EdgeCropTool({ pipelineId, initialMask, directions, headings, filterMode = "plot", onApply, onClose }: EdgeCropToolProps) {
   // ── Fetch all runs for this pipeline ───────────────────────────────────────
   const { data: runsData, isLoading: runsLoading } = useQuery({
     queryKey: ["edge-crop-runs", pipelineId],
@@ -54,15 +57,25 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
   useEffect(() => { setSelectedRunId(null) }, [pipelineId])
 
   // ── Fetch image list from selected run ─────────────────────────────────────
+  const activeFilter = filterMode === "heading"
+    ? (headings ?? [])
+    : (directions ?? [])
+  const filterParam = activeFilter.length > 0 ? activeFilter.join(",") : ""
+
   const { data: imagesData, isLoading: imagesLoading } = useQuery({
-    queryKey: ["edge-crop-images", effectiveRunId],
+    queryKey: ["edge-crop-images", effectiveRunId, filterMode, filterParam],
     queryFn: async () => {
       const auth = await authToken()
-      const res = await fetch(`${apiBase()}/api/v1/pipeline-runs/${effectiveRunId}/images`, {
-        headers: auth ? { Authorization: auth } : {},
-      })
+      const params = new URLSearchParams()
+      if (filterParam) {
+        params.set("directions", filterParam)
+        params.set("filter_mode", filterMode)
+      }
+      const qs = params.toString()
+      const url = `${apiBase()}/api/v1/pipeline-runs/${effectiveRunId}/images${qs ? `?${qs}` : ""}`
+      const res = await fetch(url, { headers: auth ? { Authorization: auth } : {} })
       if (!res.ok) throw new Error("Failed to load images")
-      return res.json() as Promise<{ images: string[]; raw_dir: string; count: number }>
+      return res.json() as Promise<{ images: string[]; raw_dir: string; count: number; direction_filtered?: boolean }>
     },
     enabled: !!effectiveRunId,
   })
@@ -106,7 +119,6 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
   // ── Crop state ────────────────────────────────────────────────────────────
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-  // Keep a ref so drag handlers always see the latest dims without re-creating closures
   const dimsRef = useRef(dims)
   useEffect(() => { dimsRef.current = dims }, [dims])
 
@@ -114,6 +126,15 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
   const [cropRight, setCropRight] = useState(0)
   const [cropTop, setCropTop] = useState(0)
   const [cropBottom, setCropBottom] = useState(0)
+
+  // Source-of-truth crop in natural pixels — persists across image navigation.
+  // Initialised from initialMask; updated whenever the user moves a handle.
+  const naturalCropRef = useRef({
+    left:   initialMask.mask_left,
+    right:  initialMask.mask_right,
+    top:    initialMask.mask_top,
+    bottom: initialMask.mask_bottom,
+  })
 
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -124,18 +145,26 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
     const dh = Math.round(nh * scale)
     setNaturalSize({ w: nw, h: nh })
     setDims({ w: dw, h: dh })
-    // Convert existing pixel mask → display pixels
-    setCropLeft(Math.round(initialMask.mask_left * dw / nw))
-    setCropRight(Math.round(initialMask.mask_right * dw / nw))
-    setCropTop(Math.round(initialMask.mask_top * dh / nh))
-    setCropBottom(Math.round(initialMask.mask_bottom * dh / nh))
+    // Re-derive display pixels from the persisted natural-pixel crop
+    const nc = naturalCropRef.current
+    setCropLeft(Math.round(nc.left   * dw / nw))
+    setCropRight(Math.round(nc.right  * dw / nw))
+    setCropTop(Math.round(nc.top    * dh / nh))
+    setCropBottom(Math.round(nc.bottom * dh / nh))
   }
 
-  // Convert display-pixel crop → natural image pixels (what gets saved)
-  const maskLeft   = naturalSize && dims ? Math.round(cropLeft   * naturalSize.w / dims.w) : 0
-  const maskRight  = naturalSize && dims ? Math.round(cropRight  * naturalSize.w / dims.w) : 0
-  const maskTop    = naturalSize && dims ? Math.round(cropTop    * naturalSize.h / dims.h) : 0
-  const maskBottom = naturalSize && dims ? Math.round(cropBottom * naturalSize.h / dims.h) : 0
+  // Convert display-pixel crop → natural image pixels (what gets saved).
+  // Fall back to initialMask before the image loads so the readout shows
+  // the existing config immediately rather than zeros.
+  const maskLeft   = naturalSize && dims ? Math.round(cropLeft   * naturalSize.w / dims.w) : initialMask.mask_left
+  const maskRight  = naturalSize && dims ? Math.round(cropRight  * naturalSize.w / dims.w) : initialMask.mask_right
+  const maskTop    = naturalSize && dims ? Math.round(cropTop    * naturalSize.h / dims.h) : initialMask.mask_top
+  const maskBottom = naturalSize && dims ? Math.round(cropBottom * naturalSize.h / dims.h) : initialMask.mask_bottom
+
+  // Keep naturalCropRef in sync so navigation preserves the latest drag position
+  useEffect(() => {
+    naturalCropRef.current = { left: maskLeft, right: maskRight, top: maskTop, bottom: maskBottom }
+  }, [maskLeft, maskRight, maskTop, maskBottom])
 
   // ── Drag handlers (pointer-capture based) ─────────────────────────────────
   // dragRef persists across re-renders so moveDrag always works
@@ -187,10 +216,26 @@ export function EdgeCropTool({ pipelineId, initialMask, onApply, onClose }: Edge
         {/* Header */}
         <div className="flex items-start justify-between border-b px-5 py-3">
           <div className="flex-1 min-w-0">
-            <h2 className="font-semibold text-sm">Edge Crop Tool</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-sm">Edge Crop Tool</h2>
+              {activeFilter.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  {filterMode === "heading"
+                    ? activeFilter.map((h) => h.charAt(0).toUpperCase()).join("/")
+                    : activeFilter.map((d) => ({ up: "↑", down: "↓", left: "←", right: "→" }[d] ?? d)).join(" ")
+                  }{" "}only
+                </span>
+              )}
+            </div>
             <p className="text-muted-foreground text-xs mt-0.5 max-w-lg">
               Drag the handles to define how many pixels to crop from each image edge before stitching.
-              This setting is shared across all datasets in this pipeline.
+              {imagesData?.direction_filtered
+                ? filterMode === "heading"
+                  ? " Showing images matching the selected GPS heading."
+                  : " Showing images from plots matching the selected direction."
+                : activeFilter.length > 0
+                  ? " Filter active — complete plot marking first to show filtered images."
+                  : " This crop applies as the default when no other rule matches."}
             </p>
             {runs.length > 1 && (
               <div className="flex items-center gap-2 mt-2">
