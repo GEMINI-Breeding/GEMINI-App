@@ -266,7 +266,8 @@ def postprocessing(
     if bearing is not None:
         stamp_col = msgs_df['stamp'] if 'stamp' in msgs_df.columns else None
         stamp_s = pd.to_numeric(stamp_col, errors='coerce') / 1e6 if stamp_col is not None else None
-        msgs_df['direction'] = smooth_headings(bearing, stamp_series=stamp_s)
+        msgs_df['direction_raw'] = bearing.apply(heading_to_direction)
+        msgs_df['direction'] = smooth_headings(bearing, stamp_series=stamp_s, window=50, min_run=26)
 
     # rename lat/lon columns if they exist
     if 'longitude' in msgs_df.columns:
