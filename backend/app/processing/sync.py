@@ -42,6 +42,41 @@ from app.models.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
+
+def _enrich_direction(csv_path: Path) -> None:
+    """Add direction_raw and direction columns to msgs_synced.csv if not already present."""
+    try:
+        df = pd.read_csv(csv_path, on_bad_lines="skip")
+        df.columns = df.columns.str.strip()
+        if "direction" in df.columns:
+            return
+        lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+        lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+        if not lat_col or not lon_col:
+            return
+        try:
+            from bin_to_images.bin_to_images import (  # type: ignore
+                compute_latlon_bearing, heading_to_direction, smooth_headings,
+            )
+        except ImportError:
+            try:
+                from bin_to_images import (  # type: ignore
+                    compute_latlon_bearing, heading_to_direction, smooth_headings,
+                )
+            except ImportError:
+                logger.warning("bin_to_images not importable — skipping direction enrichment")
+                return
+        bearing = compute_latlon_bearing(df[lat_col], df[lon_col])
+        stamp_col = df["stamp"] if "stamp" in df.columns else None
+        stamp_s = pd.to_numeric(stamp_col, errors="coerce") / 1e6 if stamp_col is not None else None
+        df["direction_raw"] = bearing.apply(heading_to_direction)
+        df["direction"] = smooth_headings(bearing, stamp_series=stamp_s, window=50, min_run=26)
+        df.to_csv(csv_path, index=False)
+        logger.info("Enriched direction columns in %s", csv_path)
+    except Exception as exc:
+        logger.warning("direction enrichment failed for %s: %s", csv_path, exc)
+
+
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 _LOG_EXTS = {".bin", ".log", ".tlog"}
 
@@ -632,6 +667,8 @@ def run_data_sync(
         df_msgs = _merge_drone_gps(df_msgs, df_drone)
         df_msgs.to_csv(paths.msgs_synced, index=False)
 
+    _enrich_direction(paths.msgs_synced)
+
     # ── GPS availability check ────────────────────────────────────────────────
     has_gps = (
         "lat" in df_msgs.columns
@@ -970,6 +1007,7 @@ def run_cross_sensor_sync(
 
     # ── Write outputs ────────────────────────────────────────────────────────
     df_target.to_csv(paths.msgs_synced, index=False)
+    _enrich_direction(paths.msgs_synced)
     emit({"event": "progress",
           "message": f"msgs_synced.csv written ({len(df_target)} images)", "progress": 90})
 

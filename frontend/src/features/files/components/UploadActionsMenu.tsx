@@ -1,4 +1,4 @@
-import { Download, EllipsisVertical, Images, Pencil } from "lucide-react"
+import { Download, EllipsisVertical, Images, Pencil, TableProperties } from "lucide-react"
 import { useState } from "react"
 
 import type { FileUploadPublic } from "@/client"
@@ -15,8 +15,15 @@ import { useProcess } from "@/contexts/ProcessContext"
 import DeleteUpload from "./DeleteUpload"
 import { EditUploadDialog } from "./EditUploadDialog"
 import { ImageViewerDialog } from "./ImageViewerDialog"
+import { MetadataViewerDialog } from "./MetadataViewerDialog"
 
 const IMAGE_DATA_TYPES = new Set(["Image Data", "Farm-ng Binary File", "Orthomosaic"])
+const METADATA_DATA_TYPES = new Set([
+  "Synced Metadata",
+  "Farm-ng Binary File",
+  "Ardupilot Logs",
+  "Image Data",
+])
 
 interface UploadActionsMenuProps {
   upload: FileUploadPublic
@@ -51,9 +58,11 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
+  const [metaViewerOpen, setMetaViewerOpen] = useState(false)
   const { addProcess, updateProcess } = useProcess()
 
   const canView = IMAGE_DATA_TYPES.has(upload.data_type)
+  const canViewData = METADATA_DATA_TYPES.has(upload.data_type)
   const viewerTitle = [upload.experiment, upload.location, upload.population, upload.date]
     .filter(Boolean)
     .join(" · ")
@@ -76,6 +85,17 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
             >
               <Images className="mr-2 h-4 w-4" />
               View images
+            </DropdownMenuItem>
+          )}
+          {canViewData && (
+            <DropdownMenuItem
+              onClick={() => {
+                setMenuOpen(false)
+                setMetaViewerOpen(true)
+              }}
+            >
+              <TableProperties className="mr-2 h-4 w-4" />
+              View data
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
@@ -123,6 +143,14 @@ export const UploadActionsMenu = ({ upload }: UploadActionsMenuProps) => {
           uploadId={String(upload.id)}
           title={viewerTitle}
           onClose={() => setViewerOpen(false)}
+        />
+      )}
+
+      {metaViewerOpen && (
+        <MetadataViewerDialog
+          uploadId={String(upload.id)}
+          title={viewerTitle}
+          onClose={() => setMetaViewerOpen(false)}
         />
       )}
     </>
