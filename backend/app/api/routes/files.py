@@ -34,6 +34,50 @@ from app.models import (
 router = APIRouter(prefix="/files", tags=["files"])
 logger = logging.getLogger(__name__)
 
+
+def _enrich_direction(csv_path: Path) -> None:
+    """Compute direction columns for a msgs_synced.csv if not already present.
+
+    Only runs when `direction` is missing — preserves any existing direction
+    column that was part of the uploaded file.
+    """
+    try:
+        import pandas as pd
+        df = pd.read_csv(csv_path, on_bad_lines="skip")
+        df.columns = df.columns.str.strip()
+
+        if "direction" in df.columns:
+            return  # already computed, leave it alone
+
+        lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+        lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+        if not lat_col or not lon_col:
+            return  # no lat/lon to derive from
+
+        try:
+            from bin_to_images.bin_to_images import (  # type: ignore
+                compute_latlon_bearing, heading_to_direction, smooth_headings,
+            )
+        except ImportError:
+            try:
+                from bin_to_images import (  # type: ignore
+                    compute_latlon_bearing, heading_to_direction, smooth_headings,
+                )
+            except ImportError:
+                logger.warning("bin_to_images not importable — skipping direction enrichment")
+                return
+
+        bearing = compute_latlon_bearing(df[lat_col], df[lon_col])
+        stamp_col = df["stamp"] if "stamp" in df.columns else None
+        stamp_s = pd.to_numeric(stamp_col, errors="coerce") / 1e6 if stamp_col is not None else None
+        df["direction_raw"] = bearing.apply(heading_to_direction)
+        df["direction"] = smooth_headings(bearing, stamp_series=stamp_s, window=50, min_run=26)
+        df.to_csv(csv_path, index=False)
+        logger.info("Enriched direction columns in %s", csv_path)
+    except Exception as exc:
+        logger.warning("direction enrichment failed for %s: %s", csv_path, exc)
+
+
 # Allowed extensions for the serve endpoint — prevents arbitrary file reads
 _SERVEABLE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".gif", ".bmp",
@@ -976,6 +1020,9 @@ def _copy_local_stream(
         try:
             shutil.copy2(src, dest_path)
             uploaded.append(str(dest_path))
+
+            if body.data_type == "Synced Metadata" and dest_path.suffix.lower() == ".csv":
+                _enrich_direction(dest_path)
 
             if is_amiga_bin:
                 # Mark as "running" so the counter doesn't jump then fall back.
