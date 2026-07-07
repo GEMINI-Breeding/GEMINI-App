@@ -2870,10 +2870,11 @@ def download_crops_for_boundary(
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
 
 class _UseUploadedOrthoRequest(BaseModel):
-    file_upload_id: str | None = None      # RGB orthomosaic FileUpload UUID
-    dem_file_upload_id: str | None = None  # DEM FileUpload UUID (optional)
-    save_mode: str = "new_version"         # "new_version" | "replace"
-    name: str | None = None                # optional name for the version
+    file_upload_id: str | None = None          # RGB orthomosaic FileUpload UUID
+    dem_file_upload_id: str | None = None      # DEM FileUpload UUID (optional)
+    thermal_file_upload_id: str | None = None  # Thermal TIF FileUpload UUID (optional)
+    save_mode: str = "new_version"             # "new_version" | "replace"
+    name: str | None = None                    # optional name for the version
 
 
 @router.post("/pipeline-runs/{id}/use-uploaded-ortho")
@@ -2933,9 +2934,13 @@ def use_uploaded_ortho(
             and ".converting" not in p.stem
         )
         logger.info("[use_uploaded_ortho] all tif_files in src_dir: %s", [p.name for p in _all_fu_tifs])
-        # RGB and DEM share the same Orthomosaic/ folder — classify to avoid picking
-        # the DEM (which sorts before RGB alphabetically: D < R).
-        tif_files = [p for p in _all_fu_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        # RGB, DEM, and Thermal all share the same Orthomosaic/ folder — classify by canonical stem.
+        tif_files = [
+            p for p in _all_fu_tifs
+            if p.stem.endswith("-RGB")
+            or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower()
+                and not p.stem.endswith("-Thermal") and "thermal" not in p.stem.lower())
+        ]
         if not tif_files:
             tif_files = _all_fu_tifs  # fallback: no classification possible, take first
         logger.info("[use_uploaded_ortho] RGB tif_files (after classification): %s", [p.name for p in tif_files])
@@ -2959,9 +2964,13 @@ def use_uploaded_ortho(
             and ".converting" not in p.stem
         )
         logger.info("[use_uploaded_ortho] backward-compat all tif_files: %s", [p.name for p in _all_tifs])
-        # Classify by canonical name ({date}-RGB.tif / {date}-DEM.tif) with
-        # fallback to "dem" stem check for any pre-existing non-canonical files.
-        tif_files = [p for p in _all_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        # Classify by canonical stem ({date}-RGB, {date}-DEM, {date}-Thermal).
+        tif_files = [
+            p for p in _all_tifs
+            if p.stem.endswith("-RGB")
+            or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower()
+                and not p.stem.endswith("-Thermal") and "thermal" not in p.stem.lower())
+        ]
         _bc_dem_tifs = [p for p in _all_tifs if p.stem.endswith("-DEM") or ("dem" in p.stem.lower() and not p.stem.endswith("-RGB"))]
         logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s",
                     [p.name for p in tif_files], [p.name for p in _bc_dem_tifs])
@@ -3003,6 +3012,35 @@ def use_uploaded_ortho(
         src_dem = _bc_dem_tifs[0]
         logger.info("[use_uploaded_ortho] auto-detected DEM from Orthomosaic folder: %s", src_dem.name)
 
+    # ── Locate the Thermal TIF ────────────────────────────────────────────────
+    src_thermal: Path | None = None
+    if req.thermal_file_upload_id:
+        try:
+            thermal_fu_id = uuid.UUID(req.thermal_file_upload_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid thermal_file_upload_id")
+        thermal_fu = _get_fu(session=session, id=thermal_fu_id)
+        if not thermal_fu:
+            raise HTTPException(status_code=404, detail="Thermal file upload not found")
+        thermal_src_dir = _data_root / thermal_fu.storage_path
+        _all_thermal_tifs = sorted(
+            p for p in thermal_src_dir.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"}
+            and ".original" not in p.stem
+            and ".converting" not in p.stem
+        )
+        # Prefer canonical {date}-Thermal stem; fall back to first TIF if no match.
+        thermal_tifs = [p for p in _all_thermal_tifs if p.stem.endswith("-Thermal") or "thermal" in p.stem.lower()]
+        if not thermal_tifs:
+            thermal_tifs = _all_thermal_tifs
+        if thermal_tifs:
+            src_thermal = thermal_tifs[0]
+        else:
+            logger.warning(
+                "[use_uploaded_ortho] Thermal upload %s has no TIF files — thermal will be skipped",
+                req.thermal_file_upload_id,
+            )
+
     paths.make_dirs()
 
     # ── Determine version ──────────────────────────────────────────────────────
@@ -3043,12 +3081,21 @@ def use_uploaded_ortho(
     else:
         logger.info("No DEM TIF found in upload — plant height will be unavailable for v%d", target_version)
 
+    dest_thermal: Path | None = None
+    if src_thermal:
+        dest_thermal = paths.aerial_thermal_versioned(target_version)
+        _link_or_copy(src_thermal, dest_thermal)
+        logger.info("Registered uploaded Thermal %s → %s (v%d)", src_thermal.name, dest_thermal.name, target_version)
+    else:
+        logger.info("No Thermal TIF found in upload — temperature extraction will be unavailable for v%d", target_version)
+
     # ── Update outputs list ────────────────────────────────────────────────────
     new_entry = {
         "version": target_version,
         "name": req.name,
         "rgb": paths.rel(dest_tif),
         "dem": paths.rel(dest_dem) if dest_dem else None,
+        "thermal": paths.rel(dest_thermal) if dest_thermal else None,
         "pyramid": None,
         "created_at": _dt.now(_tz.utc).isoformat(),
         "imported": True,

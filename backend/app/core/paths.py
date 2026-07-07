@@ -296,6 +296,10 @@ class RunPaths:
         """Aerial: {date}-RGB-Pyramid-v{N}.tif"""
         return self.processed_run / f"{self.date}-RGB-Pyramid-v{version}.tif"
 
+    def aerial_thermal_versioned(self, version: int) -> Path:
+        """Aerial: {date}-Thermal-v{N}.tif"""
+        return self.processed_run / f"{self.date}-Thermal-v{version}.tif"
+
     @property
     def cropped_images_dir(self) -> Path:
         """Aerial: cropped_images/ directory (latest, for backward compat)."""

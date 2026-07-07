@@ -217,6 +217,15 @@ def list_uploaded_dems(
     return _ortho_upload_list(session, current_user, "Orthomosaic DEM")
 
 
+@router.get("/uploaded-thermals")
+def list_uploaded_thermals(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Return all FileUpload records with data_type='Thermal', with TIF filenames."""
+    return _ortho_upload_list(session, current_user, "Thermal")
+
+
 # GET /files/{id} (get single upload)
 @router.get("/{id}", response_model=FileUploadPublic)
 def read_file(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
@@ -977,6 +986,8 @@ def _copy_local_stream(
             canonical_name = f"{body.date}-RGB.tif"
         elif body.data_type == "Orthomosaic DEM" and body.date:
             canonical_name = f"{body.date}-DEM.tif"
+        elif body.data_type == "Thermal" and body.date:
+            canonical_name = f"{body.date}-Thermal.tif"
         else:
             canonical_name = name
         dest_path = dest_dir / canonical_name

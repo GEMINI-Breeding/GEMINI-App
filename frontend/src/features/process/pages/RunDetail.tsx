@@ -4080,6 +4080,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
   const [showImportOrthoDialog, setShowImportOrthoDialog] = useState(false);
   const [importSelectedId, setImportSelectedId] = useState<string>("");
   const [importSelectedDemId, setImportSelectedDemId] = useState<string>("");
+  const [importSelectedThermalId, setImportSelectedThermalId] = useState<string>("");
   const [importSaveMode, setImportSaveMode] = useState<"new_version" | "replace">("new_version");
   const [importName, setImportName] = useState("");
 
@@ -4136,6 +4137,19 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     staleTime: 30_000,
   });
 
+  const { data: uploadedThermalsList } = useQuery<OrthoUploadEntry[]>({
+    queryKey: ["uploaded-thermals-list"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/v1/files/uploaded-thermals"), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: showImportOrthoDialog,
+    staleTime: 30_000,
+  });
+
   async function handleImportOrtho() {
     setIsRegisteringOrtho(true);
     try {
@@ -4150,6 +4164,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
           body: JSON.stringify({
             file_upload_id: importSelectedId || null,
             dem_file_upload_id: importSelectedDemId || null,
+            thermal_file_upload_id: importSelectedThermalId || null,
             save_mode: importSaveMode,
             name: importName || null,
           }),
@@ -4163,6 +4178,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       setShowImportOrthoDialog(false);
       setImportSelectedId("");
       setImportSelectedDemId("");
+      setImportSelectedThermalId("");
       setImportName("");
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
       queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
@@ -4543,6 +4559,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                         setImportSaveMode("new_version");
                         setImportSelectedId("");
                         setImportSelectedDemId("");
+                        setImportSelectedThermalId("");
                         setShowImportOrthoDialog(true);
                       } else {
                         handleUseUploadedOrtho();
@@ -4660,6 +4677,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                         onClick={() => {
                           setImportSelectedId("");
                           setImportSelectedDemId("");
+                          setImportSelectedThermalId("");
                           setImportName("");
                           setImportSaveMode("new_version");
                           setShowImportOrthoDialog(true);
@@ -5161,8 +5179,8 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
           <DialogHeader>
             <DialogTitle>Import Orthomosaic</DialogTitle>
             <DialogDescription>
-              Select an RGB orthomosaic (required) and optionally a DEM (for plant height).
-              Upload them via Files → Orthomosaic and Files → Orthomosaic DEM first.
+              Select an RGB orthomosaic (required) and optionally a DEM (for plant height) and Thermal TIF (for canopy temperature).
+              Upload them via Files → Orthomosaic, Files → Orthomosaic DEM, and Files → Thermal first.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-1">
@@ -5260,6 +5278,70 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                             >
                               <td className="px-2 py-2">
                                 <input type="radio" readOnly checked={o.id === importSelectedDemId} className="accent-primary" />
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">{o.date}</td>
+                              <td className="px-3 py-2 font-medium">{o.experiment}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{o.location}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{o.population}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{[o.platform, o.sensor].filter(Boolean).join(" / ") || "—"}</td>
+                              <td className="px-3 py-2 tabular-nums text-muted-foreground">{o.file_count}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Thermal list */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                Thermal <span className="text-muted-foreground font-normal">(optional — required for canopy temperature)</span>
+              </p>
+              <div className="border rounded-md overflow-hidden">
+                <div className="max-h-44 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/60 sticky top-0">
+                      <tr>
+                        {["", "Date", "Experiment", "Location", "Population", "Platform", "Files"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!uploadedThermalsList ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin inline-block mr-1" />Loading…
+                        </td></tr>
+                      ) : uploadedThermalsList.length === 0 ? (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                          No thermal TIFs uploaded yet. Upload via Files → Thermal to enable temperature extraction.
+                        </td></tr>
+                      ) : (
+                        <>
+                          <tr
+                            onClick={() => setImportSelectedThermalId("")}
+                            className={`cursor-pointer border-t transition-colors ${
+                              !importSelectedThermalId ? "bg-primary/10" : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <td className="px-2 py-2">
+                              <input type="radio" readOnly checked={!importSelectedThermalId} className="accent-primary" />
+                            </td>
+                            <td colSpan={6} className="px-3 py-2 text-muted-foreground italic">None</td>
+                          </tr>
+                          {uploadedThermalsList.map((o) => (
+                            <tr
+                              key={o.id}
+                              onClick={() => setImportSelectedThermalId(o.id)}
+                              className={`cursor-pointer border-t transition-colors ${
+                                o.id === importSelectedThermalId ? "bg-primary/10" : "hover:bg-muted/50"
+                              }`}
+                            >
+                              <td className="px-2 py-2">
+                                <input type="radio" readOnly checked={o.id === importSelectedThermalId} className="accent-primary" />
                               </td>
                               <td className="px-3 py-2 tabular-nums">{o.date}</td>
                               <td className="px-3 py-2 font-medium">{o.experiment}</td>
