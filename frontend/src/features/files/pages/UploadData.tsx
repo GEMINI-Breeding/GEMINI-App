@@ -25,6 +25,7 @@ export function UploadData() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [rgbTifPath, setRgbTifPath] = useState<string | null>(null);
   const [demTifPath, setDemTifPath] = useState<string | null>(null);
+  const [thermalTifPath, setThermalTifPath] = useState<string | null>(null);
   const [syncedCsvText, setSyncedCsvText] = useState<string | null>(null);
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null);
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null);
@@ -76,6 +77,14 @@ export function UploadData() {
     [],
   );
 
+  const handleThermalUploadComplete = useCallback(
+    async (destPaths: string[]) => {
+      const tif = destPaths.find((p) => /\.(tif|tiff)$/i.test(p));
+      if (tif) setThermalTifPath(tif);
+    },
+    [],
+  );
+
   const handleUploadComplete = useCallback(
     async (destPaths: string[]) => {
       if (selectedFileType === "Synced Metadata") {
@@ -117,7 +126,7 @@ export function UploadData() {
       <div className="pt-6">
         <div className="grid grid-cols-2 gap-8 items-start">
           <div className="space-y-6">
-            <DataTypes onChange={(t) => { setSelectedFileType(t); setRgbTifPath(null); setDemTifPath(null); }} />
+            <DataTypes onChange={(t) => { setSelectedFileType(t); setRgbTifPath(null); setDemTifPath(null); setThermalTifPath(null); }} />
             <DataStructureForm
               fileType={selectedFileType}
               values={formValues}
@@ -145,6 +154,15 @@ export function UploadData() {
                   label="DEM (.tif) — optional (required for plant height)"
                 />
                 {demTifPath && <GeoTiffValidationCard key={demTifPath} destPath={demTifPath} />}
+              </div>
+              <div className="border-t pt-6">
+                <UploadList
+                  dataType="Thermal"
+                  formValues={formValues}
+                  onUploadComplete={handleThermalUploadComplete}
+                  label="Thermal (.tif) — optional (required for canopy temperature)"
+                />
+                {thermalTifPath && <GeoTiffValidationCard key={thermalTifPath} destPath={thermalTifPath} />}
               </div>
             </div>
           ) : (
