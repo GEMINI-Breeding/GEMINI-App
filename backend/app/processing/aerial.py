@@ -969,19 +969,23 @@ def run_trait_extraction(
                 tier = _prop(orig_row, "Tier", "tier", "row")
                 label = _prop(orig_row, "Label", "label", "accession", "Accession")
 
+                # Build crop filename stem: plot_{id}_{label} when label exists
+                _label_suffix = f"_{label}" if label else ""
+                _crop_stem = f"plot_{plot_id}{_label_suffix}"
+
                 # Save RGB crop to both canonical dir (backward compat) and versioned dir.
                 # Use Pillow instead of cv2.imwrite — OpenCV silently returns False on Windows
                 # when codec DLLs are missing or paths exceed MAX_PATH.
                 from PIL import Image as _PILImage
                 _pil_img = _PILImage.fromarray(rgb_arr)
-                crop_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
+                crop_path = paths.cropped_images_dir / f"{_crop_stem}.png"
                 _pil_img.save(str(crop_path))
-                _pil_img.save(str(_versioned_crops_dir / f"plot_{plot_id}.png"))
+                _pil_img.save(str(_versioned_crops_dir / f"{_crop_stem}.png"))
 
                 # Save DEM crop as single-band GeoTIFF (versioned dir only)
                 if dem_src is not None and gdf_dem is not None and dem_data.size > 0:
                     from rasterio.windows import transform as _win_transform
-                    _dem_crop_path = _versioned_crops_dir / f"plot_{plot_id}_dem.tif"
+                    _dem_crop_path = _versioned_crops_dir / f"{_crop_stem}_dem.tif"
                     with rasterio.open(
                         str(_dem_crop_path), "w",
                         driver="GTiff", height=dem_data.shape[0], width=dem_data.shape[1],
@@ -993,7 +997,7 @@ def run_trait_extraction(
                 # Save thermal crop as single-band GeoTIFF (versioned dir only)
                 if thermal_src is not None and gdf_thermal is not None and thermal_data.size > 0:
                     from rasterio.windows import transform as _win_transform
-                    _thermal_crop_path = _versioned_crops_dir / f"plot_{plot_id}_thermal.tif"
+                    _thermal_crop_path = _versioned_crops_dir / f"{_crop_stem}_thermal.tif"
                     with rasterio.open(
                         str(_thermal_crop_path), "w",
                         driver="GTiff", height=thermal_data.shape[0], width=thermal_data.shape[1],

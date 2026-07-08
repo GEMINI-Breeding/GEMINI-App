@@ -2846,18 +2846,29 @@ def download_crops_for_boundary(
     if not ortho_path.exists():
         raise HTTPException(404, "Orthomosaic file not found on disk")
 
-    from app.processing.aerial import crop_plots_to_stream
-
-    images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
-    if not images:
-        raise HTTPException(404, "No plots could be cropped from the given boundary and ortho")
-
     filename = f"crops_{run.date}_{run.population}_b{boundary_version}_o{ortho_version}.zip"
+
+    # Prefer pre-saved versioned crops (RGB + DEM + thermal) when available.
+    versioned_dir = paths.cropped_images_versioned(ortho_version)
+    saved_crops = (
+        sorted(p for p in versioned_dir.iterdir()
+               if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif"})
+        if versioned_dir.exists() else []
+    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for img_name, img_bytes in images:
-            zf.writestr(img_name, img_bytes)
+        if saved_crops:
+            for img_path in saved_crops:
+                zf.write(img_path, img_path.name)
+        else:
+            # Fallback: on-demand RGB-only crop from the orthomosaic
+            from app.processing.aerial import crop_plots_to_stream
+            images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
+            if not images:
+                raise HTTPException(404, "No plots could be cropped from the given boundary and ortho")
+            for img_name, img_bytes in images:
+                zf.writestr(img_name, img_bytes)
     buf.seek(0)
 
     return StreamingResponse(
@@ -3013,6 +3024,15 @@ def use_uploaded_ortho(
         # Backward-compat: auto-pick DEM from the same Orthomosaic folder
         src_dem = _bc_dem_tifs[0]
         logger.info("[use_uploaded_ortho] auto-detected DEM from Orthomosaic folder: %s", src_dem.name)
+    else:
+        # Explicit RGB path: scan the same source directory for a canonical DEM TIF
+        _explicit_dem = [p for p in src_tif.parent.rglob("*")
+                         if p.suffix.lower() in {".tif", ".tiff"}
+                         and (p.stem.endswith("-DEM") or "dem" in p.stem.lower())
+                         and ".original" not in p.stem and ".converting" not in p.stem]
+        if _explicit_dem:
+            src_dem = sorted(_explicit_dem)[0]
+            logger.info("[use_uploaded_ortho] auto-detected DEM from RGB folder: %s", src_dem.name)
 
     # ── Locate the Thermal TIF ────────────────────────────────────────────────
     src_thermal: Path | None = None
@@ -3046,6 +3066,15 @@ def use_uploaded_ortho(
         # Backward-compat: auto-pick Thermal TIF from the same Orthomosaic folder
         src_thermal = _bc_thermal_tifs[0]
         logger.info("[use_uploaded_ortho] auto-detected Thermal from Orthomosaic folder: %s", src_thermal.name)
+    else:
+        # Explicit RGB path: scan the same source directory for a canonical Thermal TIF
+        _explicit_thermal = [p for p in src_tif.parent.rglob("*")
+                             if p.suffix.lower() in {".tif", ".tiff"}
+                             and (p.stem.endswith("-Thermal") or "thermal" in p.stem.lower())
+                             and ".original" not in p.stem and ".converting" not in p.stem]
+        if _explicit_thermal:
+            src_thermal = sorted(_explicit_thermal)[0]
+            logger.info("[use_uploaded_ortho] auto-detected Thermal from RGB folder: %s", src_thermal.name)
 
     paths.make_dirs()
 
@@ -4079,11 +4108,13 @@ def download_crops(
     if pipeline and pipeline.type == "aerial":
         outputs = run.outputs or {}
         if ortho_version is not None:
-            # Verify this version actually has crops recorded
             versioned_key = f"cropped_images_v{ortho_version}"
             if versioned_key not in outputs and "cropped_images" not in outputs:
                 raise HTTPException(status_code=404, detail="No crop images found for this orthomosaic version")
-        crop_dir = paths.cropped_images_dir
+            versioned_dir = paths.cropped_images_versioned(ortho_version)
+            crop_dir = versioned_dir if versioned_dir.exists() else paths.cropped_images_dir
+        else:
+            crop_dir = paths.cropped_images_dir
     else:
         version = int((run.outputs or {}).get("stitching_version") or 1)
         crop_dir = paths.agrowstitch_dir(version)
@@ -4116,10 +4147,14 @@ def download_crops(
         img.save(out, format="PNG")
         return out.getvalue()
 
+    # Trait extraction download: RGB only (PNGs) — TIF crops (DEM/thermal) are
+    # served via the plot-boundary download for multi-modal analysis.
+    rgb_only = [p for p in images_on_disk if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if images_on_disk:
-            for img_path in images_on_disk:
+        if rgb_only:
+            for img_path in rgb_only:
                 if square_size:
                     zf.writestr(img_path.with_suffix(".png").name, _square_crop_bytes(img_path.read_bytes(), square_size))
                 else:

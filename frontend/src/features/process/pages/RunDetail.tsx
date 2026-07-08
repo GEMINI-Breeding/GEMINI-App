@@ -719,7 +719,7 @@ function TraitRecordsPanel({
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
-                      title="Download plot images"
+                      title="Download RGB crops for model training"
                       disabled={downloadingTraitId === r.id}
                       onClick={() => setTraitDownloadDialog({ record: r, squareSize: null })}
                     >
@@ -761,7 +761,7 @@ function TraitRecordsPanel({
               Download Plot Images — v{traitDownloadDialog?.record.version}
             </DialogTitle>
             <DialogDescription>
-              Downloads cropped plot images from this trait extraction run.
+              Downloads RGB-only plot crops for model training. For multi-modal crops (RGB + DEM + Thermal), use the Download button in the Plot Boundary table.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5 py-2">
@@ -2120,7 +2120,7 @@ function AssociationVersionsPanel({
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
-                      title="Download plot images"
+                      title="Download RGB crops for model training"
                       disabled={v.stitch_version === null || downloadingAssocVersion === v.version}
                       onClick={() => setAssocDownloadDialog({ assoc: v, squareSize: null })}
                     >
@@ -3069,7 +3069,7 @@ function PlotBoundaryVersionsPanel({
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        title="Download crops"
+                        title="Download multi-modal crops (RGB, DEM, Thermal)"
                         disabled={
                           downloadingCropsBv === v.version ||
                           orthoVersions.length === 0
@@ -5265,9 +5265,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                         <>
                           <tr
                             onClick={() => setImportSelectedDemId("")}
-                            className={`cursor-pointer border-t transition-colors ${
-                              !importSelectedDemId ? "bg-primary/10" : "hover:bg-muted/50"
-                            }`}
+                            className={`cursor-pointer border-t transition-colors hover:bg-muted/50`}
                           >
                             <td className="px-2 py-2">
                               <input type="radio" readOnly checked={!importSelectedDemId} className="accent-primary" />
@@ -5277,7 +5275,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                           {uploadedDemsList.map((o) => (
                             <tr
                               key={o.id}
-                              onClick={() => setImportSelectedDemId(o.id)}
+                              onClick={() => { setImportSelectedDemId(o.id); if (!importSelectedId) setImportSelectedId(o.id); }}
                               className={`cursor-pointer border-t transition-colors ${
                                 o.id === importSelectedDemId ? "bg-primary/10" : "hover:bg-muted/50"
                               }`}
@@ -5341,7 +5339,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                           {uploadedThermalsList.map((o) => (
                             <tr
                               key={o.id}
-                              onClick={() => setImportSelectedThermalId(o.id)}
+                              onClick={() => { setImportSelectedThermalId(o.id); if (!importSelectedId) setImportSelectedId(o.id); }}
                               className={`cursor-pointer border-t transition-colors ${
                                 o.id === importSelectedThermalId ? "bg-primary/10" : "hover:bg-muted/50"
                               }`}
