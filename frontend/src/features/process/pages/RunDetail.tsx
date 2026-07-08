@@ -3930,7 +3930,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
   const [traitExgThreshold, setTraitExgThreshold] = useState(0.10);
   const [traitPreviewIndex, setTraitPreviewIndex] = useState(0);
   const [traitPreviewData, setTraitPreviewData] = useState<{
-    total_plots: number; plot_id: string; vf: number; height_m: number | null; overlay_b64: string;
+    total_plots: number; plot_id: string; vf: number; height_m: number | null; temp_avg: number | null; overlay_b64: string;
   } | null>(null);
   const [traitPreviewLoading, setTraitPreviewLoading] = useState(false);
 
@@ -5118,6 +5118,12 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                       <div>
                         <span className="text-muted-foreground text-xs">Plant Height</span>
                         <p className="font-semibold">{traitPreviewData.height_m.toFixed(2)} m</p>
+                      </div>
+                    )}
+                    {traitPreviewData.temp_avg != null && (
+                      <div>
+                        <span className="text-muted-foreground text-xs">Canopy Temp.</span>
+                        <p className="font-semibold">{traitPreviewData.temp_avg.toFixed(2)} °C</p>
                       </div>
                     )}
                   </div>

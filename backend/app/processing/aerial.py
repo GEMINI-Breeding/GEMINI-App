@@ -631,6 +631,12 @@ def preview_trait_extraction(
         if _dem.exists():
             dem_path = _dem
 
+    thermal_path: Any = None
+    if ortho_entry.get("thermal"):
+        _th = paths.abs(ortho_entry["thermal"])
+        if _th.exists():
+            thermal_path = _th
+
     # Resolve boundary path
     from app.api.routes.processing import _discover_pb_versions  # type: ignore
     _pb_versions_list, _active_pbv = _discover_pb_versions(paths, run_outputs)
@@ -654,6 +660,7 @@ def preview_trait_extraction(
 
     vf: float = 0.0
     height_m: float | None = None
+    temp_avg: float | None = None
     overlay_b64: str = ""
 
     with rasterio.open(str(rgb_path)) as rgb_src:
@@ -703,6 +710,22 @@ def preview_trait_extraction(
             except Exception:
                 pass
 
+        # Temperature estimate from thermal TIF
+        if thermal_path is not None:
+            try:
+                with rasterio.open(str(thermal_path)) as th_src:
+                    gdf_th = gdf.to_crs(th_src.crs) if gdf.crs != th_src.crs else gdf
+                    th_row = gdf_th.iloc[plot_index]
+                    th_win = _from_bounds(*th_row.geometry.bounds, th_src.transform)
+                    th_data = th_src.read(1, window=th_win, boundless=True, fill_value=np.nan)
+                    if th_data.size > 0:
+                        tm = cv2.resize(mask, (th_data.shape[1], th_data.shape[0]))
+                        veg_temps = th_data[(tm > 0) & np.isfinite(th_data)]
+                        if len(veg_temps) > 0:
+                            temp_avg = round(float(np.mean(veg_temps)), 2)
+            except Exception:
+                pass
+
         # Build overlay: vegetation pixels tinted green, rest original
         overlay = rgb_arr.copy()
         veg_mask = mask > 0
@@ -723,6 +746,7 @@ def preview_trait_extraction(
         "plot_id": str(plot_id),
         "vf": vf,
         "height_m": height_m,
+        "temp_avg": temp_avg,
         "overlay_b64": overlay_b64,
         "threshold": threshold,
     }

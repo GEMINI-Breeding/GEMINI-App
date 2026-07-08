@@ -2916,7 +2916,8 @@ def use_uploaded_ortho(
     )
 
     # ── Locate the source TIF ──────────────────────────────────────────────────
-    _bc_dem_tifs: list = []  # populated by backward-compat branch; used by DEM auto-detection below
+    _bc_dem_tifs: list = []      # populated by backward-compat branch; used by DEM auto-detection below
+    _bc_thermal_tifs: list = []  # populated by backward-compat branch; used by Thermal auto-detection below
     if req.file_upload_id:
         try:
             fu_id = uuid.UUID(req.file_upload_id)
@@ -2972,8 +2973,9 @@ def use_uploaded_ortho(
                 and not p.stem.endswith("-Thermal") and "thermal" not in p.stem.lower())
         ]
         _bc_dem_tifs = [p for p in _all_tifs if p.stem.endswith("-DEM") or ("dem" in p.stem.lower() and not p.stem.endswith("-RGB"))]
-        logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s",
-                    [p.name for p in tif_files], [p.name for p in _bc_dem_tifs])
+        _bc_thermal_tifs = [p for p in _all_tifs if p.stem.endswith("-Thermal") or "thermal" in p.stem.lower()]
+        logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s thermal=%s",
+                    [p.name for p in tif_files], [p.name for p in _bc_dem_tifs], [p.name for p in _bc_thermal_tifs])
 
     if not tif_files:
         logger.error("[use_uploaded_ortho] No TIF files found — file_upload_id=%s src_dir=%s",
@@ -3040,6 +3042,10 @@ def use_uploaded_ortho(
                 "[use_uploaded_ortho] Thermal upload %s has no TIF files — thermal will be skipped",
                 req.thermal_file_upload_id,
             )
+    elif not req.file_upload_id and _bc_thermal_tifs:
+        # Backward-compat: auto-pick Thermal TIF from the same Orthomosaic folder
+        src_thermal = _bc_thermal_tifs[0]
+        logger.info("[use_uploaded_ortho] auto-detected Thermal from Orthomosaic folder: %s", src_thermal.name)
 
     paths.make_dirs()
 

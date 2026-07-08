@@ -31,7 +31,9 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { getColumnsForDataType } from "../components/columns"
 import { ManageReferenceData } from "./ManageReferenceData"
 
-const DATA_TYPE_OPTIONS = Object.keys(dataTypes)
+const DATA_TYPE_OPTIONS = Object.entries(dataTypes)
+  .filter(([, cfg]) => !cfg.hidden)
+  .map(([key]) => key)
 
 function getFilesQueryOptions() {
   return {

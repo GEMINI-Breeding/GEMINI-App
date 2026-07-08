@@ -93,7 +93,7 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
           "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
         },
-        body: JSON.stringify({ target_root_dir: targetRootDir, file_names: fileNames, data_type: dataType }),
+        body: JSON.stringify({ target_root_dir: targetRootDir, file_names: fileNames, data_type: dataType, date: values.date || null }),
       });
       const data = res.ok ? await res.json() : { existing: [] };
       const existing: string[] = data.existing ?? [];
