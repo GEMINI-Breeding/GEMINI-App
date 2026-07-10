@@ -438,13 +438,20 @@ def get_trait_record_plot_image(
     workspace = session.get(Workspace, pipeline.workspace_id)
     paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
 
-    crop_dir = paths.cropped_images_dir
+    # Prefer versioned crops dir (matches what image-plot-ids returns)
+    _ov = (run.outputs or {}).get("active_ortho_version")
+    if _ov is None:
+        _orthos = (run.outputs or {}).get("orthomosaics", [])
+        if _orthos:
+            _ov = _orthos[-1].get("version")
+    _versioned = paths.cropped_images_versioned(_ov) if _ov is not None else None
+    crop_dir = _versioned if (_versioned and _versioned.exists()) else paths.cropped_images_dir
+
     img_path = crop_dir / f"plot_{plot_id}.png"
     logger.debug("[plot-image] record=%s plot=%s crop_dir=%s img_path=%s exists=%s",
                  record_id, plot_id, crop_dir, img_path, img_path.exists())
 
-    # If exact match not found, search for any file whose stem ends with the plot_id
-    # (handles edge cases like "plot_1_1.png" for plot id "1_1")
+    # If exact match not found, search by glob (handles label suffixes like plot_501_SC56.png)
     if not img_path.exists() and crop_dir.exists():
         matches = list(crop_dir.glob(f"*{plot_id}*.png"))
         logger.debug("[plot-image] crop_dir glob *%s* → %s", plot_id, [str(m) for m in matches])
@@ -549,11 +556,21 @@ def get_trait_record_image_plot_ids(
 
     import re as _re
 
-    crop_dir = paths.cropped_images_dir
+    # Prefer the versioned crops directory (has exactly one PNG per plot, with
+    # label suffix). Fall back to the non-versioned flat directory for older runs.
+    ortho_version = (run.outputs or {}).get("active_ortho_version")
+    if ortho_version is None:
+        _orthos = (run.outputs or {}).get("orthomosaics", [])
+        if _orthos:
+            ortho_version = _orthos[-1].get("version")
+
+    versioned_dir = paths.cropped_images_versioned(ortho_version) if ortho_version is not None else None
+    crop_dir = versioned_dir if (versioned_dir and versioned_dir.exists()) else paths.cropped_images_dir
+
     plot_ids: list[str] = []
     if crop_dir.exists():
         for p in sorted(crop_dir.glob("*.png")):
-            stem = p.stem  # e.g. "plot_1_1"
+            stem = p.stem  # e.g. "plot_501_SC56"
             if stem.startswith("plot_"):
                 plot_ids.append(stem[5:])  # strip leading "plot_"
 
