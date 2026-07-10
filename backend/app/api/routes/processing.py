@@ -2418,26 +2418,31 @@ def get_plot_boundary_version(
 
 def _tif_preview_jpeg(tif: "Path", max_size: int) -> bytes:
     """
-    Return a JPEG thumbnail of *tif* at most *max_size* pixels on the longest side.
+    Return a JPEG thumbnail of *tif* at most *max_size* pixels on the longest side,
+    reprojected to Web Mercator (EPSG:3857) so Leaflet ImageOverlay displays it
+    without distortion when stretched to the WGS84 bounding box.
 
     Fast path: if the TIF has GDAL overview levels (pyramids), rasterio reads
     only the appropriate overview instead of the full file — this is 100-1000x
     faster for large TIFs (e.g. 10 GB → reads a few MB).
 
     Disk cache: the result is written to a sidecar
-    ``{tif}.preview_{max_size}.jpg`` so subsequent requests are served from
+    ``{tif}.preview_{max_size}_merc.jpg`` so subsequent requests are served from
     disk without any rasterio work at all.
     """
     import io
     import numpy as np
     import rasterio
+    from rasterio.crs import CRS
     from rasterio.enums import Resampling
     from PIL import Image
     from pathlib import Path as _Path
 
-    cache_path = _Path(str(tif) + f".preview_{max_size}.jpg")
+    cache_path = _Path(str(tif) + f".preview_{max_size}_merc.jpg")
     if cache_path.exists():
         return cache_path.read_bytes()
+
+    mercator = CRS.from_epsg(3857)
 
     # Determine whether the TIF has usable overview levels
     ov_idx: int | None = None
@@ -2445,26 +2450,32 @@ def _tif_preview_jpeg(tif: "Path", max_size: int) -> bytes:
         overviews = src.overviews(1) if src.count > 0 else []
         if overviews:
             target_factor = max(src.width, src.height) / max_size
-            # Pick the smallest overview factor that still covers target resolution
             for i, factor in enumerate(overviews):
                 if factor >= target_factor:
                     ov_idx = i
                     break
             if ov_idx is None:
-                ov_idx = len(overviews) - 1  # coarsest available
+                ov_idx = len(overviews) - 1
 
-    # Read at chosen overview level (or full resolution if none)
     open_kw: dict = {"overview_level": ov_idx} if ov_idx is not None else {}
     with rasterio.open(tif, **open_kw) as src:
-        scale = min(max_size / src.width, max_size / src.height, 1.0)
-        out_w = max(1, int(src.width * scale))
-        out_h = max(1, int(src.height * scale))
         n_bands = min(src.count, 3)
-        data = src.read(
-            list(range(1, n_bands + 1)),
-            out_shape=(n_bands, out_h, out_w),
-            resampling=Resampling.average,
-        )
+        bands = list(range(1, n_bands + 1))
+
+        # Warp to Web Mercator so pixels match Leaflet's coordinate space.
+        # Fall back to native read if the TIF has no CRS.
+        if src.crs is not None and src.crs.to_epsg() != 3857:
+            from rasterio.vrt import WarpedVRT
+            with WarpedVRT(src, crs=mercator, resampling=Resampling.average) as vrt:
+                scale = min(max_size / vrt.width, max_size / vrt.height, 1.0)
+                out_w = max(1, int(vrt.width * scale))
+                out_h = max(1, int(vrt.height * scale))
+                data = vrt.read(bands, out_shape=(n_bands, out_h, out_w), resampling=Resampling.average)
+        else:
+            scale = min(max_size / src.width, max_size / src.height, 1.0)
+            out_w = max(1, int(src.width * scale))
+            out_h = max(1, int(src.height * scale))
+            data = src.read(bands, out_shape=(n_bands, out_h, out_w), resampling=Resampling.average)
 
     img = np.transpose(data, (1, 2, 0))
     if img.dtype != np.uint8:
