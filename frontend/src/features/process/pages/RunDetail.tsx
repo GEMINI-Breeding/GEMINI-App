@@ -3597,6 +3597,26 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     }
   }, [pipelineType, run?.steps_completed?.plot_boundary_prep, plotBoundaryVersions?.length]);
 
+  // Auto-apply boundaries from a sibling experiment when this run has none yet.
+  const hasTriedSiblingBoundaryRef = useRef(false);
+  useEffect(() => {
+    if (
+      pipelineType === "aerial" &&
+      run &&
+      !run.steps_completed?.plot_boundary_prep &&
+      run.steps_completed?.orthomosaic &&
+      !hasTriedSiblingBoundaryRef.current
+    ) {
+      hasTriedSiblingBoundaryRef.current = true;
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/apply-boundaries`), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      }).then((r) => {
+        if (r.ok) queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      }).catch(() => {});
+    }
+  }, [pipelineType, run?.steps_completed?.plot_boundary_prep, run?.steps_completed?.orthomosaic]);
+
   // Plot marking versions (for stitching dialog version picker)
   const { data: plotMarkingVersions } = useQuery<{ version: number; name: string; created_at: string }[]>({
     queryKey: ["plot-markings", runId],

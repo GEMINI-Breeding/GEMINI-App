@@ -986,6 +986,8 @@ def apply_boundaries(
     existing_outputs = dict(run.outputs or {})
     existing_steps = dict(run.steps_completed or {})
 
+    import shutil as _shutil
+
     if not paths.plot_boundary_geojson.exists():
         _sibling = _find_sibling_plot_boundary(session, run)
         if _sibling is None:
@@ -996,10 +998,10 @@ def apply_boundaries(
                     "Complete the Plot Boundary Prep step on an earlier run first."
                 ),
             )
-        import shutil as _shutil
         paths.intermediate_shared_pop.mkdir(parents=True, exist_ok=True)
         _shutil.copy2(_sibling, paths.plot_boundary_geojson)
         logger.info("Auto-copied plot boundary from sibling experiment: %s", _sibling)
+
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
     existing_steps["plot_boundary_prep"] = True
 
@@ -1040,6 +1042,32 @@ def get_field_design(
     paths = _get_paths(session, run)
 
     csv_path = paths.field_design_csv()
+
+    # Fall back to a sibling experiment's field design (same pipeline/location/population)
+    if not csv_path:
+        from sqlmodel import select as _sel_fd
+        from app.models.pipeline import PipelineRun as _PR_fd
+        pipeline_fd = session.get(Pipeline, run.pipeline_id)
+        workspace_fd = session.get(Workspace, pipeline_fd.workspace_id) if pipeline_fd else None
+        if workspace_fd:
+            siblings_fd = session.exec(
+                _sel_fd(_PR_fd).where(
+                    _PR_fd.pipeline_id == run.pipeline_id,
+                    _PR_fd.location == run.location,
+                    _PR_fd.population == run.population,
+                    _PR_fd.experiment != run.experiment,
+                )
+            ).all()
+            for sib in siblings_fd:
+                try:
+                    sib_paths = RunPaths.from_db(session=session, run=sib, workspace=workspace_fd)
+                    csv_path = sib_paths.field_design_csv()
+                    if csv_path:
+                        logger.info("Field design loaded from sibling experiment %s: %s", sib.experiment, csv_path)
+                        break
+                except Exception:
+                    continue
+
     if not csv_path:
         return {"available": False, "rows": [], "row_count": 0, "col_count": 0}
 
@@ -1965,7 +1993,8 @@ def orthomosaic_info(
         bounds = _read_tif_bounds(tif)
 
         _outputs = run.outputs or {}
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+        _sibling_dirs = _find_sibling_shared_dirs(session, run)
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs, extra_dirs=_sibling_dirs)
 
         existing_geojson = None
         existing_grid_settings = None
@@ -2008,13 +2037,15 @@ def orthomosaic_info(
                 except Exception:
                     pass
 
-        # Load existing pop boundary if present
+        # Load existing pop boundary if present; fall back to sibling experiment
         existing_pop = None
         if paths.pop_boundary_geojson.exists():
             try:
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
+        if existing_pop is None:
+            existing_pop = _find_sibling_pop_boundary(session, run)
 
         # Stitching versions that have a combined_mosaic.tif
         _stitchings = list(_outputs.get("stitchings", []))
@@ -2052,7 +2083,8 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _versions = _get_ortho_versions(_outputs)
         _active_v = _outputs.get("active_ortho_version")
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+        _sibling_dirs = _find_sibling_shared_dirs(session, run)
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs, extra_dirs=_sibling_dirs)
 
         # Load the active/latest versioned boundary. _active_pbv defaults to the most
         # recent file on disk, so runs that haven't saved their own boundary yet will
@@ -2089,6 +2121,8 @@ def orthomosaic_info(
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
+        if existing_pop is None:
+            existing_pop = _find_sibling_pop_boundary(session, run)
 
         return {
             "available": True,
@@ -2552,9 +2586,17 @@ def _get_plot_boundary_versions(outputs: dict) -> list[dict]:
     return list(outputs.get("plot_boundaries", []))
 
 
-def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict], int | None]:
+def _discover_pb_versions(
+    paths: RunPaths,
+    run_outputs: dict,
+    extra_dirs: "list[Path] | None" = None,
+) -> tuple[list[dict], int | None]:
     """
     Discover plot-boundary versions by scanning the shared population directory on disk.
+
+    If the local directory has no versioned files and extra_dirs is supplied,
+    those directories (e.g. sibling experiments) are scanned instead so that
+    the run always sees the latest boundaries without requiring a local copy.
 
     Returns (versions_list, active_version) where versions_list is sorted by version
     number.  Metadata (name, created_at) is populated from run_outputs when available,
@@ -2563,43 +2605,45 @@ def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
     import re as _re
     from datetime import datetime as _dt
 
+    def _scan_dir(d: Path) -> list[dict]:
+        results = []
+        run_meta: dict[int, dict] = {
+            v["version"]: v
+            for v in run_outputs.get("plot_boundaries", [])
+        }
+        for f in d.glob("Plot-Boundary-WGS84_v*.geojson"):
+            m = _re.search(r"_v(\d+)\.geojson$", f.name)
+            if not m:
+                continue
+            vnum = int(m.group(1))
+            meta = run_meta.get(vnum, {})
+            created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
+            file_run_meta: dict = {}
+            try:
+                raw = json.loads(f.read_text())
+                file_run_meta = raw.get("_run_meta") or {}
+            except Exception:
+                pass
+            results.append({
+                "version": vnum,
+                "name": meta.get("name"),
+                "geojson_path": paths.rel(f),
+                "created_at": created_at,
+                "stitch_version": meta.get("stitch_version") or file_run_meta.get("stitch_version"),
+                "ortho_version": meta.get("ortho_version") or file_run_meta.get("ortho_version"),
+                "run_meta": file_run_meta or None,
+            })
+        return results
+
     shared_dir = paths.intermediate_shared_pop
-    if not shared_dir.exists():
-        return [], None
+    versions: list[dict] = _scan_dir(shared_dir) if shared_dir.exists() else []
 
-    # Build a lookup from version → metadata stored in THIS run's outputs
-    run_meta: dict[int, dict] = {
-        v["version"]: v
-        for v in run_outputs.get("plot_boundaries", [])
-    }
-
-    versions: list[dict] = []
-    for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson"):
-        m = _re.search(r"_v(\d+)\.geojson$", f.name)
-        if not m:
-            continue
-        vnum = int(m.group(1))
-        meta = run_meta.get(vnum, {})
-        created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
-
-        # Read run_meta embedded in the file (saved by save_plot_grid); fall back to
-        # per-run DB metadata for versions created by this run.
-        file_run_meta: dict = {}
-        try:
-            raw = json.loads(f.read_text())
-            file_run_meta = raw.get("_run_meta") or {}
-        except Exception:
-            pass
-
-        versions.append({
-            "version": vnum,
-            "name": meta.get("name"),
-            "geojson_path": paths.rel(f),
-            "created_at": created_at,
-            "stitch_version": meta.get("stitch_version") or file_run_meta.get("stitch_version"),
-            "ortho_version": meta.get("ortho_version") or file_run_meta.get("ortho_version"),
-            "run_meta": file_run_meta or None,
-        })
+    # If no local versions, fall back to sibling experiment directories
+    if not versions and extra_dirs:
+        for d in extra_dirs:
+            versions = _scan_dir(d)
+            if versions:
+                break
 
     versions.sort(key=lambda x: x["version"])
     active = run_outputs.get("active_plot_boundary_version")
@@ -2608,22 +2652,20 @@ def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
     return versions, active
 
 
-def _find_sibling_plot_boundary(session: "Session", run: "PipelineRun") -> "Path | None":
-    """Return the most-recently-modified versioned plot boundary from a sibling
-    run in the SAME pipeline that has a different experiment but the same
-    location and population.
-
-    Uses DB queries to ensure we only cross experiment boundaries within the
-    same pipeline — not across different pipelines that share a workspace.
+def _find_sibling_shared_dirs(session: "Session", run: "PipelineRun") -> "list[Path]":
+    """Return the intermediate_shared_pop directories of sibling runs that belong
+    to the same pipeline, location, and population but a different experiment.
+    Deduplicated and ordered most-recently-modified first.
     """
-    import re as _re
-
     from sqlmodel import select as _select
-
     from app.models.pipeline import PipelineRun as _PR
 
     pipeline = session.get(Pipeline, run.pipeline_id)
+    if not pipeline:
+        return []
     workspace = session.get(Workspace, pipeline.workspace_id)
+    if not workspace:
+        return []
 
     sibling_runs = session.exec(
         _select(_PR).where(
@@ -2634,28 +2676,69 @@ def _find_sibling_plot_boundary(session: "Session", run: "PipelineRun") -> "Path
         )
     ).all()
 
-    best: "Path | None" = None
-    best_mtime = 0.0
-    seen_dirs: set[Path] = set()
-
+    seen: set[Path] = set()
+    dirs: list[tuple[float, Path]] = []
     for sibling in sibling_runs:
         try:
-            sibling_paths = RunPaths.from_db(session=session, run=sibling, workspace=workspace)
+            sp = RunPaths.from_db(session=session, run=sibling, workspace=workspace)
         except Exception:
             continue
-        shared_dir = sibling_paths.intermediate_shared_pop
-        if shared_dir in seen_dirs or not shared_dir.is_dir():
-            continue
-        seen_dirs.add(shared_dir)
-        for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson"):
-            if not _re.search(r"_v(\d+)\.geojson$", f.name):
-                continue
+        d = sp.intermediate_shared_pop
+        if d not in seen and d.is_dir():
+            seen.add(d)
+            dirs.append((d.stat().st_mtime, d))
+
+    dirs.sort(key=lambda x: x[0], reverse=True)
+    return [d for _, d in dirs]
+
+
+def _find_sibling_plot_boundary(session: "Session", run: "PipelineRun") -> "Path | None":
+    """Return the most-recently-modified plot boundary file from a sibling
+    experiment in the same pipeline.  Prefers versioned files, falls back to
+    the canonical Plot-Boundary-WGS84.geojson.
+    """
+    import re as _re
+
+    sibling_dirs = _find_sibling_shared_dirs(session, run)
+    logger.info(
+        "[sibling_pb] pipeline=%s run_experiment=%s — found %d sibling dir(s)",
+        run.pipeline_id, run.experiment, len(sibling_dirs),
+    )
+
+    best: "Path | None" = None
+    best_mtime = 0.0
+
+    for shared_dir in sibling_dirs:
+        logger.info("[sibling_pb] checking dir=%s", shared_dir)
+        candidates = [
+            f for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson")
+            if _re.search(r"_v(\d+)\.geojson$", f.name)
+        ]
+        canonical = shared_dir / "Plot-Boundary-WGS84.geojson"
+        if not candidates and canonical.exists():
+            candidates = [canonical]
+        for f in candidates:
             mtime = f.stat().st_mtime
             if mtime > best_mtime:
                 best_mtime = mtime
                 best = f
 
+    logger.info("[sibling_pb] result: %s", best)
     return best
+
+
+def _find_sibling_pop_boundary(session: "Session", run: "PipelineRun") -> "dict | None":
+    """Return the parsed pop boundary GeoJSON from the most-recently-modified
+    sibling experiment directory that has a Pop-Boundary-WGS84.geojson.
+    """
+    for shared_dir in _find_sibling_shared_dirs(session, run):
+        candidate = shared_dir / "Pop-Boundary-WGS84.geojson"
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text())
+            except Exception:
+                continue
+    return None
 
 
 @router.get("/pipeline-runs/{id}/orthomosaics")
@@ -2830,7 +2913,8 @@ def list_plot_boundaries(
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     outputs = run.outputs or {}
-    versions, active_v = _discover_pb_versions(paths, outputs)
+    sibling_dirs = _find_sibling_shared_dirs(session, run)
+    versions, active_v = _discover_pb_versions(paths, outputs, extra_dirs=sibling_dirs)
     return [{"active": v["version"] == active_v, **v} for v in versions]
 
 
