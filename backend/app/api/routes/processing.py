@@ -987,13 +987,19 @@ def apply_boundaries(
     existing_steps = dict(run.steps_completed or {})
 
     if not paths.plot_boundary_geojson.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "No Plot-Boundary-WGS84.geojson found for this pipeline. "
-                "Complete the Plot Boundary Prep step on an earlier run first."
-            ),
-        )
+        _sibling = _find_sibling_plot_boundary(session, run)
+        if _sibling is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No Plot-Boundary-WGS84.geojson found for this pipeline. "
+                    "Complete the Plot Boundary Prep step on an earlier run first."
+                ),
+            )
+        import shutil as _shutil
+        paths.intermediate_shared_pop.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_sibling, paths.plot_boundary_geojson)
+        logger.info("Auto-copied plot boundary from sibling experiment: %s", _sibling)
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
     existing_steps["plot_boundary_prep"] = True
 
@@ -1989,6 +1995,19 @@ def orthomosaic_info(
                     except Exception:
                         pass
 
+        # Priority 3: sibling experiment boundary (same workspace/year/location/population)
+        if existing_geojson is None:
+            _sibling_pb = _find_sibling_plot_boundary(session, run)
+            if _sibling_pb is not None:
+                try:
+                    raw = json.loads(_sibling_pb.read_text())
+                    existing_grid_settings = existing_grid_settings or raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                    logger.info("Loaded plot boundary from sibling experiment: %s", _sibling_pb)
+                except Exception:
+                    pass
+
         # Load existing pop boundary if present
         existing_pop = None
         if paths.pop_boundary_geojson.exists():
@@ -2048,6 +2067,19 @@ def orthomosaic_info(
                     existing_grid_settings = raw.pop("grid_settings", None)
                     raw.pop("_run_meta", None)
                     existing_geojson = raw
+                except Exception:
+                    pass
+
+        # Sibling experiment fallback (same workspace/year/location/population)
+        if existing_geojson is None:
+            _sibling_pb = _find_sibling_plot_boundary(session, run)
+            if _sibling_pb is not None:
+                try:
+                    raw = json.loads(_sibling_pb.read_text())
+                    existing_grid_settings = existing_grid_settings or raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                    logger.info("Loaded plot boundary from sibling experiment: %s", _sibling_pb)
                 except Exception:
                     pass
 
@@ -2574,6 +2606,56 @@ def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
     if active is None and versions:
         active = versions[-1]["version"]
     return versions, active
+
+
+def _find_sibling_plot_boundary(session: "Session", run: "PipelineRun") -> "Path | None":
+    """Return the most-recently-modified versioned plot boundary from a sibling
+    run in the SAME pipeline that has a different experiment but the same
+    location and population.
+
+    Uses DB queries to ensure we only cross experiment boundaries within the
+    same pipeline — not across different pipelines that share a workspace.
+    """
+    import re as _re
+
+    from sqlmodel import select as _select
+
+    from app.models.pipeline import PipelineRun as _PR
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+
+    sibling_runs = session.exec(
+        _select(_PR).where(
+            _PR.pipeline_id == run.pipeline_id,
+            _PR.location == run.location,
+            _PR.population == run.population,
+            _PR.experiment != run.experiment,
+        )
+    ).all()
+
+    best: "Path | None" = None
+    best_mtime = 0.0
+    seen_dirs: set[Path] = set()
+
+    for sibling in sibling_runs:
+        try:
+            sibling_paths = RunPaths.from_db(session=session, run=sibling, workspace=workspace)
+        except Exception:
+            continue
+        shared_dir = sibling_paths.intermediate_shared_pop
+        if shared_dir in seen_dirs or not shared_dir.is_dir():
+            continue
+        seen_dirs.add(shared_dir)
+        for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson"):
+            if not _re.search(r"_v(\d+)\.geojson$", f.name):
+                continue
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best = f
+
+    return best
 
 
 @router.get("/pipeline-runs/{id}/orthomosaics")
