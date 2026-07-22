@@ -1060,9 +1060,9 @@ def run_trait_extraction(
     if _effective_bv is not None and _effective_bv in _pb_by_version:
         _resolved_boundary_v = _effective_bv
         _resolved_boundary_name = _pb_by_version[_effective_bv].get("name")
-    elif _pb_versions_list:
+    elif _all_pb_versions:
         # Canonical boundary was used; tag with the highest discovered version
-        _last_pb = _pb_versions_list[-1]
+        _last_pb = _all_pb_versions[-1]
         _resolved_boundary_v = _last_pb["version"]
         _resolved_boundary_name = _last_pb.get("name")
 
