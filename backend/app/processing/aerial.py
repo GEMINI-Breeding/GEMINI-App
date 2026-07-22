@@ -631,6 +631,12 @@ def preview_trait_extraction(
         if _dem.exists():
             dem_path = _dem
 
+    thermal_path: Any = None
+    if ortho_entry.get("thermal"):
+        _th = paths.abs(ortho_entry["thermal"])
+        if _th.exists():
+            thermal_path = _th
+
     # Resolve boundary path
     from app.api.routes.processing import _discover_pb_versions  # type: ignore
     _pb_versions_list, _active_pbv = _discover_pb_versions(paths, run_outputs)
@@ -654,6 +660,7 @@ def preview_trait_extraction(
 
     vf: float = 0.0
     height_m: float | None = None
+    temp_avg: float | None = None
     overlay_b64: str = ""
 
     with rasterio.open(str(rgb_path)) as rgb_src:
@@ -703,6 +710,22 @@ def preview_trait_extraction(
             except Exception:
                 pass
 
+        # Temperature estimate from thermal TIF
+        if thermal_path is not None:
+            try:
+                with rasterio.open(str(thermal_path)) as th_src:
+                    gdf_th = gdf.to_crs(th_src.crs) if gdf.crs != th_src.crs else gdf
+                    th_row = gdf_th.iloc[plot_index]
+                    th_win = _from_bounds(*th_row.geometry.bounds, th_src.transform)
+                    th_data = th_src.read(1, window=th_win, boundless=True, fill_value=np.nan)
+                    if th_data.size > 0:
+                        tm = cv2.resize(mask, (th_data.shape[1], th_data.shape[0]))
+                        veg_temps = th_data[(tm > 0) & np.isfinite(th_data)]
+                        if len(veg_temps) > 0:
+                            temp_avg = round(float(np.mean(veg_temps)), 2)
+            except Exception:
+                pass
+
         # Build overlay: vegetation pixels tinted green, rest original
         overlay = rgb_arr.copy()
         veg_mask = mask > 0
@@ -723,6 +746,7 @@ def preview_trait_extraction(
         "plot_id": str(plot_id),
         "vf": vf,
         "height_m": height_m,
+        "temp_avg": temp_avg,
         "overlay_b64": overlay_b64,
         "threshold": threshold,
     }
@@ -787,11 +811,13 @@ def run_trait_extraction(
     if _ortho:
         aerial_rgb = paths.abs(_ortho["rgb"])
         aerial_dem = paths.abs(_ortho["dem"]) if _ortho.get("dem") else None
+        aerial_thermal = paths.abs(_ortho["thermal"]) if _ortho.get("thermal") else None
     else:
         # Backward-compat: old flat "orthomosaic" key
         _legacy = _outputs.get("orthomosaic")
         aerial_rgb = paths.abs(_legacy) if _legacy else paths.aerial_rgb
         aerial_dem = paths.aerial_dem if paths.aerial_dem.exists() else None
+        aerial_thermal = None
 
     if not aerial_rgb.exists():
         raise FileNotFoundError(
@@ -839,6 +865,7 @@ def run_trait_extraction(
           "total": n_plots, "progress": 0})
 
     has_dem = aerial_dem is not None and aerial_dem.exists()
+    has_thermal = aerial_thermal is not None and aerial_thermal.exists()
     records: list[dict] = []
 
     with rasterio.open(aerial_rgb) as rgb_src:
@@ -857,6 +884,14 @@ def run_trait_extraction(
             gdf_dem = gdf_raster
         else:
             gdf_dem = None
+
+        thermal_src = rasterio.open(aerial_thermal) if has_thermal else None
+        if thermal_src is not None and thermal_src.crs != rgb_src.crs:
+            gdf_thermal = gdf.to_crs(thermal_src.crs)
+        elif thermal_src is not None:
+            gdf_thermal = gdf_raster
+        else:
+            gdf_thermal = None
 
         try:
             for i, (_, row) in enumerate(gdf_raster.iterrows()):
@@ -912,6 +947,18 @@ def run_trait_extraction(
                                 if h > 0:
                                     height_m = round(h, 4)
 
+                # Average canopy temperature from thermal TIF (vegetation pixels only)
+                temp_avg: float | None = None
+                if thermal_src is not None and gdf_thermal is not None:
+                    thermal_row = gdf_thermal.iloc[i]
+                    thermal_win = _from_bounds(*thermal_row.geometry.bounds, thermal_src.transform)
+                    thermal_data = thermal_src.read(1, window=thermal_win, boundless=True, fill_value=np.nan)
+                    if thermal_data.size > 0:
+                        tm = cv2.resize(mask, (thermal_data.shape[1], thermal_data.shape[0]))
+                        veg_temps = thermal_data[(tm > 0) & np.isfinite(thermal_data)]
+                        if len(veg_temps) > 0:
+                            temp_avg = round(float(np.mean(veg_temps)), 4)
+
                 # Derive plot ID and labels from GeoJSON properties
                 plot_id = (
                     _prop(orig_row, "Plot", "plot", "plot_id")
@@ -922,14 +969,42 @@ def run_trait_extraction(
                 tier = _prop(orig_row, "Tier", "tier", "row")
                 label = _prop(orig_row, "Label", "label", "accession", "Accession")
 
-                # Save cropped image to both canonical dir (backward compat) and versioned dir.
+                # Build crop filename stem: plot_{id}_{label} when label exists
+                _label_suffix = f"_{label}" if label else ""
+                _crop_stem = f"plot_{plot_id}{_label_suffix}"
+
+                # Save RGB crop to both canonical dir (backward compat) and versioned dir.
                 # Use Pillow instead of cv2.imwrite — OpenCV silently returns False on Windows
                 # when codec DLLs are missing or paths exceed MAX_PATH.
                 from PIL import Image as _PILImage
                 _pil_img = _PILImage.fromarray(rgb_arr)
-                crop_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
+                crop_path = paths.cropped_images_dir / f"{_crop_stem}.png"
                 _pil_img.save(str(crop_path))
-                _pil_img.save(str(_versioned_crops_dir / f"plot_{plot_id}.png"))
+                _pil_img.save(str(_versioned_crops_dir / f"{_crop_stem}.png"))
+
+                # Save DEM crop as single-band GeoTIFF (versioned dir only)
+                if dem_src is not None and gdf_dem is not None and dem_data.size > 0:
+                    from rasterio.windows import transform as _win_transform
+                    _dem_crop_path = _versioned_crops_dir / f"{_crop_stem}_dem.tif"
+                    with rasterio.open(
+                        str(_dem_crop_path), "w",
+                        driver="GTiff", height=dem_data.shape[0], width=dem_data.shape[1],
+                        count=1, dtype=dem_data.dtype, crs=dem_src.crs,
+                        transform=_win_transform(dem_window, dem_src.transform),
+                    ) as _dst:
+                        _dst.write(dem_data, 1)
+
+                # Save thermal crop as single-band GeoTIFF (versioned dir only)
+                if thermal_src is not None and gdf_thermal is not None and thermal_data.size > 0:
+                    from rasterio.windows import transform as _win_transform
+                    _thermal_crop_path = _versioned_crops_dir / f"{_crop_stem}_thermal.tif"
+                    with rasterio.open(
+                        str(_thermal_crop_path), "w",
+                        driver="GTiff", height=thermal_data.shape[0], width=thermal_data.shape[1],
+                        count=1, dtype=thermal_data.dtype, crs=thermal_src.crs,
+                        transform=_win_transform(thermal_win, thermal_src.transform),
+                    ) as _dst:
+                        _dst.write(thermal_data, 1)
 
                 record: dict[str, Any] = {
                     "plot_id": plot_id,
@@ -940,6 +1015,8 @@ def run_trait_extraction(
                 }
                 if height_m is not None:
                     record["Height_95p_meters"] = height_m
+                if temp_avg is not None:
+                    record["Temp_veg_avg_C"] = temp_avg
 
                 records.append(record)
 
@@ -947,11 +1024,14 @@ def run_trait_extraction(
                 emit({"event": "progress", "index": i, "total": n_plots,
                       "progress": pct,
                       "message": f"Plot {plot_id}: VF={vf:.3f}"
-                                 + (f", H={height_m:.3f}m" if height_m is not None else "")})
+                                 + (f", H={height_m:.3f}m" if height_m is not None else "")
+                                 + (f", T={temp_avg:.2f}°C" if temp_avg is not None else "")})
 
         finally:
             if dem_src is not None:
                 dem_src.close()
+            if thermal_src is not None:
+                thermal_src.close()
 
     if not records:
         raise RuntimeError("No plot traits could be extracted. Check plot boundaries and orthomosaic overlap.")
@@ -960,7 +1040,7 @@ def run_trait_extraction(
     df_traits = pd.DataFrame(records)
     gdf_out = gdf.copy()
 
-    for col in ["Vegetation_Fraction", "Height_95p_meters"]:
+    for col in ["Vegetation_Fraction", "Height_95p_meters", "Temp_veg_avg_C"]:
         if col in df_traits.columns:
             gdf_out[col] = df_traits[col].values
 

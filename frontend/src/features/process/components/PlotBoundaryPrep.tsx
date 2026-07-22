@@ -695,6 +695,8 @@ function GridSettingsPanel({
   onUndo,
   onRedo,
   onClearAll,
+  onFlipVertical,
+  onFlipHorizontal,
 }: {
   options: GridOptions;
   onChange: (opts: GridOptions) => void;
@@ -719,6 +721,8 @@ function GridSettingsPanel({
   onUndo?: () => void;
   onRedo?: () => void;
   onClearAll?: () => void;
+  onFlipVertical?: () => void;
+  onFlipHorizontal?: () => void;
 }) {
   const [minimized, setMinimized] = useState(false);
   const [dangerOpen, setDangerOpen] = useState(false);
@@ -884,6 +888,34 @@ function GridSettingsPanel({
               Move
             </Button>
           </div>
+
+          {/* Flip buttons — shown when a grid exists */}
+          {featureCount > 0 && (onFlipVertical || onFlipHorizontal) && (
+            <div className="grid grid-cols-2 gap-1.5">
+              {onFlipVertical && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  title="Flip across horizontal axis (top ↔ bottom)"
+                  onClick={onFlipVertical}
+                >
+                  Flip ↕
+                </Button>
+              )}
+              {onFlipHorizontal && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  title="Flip across vertical axis (left ↔ right)"
+                  onClick={onFlipHorizontal}
+                >
+                  Flip ↔
+                </Button>
+              )}
+            </div>
+          )}
 
           {/* Select all / clear / delete — shown in select mode when plots exist */}
           {interactionMode === "select" && featureCount > 0 && (
@@ -1831,6 +1863,32 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
     }
   }
 
+  function flipGrid(axis: "vertical" | "horizontal") {
+    if (!previewGeoJson) return;
+    const allCoords = previewGeoJson.features.flatMap((f) =>
+      (f.geometry as GeoJSON.Polygon).coordinates[0]
+    );
+    const lats = allCoords.map((p) => p[1]);
+    const lons = allCoords.map((p) => p[0]);
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+    const newFeatures = previewGeoJson.features.map((f) => {
+      const geom = f.geometry as GeoJSON.Polygon;
+      const newCoords = geom.coordinates.map((ring) =>
+        ring.map(([lon, lat]) =>
+          axis === "vertical"
+            ? [lon, 2 * centerLat - lat]
+            : [2 * centerLon - lon, lat]
+        )
+      );
+      return { ...f, geometry: { ...geom, coordinates: newCoords } };
+    });
+    const fc = { ...previewGeoJson, features: newFeatures };
+    setPreviewGeoJson(fc);
+    setSelectedIndexes([]);
+    pushHistory(fc);
+  }
+
   function handleClearAll() {
     setPreviewGeoJson(null);
     setSelectedIndexes([]);
@@ -2058,6 +2116,8 @@ export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onS
             onUndo={undo}
             onRedo={redo}
             onClearAll={handleClearAll}
+            onFlipVertical={() => flipGrid("vertical")}
+            onFlipHorizontal={() => flipGrid("horizontal")}
           />
         )}
         {!hasBoundary && (

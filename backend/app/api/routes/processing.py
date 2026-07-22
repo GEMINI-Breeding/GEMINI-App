@@ -986,14 +986,22 @@ def apply_boundaries(
     existing_outputs = dict(run.outputs or {})
     existing_steps = dict(run.steps_completed or {})
 
+    import shutil as _shutil
+
     if not paths.plot_boundary_geojson.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "No Plot-Boundary-WGS84.geojson found for this pipeline. "
-                "Complete the Plot Boundary Prep step on an earlier run first."
-            ),
-        )
+        _sibling = _find_sibling_plot_boundary(session, run)
+        if _sibling is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No Plot-Boundary-WGS84.geojson found for this pipeline. "
+                    "Complete the Plot Boundary Prep step on an earlier run first."
+                ),
+            )
+        paths.intermediate_shared_pop.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_sibling, paths.plot_boundary_geojson)
+        logger.info("Auto-copied plot boundary from sibling experiment: %s", _sibling)
+
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
     existing_steps["plot_boundary_prep"] = True
 
@@ -1034,6 +1042,32 @@ def get_field_design(
     paths = _get_paths(session, run)
 
     csv_path = paths.field_design_csv()
+
+    # Fall back to a sibling experiment's field design (same pipeline/location/population)
+    if not csv_path:
+        from sqlmodel import select as _sel_fd
+        from app.models.pipeline import PipelineRun as _PR_fd
+        pipeline_fd = session.get(Pipeline, run.pipeline_id)
+        workspace_fd = session.get(Workspace, pipeline_fd.workspace_id) if pipeline_fd else None
+        if workspace_fd:
+            siblings_fd = session.exec(
+                _sel_fd(_PR_fd).where(
+                    _PR_fd.pipeline_id == run.pipeline_id,
+                    _PR_fd.location == run.location,
+                    _PR_fd.population == run.population,
+                    _PR_fd.experiment != run.experiment,
+                )
+            ).all()
+            for sib in siblings_fd:
+                try:
+                    sib_paths = RunPaths.from_db(session=session, run=sib, workspace=workspace_fd)
+                    csv_path = sib_paths.field_design_csv()
+                    if csv_path:
+                        logger.info("Field design loaded from sibling experiment %s: %s", sib.experiment, csv_path)
+                        break
+                except Exception:
+                    continue
+
     if not csv_path:
         return {"available": False, "rows": [], "row_count": 0, "col_count": 0}
 
@@ -1959,7 +1993,8 @@ def orthomosaic_info(
         bounds = _read_tif_bounds(tif)
 
         _outputs = run.outputs or {}
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+        _sibling_dirs = _find_sibling_shared_dirs(session, run)
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs, extra_dirs=_sibling_dirs)
 
         existing_geojson = None
         existing_grid_settings = None
@@ -1989,13 +2024,28 @@ def orthomosaic_info(
                     except Exception:
                         pass
 
-        # Load existing pop boundary if present
+        # Priority 3: sibling experiment boundary (same workspace/year/location/population)
+        if existing_geojson is None:
+            _sibling_pb = _find_sibling_plot_boundary(session, run)
+            if _sibling_pb is not None:
+                try:
+                    raw = json.loads(_sibling_pb.read_text())
+                    existing_grid_settings = existing_grid_settings or raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                    logger.info("Loaded plot boundary from sibling experiment: %s", _sibling_pb)
+                except Exception:
+                    pass
+
+        # Load existing pop boundary if present; fall back to sibling experiment
         existing_pop = None
         if paths.pop_boundary_geojson.exists():
             try:
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
+        if existing_pop is None:
+            existing_pop = _find_sibling_pop_boundary(session, run)
 
         # Stitching versions that have a combined_mosaic.tif
         _stitchings = list(_outputs.get("stitchings", []))
@@ -2033,7 +2083,8 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _versions = _get_ortho_versions(_outputs)
         _active_v = _outputs.get("active_ortho_version")
-        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs)
+        _sibling_dirs = _find_sibling_shared_dirs(session, run)
+        _pb_versions, _active_pbv = _discover_pb_versions(paths, _outputs, extra_dirs=_sibling_dirs)
 
         # Load the active/latest versioned boundary. _active_pbv defaults to the most
         # recent file on disk, so runs that haven't saved their own boundary yet will
@@ -2051,12 +2102,27 @@ def orthomosaic_info(
                 except Exception:
                     pass
 
+        # Sibling experiment fallback (same workspace/year/location/population)
+        if existing_geojson is None:
+            _sibling_pb = _find_sibling_plot_boundary(session, run)
+            if _sibling_pb is not None:
+                try:
+                    raw = json.loads(_sibling_pb.read_text())
+                    existing_grid_settings = existing_grid_settings or raw.pop("grid_settings", None)
+                    raw.pop("_run_meta", None)
+                    existing_geojson = raw
+                    logger.info("Loaded plot boundary from sibling experiment: %s", _sibling_pb)
+                except Exception:
+                    pass
+
         existing_pop = None
         if paths.pop_boundary_geojson.exists():
             try:
                 existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
             except Exception:
                 pass
+        if existing_pop is None:
+            existing_pop = _find_sibling_pop_boundary(session, run)
 
         return {
             "available": True,
@@ -2352,26 +2418,31 @@ def get_plot_boundary_version(
 
 def _tif_preview_jpeg(tif: "Path", max_size: int) -> bytes:
     """
-    Return a JPEG thumbnail of *tif* at most *max_size* pixels on the longest side.
+    Return a JPEG thumbnail of *tif* at most *max_size* pixels on the longest side,
+    reprojected to Web Mercator (EPSG:3857) so Leaflet ImageOverlay displays it
+    without distortion when stretched to the WGS84 bounding box.
 
     Fast path: if the TIF has GDAL overview levels (pyramids), rasterio reads
     only the appropriate overview instead of the full file — this is 100-1000x
     faster for large TIFs (e.g. 10 GB → reads a few MB).
 
     Disk cache: the result is written to a sidecar
-    ``{tif}.preview_{max_size}.jpg`` so subsequent requests are served from
+    ``{tif}.preview_{max_size}_merc.jpg`` so subsequent requests are served from
     disk without any rasterio work at all.
     """
     import io
     import numpy as np
     import rasterio
+    from rasterio.crs import CRS
     from rasterio.enums import Resampling
     from PIL import Image
     from pathlib import Path as _Path
 
-    cache_path = _Path(str(tif) + f".preview_{max_size}.jpg")
+    cache_path = _Path(str(tif) + f".preview_{max_size}_merc.jpg")
     if cache_path.exists():
         return cache_path.read_bytes()
+
+    mercator = CRS.from_epsg(3857)
 
     # Determine whether the TIF has usable overview levels
     ov_idx: int | None = None
@@ -2379,26 +2450,32 @@ def _tif_preview_jpeg(tif: "Path", max_size: int) -> bytes:
         overviews = src.overviews(1) if src.count > 0 else []
         if overviews:
             target_factor = max(src.width, src.height) / max_size
-            # Pick the smallest overview factor that still covers target resolution
             for i, factor in enumerate(overviews):
                 if factor >= target_factor:
                     ov_idx = i
                     break
             if ov_idx is None:
-                ov_idx = len(overviews) - 1  # coarsest available
+                ov_idx = len(overviews) - 1
 
-    # Read at chosen overview level (or full resolution if none)
     open_kw: dict = {"overview_level": ov_idx} if ov_idx is not None else {}
     with rasterio.open(tif, **open_kw) as src:
-        scale = min(max_size / src.width, max_size / src.height, 1.0)
-        out_w = max(1, int(src.width * scale))
-        out_h = max(1, int(src.height * scale))
         n_bands = min(src.count, 3)
-        data = src.read(
-            list(range(1, n_bands + 1)),
-            out_shape=(n_bands, out_h, out_w),
-            resampling=Resampling.average,
-        )
+        bands = list(range(1, n_bands + 1))
+
+        # Warp to Web Mercator so pixels match Leaflet's coordinate space.
+        # Fall back to native read if the TIF has no CRS.
+        if src.crs is not None and src.crs.to_epsg() != 3857:
+            from rasterio.vrt import WarpedVRT
+            with WarpedVRT(src, crs=mercator, resampling=Resampling.average) as vrt:
+                scale = min(max_size / vrt.width, max_size / vrt.height, 1.0)
+                out_w = max(1, int(vrt.width * scale))
+                out_h = max(1, int(vrt.height * scale))
+                data = vrt.read(bands, out_shape=(n_bands, out_h, out_w), resampling=Resampling.average)
+        else:
+            scale = min(max_size / src.width, max_size / src.height, 1.0)
+            out_w = max(1, int(src.width * scale))
+            out_h = max(1, int(src.height * scale))
+            data = src.read(bands, out_shape=(n_bands, out_h, out_w), resampling=Resampling.average)
 
     img = np.transpose(data, (1, 2, 0))
     if img.dtype != np.uint8:
@@ -2520,9 +2597,17 @@ def _get_plot_boundary_versions(outputs: dict) -> list[dict]:
     return list(outputs.get("plot_boundaries", []))
 
 
-def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict], int | None]:
+def _discover_pb_versions(
+    paths: RunPaths,
+    run_outputs: dict,
+    extra_dirs: "list[Path] | None" = None,
+) -> tuple[list[dict], int | None]:
     """
     Discover plot-boundary versions by scanning the shared population directory on disk.
+
+    If the local directory has no versioned files and extra_dirs is supplied,
+    those directories (e.g. sibling experiments) are scanned instead so that
+    the run always sees the latest boundaries without requiring a local copy.
 
     Returns (versions_list, active_version) where versions_list is sorted by version
     number.  Metadata (name, created_at) is populated from run_outputs when available,
@@ -2531,49 +2616,140 @@ def _discover_pb_versions(paths: RunPaths, run_outputs: dict) -> tuple[list[dict
     import re as _re
     from datetime import datetime as _dt
 
+    def _scan_dir(d: Path) -> list[dict]:
+        results = []
+        run_meta: dict[int, dict] = {
+            v["version"]: v
+            for v in run_outputs.get("plot_boundaries", [])
+        }
+        for f in d.glob("Plot-Boundary-WGS84_v*.geojson"):
+            m = _re.search(r"_v(\d+)\.geojson$", f.name)
+            if not m:
+                continue
+            vnum = int(m.group(1))
+            meta = run_meta.get(vnum, {})
+            created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
+            file_run_meta: dict = {}
+            try:
+                raw = json.loads(f.read_text())
+                file_run_meta = raw.get("_run_meta") or {}
+            except Exception:
+                pass
+            results.append({
+                "version": vnum,
+                "name": meta.get("name"),
+                "geojson_path": paths.rel(f),
+                "created_at": created_at,
+                "stitch_version": meta.get("stitch_version") or file_run_meta.get("stitch_version"),
+                "ortho_version": meta.get("ortho_version") or file_run_meta.get("ortho_version"),
+                "run_meta": file_run_meta or None,
+            })
+        return results
+
     shared_dir = paths.intermediate_shared_pop
-    if not shared_dir.exists():
-        return [], None
+    versions: list[dict] = _scan_dir(shared_dir) if shared_dir.exists() else []
 
-    # Build a lookup from version → metadata stored in THIS run's outputs
-    run_meta: dict[int, dict] = {
-        v["version"]: v
-        for v in run_outputs.get("plot_boundaries", [])
-    }
-
-    versions: list[dict] = []
-    for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson"):
-        m = _re.search(r"_v(\d+)\.geojson$", f.name)
-        if not m:
-            continue
-        vnum = int(m.group(1))
-        meta = run_meta.get(vnum, {})
-        created_at = meta.get("created_at") or _dt.utcfromtimestamp(f.stat().st_mtime).isoformat()
-
-        # Read run_meta embedded in the file (saved by save_plot_grid); fall back to
-        # per-run DB metadata for versions created by this run.
-        file_run_meta: dict = {}
-        try:
-            raw = json.loads(f.read_text())
-            file_run_meta = raw.get("_run_meta") or {}
-        except Exception:
-            pass
-
-        versions.append({
-            "version": vnum,
-            "name": meta.get("name"),
-            "geojson_path": paths.rel(f),
-            "created_at": created_at,
-            "stitch_version": meta.get("stitch_version") or file_run_meta.get("stitch_version"),
-            "ortho_version": meta.get("ortho_version") or file_run_meta.get("ortho_version"),
-            "run_meta": file_run_meta or None,
-        })
+    # If no local versions, fall back to sibling experiment directories
+    if not versions and extra_dirs:
+        for d in extra_dirs:
+            versions = _scan_dir(d)
+            if versions:
+                break
 
     versions.sort(key=lambda x: x["version"])
     active = run_outputs.get("active_plot_boundary_version")
     if active is None and versions:
         active = versions[-1]["version"]
     return versions, active
+
+
+def _find_sibling_shared_dirs(session: "Session", run: "PipelineRun") -> "list[Path]":
+    """Return the intermediate_shared_pop directories of sibling runs that belong
+    to the same pipeline, location, and population but a different experiment.
+    Deduplicated and ordered most-recently-modified first.
+    """
+    from sqlmodel import select as _select
+    from app.models.pipeline import PipelineRun as _PR
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    if not pipeline:
+        return []
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    if not workspace:
+        return []
+
+    sibling_runs = session.exec(
+        _select(_PR).where(
+            _PR.pipeline_id == run.pipeline_id,
+            _PR.location == run.location,
+            _PR.population == run.population,
+            _PR.experiment != run.experiment,
+        )
+    ).all()
+
+    seen: set[Path] = set()
+    dirs: list[tuple[float, Path]] = []
+    for sibling in sibling_runs:
+        try:
+            sp = RunPaths.from_db(session=session, run=sibling, workspace=workspace)
+        except Exception:
+            continue
+        d = sp.intermediate_shared_pop
+        if d not in seen and d.is_dir():
+            seen.add(d)
+            dirs.append((d.stat().st_mtime, d))
+
+    dirs.sort(key=lambda x: x[0], reverse=True)
+    return [d for _, d in dirs]
+
+
+def _find_sibling_plot_boundary(session: "Session", run: "PipelineRun") -> "Path | None":
+    """Return the most-recently-modified plot boundary file from a sibling
+    experiment in the same pipeline.  Prefers versioned files, falls back to
+    the canonical Plot-Boundary-WGS84.geojson.
+    """
+    import re as _re
+
+    sibling_dirs = _find_sibling_shared_dirs(session, run)
+    logger.info(
+        "[sibling_pb] pipeline=%s run_experiment=%s — found %d sibling dir(s)",
+        run.pipeline_id, run.experiment, len(sibling_dirs),
+    )
+
+    best: "Path | None" = None
+    best_mtime = 0.0
+
+    for shared_dir in sibling_dirs:
+        logger.info("[sibling_pb] checking dir=%s", shared_dir)
+        candidates = [
+            f for f in shared_dir.glob("Plot-Boundary-WGS84_v*.geojson")
+            if _re.search(r"_v(\d+)\.geojson$", f.name)
+        ]
+        canonical = shared_dir / "Plot-Boundary-WGS84.geojson"
+        if not candidates and canonical.exists():
+            candidates = [canonical]
+        for f in candidates:
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best = f
+
+    logger.info("[sibling_pb] result: %s", best)
+    return best
+
+
+def _find_sibling_pop_boundary(session: "Session", run: "PipelineRun") -> "dict | None":
+    """Return the parsed pop boundary GeoJSON from the most-recently-modified
+    sibling experiment directory that has a Pop-Boundary-WGS84.geojson.
+    """
+    for shared_dir in _find_sibling_shared_dirs(session, run):
+        candidate = shared_dir / "Pop-Boundary-WGS84.geojson"
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text())
+            except Exception:
+                continue
+    return None
 
 
 @router.get("/pipeline-runs/{id}/orthomosaics")
@@ -2748,7 +2924,8 @@ def list_plot_boundaries(
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     outputs = run.outputs or {}
-    versions, active_v = _discover_pb_versions(paths, outputs)
+    sibling_dirs = _find_sibling_shared_dirs(session, run)
+    versions, active_v = _discover_pb_versions(paths, outputs, extra_dirs=sibling_dirs)
     return [{"active": v["version"] == active_v, **v} for v in versions]
 
 
@@ -2846,18 +3023,29 @@ def download_crops_for_boundary(
     if not ortho_path.exists():
         raise HTTPException(404, "Orthomosaic file not found on disk")
 
-    from app.processing.aerial import crop_plots_to_stream
-
-    images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
-    if not images:
-        raise HTTPException(404, "No plots could be cropped from the given boundary and ortho")
-
     filename = f"crops_{run.date}_{run.population}_b{boundary_version}_o{ortho_version}.zip"
+
+    # Prefer pre-saved versioned crops (RGB + DEM + thermal) when available.
+    versioned_dir = paths.cropped_images_versioned(ortho_version)
+    saved_crops = (
+        sorted(p for p in versioned_dir.iterdir()
+               if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif"})
+        if versioned_dir.exists() else []
+    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for img_name, img_bytes in images:
-            zf.writestr(img_name, img_bytes)
+        if saved_crops:
+            for img_path in saved_crops:
+                zf.write(img_path, img_path.name)
+        else:
+            # Fallback: on-demand RGB-only crop from the orthomosaic
+            from app.processing.aerial import crop_plots_to_stream
+            images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
+            if not images:
+                raise HTTPException(404, "No plots could be cropped from the given boundary and ortho")
+            for img_name, img_bytes in images:
+                zf.writestr(img_name, img_bytes)
     buf.seek(0)
 
     return StreamingResponse(
@@ -2870,10 +3058,11 @@ def download_crops_for_boundary(
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
 
 class _UseUploadedOrthoRequest(BaseModel):
-    file_upload_id: str | None = None      # RGB orthomosaic FileUpload UUID
-    dem_file_upload_id: str | None = None  # DEM FileUpload UUID (optional)
-    save_mode: str = "new_version"         # "new_version" | "replace"
-    name: str | None = None                # optional name for the version
+    file_upload_id: str | None = None          # RGB orthomosaic FileUpload UUID
+    dem_file_upload_id: str | None = None      # DEM FileUpload UUID (optional)
+    thermal_file_upload_id: str | None = None  # Thermal TIF FileUpload UUID (optional)
+    save_mode: str = "new_version"             # "new_version" | "replace"
+    name: str | None = None                    # optional name for the version
 
 
 @router.post("/pipeline-runs/{id}/use-uploaded-ortho")
@@ -2915,7 +3104,8 @@ def use_uploaded_ortho(
     )
 
     # ── Locate the source TIF ──────────────────────────────────────────────────
-    _bc_dem_tifs: list = []  # populated by backward-compat branch; used by DEM auto-detection below
+    _bc_dem_tifs: list = []      # populated by backward-compat branch; used by DEM auto-detection below
+    _bc_thermal_tifs: list = []  # populated by backward-compat branch; used by Thermal auto-detection below
     if req.file_upload_id:
         try:
             fu_id = uuid.UUID(req.file_upload_id)
@@ -2933,9 +3123,13 @@ def use_uploaded_ortho(
             and ".converting" not in p.stem
         )
         logger.info("[use_uploaded_ortho] all tif_files in src_dir: %s", [p.name for p in _all_fu_tifs])
-        # RGB and DEM share the same Orthomosaic/ folder — classify to avoid picking
-        # the DEM (which sorts before RGB alphabetically: D < R).
-        tif_files = [p for p in _all_fu_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        # RGB, DEM, and Thermal all share the same Orthomosaic/ folder — classify by canonical stem.
+        tif_files = [
+            p for p in _all_fu_tifs
+            if p.stem.endswith("-RGB")
+            or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower()
+                and not p.stem.endswith("-Thermal") and "thermal" not in p.stem.lower())
+        ]
         if not tif_files:
             tif_files = _all_fu_tifs  # fallback: no classification possible, take first
         logger.info("[use_uploaded_ortho] RGB tif_files (after classification): %s", [p.name for p in tif_files])
@@ -2959,12 +3153,17 @@ def use_uploaded_ortho(
             and ".converting" not in p.stem
         )
         logger.info("[use_uploaded_ortho] backward-compat all tif_files: %s", [p.name for p in _all_tifs])
-        # Classify by canonical name ({date}-RGB.tif / {date}-DEM.tif) with
-        # fallback to "dem" stem check for any pre-existing non-canonical files.
-        tif_files = [p for p in _all_tifs if p.stem.endswith("-RGB") or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower())]
+        # Classify by canonical stem ({date}-RGB, {date}-DEM, {date}-Thermal).
+        tif_files = [
+            p for p in _all_tifs
+            if p.stem.endswith("-RGB")
+            or (not p.stem.endswith("-DEM") and "dem" not in p.stem.lower()
+                and not p.stem.endswith("-Thermal") and "thermal" not in p.stem.lower())
+        ]
         _bc_dem_tifs = [p for p in _all_tifs if p.stem.endswith("-DEM") or ("dem" in p.stem.lower() and not p.stem.endswith("-RGB"))]
-        logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s",
-                    [p.name for p in tif_files], [p.name for p in _bc_dem_tifs])
+        _bc_thermal_tifs = [p for p in _all_tifs if p.stem.endswith("-Thermal") or "thermal" in p.stem.lower()]
+        logger.info("[use_uploaded_ortho] backward-compat rgb=%s dem=%s thermal=%s",
+                    [p.name for p in tif_files], [p.name for p in _bc_dem_tifs], [p.name for p in _bc_thermal_tifs])
 
     if not tif_files:
         logger.error("[use_uploaded_ortho] No TIF files found — file_upload_id=%s src_dir=%s",
@@ -3002,6 +3201,57 @@ def use_uploaded_ortho(
         # Backward-compat: auto-pick DEM from the same Orthomosaic folder
         src_dem = _bc_dem_tifs[0]
         logger.info("[use_uploaded_ortho] auto-detected DEM from Orthomosaic folder: %s", src_dem.name)
+    else:
+        # Explicit RGB path: scan the same source directory for a canonical DEM TIF
+        _explicit_dem = [p for p in src_tif.parent.rglob("*")
+                         if p.suffix.lower() in {".tif", ".tiff"}
+                         and (p.stem.endswith("-DEM") or "dem" in p.stem.lower())
+                         and ".original" not in p.stem and ".converting" not in p.stem]
+        if _explicit_dem:
+            src_dem = sorted(_explicit_dem)[0]
+            logger.info("[use_uploaded_ortho] auto-detected DEM from RGB folder: %s", src_dem.name)
+
+    # ── Locate the Thermal TIF ────────────────────────────────────────────────
+    src_thermal: Path | None = None
+    if req.thermal_file_upload_id:
+        try:
+            thermal_fu_id = uuid.UUID(req.thermal_file_upload_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid thermal_file_upload_id")
+        thermal_fu = _get_fu(session=session, id=thermal_fu_id)
+        if not thermal_fu:
+            raise HTTPException(status_code=404, detail="Thermal file upload not found")
+        thermal_src_dir = _data_root / thermal_fu.storage_path
+        _all_thermal_tifs = sorted(
+            p for p in thermal_src_dir.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"}
+            and ".original" not in p.stem
+            and ".converting" not in p.stem
+        )
+        # Prefer canonical {date}-Thermal stem; fall back to first TIF if no match.
+        thermal_tifs = [p for p in _all_thermal_tifs if p.stem.endswith("-Thermal") or "thermal" in p.stem.lower()]
+        if not thermal_tifs:
+            thermal_tifs = _all_thermal_tifs
+        if thermal_tifs:
+            src_thermal = thermal_tifs[0]
+        else:
+            logger.warning(
+                "[use_uploaded_ortho] Thermal upload %s has no TIF files — thermal will be skipped",
+                req.thermal_file_upload_id,
+            )
+    elif not req.file_upload_id and _bc_thermal_tifs:
+        # Backward-compat: auto-pick Thermal TIF from the same Orthomosaic folder
+        src_thermal = _bc_thermal_tifs[0]
+        logger.info("[use_uploaded_ortho] auto-detected Thermal from Orthomosaic folder: %s", src_thermal.name)
+    else:
+        # Explicit RGB path: scan the same source directory for a canonical Thermal TIF
+        _explicit_thermal = [p for p in src_tif.parent.rglob("*")
+                             if p.suffix.lower() in {".tif", ".tiff"}
+                             and (p.stem.endswith("-Thermal") or "thermal" in p.stem.lower())
+                             and ".original" not in p.stem and ".converting" not in p.stem]
+        if _explicit_thermal:
+            src_thermal = sorted(_explicit_thermal)[0]
+            logger.info("[use_uploaded_ortho] auto-detected Thermal from RGB folder: %s", src_thermal.name)
 
     paths.make_dirs()
 
@@ -3043,12 +3293,21 @@ def use_uploaded_ortho(
     else:
         logger.info("No DEM TIF found in upload — plant height will be unavailable for v%d", target_version)
 
+    dest_thermal: Path | None = None
+    if src_thermal:
+        dest_thermal = paths.aerial_thermal_versioned(target_version)
+        _link_or_copy(src_thermal, dest_thermal)
+        logger.info("Registered uploaded Thermal %s → %s (v%d)", src_thermal.name, dest_thermal.name, target_version)
+    else:
+        logger.info("No Thermal TIF found in upload — temperature extraction will be unavailable for v%d", target_version)
+
     # ── Update outputs list ────────────────────────────────────────────────────
     new_entry = {
         "version": target_version,
         "name": req.name,
         "rgb": paths.rel(dest_tif),
         "dem": paths.rel(dest_dem) if dest_dem else None,
+        "thermal": paths.rel(dest_thermal) if dest_thermal else None,
         "pyramid": None,
         "created_at": _dt.now(_tz.utc).isoformat(),
         "imported": True,
@@ -4026,11 +4285,13 @@ def download_crops(
     if pipeline and pipeline.type == "aerial":
         outputs = run.outputs or {}
         if ortho_version is not None:
-            # Verify this version actually has crops recorded
             versioned_key = f"cropped_images_v{ortho_version}"
             if versioned_key not in outputs and "cropped_images" not in outputs:
                 raise HTTPException(status_code=404, detail="No crop images found for this orthomosaic version")
-        crop_dir = paths.cropped_images_dir
+            versioned_dir = paths.cropped_images_versioned(ortho_version)
+            crop_dir = versioned_dir if versioned_dir.exists() else paths.cropped_images_dir
+        else:
+            crop_dir = paths.cropped_images_dir
     else:
         version = int((run.outputs or {}).get("stitching_version") or 1)
         crop_dir = paths.agrowstitch_dir(version)
@@ -4063,10 +4324,14 @@ def download_crops(
         img.save(out, format="PNG")
         return out.getvalue()
 
+    # Trait extraction download: RGB only (PNGs) — TIF crops (DEM/thermal) are
+    # served via the plot-boundary download for multi-modal analysis.
+    rgb_only = [p for p in images_on_disk if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if images_on_disk:
-            for img_path in images_on_disk:
+        if rgb_only:
+            for img_path in rgb_only:
                 if square_size:
                     zf.writestr(img_path.with_suffix(".png").name, _square_crop_bytes(img_path.read_bytes(), square_size))
                 else:

@@ -160,30 +160,46 @@ def read_field_values(
 
 
 # GET /files/uploaded-orthos — list all Orthomosaic uploads for the import picker
-def _ortho_upload_list(session: Any, current_user: Any, data_type: str) -> list[dict]:
-    """Shared helper: list uploads of a given orthomosaic data_type with their TIF filenames."""
+def _ortho_upload_list(
+    session: Any,
+    current_user: Any,
+    data_types: list[str],
+    file_stem_suffix: str | None = None,
+) -> list[dict]:
+    """
+    List orthomosaic-family uploads with their TIF filenames.
+
+    data_types   — which data_type values to include (e.g. ["Orthomosaic", "Thermal"])
+    file_stem_suffix — when set, only include records that have at least one TIF whose stem
+                       ends with this string (e.g. "-Thermal"), and only return matching TIFs.
+                       When None, return all TIFs in the directory.
+    """
     from sqlmodel import select as _sel
     from app.models import FileUpload as _FU
 
     rows = session.exec(
         _sel(_FU)
-        .where(_FU.data_type == data_type)
+        .where(_FU.data_type.in_(data_types))
         .where(_FU.owner_id == current_user.id)
     ).all()
 
-    # Use the user-configured data_root so that storage_path (relative to data_root)
-    # resolves correctly on systems with a custom data directory.
     data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
     result = []
     for r in rows:
         storage = data_root / r.storage_path
-        tifs: list[str] = []
-        if storage.is_dir():
-            tifs = sorted(
-                p.name
-                for p in storage.rglob("*")
-                if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
-            )[:5]
+        if not storage.is_dir():
+            continue
+        all_tifs = sorted(
+            p.name
+            for p in storage.rglob("*")
+            if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+        )
+        if file_stem_suffix:
+            tifs = [n for n in all_tifs if Path(n).stem.endswith(file_stem_suffix)]
+            if not tifs:
+                continue  # this record doesn't have the requested modality
+        else:
+            tifs = all_tifs[:5]
         result.append({
             "id": str(r.id),
             "experiment": r.experiment,
@@ -204,8 +220,8 @@ def list_uploaded_orthos(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> list[dict]:
-    """Return all FileUpload records with data_type='Orthomosaic' (RGB), with TIF filenames."""
-    return _ortho_upload_list(session, current_user, "Orthomosaic")
+    """Return all Orthomosaic FileUpload records with their TIF filenames."""
+    return _ortho_upload_list(session, current_user, ["Orthomosaic"])
 
 
 @router.get("/uploaded-dems")
@@ -213,8 +229,25 @@ def list_uploaded_dems(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> list[dict]:
-    """Return all FileUpload records with data_type='Orthomosaic DEM', with TIF filenames."""
-    return _ortho_upload_list(session, current_user, "Orthomosaic DEM")
+    """Return Orthomosaic records that contain a DEM TIF (canonical stem ending in -DEM)."""
+    return _ortho_upload_list(
+        session, current_user,
+        ["Orthomosaic", "Orthomosaic DEM"],
+        file_stem_suffix="-DEM",
+    )
+
+
+@router.get("/uploaded-thermals")
+def list_uploaded_thermals(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Return Orthomosaic records that contain a Thermal TIF (canonical stem ending in -Thermal)."""
+    return _ortho_upload_list(
+        session, current_user,
+        ["Orthomosaic", "Thermal"],
+        file_stem_suffix="-Thermal",
+    )
 
 
 # GET /files/{id} (get single upload)
@@ -943,6 +976,11 @@ def _copy_local_stream(
     logger.info(f"SSE stream – destination: {dest_dir}")
 
     file_names = [Path(p).name for p in body.file_paths]
+    logger.info(
+        "SSE stream – %d file(s) to copy: %s",
+        len(body.file_paths),
+        [Path(p).name for p in body.file_paths],
+    )
     yield _sse_event(
         {"event": "start", "total": len(body.file_paths), "files": file_names}
     )
@@ -959,6 +997,7 @@ def _copy_local_stream(
         name = src.name
 
         if not src.exists():
+            logger.warning("SSE stream – source not found: %s", file_path)
             yield _sse_event(
                 {
                     "event": "error",
@@ -977,6 +1016,8 @@ def _copy_local_stream(
             canonical_name = f"{body.date}-RGB.tif"
         elif body.data_type == "Orthomosaic DEM" and body.date:
             canonical_name = f"{body.date}-DEM.tif"
+        elif body.data_type == "Thermal" and body.date:
+            canonical_name = f"{body.date}-Thermal.tif"
         else:
             canonical_name = name
         dest_path = dest_dir / canonical_name
@@ -1010,6 +1051,10 @@ def _copy_local_stream(
                 except OSError as e:
                     logger.warning("Could not remove stale .bin %s: %s", dest_path.name, e)
 
+        logger.info(
+            "SSE stream – copying %s → %s (dest_exists=%s, reupload=%s)",
+            name, dest_path.name, dest_path.exists(), body.reupload,
+        )
         if dest_path.exists() and not body.reupload:
             skipped.append(name)
             yield _sse_event(
@@ -1133,6 +1178,7 @@ class CheckExistingRequest(BaseModel):
     target_root_dir: str
     file_names: list[str]
     data_type: str = ""
+    date: str | None = None
 
 
 @router.post("/check-existing")
@@ -1158,6 +1204,22 @@ def check_existing_files(
             for f in dest_dir.rglob("*") if f.is_file()
         )
         return {"existing": body.file_names if has_images else []}
+
+    # For data types that use a canonical destination name, check the canonical name
+    # rather than the original filename — otherwise re-uploads are silently skipped.
+    canonical: str | None = None
+    if body.date:
+        if body.data_type == "Orthomosaic":
+            canonical = f"{body.date}-RGB.tif"
+        elif body.data_type == "Orthomosaic DEM":
+            canonical = f"{body.date}-DEM.tif"
+        elif body.data_type == "Thermal":
+            canonical = f"{body.date}-Thermal.tif"
+        elif body.data_type == "Synced Metadata":
+            canonical = "msgs_synced.csv"
+
+    if canonical and (dest_dir / canonical).exists():
+        return {"existing": body.file_names}
 
     existing = [
         name for name in body.file_names
@@ -1190,7 +1252,9 @@ def copy_local_files_stream(
         file_upload = create_file_upload(
             session=session,
             file_in=FileUploadCreate(
-                data_type=body.data_type,
+                # DEM and Thermal are sub-modalities of Orthomosaic — fold them into
+                # one "Orthomosaic" record so the Manage tab shows a single row per dir.
+                data_type="Orthomosaic" if body.data_type in ("Orthomosaic DEM", "Thermal") else body.data_type,
                 experiment=body.experiment or "",
                 location=body.location or "",
                 population=body.population or "",
