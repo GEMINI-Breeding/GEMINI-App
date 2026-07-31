@@ -318,6 +318,15 @@ jobs:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C debuginfo=0"
 
+      - name: Download VC++ Redistributable (Windows)
+        if: runner.os == 'Windows'
+        working-directory: frontend/src-tauri
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
+            -OutFile "vc_redist.x64.exe" -UseBasicParsing
+          Write-Host "VC++ Redist size: $([math]::Round((Get-Item vc_redist.x64.exe).Length / 1MB, 1)) MB"
+
       - name: Create installer (Windows — Inno Setup)
         if: runner.os == 'Windows'
         working-directory: frontend

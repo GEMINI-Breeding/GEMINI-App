@@ -78,6 +78,11 @@ function Build-Tauri {
 
     Set-Location $Frontend
 
+    # Download VC++ Redistributable for bundling in the installer
+    Log "Downloading Visual C++ Redistributable..."
+    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
+        -OutFile "src-tauri\vc_redist.x64.exe" -UseBasicParsing
+
     if (-not (Test-Path "node_modules")) { npm install }
 
     $env:CARGO_INCREMENTAL = "0"
