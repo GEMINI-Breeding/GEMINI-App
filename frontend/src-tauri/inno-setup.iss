@@ -87,26 +87,28 @@ Filename: "{app}\{#AppExeName}"; \
 // an outdated-but-present runtime still loads, so torch's own
 // ctypes.CDLL("msvcp140.dll") probe passes, but torch_cuda.dll then fails to
 // bind a newer export and raises [WinError 127] (ERROR_PROC_NOT_FOUND).
+// Minimum is 14.40.33810 (VS 2022 17.10). Inno's Pascal Script has no local
+// `const` section, so the key and bounds are plain variables.
 function VCRedistNeedsInstall: Boolean;
-const
-  RuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
-  MinMajor = 14; MinMinor = 40; MinBld = 33810;   // VS 2022 17.10
 var
+  RuntimeKey: String;
   Installed, Major, Minor, Bld: Cardinal;
 begin
+  RuntimeKey := 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
   Result := True;   // default: install it
-  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Installed', Installed) then Exit;
+  // HKLM64: the x64 runtime records itself in the 64-bit registry view.
+  if not RegQueryDWordValue(HKLM64, RuntimeKey, 'Installed', Installed) then Exit;
   if Installed <> 1 then Exit;
-  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Major', Major) then Exit;
-  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Minor', Minor) then Exit;
-  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Bld',   Bld)   then Exit;
+  if not RegQueryDWordValue(HKLM64, RuntimeKey, 'Major', Major) then Exit;
+  if not RegQueryDWordValue(HKLM64, RuntimeKey, 'Minor', Minor) then Exit;
+  if not RegQueryDWordValue(HKLM64, RuntimeKey, 'Bld',   Bld)   then Exit;
 
-  if Major <> MinMajor then
-    Result := Major < MinMajor
-  else if Minor <> MinMinor then
-    Result := Minor < MinMinor
+  if Major <> 14 then
+    Result := Major < 14
+  else if Minor <> 40 then
+    Result := Minor < 40
   else
-    Result := Bld < MinBld;
+    Result := Bld < 33810;
 end;
 
 [UninstallDelete]
