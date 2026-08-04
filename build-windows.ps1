@@ -44,7 +44,7 @@ function Build-Backend {
     # which fails on a user's machine with [WinError 127] loading torch_cuda.dll.
     Log "Installing PyTorch (CUDA cu128)..."
     uv pip install --reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
-    uv run python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build')"
+    uv run --no-sync python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build')"
     if ($LASTEXITCODE -ne 0) { Die "PyTorch CUDA install failed verification" }
 
     if (Test-Path "vendor\AgRowStitch")   { uv pip install -e vendor\AgRowStitch --no-build-isolation }
@@ -69,7 +69,9 @@ function Build-Backend {
         if (Test-Path $FarmNgDir) { Remove-Item -Recurse -Force $FarmNgDir }
     }
 
-    uv run pyinstaller --clean gemi-backend.spec
+    # --no-sync: plain `uv run` re-syncs to uv.lock first, which would undo the
+    # cu128 torch and the vendored AgRowStitch / LightGlue installs above.
+    uv run --no-sync pyinstaller --clean gemi-backend.spec
 
     $DestDir = Join-Path $Frontend "src-tauri\binaries\gemi-backend"
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
