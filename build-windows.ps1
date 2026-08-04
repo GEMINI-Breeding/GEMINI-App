@@ -37,6 +37,16 @@ function Build-Backend {
     Set-Location $Backend
     uv sync
 
+    # PyTorch with CUDA — uv.lock pins the CPU wheel, so `uv sync` above always
+    # installs CPU torch and this must overwrite it. --reinstall is required:
+    # without it the unpinned `torch` requirement is considered already satisfied,
+    # leaving CUDA DLLs from an earlier install beside CPU DLLs from this one,
+    # which fails on a user's machine with [WinError 127] loading torch_cuda.dll.
+    Log "Installing PyTorch (CUDA cu128)..."
+    uv pip install --reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    uv run python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build')"
+    if ($LASTEXITCODE -ne 0) { Die "PyTorch CUDA install failed verification" }
+
     if (Test-Path "vendor\AgRowStitch")   { uv pip install -e vendor\AgRowStitch --no-build-isolation }
     else                                  { Log "WARNING: vendor\AgRowStitch not found" }
     # LightGlue is declared in pyproject.toml and installed by uv sync above

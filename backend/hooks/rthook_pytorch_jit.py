@@ -11,14 +11,27 @@ Problem 1 — TorchScript JIT crash:
   plain Python. Performance impact is negligible for our LightGlue usage.
 
 Problem 2 — torch_cuda.dll load failure ([WinError 127]):
-  CUDA DLLs are bundled for users with NVIDIA GPUs. On machines without a
-  compatible NVIDIA driver, torch._load_dll_libraries() raises [WinError 127]
-  at startup — CUDA_VISIBLE_DEVICES alone does NOT prevent this in newer PyTorch.
+  torch/__init__.py::_load_dll_libraries() globs *every* .dll in torch/lib and
+  loads each one via kernel32.LoadLibraryExW at import time — there is no CUDA
+  check and no device enumeration. ERROR_MOD_NOT_FOUND (126) is tolerated, but
+  ERROR_PROC_NOT_FOUND (127) raises immediately. So a torch_cuda.dll whose
+  dependency chain is unsatisfiable crashes `import torch` outright, long
+  before any device selection happens. This is why neither CUDA_VISIBLE_DEVICES
+  nor selecting CPU mode avoids it.
 
-  Fix: probe for nvcuda.dll (the NVIDIA kernel driver DLL, present only when a
-  compatible NVIDIA GPU driver is installed) before torch loads. If the probe
-  succeeds the user has working CUDA — leave all DLLs in place so GPU is used.
-  If it fails, rename the bundled CUDA DLLs so torch falls back to CPU cleanly.
+  Notably this fires even on machines that DO have an NVIDIA GPU and driver —
+  nvcuda.dll loading successfully says nothing about whether torch_cuda.dll's
+  own imports resolve. So the driver's presence is not a usable proxy.
+
+  Fix: replicate torch's own load test against torch_cuda.dll before torch is
+  imported. If it loads, leave everything alone so the GPU is used. If it
+  fails, patch glob.glob so the CUDA DLLs are filtered out of the list
+  _load_dll_libraries() iterates, and torch imports CPU-only.
+
+  glob filtering is used rather than renaming the files because it needs no
+  write access to the install directory (per-machine installs under
+  Program Files are read-only for a non-elevated process) and mutates nothing
+  on disk, so the same bundle still works if the driver is fixed later.
 """
 
 import os
@@ -29,34 +42,61 @@ if getattr(sys, "frozen", False):
 
     if sys.platform == "win32":
         import ctypes
-        import pathlib
+        import glob as _glob_mod
+        import os.path as _osp
 
-        _cuda_prefixes = (
-            "torch_cuda", "libcuda", "libcublas", "libcufft", "libcurand",
-            "libcusolver", "libcusparse", "libcudnn", "cudart64_", "cufft64_",
-            "cublas64_", "cublaslt64_", "curand64_", "cusolver64_",
-            "cusparse64_", "cudnn64_", "nvrtc", "nvToolsExt",
+        # Lowercase — compared against a lowercased filename below.
+        # Deliberately broad (e.g. "cudnn" not "cudnn64_") so the list does not
+        # depend on wheel-specific version suffixes: cuDNN 9 ships split libs
+        # (cudnn_graph64_9.dll, cudnn_ops64_9.dll, ...) and cuBLAS ships
+        # cublasLt64_*.dll alongside cublas64_*.dll.
+        _CUDA_PREFIXES = (
+            "torch_cuda", "c10_cuda", "caffe2_nvrtc",
+            "cudnn", "cublas", "cudart", "cufft", "curand",
+            "cusolver", "cusparse", "cupti", "cufile",
+            "nvrtc", "nvtoolsext", "nvjitlink", "nvfuser",
+            "libcu",  # linux-style names occasionally present in wheels
         )
 
-        # Probe for a compatible NVIDIA driver. nvcuda.dll is the CUDA kernel
-        # driver DLL shipped with NVIDIA GPU drivers — it is NOT part of the
-        # CUDA Toolkit and cannot be bundled. Its presence means the driver
-        # supports CUDA and torch_cuda.dll will load successfully.
-        _cuda_available = False
-        try:
-            ctypes.WinDLL("nvcuda.dll")
-            _cuda_available = True
-        except OSError:
-            pass
+        def _is_cuda_dll(path):
+            name = _osp.basename(path).lower()
+            return name.endswith(".dll") and name.startswith(_CUDA_PREFIXES)
 
-        if not _cuda_available:
-            # No compatible NVIDIA driver — disable bundled CUDA DLLs so
-            # torch._load_dll_libraries() falls back to CPU without crashing.
-            _torch_lib = pathlib.Path(sys._MEIPASS) / "torch" / "lib"
-            if _torch_lib.is_dir():
-                for _dll in list(_torch_lib.glob("*.dll")):
-                    if any(_dll.name.lower().startswith(p.lower()) for p in _cuda_prefixes):
-                        try:
-                            _dll.rename(_dll.with_name(_dll.name + ".disabled"))
-                        except Exception:
-                            pass
+        _torch_lib = _osp.join(sys._MEIPASS, "torch", "lib")
+        _probe = _osp.join(_torch_lib, "torch_cuda.dll")
+
+        if _osp.isdir(_torch_lib) and _osp.exists(_probe):
+            # Mirror what _load_dll_libraries() does: put torch/lib on the DLL
+            # search path first, then LoadLibraryExW with the same flags
+            # (LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | ..._DLL_LOAD_DIR).
+            try:
+                os.add_dll_directory(_torch_lib)
+            except Exception:
+                pass
+
+            _kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+            _kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+            _prev_mode = _kernel32.SetErrorMode(0x0001)  # suppress the error dialog
+            try:
+                _handle = _kernel32.LoadLibraryExW(_probe, None, 0x00001100)
+                _cuda_ok = _handle is not None
+            except Exception:
+                _cuda_ok = False
+            finally:
+                _kernel32.SetErrorMode(_prev_mode)
+
+            if not _cuda_ok:
+                # Hide the CUDA DLLs from _load_dll_libraries()'s glob so torch
+                # imports CPU-only instead of raising on the broken DLL.
+                _orig_glob = _glob_mod.glob
+
+                def _glob_without_cuda(pathname, *args, **kwargs):
+                    results = _orig_glob(pathname, *args, **kwargs)
+                    if pathname.lower().endswith("*.dll"):
+                        results = [r for r in results if not _is_cuda_dll(r)]
+                    return results
+
+                _glob_mod.glob = _glob_without_cuda
+                # Signal to app code that GPU is unavailable in this process.
+                os.environ["GEMI_CUDA_DISABLED"] = "1"
+                os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")

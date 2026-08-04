@@ -205,12 +205,35 @@ jobs:
         working-directory: backend
         shell: bash
         run: |
-          # Install PyTorch with CUDA support — Windows default wheel is CPU-only
-          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+          # Install PyTorch with CUDA support — Windows default wheel is CPU-only.
+          #
+          # --reinstall is REQUIRED, not cosmetic. The venv is restored from cache,
+          # then `uv sync` reinstalls the CPU torch pinned in uv.lock — which
+          # overwrites torch_cpu.dll / c10.dll / torch_python.dll but leaves the
+          # CUDA DLLs from the previous run's cu128 install behind (they aren't in
+          # the CPU wheel's RECORD). Without --reinstall, the unpinned `torch`
+          # requirement is then considered already satisfied and nothing is
+          # installed, shipping CUDA DLLs from one torch build alongside CPU DLLs
+          # from another. torch_cuda.dll links against torch_cpu.dll and c10.dll,
+          # so the mismatch surfaces at import as:
+          #   OSError: [WinError 127] ... Error loading "torch_cuda.dll"
+          uv pip install --reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
           [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
           [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
           # farm-ng-amiga: no Windows wheels and farm-ng-core can't build on MSVC; non-fatal
           uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
+
+      # Fail fast if the venv ended up with CPU torch (or a CPU/CUDA mix).
+      # A mix still imports on the runner — torch tolerates ERROR_MOD_NOT_FOUND
+      # (126) for the absent GPU driver — but raises ERROR_PROC_NOT_FOUND (127)
+      # on a user's machine when torch_cuda.dll binds against mismatched
+      # torch_cpu.dll / c10.dll. Catch it here, not in a shipped installer.
+      - name: Verify PyTorch is a CUDA build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: backend
+        shell: bash
+        run: |
+          uv run python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build - the cu128 install did not take')"
 
       # Drop the uv download cache — the venv is already built and cached separately.
       # On Linux this can be 1-3 GB of wheel/sdist downloads we no longer need.

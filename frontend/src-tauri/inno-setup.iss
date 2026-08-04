@@ -82,15 +82,31 @@ Filename: "{app}\{#AppExeName}"; \
   Flags: nowait postinstall skipifsilent
 
 [Code]
+// Returns True when the installed VC++ 14.x runtime is absent OR older than
+// the minimum below. Checking only the 'Installed' flag is NOT sufficient:
+// an outdated-but-present runtime still loads, so torch's own
+// ctypes.CDLL("msvcp140.dll") probe passes, but torch_cuda.dll then fails to
+// bind a newer export and raises [WinError 127] (ERROR_PROC_NOT_FOUND).
 function VCRedistNeedsInstall: Boolean;
+const
+  RuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  MinMajor = 14; MinMinor = 40; MinBld = 33810;   // VS 2022 17.10
 var
-  Installed: Cardinal;
+  Installed, Major, Minor, Bld: Cardinal;
 begin
-  // VS 2015-2022 all share the same 14.x runtime registry key
-  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) then
-    Result := Installed <> 1
+  Result := True;   // default: install it
+  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Installed', Installed) then Exit;
+  if Installed <> 1 then Exit;
+  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Major', Major) then Exit;
+  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Minor', Minor) then Exit;
+  if not RegQueryDWordValue(HKLM, RuntimeKey, 'Bld',   Bld)   then Exit;
+
+  if Major <> MinMajor then
+    Result := Major < MinMajor
+  else if Minor <> MinMinor then
+    Result := Minor < MinMinor
   else
-    Result := True;
+    Result := Bld < MinBld;
 end;
 
 [UninstallDelete]
