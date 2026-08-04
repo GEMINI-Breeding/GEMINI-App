@@ -274,22 +274,10 @@ a = Analysis(
 )
 
 
-# Strip CUDA DLLs from the Windows bundle.
-# torch_cuda.dll and its siblings depend on nvcuda.dll from the NVIDIA driver,
-# which is NOT present on machines without a GPU or without the matching CUDA
-# toolkit. If bundled, Windows raises [WinError 127] at startup.
-# The runtime hook sets CUDA_VISIBLE_DEVICES="" so PyTorch doesn't need them.
-if sys.platform == 'win32':
-    _cuda_prefixes = (
-        'torch_cuda', 'libcuda', 'libcublas', 'libcufft', 'libcurand',
-        'libcusolver', 'libcusparse', 'libcudnn', 'cudart', 'cufft64_',
-        'cublas64_', 'cublaslt64_', 'curand64_', 'cusolver64_',
-        'cusparse64_', 'cudnn64_', 'nvrtc', 'nvToolsExt',
-    )
-    a.binaries = [
-        b for b in a.binaries
-        if not any(os.path.basename(b[0]).lower().startswith(p.lower()) for p in _cuda_prefixes)
-    ]
+# CUDA DLLs are intentionally kept in the bundle so users with NVIDIA GPUs
+# get GPU-accelerated stitching. The runtime hook (rthook_pytorch_jit.py)
+# probes for nvcuda.dll at startup and disables the bundled CUDA DLLs on
+# machines without a compatible NVIDIA driver, falling back to CPU cleanly.
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

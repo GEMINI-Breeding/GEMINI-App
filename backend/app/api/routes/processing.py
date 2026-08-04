@@ -3001,8 +3001,10 @@ def download_crops_for_boundary(
     paths = _get_paths(session, run)
     outputs = run.outputs or {}
 
-    # Resolve boundary geojson
-    versions = _get_plot_boundary_versions(outputs)
+    # Resolve boundary geojson — use _discover_pb_versions so sibling-experiment
+    # boundaries (not stored in this run's outputs) are also found.
+    _sibling_dirs = _find_sibling_shared_dirs(session, run)
+    versions, _ = _discover_pb_versions(paths, outputs, extra_dirs=_sibling_dirs)
     bv = next((v for v in versions if v["version"] == boundary_version), None)
     if not bv:
         raise HTTPException(404, f"Plot boundary version {boundary_version} not found")

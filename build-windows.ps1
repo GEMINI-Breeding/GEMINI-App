@@ -37,6 +37,16 @@ function Build-Backend {
     Set-Location $Backend
     uv sync
 
+    # PyTorch with CUDA — uv.lock pins the CPU wheel, so `uv sync` above always
+    # installs CPU torch and this must overwrite it. --reinstall is required:
+    # without it the unpinned `torch` requirement is considered already satisfied,
+    # leaving CUDA DLLs from an earlier install beside CPU DLLs from this one,
+    # which fails on a user's machine with [WinError 127] loading torch_cuda.dll.
+    Log "Installing PyTorch (CUDA cu128)..."
+    uv pip install --reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    uv run --no-sync python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build')"
+    if ($LASTEXITCODE -ne 0) { Die "PyTorch CUDA install failed verification" }
+
     if (Test-Path "vendor\AgRowStitch")   { uv pip install -e vendor\AgRowStitch --no-build-isolation }
     else                                  { Log "WARNING: vendor\AgRowStitch not found" }
     # LightGlue is declared in pyproject.toml and installed by uv sync above
@@ -59,7 +69,9 @@ function Build-Backend {
         if (Test-Path $FarmNgDir) { Remove-Item -Recurse -Force $FarmNgDir }
     }
 
-    uv run pyinstaller --clean gemi-backend.spec
+    # --no-sync: plain `uv run` re-syncs to uv.lock first, which would undo the
+    # cu128 torch and the vendored AgRowStitch / LightGlue installs above.
+    uv run --no-sync pyinstaller --clean gemi-backend.spec
 
     $DestDir = Join-Path $Frontend "src-tauri\binaries\gemi-backend"
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
@@ -77,6 +89,11 @@ function Build-Tauri {
     }
 
     Set-Location $Frontend
+
+    # Download VC++ Redistributable for bundling in the installer
+    Log "Downloading Visual C++ Redistributable..."
+    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
+        -OutFile "src-tauri\vc_redist.x64.exe" -UseBasicParsing
 
     if (-not (Test-Path "node_modules")) { npm install }
 
