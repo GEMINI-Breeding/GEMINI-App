@@ -20,6 +20,7 @@ DATA_ROOT_KEY = "data_root"
 DOCKER_CPUS_KEY = "docker_cpus"
 DOCKER_MEMORY_GB_KEY = "docker_memory_gb"
 DOCKER_SWAP_GB_KEY = "docker_swap_gb"
+DJI_THERMAL_SDK_PATH_KEY = "dji_thermal_sdk_path"
 
 
 @router.get("/data-root", response_model=AppSettingPublic)
@@ -49,6 +50,19 @@ def update_data_root(
     except Exception as exc:
         logger.warning("data_root auto-sync failed (non-fatal): %s", exc)
     return setting
+
+
+@router.get("/dji-thermal-sdk-path", response_model=AppSettingPublic)
+def read_dji_thermal_sdk_path(session: SessionDep, current_user: CurrentUser) -> Any:
+    value = get_setting(session=session, key=DJI_THERMAL_SDK_PATH_KEY) or ""
+    return AppSettingPublic(key=DJI_THERMAL_SDK_PATH_KEY, value=value)
+
+
+@router.put("/dji-thermal-sdk-path", response_model=AppSettingPublic)
+def update_dji_thermal_sdk_path(
+    *, session: SessionDep, current_user: CurrentUser, setting_in: AppSettingUpdate
+) -> Any:
+    return set_setting(session=session, key=DJI_THERMAL_SDK_PATH_KEY, value=setting_in.value)
 
 
 class DockerResourcesPublic(BaseModel):

@@ -14,14 +14,29 @@ interface DataStructureFormProps {
     date?: string;
     platform?: string;
     sensor?: string;
+    image_type?: string;
   };
   onChange?: (field: string, value: string) => void;
+  /** Suppress the Image Type picker — used where the tag is already
+   * determined automatically (e.g. the DJI thermal directory flow, which
+   * uploads thermal/RGB files as separately-tagged batches itself). */
+  hideImageType?: boolean;
 }
+
+// Placeholder tag on image uploads — not consumed by any pipeline logic yet
+// (see backend FileUpload.image_type), stored for future use e.g. auto-
+// suggesting relevant processing steps based on what kind of imagery this is.
+const IMAGE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "rgb", label: "RGB" },
+  { value: "thermal", label: "Thermal" },
+  { value: "multispectral", label: "Multispectral" },
+];
 
 export function DataStructureForm({
   fileType,
   values = {},
   onChange,
+  hideImageType = false,
 }: DataStructureFormProps) {
   const { data: fieldValues } = useQuery({
     queryKey: [
@@ -90,6 +105,35 @@ export function DataStructureForm({
             />
           );
         })}
+
+        {fileType === "Image Data" && !hideImageType && (
+          <div>
+            <label className="text-foreground mb-1.5 block text-sm">
+              Image Type <span className="text-muted-foreground">(optional)</span>
+            </label>
+            <div className="flex gap-2">
+              {IMAGE_TYPE_OPTIONS.map((opt) => {
+                const selected = values.image_type === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() =>
+                      handleChange("image_type")(selected ? "" : opt.value)
+                    }
+                    className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                      selected
+                        ? "border-primary bg-primary/5 text-foreground"
+                        : "border-border hover:border-primary/50 text-muted-foreground"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

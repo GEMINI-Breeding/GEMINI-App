@@ -5,30 +5,31 @@
  * Renders the tool at full width with a back button; "Save" navigates back.
  */
 
-import { ArrowLeft } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
-import { useQueryClient } from "@tanstack/react-query"
-import { useRef, useEffect } from "react"
-import { useProcess } from "@/contexts/ProcessContext"
-import { subscribe } from "@/lib/sseManager"
-
-import { PipelinesService, type PipelineRunPublic, type PipelinePublic } from "@/client"
-import { Button } from "@/components/ui/button"
-import { GcpPicker } from "@/features/process/components/GcpPicker"
-import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
-import { PlotMarker } from "@/features/process/components/PlotMarker"
+import { ArrowLeft } from "lucide-react"
+import { useEffect, useRef } from "react"
 import {
-  InferenceTool,
-  type InferenceRunConfig,
-  type StitchVersionOption,
+  type PipelinePublic,
+  type PipelineRunPublic,
+  PipelinesService,
+  ProcessingService,
+} from "@/client"
+import { Button } from "@/components/ui/button"
+import { useProcess } from "@/contexts/ProcessContext"
+import { analyzeApi, type TraitRecord } from "@/features/analyze/api"
+import { GcpPicker } from "@/features/process/components/GcpPicker"
+import {
   type AssociationVersionOption,
+  type InferenceRunConfig,
+  InferenceTool,
+  type StitchVersionOption,
   type TraitVersionOption,
 } from "@/features/process/components/InferenceTool"
-import { analyzeApi, type TraitRecord } from "@/features/analyze/api"
-import { ProcessingService } from "@/client"
-import { useMutation } from "@tanstack/react-query"
+import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
+import { PlotMarker } from "@/features/process/components/PlotMarker"
 import useCustomToast from "@/hooks/useCustomToast"
+import { subscribe } from "@/lib/sseManager"
 
 const STEP_LABELS: Record<string, string> = {
   plot_marking: "Plot Marking",
@@ -38,10 +39,14 @@ const STEP_LABELS: Record<string, string> = {
 }
 
 const STEP_DESCRIPTIONS: Record<string, string> = {
-  plot_marking: "Navigate through raw images and mark the start and end frame for each plot row.",
-  gcp_selection: "Select each ground control point in a drone image and mark its pixel location.",
-  plot_boundary_prep: "Draw the outer field boundary and configure plot grid dimensions. The grid is auto-generated from the field design CSV.",
-  inference: "Run Roboflow detection or segmentation on plot images and view results.",
+  plot_marking:
+    "Navigate through raw images and mark the start and end frame for each plot row.",
+  gcp_selection:
+    "Select each ground control point in a drone image and mark its pixel location.",
+  plot_boundary_prep:
+    "Draw the outer field boundary and configure plot grid dimensions. The grid is auto-generated from the field design CSV.",
+  inference:
+    "Run Roboflow detection or segmentation on plot images and view results.",
 }
 
 const apiUrl = (path: string) => {
@@ -84,7 +89,9 @@ export function RunTool() {
   const { data: stitchVersions } = useQuery<StitchVersionOption[]>({
     queryKey: ["stitch-versions", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`))
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`),
+      )
       if (!res.ok) return []
       return res.json()
     },
@@ -95,7 +102,9 @@ export function RunTool() {
   const { data: associationVersions } = useQuery<AssociationVersionOption[]>({
     queryKey: ["associations", runId],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations`))
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/associations`),
+      )
       if (!res.ok) return []
       return res.json()
     },
@@ -112,41 +121,57 @@ export function RunTool() {
   })
 
   // Map TraitRecord → TraitVersionOption
-  const traitVersions: TraitVersionOption[] | undefined = isAerial && traitRecords
-    ? traitRecords.map((r) => ({
-        version: r.version,
-        ortho_version: r.ortho_version ?? null,
-        ortho_name: r.ortho_name ?? null,
-        boundary_version: r.boundary_version ?? null,
-        boundary_name: r.boundary_name ?? null,
-        plot_count: r.plot_count ?? 0,
-      }))
-    : undefined
+  const traitVersions: TraitVersionOption[] | undefined =
+    isAerial && traitRecords
+      ? traitRecords.map((r) => ({
+          version: r.version,
+          ortho_version: r.ortho_version ?? null,
+          ortho_name: r.ortho_name ?? null,
+          boundary_version: r.boundary_version ?? null,
+          boundary_name: r.boundary_name ?? null,
+          plot_count: r.plot_count ?? 0,
+        }))
+      : undefined
 
   const pipelineConfig = (pipeline?.config ?? {}) as Record<string, any>
-  const pipelineRoboflowModels: import("@/features/process/components/InferenceTool").ModelConfig[] | undefined =
-    pipelineConfig.roboflow_models ?? undefined
-  const pipelineInferenceMode: string | undefined = pipelineConfig.inference_mode ?? undefined
-  const pipelineLocalServerUrl: string | undefined = pipelineConfig.local_server_url ?? undefined
+  const pipelineRoboflowModels:
+    | import("@/features/process/components/InferenceTool").ModelConfig[]
+    | undefined = pipelineConfig.roboflow_models ?? undefined
+  const pipelineInferenceMode: string | undefined =
+    pipelineConfig.inference_mode ?? undefined
+  const pipelineLocalServerUrl: string | undefined =
+    pipelineConfig.local_server_url ?? undefined
 
   const executeMutation = useMutation({
     mutationFn: (body: {
       step: string
-      models?: { label: string; roboflow_api_key: string; roboflow_model_id: string; task_type: string }[]
+      models?: {
+        label: string
+        source?: string
+        roboflow_api_key: string
+        roboflow_model_id: string
+        weights_path?: string
+        hf_model_id?: string
+        hf_api_key?: string
+        hf_zero_shot?: boolean
+        hf_prompt?: string
+        task_type: string
+      }[]
       stitch_version?: number
       association_version?: number
       trait_version?: number
       inference_mode?: string
       local_server_url?: string
-    }) =>
-      ProcessingService.executeStep({ id: runId, requestBody: body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
+    }) => ProcessingService.executeStep({ id: runId, requestBody: body }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
     onError: () => showErrorToast("Failed to start step"),
   })
 
   const stopMutation = useMutation({
     mutationFn: () => ProcessingService.stopStep({ id: runId }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
     onError: () => showErrorToast("Failed to stop step"),
   })
 
@@ -185,7 +210,8 @@ export function RunTool() {
     const toolLink = `/process/${workspaceId}/tool?runId=${runId}&step=${step}`
     const cancel = () => stopFnRef.current?.()
     const existing = processes.find(
-      (p) => p.runId === runId && (p.status === "running" || p.status === "pending"),
+      (p) =>
+        p.runId === runId && (p.status === "running" || p.status === "pending"),
     )
     if (existing) {
       updateProcess(existing.id, { link: toolLink, cancel })
@@ -200,14 +226,28 @@ export function RunTool() {
         cancel,
       })
     }
-  }, [isRunning, run, pipeline, runId, step, workspaceId, processes, addProcess, updateProcess])
+  }, [
+    isRunning,
+    run,
+    pipeline,
+    runId,
+    step,
+    workspaceId,
+    processes,
+    addProcess,
+    updateProcess,
+  ])
 
   // When a step finishes (complete/cancelled/error), refresh the run so
   // isRunning updates and InferenceTool's EventSource closes cleanly.
   useEffect(() => {
     if (!isRunning) return
     const unsub = subscribe(runId, (evt) => {
-      if (evt.event === "complete" || evt.event === "cancelled" || evt.event === "error") {
+      if (
+        evt.event === "complete" ||
+        evt.event === "cancelled" ||
+        evt.event === "error"
+      ) {
         queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
       }
     })
@@ -225,18 +265,16 @@ export function RunTool() {
           <div>
             <h1 className="text-xl font-semibold">{label}</h1>
             {description && (
-              <p className="text-muted-foreground text-sm mt-0.5">{description}</p>
+              <p className="text-muted-foreground text-sm mt-0.5">
+                {description}
+              </p>
             )}
           </div>
         </div>
 
         {/* Tool content */}
         {step === "plot_marking" && (
-          <PlotMarker
-            runId={runId}
-            onSaved={onSaved}
-            onCancel={goBack}
-          />
+          <PlotMarker runId={runId} onSaved={onSaved} onCancel={goBack} />
         )}
 
         {step === "gcp_selection" && (
@@ -281,7 +319,9 @@ export function RunTool() {
             inferenceMode={pipelineInferenceMode}
             localServerUrl={pipelineLocalServerUrl}
             stitchVersions={isGround ? (stitchVersions ?? []) : undefined}
-            associationVersions={isGround ? (associationVersions ?? []) : undefined}
+            associationVersions={
+              isGround ? (associationVersions ?? []) : undefined
+            }
             traitVersions={isAerial ? (traitVersions ?? []) : undefined}
           />
         )}

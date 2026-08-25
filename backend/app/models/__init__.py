@@ -54,6 +54,15 @@ from app.models.reference_data import (  # noqa: F401 — ensures tables are cre
     WorkspaceReferenceDataset,
     MatchReport,
 )
+from app.models.agml_dataset import (  # noqa: F401 — ensures table is created
+    AgmlDatasetLocation,
+    AgmlDatasetPublic,
+    LeaderboardPublic,
+    SelectedAgmlDataset,
+    SelectedAgmlDatasetCreate,
+    SelectedAgmlDatasetPublic,
+    SimilarDatasetsPublic,
+)
 from app.models.pipeline import (
     Pipeline,
     PipelineCreate,
@@ -65,4 +74,8 @@ from app.models.pipeline import (
     PipelineRunsPublic,
     PipelineRunUpdate,
     PipelineUpdate,
+)
+from app.models.weather_station_file import (  # noqa: F401 — ensures table is created
+    WeatherStationFile,
+    WeatherStationFilePublic,
 )

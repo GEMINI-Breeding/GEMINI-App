@@ -82,7 +82,12 @@ interface GcpCandidatesResponse {
   has_msgs_synced: boolean;
   raw_dir: string;
   existing_selections: ExistingSelection[];
+  mode: "rgb" | "thermal";
+  /** Whether there's a Thermal tab worth showing — independent of `mode`. */
+  thermal_available: boolean;
 }
+
+type GcpMode = "rgb" | "thermal";
 
 /** A single pixel marking for one GCP on one image. */
 interface GcpMarkEntry {
@@ -294,29 +299,54 @@ export function GcpPicker({
 
   const [filterByGcp, setFilterByGcp] = useState(true)
   const [confirmClear, setConfirmClear] = useState(false);
+  // RGB/Thermal tab — GCPs need marking separately on each: a thermal
+  // sensor's different lens/FOV/resolution means the same physical GCP
+  // lands at different pixel coordinates than in the RGB images.
+  const [mode, setMode] = useState<GcpMode>("rgb");
 
-  const { data, isLoading, refetch } = useQuery<GcpCandidatesResponse>({
-    queryKey: ["gcp-candidates", runId, filterByGcp],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        filter_by_gcp: String(filterByGcp),
-      });
-      return fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-candidates?${params}`),
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-          },
-        }
-      ).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<GcpCandidatesResponse>;
-      });
-    },
+  const fetchGcpCandidates = (candidateMode: GcpMode) => {
+    const params = new URLSearchParams({
+      filter_by_gcp: String(filterByGcp),
+      mode: candidateMode,
+    });
+    return fetch(
+      apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-candidates?${params}`),
+      {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }
+    ).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json() as Promise<GcpCandidatesResponse>;
+    });
+  };
+
+  const { data: rgbData, isLoading: rgbLoading, refetch: refetchRgb } = useQuery<GcpCandidatesResponse>({
+    queryKey: ["gcp-candidates", runId, filterByGcp, "rgb"],
+    queryFn: () => fetchGcpCandidates("rgb"),
+  });
+  const thermalAvailable = rgbData?.thermal_available ?? false;
+  const { data: thermalData, isLoading: thermalLoading, refetch: refetchThermal } = useQuery<GcpCandidatesResponse>({
+    queryKey: ["gcp-candidates", runId, filterByGcp, "thermal"],
+    queryFn: () => fetchGcpCandidates("thermal"),
+    enabled: thermalAvailable,
   });
 
-  // Multiple marks per GCP: label → list of {image, pixel_x, pixel_y}
-  const [markings, setMarkings] = useState<Record<string, GcpMarkEntry[]>>({});
+  const data = mode === "thermal" ? thermalData : rgbData;
+  const isLoading = mode === "thermal" ? thermalLoading : rgbLoading;
+  const refetch = () => {
+    refetchRgb();
+    if (thermalAvailable) refetchThermal();
+  };
+
+  // Multiple marks per GCP: label → list of {image, pixel_x, pixel_y}.
+  // Kept as two independent buckets (not reset on tab switch) since RGB and
+  // thermal marks are saved together — see saveMutation below.
+  const [rgbMarkings, setRgbMarkings] = useState<Record<string, GcpMarkEntry[]>>({});
+  const [thermalMarkings, setThermalMarkings] = useState<Record<string, GcpMarkEntry[]>>({});
+  const markings = mode === "thermal" ? thermalMarkings : rgbMarkings;
+  const setMarkings = mode === "thermal" ? setThermalMarkings : setRgbMarkings;
   const [activeGcpLabel, setActiveGcpLabel] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [replaceMode, setReplaceMode] = useState(false);
@@ -537,6 +567,18 @@ export function GcpPicker({
     // Don't change selectedImage — user stays at the same image position
   }
 
+  // ── RGB/Thermal tab switch — different image set, same active GCP ────────
+
+  function switchMode(next: GcpMode) {
+    if (next === mode) return;
+    setMode(next);
+    setSelectedImage(null);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    // activeGcpLabel intentionally kept — same physical GCP, just now
+    // marking it on the other image set.
+  }
+
   // ── Navigate through marked images for the active GCP ────────────────────
 
   // Marked images for active GCP sorted by their index in allImages
@@ -698,35 +740,59 @@ export function GcpPicker({
   const unmarked = gcps.filter(
     (g) => !markings[g.label] || markings[g.label].length === 0
   );
-  const totalMarked = gcps.length - unmarked.length;
-  const canSave = totalMarked > 0;
+  // Enabled if either tab has marks — Save always commits both (see
+  // buildGcpPayload below), so this shouldn't be gated on just the
+  // currently-active tab.
+  const canSave =
+    Object.values(rgbMarkings).some((m) => m.length > 0) ||
+    Object.values(thermalMarkings).some((m) => m.length > 0);
+
+  // Builds {gcp_selections, image_gps} for one tab's dataset — shared by
+  // both RGB and thermal, called with each tab's own data/marks so Save
+  // commits whichever tab(s) have marks, regardless of which is active.
+  function buildGcpPayload(
+    forData: GcpCandidatesResponse | undefined,
+    forMarkings: Record<string, GcpMarkEntry[]>,
+  ) {
+    const forGcps = forData?.gcps ?? [];
+    const forImages = forData?.images ?? [];
+    const selections = Object.entries(forMarkings).flatMap(([label, marks]) => {
+      const gcp = forGcps.find((g) => g.label === label);
+      if (!gcp) return [];
+      return marks.map((m) => ({
+        label,
+        image: m.image,
+        pixel_x: m.pixel_x,
+        pixel_y: m.pixel_y,
+        lat: gcp.lat,
+        lon: gcp.lon,
+        alt: gcp.alt,
+      }));
+    });
+    const imageGps = forImages.map((img) => ({
+      image: img.name,
+      lat: img.lat ?? 0,
+      lon: img.lon ?? 0,
+      alt: img.alt ?? 0,
+    }));
+    return { selections, imageGps };
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      // Flatten all marks into a list of {label, image, pixel_x, pixel_y, lat, lon, alt}
-      const selections = Object.entries(markings).flatMap(([label, marks]) => {
-        const gcp = gcps.find((g) => g.label === label)!;
-        return marks.map((m) => ({
-          label,
-          image: m.image,
-          pixel_x: m.pixel_x,
-          pixel_y: m.pixel_y,
-          lat: gcp.lat,
-          lon: gcp.lon,
-          alt: gcp.alt,
-        }));
-      });
-      const imageGps = allImages.map((img) => ({
-        image: img.name,
-        lat: img.lat ?? 0,
-        lon: img.lon ?? 0,
-        alt: img.alt ?? 0,
-      }));
+      const rgb = buildGcpPayload(rgbData, rgbMarkings);
+      const thermal = thermalAvailable ? buildGcpPayload(thermalData, thermalMarkings) : null;
       return ProcessingService.saveGcpSelection({
         id: runId,
         requestBody: {
-          gcp_selections: selections as unknown as { [key: string]: unknown }[],
-          image_gps: imageGps as unknown as { [key: string]: unknown }[],
+          gcp_selections: rgb.selections as unknown as { [key: string]: unknown }[],
+          image_gps: rgb.imageGps as unknown as { [key: string]: unknown }[],
+          ...(thermal && thermal.selections.length > 0
+            ? {
+                thermal_gcp_selections: thermal.selections as unknown as { [key: string]: unknown }[],
+                thermal_image_gps: thermal.imageGps as unknown as { [key: string]: unknown }[],
+              }
+            : {}),
         },
       });
     },
@@ -799,17 +865,25 @@ export function GcpPicker({
             </code>
           </p>
           <p className="text-xs">
-            Make sure the data sync step completed successfully.
+            {mode === "thermal"
+              ? "Make sure the Thermal Conversion step completed successfully."
+              : "Make sure the data sync step completed successfully."}
           </p>
         </div>
       </div>
     );
   }
 
+  // Thermal GeoTIFFs aren't directly browser-renderable — use the same
+  // colorized-PNG preview endpoint the Guided Upload thermal flow uses.
   const imgSrc = selectedImage
-    ? apiUrl(
-        `/api/v1/files/serve?path=${encodeURIComponent(rawDir + "/" + selectedImage)}`
-      )
+    ? mode === "thermal"
+      ? apiUrl(
+          `/api/v1/thermal/preview?path=${encodeURIComponent(rawDir + "/" + selectedImage)}`
+        )
+      : apiUrl(
+          `/api/v1/files/serve?path=${encodeURIComponent(rawDir + "/" + selectedImage)}`
+        )
     : null;
 
   return (
@@ -830,6 +904,32 @@ export function GcpPicker({
         <Button variant="ghost" size="sm" data-onboarding="gcp-replace-file" onClick={() => setReplaceMode(true)}>
           Replace GCP file
         </Button>
+
+        {thermalAvailable && (
+          <>
+            <div className="bg-border mx-1 h-5 w-px" />
+            <div className="bg-muted flex items-center gap-0.5 rounded-md p-0.5">
+              <button
+                type="button"
+                onClick={() => switchMode("rgb")}
+                className={`rounded px-2 py-1 text-xs transition-colors ${
+                  mode === "rgb" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                RGB
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode("thermal")}
+                className={`rounded px-2 py-1 text-xs transition-colors ${
+                  mode === "thermal" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                Thermal
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="bg-border mx-1 h-5 w-px" />
 

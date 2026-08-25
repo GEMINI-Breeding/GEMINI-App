@@ -31,6 +31,7 @@ hiddenimports = [
     'app.api.routes.pipelines',
     'app.api.routes.processing',
     'app.api.routes.analyze',
+    'app.api.routes.agml_datasets',
     'app.core.config',
     'app.core.db',
     'app.core.security',
@@ -43,6 +44,7 @@ hiddenimports = [
     'app.models.common',
     'app.models.workspace',
     'app.models.pipeline',
+    'app.models.agml_dataset',
     'app.crud',
     'app.crud.user',
     'app.crud.item',
@@ -55,6 +57,7 @@ hiddenimports = [
     'app.processing.aerial',
     'app.processing.geo_utils',
     'app.processing.inference_utils',
+    'app.processing.agml_utils',
     # Core dependencies
     'email_validator',
     'passlib.handlers.bcrypt',
@@ -134,6 +137,61 @@ try:
 except Exception:
     pass
 
+# ultralytics — local YOLO weights inference (detection/segmentation)
+try:
+    hiddenimports += collect_submodules('ultralytics')
+except Exception as e:
+    import warnings
+    warnings.warn(f"ultralytics not found — local weights inference will be broken in the built app: {e}", stacklevel=1)
+
+# transformers + timm — local HuggingFace model inference (pipeline-based)
+try:
+    hiddenimports += collect_submodules('transformers')
+    hiddenimports += collect_submodules('timm')
+except Exception as e:
+    import warnings
+    warnings.warn(f"transformers/timm not found — HuggingFace inference will be broken in the built app: {e}", stacklevel=1)
+
+# onnx / onnxruntime / onnxslim — .onnx exports of Ultralytics local-weights models
+try:
+    hiddenimports += collect_submodules('onnxruntime')
+    hiddenimports += collect_submodules('onnx')
+    hiddenimports += collect_submodules('onnxslim')
+except Exception as e:
+    import warnings
+    warnings.warn(f"onnx/onnxruntime not found — .onnx local weights inference will be broken in the built app: {e}", stacklevel=1)
+
+# agml — public agricultural dataset catalog (metadata/discovery only, no
+# training). Pulls in HF `datasets` (+ pyarrow) and `albumentations`.
+try:
+    hiddenimports += collect_submodules('agml')
+except Exception as e:
+    import warnings
+    warnings.warn(f"agml not found — AgML dataset browsing will be broken in the built app: {e}", stacklevel=1)
+
+try:
+    hiddenimports += collect_submodules('datasets')
+    hiddenimports += collect_submodules('pyarrow')
+except Exception as e:
+    import warnings
+    warnings.warn(f"datasets/pyarrow not found — AgML dataset browsing will be broken in the built app: {e}", stacklevel=1)
+
+try:
+    hiddenimports += collect_submodules('albumentations')
+except Exception:
+    pass
+
+# dji_thermal_sdk — thin ctypes wrapper for the proprietary DJI Thermal SDK
+# native library (libdirp.so/.dll). The wrapper itself is a small pip package
+# (no native binary bundled); the actual .so/.dll is downloaded separately by
+# the user and its folder configured via Settings — this only needs to
+# ensure the ctypes wrapper module itself is bundled.
+try:
+    hiddenimports += collect_submodules('dji_thermal_sdk')
+except Exception as e:
+    import warnings
+    warnings.warn(f"dji_thermal_sdk not found — thermal image conversion will be broken in the built app: {e}", stacklevel=1)
+
 # farm-ng-amiga — Amiga .bin extraction SDK
 try:
     hiddenimports += collect_submodules('farm_ng')
@@ -179,6 +237,17 @@ datas += [
     ('bin_to_images/__init__.py',       'docker/bin-extractor/bin_to_images'),
 ]
 
+# Docker build context for DJI thermal conversion on macOS — DJI ships no
+# native macOS library, so the app runs it in a small Linux container built
+# from this context (see backend/app/processing/thermal_utils.py:
+# _convert_dji_rjpeg_docker). No proprietary code is bundled here — the
+# vendored libdirp.so (see dji_thermal_sdk vendoring below) is bind-mounted
+# into the container at run time, not baked into this image.
+datas += [
+    ('docker/dji-thermal/Dockerfile',       'docker/dji-thermal'),
+    ('docker/dji-thermal/measure_rjpeg.py', 'docker/dji-thermal'),
+]
+
 # farm_ng_core / farm_ng_amiga — bin_to_images uses importlib.metadata to find these;
 # copy_metadata includes the .dist-info so PackageNotFoundError doesn't occur at runtime.
 try:
@@ -189,6 +258,33 @@ try:
     datas += copy_metadata('farm_ng_amiga')
 except Exception:
     pass
+
+# transformers/timm/huggingface_hub use importlib.metadata to check optional-dep
+# versions at import time (same class of issue as farm_ng_core above).
+for _pkg in ('transformers', 'timm', 'huggingface_hub', 'tokenizers', 'safetensors'):
+    try:
+        datas += copy_metadata(_pkg)
+    except Exception:
+        pass
+
+# agml's bundled dataset catalog + benchmark JSON files (agml/_assets/*.json)
+# are loaded via package-relative paths at runtime — same class of gotcha as
+# ultralytics' YAML configs (see docs/INSTRUCTIONS.md): without bundling
+# these as datas, the dataset browser/leaderboard will be empty in the
+# frozen app even though `import agml` succeeds.
+try:
+    datas += collect_data_files('agml')
+except Exception as e:
+    import warnings
+    warnings.warn(f"agml data files not found — dataset catalog will be empty in the built app: {e}", stacklevel=1)
+
+# datasets/pyarrow/dill/multiprocess/xxhash/fsspec use importlib.metadata for
+# optional-dep version checks at import time (same class of issue as above).
+for _pkg in ('datasets', 'pyarrow', 'dill', 'multiprocess', 'xxhash', 'fsspec'):
+    try:
+        datas += copy_metadata(_pkg)
+    except Exception:
+        pass
 
 datas += collect_data_files('setuptools')  # jaraco.text data files needed by pkg_resources hook
 datas += collect_data_files('rasterio')   # bundled GDAL + PROJ data
@@ -210,6 +306,60 @@ if os.path.exists(_ars_src):
 if os.path.exists(_ars_cfg):
     datas += [(_ars_cfg, 'vendor/AgRowStitch')]
 
+# DJI Thermal SDK native library — vendored (not pip-installable, DJI-licensed).
+# Bundled into the packaged app so end users need zero separate install step;
+# DJI's EULA (https://developer.dji.com/policies/eula/) explicitly permits
+# shipping the SDK's object code, execution-form-only, as part of a compiled
+# Application. Not committed to git (see backend/vendor/dji_thermal_sdk/README.md)
+# — this block is a no-op (warns, doesn't fail the build) until a maintainer
+# places the actual libdirp.so/.dll there per that README.
+_dji_sdk_root = 'vendor/dji_thermal_sdk/utility/bin'
+if os.path.isdir(_dji_sdk_root):
+    for _dji_dirpath, _dji_dirnames, _dji_filenames in os.walk(_dji_sdk_root):
+        for _dji_fname in _dji_filenames:
+            _dji_src = os.path.join(_dji_dirpath, _dji_fname)
+            # Mirror the source tree under vendor/dji_thermal_sdk/utility/bin/...
+            # so _bundled_dji_sdk_dir()'s expected relative path resolves inside
+            # sys._MEIPASS exactly as it does in dev mode under backend/vendor/.
+            _dji_dest = os.path.join('vendor/dji_thermal_sdk', os.path.relpath(_dji_dirpath, 'vendor/dji_thermal_sdk'))
+            datas += [(_dji_src, _dji_dest)]
+else:
+    import warnings
+    warnings.warn(
+        "backend/vendor/dji_thermal_sdk/utility/bin not found — DJI thermal "
+        "conversion will report unavailable in the built app until the SDK is "
+        "vendored locally (see backend/vendor/dji_thermal_sdk/README.md).",
+        stacklevel=1,
+    )
+
+# exiftool — vendored (GPL/Artistic-licensed, freely redistributable, unlike
+# the DJI SDK above). Bundled so GPS/timestamp EXIF gets copied onto
+# converted thermal GeoTIFFs with zero separate install step. Not committed
+# to git (see backend/vendor/exiftool/README.md) purely to keep ~50MB of
+# binaries out of git history — this block is a no-op (warns, doesn't fail
+# the build) until vendored locally per that README.
+_exiftool_root = 'vendor/exiftool'
+if os.path.isdir(_exiftool_root) and (
+    os.path.isdir(os.path.join(_exiftool_root, 'macos_linux'))
+    or os.path.isdir(os.path.join(_exiftool_root, 'windows'))
+):
+    for _et_dirpath, _et_dirnames, _et_filenames in os.walk(_exiftool_root):
+        for _et_fname in _et_filenames:
+            _et_src = os.path.join(_et_dirpath, _et_fname)
+            # Mirror the source tree under vendor/exiftool/... so
+            # _bundled_exiftool_dir()'s expected relative path resolves
+            # inside sys._MEIPASS exactly as it does in dev mode.
+            _et_dest = os.path.join('vendor/exiftool', os.path.relpath(_et_dirpath, _exiftool_root))
+            datas += [(_et_src, _et_dest)]
+else:
+    import warnings
+    warnings.warn(
+        "backend/vendor/exiftool/{macos_linux,windows} not found — converted "
+        "thermal images won't get GPS/timestamp EXIF copied in the built app "
+        "until exiftool is vendored locally (see backend/vendor/exiftool/README.md).",
+        stacklevel=1,
+    )
+
 # AgRowStitch / LightGlue data files + Python source files.
 # LightGlue imports kornia which uses torch.jit.script — include source for same reason.
 try:
@@ -230,6 +380,17 @@ try:
     datas += collect_data_files('kornia_rs')
 except Exception:
     pass
+
+# ultralytics data files + Python source files. ultralytics loads its YAML
+# configs (default.yaml, per-task/model YAMLs under ultralytics/cfg/) via
+# paths relative to the package's __file__ at runtime — these must be shipped
+# as datas, not just hiddenimports, or model loading fails with
+# FileNotFoundError in the frozen app even though `import ultralytics` succeeds.
+try:
+    datas += collect_data_files('ultralytics', include_py_files=True)
+except Exception as e:
+    import warnings
+    warnings.warn(f"ultralytics data files not found — local weights inference will be broken in the built app: {e}", stacklevel=1)
 
 # google.protobuf descriptor pool data files
 try:

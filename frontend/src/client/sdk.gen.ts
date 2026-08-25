@@ -3,7 +3,175 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AnalyzeListRunsResponse, AnalyzeGetTraitsData, AnalyzeGetTraitsResponse, AnalyzeListTraitRecordsData, AnalyzeListTraitRecordsResponse, AnalyzeGetTraitRecordGeojsonData, AnalyzeGetTraitRecordGeojsonResponse, AnalyzeGetTraitRecordOrthoInfoData, AnalyzeGetTraitRecordOrthoInfoResponse, AnalyzeGetTraitRecordPlotImageData, AnalyzeGetTraitRecordPlotImageResponse, AnalyzeGetTraitRecordImagePlotIdsData, AnalyzeGetTraitRecordImagePlotIdsResponse, AnalyzeDeleteTraitRecordData, AnalyzeDeleteTraitRecordResponse, AnalyzeGetOrthoInfoData, AnalyzeGetOrthoInfoResponse, AnalyzeListPlotRecordsData, AnalyzeListPlotRecordsResponse, AnalyzeGetMasterTableData, AnalyzeGetMasterTableResponse, FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesListUploadedOrthosResponse, FilesListUploadedDemsResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDeleteUploadImagesData, FilesDeleteUploadImagesResponse, FilesListUploadImagesData, FilesListUploadImagesResponse, FilesDownloadUploadZipData, FilesDownloadUploadZipResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCheckGeotiffData, FilesCheckGeotiffResponse, FilesConvertGeotiffData, FilesConvertGeotiffResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesSaveMsgsSyncedData, FilesSaveMsgsSyncedResponse, FilesCheckExistingFilesData, FilesCheckExistingFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingAvailableSyncSourcesData, ProcessingAvailableSyncSourcesResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingListPlotMarkingsData, ProcessingListPlotMarkingsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingLoadPlotMarkingData, ProcessingLoadPlotMarkingResponse, ProcessingRenamePlotMarkingData, ProcessingRenamePlotMarkingResponse, ProcessingDeletePlotMarkingVersionData, ProcessingDeletePlotMarkingVersionResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingGetGpsDataData, ProcessingGetGpsDataResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingGetFieldDesignData, ProcessingGetFieldDesignResponse, ProcessingSaveFieldDesignData, ProcessingSaveFieldDesignResponse, ProcessingSavePlotGridData, ProcessingSavePlotGridResponse, ProcessingTraitExtractionPreviewData, ProcessingTraitExtractionPreviewResponse, ProcessingGeneratePlotGridData, ProcessingGeneratePlotGridResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingListPlotBoundariesData, ProcessingListPlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingAutoBoundaryData, ProcessingAutoBoundaryResponse, ProcessingGetPlotBoundaryVersionData, ProcessingGetPlotBoundaryVersionResponse, ProcessingDeletePlotBoundaryData, ProcessingDeletePlotBoundaryResponse, ProcessingMosaicPreviewData, ProcessingMosaicPreviewResponse, ProcessingListOrthomosaicsData, ProcessingListOrthomosaicsResponse, ProcessingOrthomosaicVersionPreviewData, ProcessingOrthomosaicVersionPreviewResponse, ProcessingDeleteOrthomosaicData, ProcessingDeleteOrthomosaicResponse, ProcessingActivateOrthomosaicData, ProcessingActivateOrthomosaicResponse, ProcessingRenameOrthomosaicData, ProcessingRenameOrthomosaicResponse, ProcessingRenamePlotBoundaryData, ProcessingRenamePlotBoundaryResponse, ProcessingDownloadCropsForBoundaryData, ProcessingDownloadCropsForBoundaryResponse, ProcessingUseUploadedOrthoData, ProcessingUseUploadedOrthoResponse, ProcessingCheckUploadedOrthoData, ProcessingCheckUploadedOrthoResponse, ProcessingInferenceResultsData, ProcessingInferenceResultsResponse, ProcessingMarkStepCompleteData, ProcessingMarkStepCompleteResponse, ProcessingApplyInferenceThresholdData, ProcessingApplyInferenceThresholdResponse, ProcessingListStitchingsData, ProcessingListStitchingsResponse, ProcessingDownloadStitchingImagesData, ProcessingDownloadStitchingImagesResponse, ProcessingRenameStitchingData, ProcessingRenameStitchingResponse, ProcessingDeleteStitchingData, ProcessingDeleteStitchingResponse, ProcessingListAssociationsData, ProcessingListAssociationsResponse, ProcessingDeleteAssociationData, ProcessingDeleteAssociationResponse, ProcessingGetStitchOutputsData, ProcessingGetStitchOutputsResponse, ProcessingGetInferenceResultsData, ProcessingGetInferenceResultsResponse, ProcessingDeleteInferenceResultData, ProcessingDeleteInferenceResultResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, ProcessingMigratePlotBoundariesResponse, ReferenceDataParseHeadersData, ReferenceDataParseHeadersResponse, ReferenceDataUploadReferenceDataData, ReferenceDataUploadReferenceDataResponse, ReferenceDataListDatasetsData, ReferenceDataListDatasetsResponse, ReferenceDataGetDatasetData, ReferenceDataGetDatasetResponse, ReferenceDataDeleteDatasetData, ReferenceDataDeleteDatasetResponse, ReferenceDataListPlotsData, ReferenceDataListPlotsResponse, ReferenceDataListWorkspaceDatasetsData, ReferenceDataListWorkspaceDatasetsResponse, ReferenceDataAssociateDatasetData, ReferenceDataAssociateDatasetResponse, ReferenceDataRemoveDatasetFromWorkspaceData, ReferenceDataRemoveDatasetFromWorkspaceResponse, ReferenceDataMatchPlotData, ReferenceDataMatchPlotResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, SettingsReadSystemInfoResponse, SettingsReadDockerResourcesResponse, SettingsUpdateDockerResourcesData, SettingsUpdateDockerResourcesResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsGetLogsResponse, UtilsDockerCheckResponse, UtilsCapabilitiesResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesSyncWorkspacesResponse, WorkspacesWorkspaceStatsResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse, WorkspacesWorkspaceCardImagesData, WorkspacesWorkspaceCardImagesResponse } from './types.gen';
+import type { AgmlListDatasetsData, AgmlListDatasetsResponse, AgmlGetDatasetData, AgmlGetDatasetResponse, AgmlGetSimilarDatasetsData, AgmlGetSimilarDatasetsResponse, AgmlListSelectedResponse, AgmlSelectDatasetData, AgmlSelectDatasetResponse, AgmlUnselectDatasetData, AgmlUnselectDatasetResponse, AgmlGetDatasetBenchmarksData, AgmlGetDatasetBenchmarksResponse, AgmlGetLeaderboardResponse, AnalyzeListRunsResponse, AnalyzeGetTraitsData, AnalyzeGetTraitsResponse, AnalyzeListTraitRecordsData, AnalyzeListTraitRecordsResponse, AnalyzeGetTraitRecordGeojsonData, AnalyzeGetTraitRecordGeojsonResponse, AnalyzeGetTraitRecordOrthoInfoData, AnalyzeGetTraitRecordOrthoInfoResponse, AnalyzeGetTraitRecordPlotImageData, AnalyzeGetTraitRecordPlotImageResponse, AnalyzeGetTraitRecordImagePlotIdsData, AnalyzeGetTraitRecordImagePlotIdsResponse, AnalyzeDeleteTraitRecordData, AnalyzeDeleteTraitRecordResponse, AnalyzeGetOrthoInfoData, AnalyzeGetOrthoInfoResponse, AnalyzeListPlotRecordsData, AnalyzeListPlotRecordsResponse, AnalyzeGetMasterTableData, AnalyzeGetMasterTableResponse, FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesListUploadedOrthosResponse, FilesListUploadedDemsResponse, FilesListUploadedThermalsResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDeleteUploadImagesData, FilesDeleteUploadImagesResponse, FilesListUploadImagesData, FilesListUploadImagesResponse, FilesGetMsgsMetadataData, FilesGetMsgsMetadataResponse, FilesGetMetadataCsvsData, FilesGetMetadataCsvsResponse, FilesDownloadUploadZipData, FilesDownloadUploadZipResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCheckGeotiffData, FilesCheckGeotiffResponse, FilesConvertGeotiffData, FilesConvertGeotiffResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesSaveMsgsSyncedData, FilesSaveMsgsSyncedResponse, FilesCheckExistingFilesData, FilesCheckExistingFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingAvailableSyncSourcesData, ProcessingAvailableSyncSourcesResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingThermalConversionResultsData, ProcessingThermalConversionResultsResponse, ProcessingListPlotMarkingsData, ProcessingListPlotMarkingsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingLoadPlotMarkingData, ProcessingLoadPlotMarkingResponse, ProcessingRenamePlotMarkingData, ProcessingRenamePlotMarkingResponse, ProcessingDeletePlotMarkingVersionData, ProcessingDeletePlotMarkingVersionResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingGetGpsDataData, ProcessingGetGpsDataResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingGetFieldDesignData, ProcessingGetFieldDesignResponse, ProcessingSaveFieldDesignData, ProcessingSaveFieldDesignResponse, ProcessingSavePlotGridData, ProcessingSavePlotGridResponse, ProcessingTraitExtractionPreviewData, ProcessingTraitExtractionPreviewResponse, ProcessingGeneratePlotGridData, ProcessingGeneratePlotGridResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingSkipGcpSelectionData, ProcessingSkipGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingListPlotBoundariesData, ProcessingListPlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingAutoBoundaryData, ProcessingAutoBoundaryResponse, ProcessingGetPlotBoundaryVersionData, ProcessingGetPlotBoundaryVersionResponse, ProcessingDeletePlotBoundaryData, ProcessingDeletePlotBoundaryResponse, ProcessingMosaicPreviewData, ProcessingMosaicPreviewResponse, ProcessingListOrthomosaicsData, ProcessingListOrthomosaicsResponse, ProcessingOrthomosaicVersionPreviewData, ProcessingOrthomosaicVersionPreviewResponse, ProcessingDeleteOrthomosaicData, ProcessingDeleteOrthomosaicResponse, ProcessingActivateOrthomosaicData, ProcessingActivateOrthomosaicResponse, ProcessingRenameOrthomosaicData, ProcessingRenameOrthomosaicResponse, ProcessingRenamePlotBoundaryData, ProcessingRenamePlotBoundaryResponse, ProcessingDownloadCropsForBoundaryData, ProcessingDownloadCropsForBoundaryResponse, ProcessingUseUploadedOrthoData, ProcessingUseUploadedOrthoResponse, ProcessingCheckUploadedOrthoData, ProcessingCheckUploadedOrthoResponse, ProcessingInferenceResultsData, ProcessingInferenceResultsResponse, ProcessingAddInferenceRowData, ProcessingAddInferenceRowResponse, ProcessingUpdateInferenceRowData, ProcessingUpdateInferenceRowResponse, ProcessingDeleteInferenceRowData, ProcessingDeleteInferenceRowResponse, ProcessingMarkStepCompleteData, ProcessingMarkStepCompleteResponse, ProcessingApplyInferenceThresholdData, ProcessingApplyInferenceThresholdResponse, ProcessingListStitchingsData, ProcessingListStitchingsResponse, ProcessingDownloadStitchingImagesData, ProcessingDownloadStitchingImagesResponse, ProcessingRenameStitchingData, ProcessingRenameStitchingResponse, ProcessingDeleteStitchingData, ProcessingDeleteStitchingResponse, ProcessingListAssociationsData, ProcessingListAssociationsResponse, ProcessingDeleteAssociationData, ProcessingDeleteAssociationResponse, ProcessingGetStitchOutputsData, ProcessingGetStitchOutputsResponse, ProcessingGetInferenceResultsData, ProcessingGetInferenceResultsResponse, ProcessingDeleteInferenceResultData, ProcessingDeleteInferenceResultResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, ProcessingMigratePlotBoundariesResponse, ReferenceDataParseHeadersData, ReferenceDataParseHeadersResponse, ReferenceDataUploadReferenceDataData, ReferenceDataUploadReferenceDataResponse, ReferenceDataListDatasetsData, ReferenceDataListDatasetsResponse, ReferenceDataGetDatasetData, ReferenceDataGetDatasetResponse, ReferenceDataDeleteDatasetData, ReferenceDataDeleteDatasetResponse, ReferenceDataListPlotsData, ReferenceDataListPlotsResponse, ReferenceDataListPlotsAllData, ReferenceDataListPlotsAllResponse, ReferenceDataAggregateDatasetData, ReferenceDataAggregateDatasetResponse, ReferenceDataDownloadDatasetData, ReferenceDataDownloadDatasetResponse, ReferenceDataListWorkspaceDatasetsData, ReferenceDataListWorkspaceDatasetsResponse, ReferenceDataAssociateDatasetData, ReferenceDataAssociateDatasetResponse, ReferenceDataRemoveDatasetFromWorkspaceData, ReferenceDataRemoveDatasetFromWorkspaceResponse, ReferenceDataMatchPlotData, ReferenceDataMatchPlotResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, SettingsReadDjiThermalSdkPathResponse, SettingsUpdateDjiThermalSdkPathData, SettingsUpdateDjiThermalSdkPathResponse, SettingsReadSystemInfoResponse, SettingsReadDockerResourcesResponse, SettingsUpdateDockerResourcesData, SettingsUpdateDockerResourcesResponse, ThermalUploadWeatherFileData, ThermalUploadWeatherFileResponse, ThermalListWeatherFilesResponse, ThermalDeleteWeatherFileData, ThermalDeleteWeatherFileResponse, ThermalPreviewThermalImageData, ThermalPreviewThermalImageResponse, ThermalScanDirectoryData, ThermalScanDirectoryResponse, ThermalConvertDirectoryData, ThermalConvertDirectoryResponse, ThermalPendingConversionsResponse, ThermalConvertDirectoryStatusData, ThermalConvertDirectoryStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsGetLogsResponse, UtilsDockerCheckResponse, UtilsCapabilitiesResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesSyncWorkspacesResponse, WorkspacesWorkspaceStatsResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse, WorkspacesWorkspaceCardImagesData, WorkspacesWorkspaceCardImagesResponse } from './types.gen';
+
+export class AgmlService {
+    /**
+     * List Datasets
+     * @param data The data for the request.
+     * @param data.mlTask
+     * @param data.agTask
+     * @param data.location 'continent:africa' or 'country:denmark'
+     * @param data.sensorModality
+     * @param data.platform
+     * @param data.realSynthetic
+     * @param data.nImagesMin
+     * @param data.nImagesMax
+     * @param data.search
+     * @returns AgmlDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static listDatasets(data: AgmlListDatasetsData = {}): CancelablePromise<AgmlListDatasetsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/datasets',
+            query: {
+                ml_task: data.mlTask,
+                ag_task: data.agTask,
+                location: data.location,
+                sensor_modality: data.sensorModality,
+                platform: data.platform,
+                real_synthetic: data.realSynthetic,
+                n_images_min: data.nImagesMin,
+                n_images_max: data.nImagesMax,
+                search: data.search
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Dataset
+     * @param data The data for the request.
+     * @param data.name
+     * @returns AgmlDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static getDataset(data: AgmlGetDatasetData): CancelablePromise<AgmlGetDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/datasets/{name}',
+            path: {
+                name: data.name
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Similar Datasets
+     * @param data The data for the request.
+     * @param data.name
+     * @param data.limit
+     * @returns SimilarDatasetsPublic Successful Response
+     * @throws ApiError
+     */
+    public static getSimilarDatasets(data: AgmlGetSimilarDatasetsData): CancelablePromise<AgmlGetSimilarDatasetsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/datasets/{name}/similar',
+            path: {
+                name: data.name
+            },
+            query: {
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Selected
+     * @returns SelectedAgmlDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static listSelected(): CancelablePromise<AgmlListSelectedResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/selected'
+        });
+    }
+    
+    /**
+     * Select Dataset
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns SelectedAgmlDatasetPublic Successful Response
+     * @throws ApiError
+     */
+    public static selectDataset(data: AgmlSelectDatasetData): CancelablePromise<AgmlSelectDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agml/selected',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Unselect Dataset
+     * @param data The data for the request.
+     * @param data.name
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static unselectDataset(data: AgmlUnselectDatasetData): CancelablePromise<AgmlUnselectDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/agml/selected/{name}',
+            path: {
+                name: data.name
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Dataset Benchmarks
+     * Prior foundation-model benchmark results for one dataset, if agml has any.
+     * @param data The data for the request.
+     * @param data.name
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getDatasetBenchmarks(data: AgmlGetDatasetBenchmarksData): CancelablePromise<AgmlGetDatasetBenchmarksResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/datasets/{name}/benchmarks',
+            path: {
+                name: data.name
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Leaderboard
+     * Sourced from agml's own bundled prior-benchmark JSON (small, fully
+     * offline) — see LeaderboardPublic's docstring for why this isn't a stub.
+     * @returns LeaderboardPublic Successful Response
+     * @throws ApiError
+     */
+    public static getLeaderboard(): CancelablePromise<AgmlGetLeaderboardResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agml/leaderboard'
+        });
+    }
+}
 
 export class AnalyzeService {
     /**
@@ -414,7 +582,7 @@ export class FilesService {
     
     /**
      * List Uploaded Orthos
-     * Return all FileUpload records with data_type='Orthomosaic' (RGB), with TIF filenames.
+     * Return all Orthomosaic FileUpload records with their TIF filenames.
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -427,7 +595,7 @@ export class FilesService {
     
     /**
      * List Uploaded Dems
-     * Return all FileUpload records with data_type='Orthomosaic DEM', with TIF filenames.
+     * Return Orthomosaic records that contain a DEM TIF (canonical stem ending in -DEM).
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -435,6 +603,19 @@ export class FilesService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/files/uploaded-dems'
+        });
+    }
+    
+    /**
+     * List Uploaded Thermals
+     * Return Orthomosaic records that contain a Thermal TIF (canonical stem ending in -Thermal).
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listUploadedThermals(): CancelablePromise<FilesListUploadedThermalsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/uploaded-thermals'
         });
     }
     
@@ -537,6 +718,60 @@ export class FilesService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/files/{id}/list-images',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Msgs Metadata
+     * Return msgs_synced.csv metadata keyed by image basename.
+     * Only the display-relevant columns are returned
+     * (direction, heading_deg, lat, lon, timestamp).
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getMsgsMetadata(data: FilesGetMsgsMetadataData): CancelablePromise<FilesGetMsgsMetadataResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/{id}/msgs-metadata',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Metadata Csvs
+     * Return all metadata CSVs associated with a FileUpload as tabular data.
+     *
+     * Searches in priority order:
+     * 1. FileUpload.msgs_synced_path  — direct pointer (Synced Metadata upload,
+     * Farm-ng binary after extraction)
+     * 2. rglob("msgs_synced.csv") under storage_path in Raw/
+     * 3. rglob("drone_msgs.csv")  under storage_path in Raw/
+     * (ArduPilot log data generated by sync step)
+     *
+     * Each found CSV is returned as { label, columns, rows } where rows is a
+     * list of dicts (one per row, None for NaN values).
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getMetadataCsvs(data: FilesGetMetadataCsvsData): CancelablePromise<FilesGetMetadataCsvsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/{id}/metadata-csvs',
             path: {
                 id: data.id
             },
@@ -1305,6 +1540,29 @@ export class ProcessingService {
     }
     
     /**
+     * Thermal Conversion Results
+     * Return this run's thermal conversion results with image paths resolved
+     * to absolute (for /thermal/preview and /files/serve) — mirrors
+     * inference_results()'s relative-in-storage/absolute-on-read pattern.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static thermalConversionResults(data: ProcessingThermalConversionResultsData): CancelablePromise<ProcessingThermalConversionResultsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/thermal-conversion',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * List Plot Markings
      * @param data The data for the request.
      * @param data.id
@@ -1421,9 +1679,15 @@ export class ProcessingService {
     
     /**
      * List Images
+     * List raw images for a run.
+     * - filter_mode="plot": filter by plot direction from plot_borders.csv (up/down/left/right)
+     * - filter_mode="heading": filter by per-image GPS heading from msgs_synced.csv (north/south/east/west)
+     * Falls back to all images if the required data is unavailable.
      * @param data The data for the request.
      * @param data.id
      * @param data.extensions
+     * @param data.directions
+     * @param data.filterMode
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1435,7 +1699,9 @@ export class ProcessingService {
                 id: data.id
             },
             query: {
-                extensions: data.extensions
+                extensions: data.extensions,
+                directions: data.directions,
+                filter_mode: data.filterMode
             },
             errors: {
                 422: 'Validation Error'
@@ -1650,6 +1916,28 @@ export class ProcessingService {
     }
     
     /**
+     * Skip Gcp Selection
+     * Skip GCP selection — generate geo.txt from msgs_synced.csv image GPS and
+     * write an empty gcp_list.txt so ODM can proceed without ground control points.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static skipGcpSelection(data: ProcessingSkipGcpSelectionData): CancelablePromise<ProcessingSkipGcpSelectionResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/gcp-selection/skip',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Gcp Candidates
      * Return drone images, optionally filtered to those within `radius_m` metres
      * of any GCP.
@@ -1662,10 +1950,21 @@ export class ProcessingService {
      * radius are returned.  Images with no GPS at all are excluded from the
      * filtered set (they cannot be reliably placed relative to GCPs).
      * When filter_by_gcp=False, all images are returned unfiltered.
+     *
+     * mode="thermal" lists converted thermal GeoTIFFs
+     * (Intermediate/.../thermal_converted/) instead of the RGB image set, for
+     * marking the same physical GCPs on thermal images — needed because a
+     * thermal sensor's different lens/FOV/resolution means the same GCP lands
+     * at different pixel coordinates than in the RGB images. Those images
+     * aren't in msgs_synced.csv (raw thermal captures are excluded from Data
+     * Sync's scan), so GPS always comes from each GeoTIFF's own EXIF (copied
+     * from the source R-JPEG at conversion time). Existing selections are read
+     * from gcp_list_thermal.txt instead of gcp_list.txt.
      * @param data The data for the request.
      * @param data.id
      * @param data.radiusM
      * @param data.filterByGcp
+     * @param data.mode
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1678,7 +1977,8 @@ export class ProcessingService {
             },
             query: {
                 radius_m: data.radiusM,
-                filter_by_gcp: data.filterByGcp
+                filter_by_gcp: data.filterByGcp,
+                mode: data.mode
             },
             errors: {
                 422: 'Validation Error'
@@ -2163,6 +2463,85 @@ export class ProcessingService {
     }
     
     /**
+     * Add Inference Row
+     * Add one hand-drawn label row (box, polygon, or classification) — always verified.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.label
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static addInferenceRow(data: ProcessingAddInferenceRowData): CancelablePromise<ProcessingAddInferenceRowResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/inference-results/{label}/rows',
+            path: {
+                id: data.id,
+                label: data.label
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Inference Row
+     * Partially update one label row — edited geometry/class, or mark verified on accept.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.label
+     * @param data.rowIndex
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static updateInferenceRow(data: ProcessingUpdateInferenceRowData): CancelablePromise<ProcessingUpdateInferenceRowResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/pipeline-runs/{id}/inference-results/{label}/rows/{row_index}',
+            path: {
+                id: data.id,
+                label: data.label,
+                row_index: data.rowIndex
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Inference Row
+     * Reject/remove one label row.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.label
+     * @param data.rowIndex
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static deleteInferenceRow(data: ProcessingDeleteInferenceRowData): CancelablePromise<ProcessingDeleteInferenceRowResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/inference-results/{label}/rows/{row_index}',
+            path: {
+                id: data.id,
+                label: data.label,
+                row_index: data.rowIndex
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Mark Step Complete
      * Mark a pipeline step as complete without running it (e.g. skip inference).
      * @param data The data for the request.
@@ -2251,6 +2630,7 @@ export class ProcessingService {
      * @param data.id
      * @param data.version
      * @param data.associationVersion
+     * @param data.squareSize
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -2263,7 +2643,8 @@ export class ProcessingService {
                 version: data.version
             },
             query: {
-                association_version: data.associationVersion
+                association_version: data.associationVersion,
+                square_size: data.squareSize
             },
             errors: {
                 422: 'Validation Error'
@@ -2444,6 +2825,7 @@ export class ProcessingService {
      * @param data The data for the request.
      * @param data.id
      * @param data.orthoVersion
+     * @param data.squareSize
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -2455,7 +2837,8 @@ export class ProcessingService {
                 id: data.id
             },
             query: {
-                ortho_version: data.orthoVersion
+                ortho_version: data.orthoVersion,
+                square_size: data.squareSize
             },
             errors: {
                 422: 'Validation Error'
@@ -2638,6 +3021,77 @@ export class ReferenceDataService {
     }
     
     /**
+     * List Plots All
+     * Return all plots for a dataset (up to 10 000) without pagination.
+     * Used by the dashboard multi-source hooks that need the full distribution.
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listPlotsAll(data: ReferenceDataListPlotsAllData): CancelablePromise<ReferenceDataListPlotsAllResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/{dataset_id}/plots-all',
+            path: {
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Aggregate Dataset
+     * Aggregate a single reference trait across all plots in a dataset.
+     * Used by dashboard widgets to compute a single representative value.
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @param data.metric Trait column to aggregate
+     * @param data.aggregation avg | min | max
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static aggregateDataset(data: ReferenceDataAggregateDatasetData): CancelablePromise<ReferenceDataAggregateDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/{dataset_id}/aggregate',
+            path: {
+                dataset_id: data.datasetId
+            },
+            query: {
+                metric: data.metric,
+                aggregation: data.aggregation
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Download Dataset
+     * Download the original uploaded file for a reference dataset.
+     * @param data The data for the request.
+     * @param data.datasetId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadDataset(data: ReferenceDataDownloadDatasetData): CancelablePromise<ReferenceDataDownloadDatasetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/reference-data/{dataset_id}/download',
+            path: {
+                dataset_id: data.datasetId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * List Workspace Datasets
      * List all ReferenceDatasets associated with this workspace, with match reports.
      * @param data The data for the request.
@@ -2776,6 +3230,37 @@ export class SettingsService {
     }
     
     /**
+     * Read Dji Thermal Sdk Path
+     * @returns AppSettingPublic Successful Response
+     * @throws ApiError
+     */
+    public static readDjiThermalSdkPath(): CancelablePromise<SettingsReadDjiThermalSdkPathResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/settings/dji-thermal-sdk-path'
+        });
+    }
+    
+    /**
+     * Update Dji Thermal Sdk Path
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns AppSettingPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateDjiThermalSdkPath(data: SettingsUpdateDjiThermalSdkPathData): CancelablePromise<SettingsUpdateDjiThermalSdkPathResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/settings/dji-thermal-sdk-path',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Read System Info
      * @returns SystemInfoPublic Successful Response
      * @throws ApiError
@@ -2812,6 +3297,183 @@ export class SettingsService {
             url: '/api/v1/settings/docker-resources',
             body: data.requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class ThermalService {
+    /**
+     * Upload Weather File
+     * @param data The data for the request.
+     * @param data.name Display name for this weather file
+     * @param data.formData
+     * @param data.format Weather file format — see thermal_utils.SUPPORTED_WEATHER_FORMATS
+     * @returns WeatherStationFilePublic Successful Response
+     * @throws ApiError
+     */
+    public static uploadWeatherFile(data: ThermalUploadWeatherFileData): CancelablePromise<ThermalUploadWeatherFileResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/thermal/weather-files',
+            query: {
+                name: data.name,
+                format: data.format
+            },
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Weather Files
+     * @returns WeatherStationFilePublic Successful Response
+     * @throws ApiError
+     */
+    public static listWeatherFiles(): CancelablePromise<ThermalListWeatherFilesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/thermal/weather-files'
+        });
+    }
+    
+    /**
+     * Delete Weather File
+     * @param data The data for the request.
+     * @param data.id
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static deleteWeatherFile(data: ThermalDeleteWeatherFileData): CancelablePromise<ThermalDeleteWeatherFileResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/thermal/weather-files/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Preview Thermal Image
+     * Render one converted single-band float32 GeoTIFF as a colorized PNG —
+     * raw GeoTIFF pixel data isn't directly viewable in a browser `<img>`, so
+     * this is the "viewable as temperature" piece: min/max/mean temperature
+     * are returned as response headers alongside the image.
+     *
+     * Only .tif/.tiff under the configured data_root — same extension-allowlist
+     * pattern as files.py's /files/serve. `path` may be absolute (existing
+     * Guided Upload callers already pass absolute paths) or relative to
+     * data_root (PipelineRun.outputs stores orthomosaic/thermal paths as
+     * data_root-relative strings via RunPaths.rel(), so they stay valid if the
+     * user changes their data_root setting later).
+     * @param data The data for the request.
+     * @param data.path Absolute path, or path relative to data_root, to a converted thermal GeoTIFF
+     * @param data.colormap Any matplotlib colormap name
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static previewThermalImage(data: ThermalPreviewThermalImageData): CancelablePromise<ThermalPreviewThermalImageResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/thermal/preview',
+            query: {
+                path: data.path,
+                colormap: data.colormap
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Scan Directory
+     * Preview thermal/paired-RGB image counts (+ resolved file paths) for a
+     * picked directory before the user commits to uploading it — the
+     * "detected with _T and _V" check.
+     * @param data The data for the request.
+     * @param data.path Absolute path to a directory to scan
+     * @param data.platform
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static scanDirectory(data: ThermalScanDirectoryData): CancelablePromise<ThermalScanDirectoryResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/thermal/scan-directory',
+            query: {
+                path: data.path,
+                platform: data.platform
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Convert Directory
+     * Start an upload-scoped thermal conversion job over a directory — not
+     * tied to any PipelineRun (see thermal_jobs.py). Returns immediately with
+     * a job_id to poll via GET /thermal/convert-directory/{job_id}.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static convertDirectory(data: ThermalConvertDirectoryData): CancelablePromise<ThermalConvertDirectoryResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/thermal/convert-directory',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Pending Conversions
+     * Thermal-tagged uploads that haven't been converted yet — lets the
+     * Guided Upload flow offer to resume conversion for a directory that was
+     * already uploaded (e.g. the user navigated away, or closed the app,
+     * before starting/finishing the conversion step), instead of requiring a
+     * fresh directory pick every time.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static pendingConversions(): CancelablePromise<ThermalPendingConversionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/thermal/pending-conversions'
+        });
+    }
+    
+    /**
+     * Convert Directory Status
+     * Poll an upload-scoped conversion job's progress/results.
+     * @param data The data for the request.
+     * @param data.jobId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static convertDirectoryStatus(data: ThermalConvertDirectoryStatusData): CancelablePromise<ThermalConvertDirectoryStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/thermal/convert-directory/{job_id}',
+            path: {
+                job_id: data.jobId
+            },
             errors: {
                 422: 'Validation Error'
             }

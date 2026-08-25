@@ -1,5 +1,6 @@
 import {
   ChartSpline,
+  Database,
   Folder,
   Home,
   type LucideIcon,
@@ -33,6 +34,7 @@ export const sidebarItems: NavItem[] = [
     title: "Analyze",
     path: "/analyze",
   },
+  { icon: Database, title: "Datasets", path: "/datasets" },
   { icon: Settings, title: "Settings", path: "/settings" },
   { icon: Terminal, title: "Console", path: "/console" },
 ];

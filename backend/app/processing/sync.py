@@ -39,6 +39,7 @@ from sqlmodel import Session
 
 from app.core.paths import RunPaths
 from app.models.workspace import Workspace
+from app.processing.thermal_utils import is_raw_thermal_image
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +320,16 @@ def _build_msgs_synced(image_dir: Path, out_path: Path, emit: Callable[[dict], N
     Returns the resulting DataFrame.
     """
     files = sorted(
-        f for f in image_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
+        f for f in image_dir.iterdir()
+        if f.suffix.lower() in _IMAGE_EXTS
+        and "mask" not in f.name
+        # Raw thermal captures (e.g. DJI's _T.JPG) aren't visible-light
+        # photos — skip them here: their location is already covered by
+        # their paired RGB image (if any), and this function may re-save a
+        # file below (EXIF-orientation fix), which would destroy the
+        # proprietary radiometric payload a raw thermal capture needs for
+        # (re-)conversion. See thermal_utils.is_raw_thermal_image.
+        and not is_raw_thermal_image(f.name)
     )
     total = len(files)
     emit({"event": "progress", "message": f"Found {total} images — extracting EXIF…", "progress": 5})
@@ -893,7 +903,9 @@ def run_cross_sensor_sync(
 
     files = sorted(
         f for f in image_dir.iterdir()
-        if f.suffix.lower() in _IMAGE_EXTS and "mask" not in f.name
+        if f.suffix.lower() in _IMAGE_EXTS
+        and "mask" not in f.name
+        and not is_raw_thermal_image(f.name)
     )
     total = len(files)
     emit({"event": "progress",

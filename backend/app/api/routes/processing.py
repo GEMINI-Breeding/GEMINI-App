@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import uuid
 import zipfile
 from pathlib import Path
@@ -37,7 +38,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.api.deps import CurrentUser, SessionDep
@@ -223,14 +224,20 @@ def available_sync_sources(
 # ── Execute step ──────────────────────────────────────────────────────────────
 
 GROUND_COMPUTE_STEPS = {"stitching", "georeferencing", "associate_boundaries"}
-AERIAL_COMPUTE_STEPS = {"orthomosaic", "trait_extraction"}
+AERIAL_COMPUTE_STEPS = {"orthomosaic", "trait_extraction", "thermal_conversion"}
 SHARED_COMPUTE_STEPS = {"inference"}
 
 
 class ModelConfig(BaseModel):
     label: str
-    roboflow_api_key: str
-    roboflow_model_id: str
+    source: str = "roboflow"  # "roboflow" | "local_weights" | "huggingface" | "sam_auto"
+    roboflow_api_key: str | None = None
+    roboflow_model_id: str | None = None
+    weights_path: str | None = None
+    hf_model_id: str | None = None
+    hf_api_key: str | None = None
+    hf_zero_shot: bool = False
+    hf_prompt: str | None = None
     task_type: str = "detection"
 
 
@@ -243,6 +250,9 @@ class ExecuteStepRequest(BaseModel):
     plot_marking_version: int | None = None
     # Orthomosaic run name (aerial only, optional)
     ortho_name: str | None = None
+    # Also generate a thermal orthophoto (independent ODM reconstruction on
+    # converted thermal GeoTIFFs) alongside the RGB one, in the same step run.
+    generate_thermal: bool = False
     # Trait extraction / association version overrides
     ortho_version: int | None = None
     boundary_version: int | None = None
@@ -257,6 +267,13 @@ class ExecuteStepRequest(BaseModel):
     sync_mode: str = "own_metadata"
     sync_source_run_id: str | None = None  # required when sync_mode == "cross_sensor"
     sync_max_extrapolation_sec: float = 30.0  # threshold for out-of-range fallback
+    # Thermal conversion (aerial only)
+    thermal_platform: str = "dji"
+    thermal_distance: float = 5.0
+    thermal_humidity: float = 70.0
+    thermal_emissivity: float = 1.0
+    thermal_reflected_temperature: float = 25.0
+    thermal_weather_file_id: str | None = None
 
 
 @router.post("/pipeline-runs/{id}/execute-step")
@@ -319,6 +336,17 @@ def execute_step(
         _sync_fn, _sync_kwargs = _resolve_sync_step(body, sync)
         dispatch = {
             "data_sync": (_sync_fn, _sync_kwargs),
+            "thermal_conversion": (
+                aerial.run_thermal_conversion,
+                {
+                    "platform": body.thermal_platform,
+                    "distance": body.thermal_distance,
+                    "humidity": body.thermal_humidity,
+                    "emissivity": body.thermal_emissivity,
+                    "reflected_temperature": body.thermal_reflected_temperature,
+                    "weather_file_id": body.thermal_weather_file_id,
+                },
+            ),
             "orthomosaic": (
                 aerial.run_orthomosaic,
                 {
@@ -332,6 +360,7 @@ def execute_step(
                     "feature_quality": (pipeline.config or {}).get("feature_quality", "high"),
                     "custom_odm_options": (pipeline.config or {}).get("custom_odm_options", ""),
                     "name": body.ortho_name,
+                    "generate_thermal": body.generate_thermal,
                 },
             ),
             "trait_extraction": (
@@ -428,6 +457,116 @@ def list_outputs(
                 ]
 
     return {"outputs": resolved, "run_id": str(id)}
+
+
+def _adopt_guided_upload_thermal_conversion(
+    session: SessionDep, run: PipelineRun, paths: RunPaths
+) -> dict[str, Any] | None:
+    """
+    A dataset's thermal images may already have been converted via the
+    Files tab's Guided Upload flow (backend/app/processing/thermal_jobs.py)
+    *before* this PipelineRun ever existed — that path writes to
+    FileUpload.thermal_converted_dir, not run.outputs, so the run's own
+    Thermal Conversion step has no way to know about it and would
+    otherwise report no results, even though the images are sitting right
+    there and re-running the step would just redundantly reconvert them.
+
+    If this run's source FileUpload has a completed Guided Upload
+    conversion, adopt it into run.outputs/steps_completed (same shape
+    aerial.run_thermal_conversion() itself produces) so it shows up here
+    and the stepper reflects it as done. Returns the adopted result dict,
+    or None if there's nothing to adopt.
+    """
+    if run.file_upload_id is None:
+        return None
+
+    from app.models.file_upload import FileUpload
+    fu = session.get(FileUpload, run.file_upload_id)
+    if not fu or not fu.thermal_converted or not fu.thermal_converted_dir:
+        return None
+
+    converted_dir = Path(fu.thermal_converted_dir)
+    if not converted_dir.is_dir():
+        return None
+
+    import rasterio
+
+    converted: list[dict[str, Any]] = []
+    for tif_path in sorted(converted_dir.glob("*.tif")):
+        try:
+            with rasterio.open(tif_path) as ds:
+                band = ds.read(1)
+            converted.append({
+                "name": tif_path.name,
+                "path": paths.rel(tif_path),
+                "min_temp": round(float(band.min()), 2),
+                "max_temp": round(float(band.max()), 2),
+                "mean_temp": round(float(band.mean()), 2),
+            })
+        except Exception as exc:
+            logger.warning("Could not read adopted thermal GeoTIFF %s: %s", tif_path, exc)
+
+    if not converted:
+        return None
+
+    result = {
+        "dir": paths.rel(converted_dir),
+        "platform": "dji",
+        "images": converted,
+        "weather_file_id": None,
+        "params": {},
+        "source": "guided_upload",
+    }
+
+    existing_outputs = dict(run.outputs or {})
+    existing_outputs["thermal_conversion"] = result
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps["thermal_conversion"] = True
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs, steps_completed=existing_steps),
+    )
+    logger.info(
+        "Adopted %d Guided-Upload-converted thermal image(s) into run %s from %s",
+        len(converted), run.id, converted_dir,
+    )
+    return result
+
+
+@router.get("/pipeline-runs/{id}/thermal-conversion")
+def thermal_conversion_results(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Return this run's thermal conversion results with image paths resolved
+    to absolute (for /thermal/preview and /files/serve) — mirrors
+    inference_results()'s relative-in-storage/absolute-on-read pattern.
+    """
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    result = (run.outputs or {}).get("thermal_conversion")
+    if not result:
+        result = _adopt_guided_upload_thermal_conversion(session, run, paths)
+    if not result:
+        return {"available": False, "images": []}
+
+    images = [
+        {**img, "path": str(paths.abs(img["path"]))}
+        for img in result.get("images", [])
+    ]
+
+    return {
+        "available": True,
+        "platform": result.get("platform"),
+        "params": result.get("params", {}),
+        "weather_file_id": result.get("weather_file_id"),
+        "source": result.get("source", "pipeline_step"),
+        "images": images,
+    }
 
 
 # ── Ground: plot marking ──────────────────────────────────────────────────────
@@ -1361,6 +1500,10 @@ class GcpSelectionRequest(BaseModel):
     gcp_selections: list[dict[str, Any]]
     image_gps: list[dict[str, Any]]
     gcp_locations_csv: str | None = None  # inline CSV if not uploaded via files tab
+    # Same shape as gcp_selections/image_gps, but marked against converted
+    # thermal GeoTIFFs (GcpPicker's Thermal tab) — see aerial.save_gcp_selection.
+    thermal_gcp_selections: list[dict[str, Any]] | None = None
+    thermal_image_gps: list[dict[str, Any]] | None = None
 
 
 @router.post("/pipeline-runs/{id}/gcp-selection")
@@ -1384,6 +1527,8 @@ def save_gcp_selection(
         gcp_selections=body.gcp_selections,
         image_gps=body.image_gps,
         gcp_locations_csv=body.gcp_locations_csv,
+        thermal_gcp_selections=body.thermal_gcp_selections,
+        thermal_image_gps=body.thermal_image_gps,
     )
 
     existing_outputs = dict(run.outputs or {})
@@ -1529,6 +1674,7 @@ def gcp_candidates(
     id: uuid.UUID,
     radius_m: float = 5.0,
     filter_by_gcp: bool = True,
+    mode: str = "rgb",
 ) -> dict[str, Any]:
     """
     Return drone images, optionally filtered to those within `radius_m` metres
@@ -1542,29 +1688,48 @@ def gcp_candidates(
     radius are returned.  Images with no GPS at all are excluded from the
     filtered set (they cannot be reliably placed relative to GCPs).
     When filter_by_gcp=False, all images are returned unfiltered.
+
+    mode="thermal" lists converted thermal GeoTIFFs
+    (Intermediate/.../thermal_converted/) instead of the RGB image set, for
+    marking the same physical GCPs on thermal images — needed because a
+    thermal sensor's different lens/FOV/resolution means the same GCP lands
+    at different pixel coordinates than in the RGB images. Those images
+    aren't in msgs_synced.csv (raw thermal captures are excluded from Data
+    Sync's scan), so GPS always comes from each GeoTIFF's own EXIF (copied
+    from the source R-JPEG at conversion time). Existing selections are read
+    from gcp_list_thermal.txt instead of gcp_list.txt.
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
+    is_thermal_mode = mode == "thermal"
 
     gcp_csv = paths.gcp_locations()
     has_gcp_csv = gcp_csv.exists()
     gcps: list[dict[str, Any]] = _parse_gcp_csv(gcp_csv) if has_gcp_csv else []
 
-    # ── Resolve image directory ───────────────────────────────────────────────
-    _img_exts = {".jpg", ".jpeg", ".png"}
-    image_dir: Path | None = None
-    if run.file_upload_id is not None:
-        from app.models.file_upload import FileUpload as _FileUpload
-        fu = session.get(_FileUpload, run.file_upload_id)
-        if fu:
-            candidate = paths.data_root / fu.storage_path
-            if candidate.is_dir():
-                image_dir = candidate
-    if image_dir is None:
-        for candidate in [paths.raw / "Images", paths.raw]:
-            if candidate.is_dir() and any(f.suffix.lower() in _img_exts for f in candidate.iterdir()):
-                image_dir = candidate
-                break
+    thermal_available = paths.thermal_converted_dir.is_dir() and any(
+        f.suffix.lower() in (".tif", ".tiff") for f in paths.thermal_converted_dir.iterdir()
+    )
+
+    if is_thermal_mode:
+        image_dir: Path | None = paths.thermal_converted_dir if thermal_available else None
+        _img_exts = {".tif", ".tiff"}
+    else:
+        # ── Resolve image directory ───────────────────────────────────────────
+        _img_exts = {".jpg", ".jpeg", ".png"}
+        image_dir = None
+        if run.file_upload_id is not None:
+            from app.models.file_upload import FileUpload as _FileUpload
+            fu = session.get(_FileUpload, run.file_upload_id)
+            if fu:
+                candidate = paths.data_root / fu.storage_path
+                if candidate.is_dir():
+                    image_dir = candidate
+        if image_dir is None:
+            for candidate in [paths.raw / "Images", paths.raw]:
+                if candidate.is_dir() and any(f.suffix.lower() in _img_exts for f in candidate.iterdir()):
+                    image_dir = candidate
+                    break
 
     all_image_files: list[Path] = []
     if image_dir and image_dir.exists():
@@ -1572,11 +1737,11 @@ def gcp_candidates(
             p for p in image_dir.iterdir() if p.suffix.lower() in _img_exts
         )
 
-    # ── Build GPS lookup from msgs_synced.csv (preferred) ────────────────────
+    # ── Build GPS lookup from msgs_synced.csv (preferred, RGB mode only) ─────
     # msgs_synced columns: image_path, timestamp, lat, lon, alt, ...
     # pandas writes NaN as empty string, so use _parse_gps_float everywhere.
     msgs_gps: dict[str, dict[str, float | None]] = {}
-    has_msgs_synced = paths.msgs_synced.exists()
+    has_msgs_synced = not is_thermal_mode and paths.msgs_synced.exists()
     if has_msgs_synced:
         try:
             import csv
@@ -1596,6 +1761,7 @@ def gcp_candidates(
             has_msgs_synced = False
 
     # ── Build image list with best-available GPS ──────────────────────────────
+    # Thermal images are never in msgs_synced.csv — always read their own EXIF.
     images: list[dict[str, Any]] = []
     for p in all_image_files:
         if p.name in msgs_gps:
@@ -1630,11 +1796,12 @@ def gcp_candidates(
                 images = near
                 filtered = True
 
-    # ── Load existing gcp_list.txt selections ─────────────────────────────────
+    # ── Load existing gcp_list.txt (or gcp_list_thermal.txt) selections ──────
     existing_selections: list[dict[str, Any]] = []
-    if paths.gcp_list.exists():
+    selections_path = paths.gcp_list_thermal if is_thermal_mode else paths.gcp_list
+    if selections_path.exists():
         try:
-            lines = paths.gcp_list.read_text().splitlines()
+            lines = selections_path.read_text().splitlines()
         except Exception:
             lines = []
         for line in lines[1:]:  # skip EPSG:4326 header
@@ -1666,6 +1833,11 @@ def gcp_candidates(
         "has_msgs_synced": has_msgs_synced,
         "raw_dir": str(image_dir) if image_dir else str(paths.raw),
         "existing_selections": existing_selections,
+        "mode": mode,
+        # Whether there's a Thermal tab worth showing at all — independent
+        # of `mode`, so the RGB-mode response also tells the frontend
+        # whether to render the toggle.
+        "thermal_available": thermal_available,
     }
 
 
@@ -3449,23 +3621,41 @@ def inference_results(
     if not csv_path.exists():
         return {"available": False, "models": available_models, "active_model": active_model, "predictions": [], "images": []}
 
+    def _parse_optional_float(raw: str | None) -> float | None:
+        """Blank/missing → None (e.g. classification rows have no geometry),
+        rather than letting float("") raise and silently drop the whole row."""
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
     rows: list[dict] = []
     # Per-image metadata captured from CSV (ground pipelines store row/col/accession per prediction)
     img_meta_from_csv: dict[str, dict] = {}
     with open(csv_path, newline="") as f:
-        for row in _csv.DictReader(f):
+        for _row_index, row in enumerate(_csv.DictReader(f)):
             try:
                 points_raw = row.get("points", "") or ""
                 points = _json.loads(points_raw) if points_raw else []
                 entry: dict[str, Any] = {
+                    "row_index": _row_index,
                     "image": row.get("image", ""),
                     "class": row.get("class", ""),
-                    "confidence": round(float(row.get("confidence", 0)), 4),
-                    "x": float(row.get("x", 0)),
-                    "y": float(row.get("y", 0)),
-                    "width": float(row.get("width", 0)),
-                    "height": float(row.get("height", 0)),
+                    "confidence": round(float(row.get("confidence") or 0), 4),
+                    "verified": str(row.get("verified") or "").strip() in ("1", "true", "True"),
                 }
+                x_val = _parse_optional_float(row.get("x"))
+                y_val = _parse_optional_float(row.get("y"))
+                w_val = _parse_optional_float(row.get("width"))
+                h_val = _parse_optional_float(row.get("height"))
+                if None not in (x_val, y_val, w_val, h_val):
+                    entry["x"] = x_val
+                    entry["y"] = y_val
+                    entry["width"] = w_val
+                    entry["height"] = h_val
                 if points:
                     entry["points"] = points
                 rows.append(entry)
@@ -3604,6 +3794,187 @@ def inference_results(
         "predictions": rows,
         "images": images,
     }
+
+
+# ── Row-level label CRUD (labeling/review tool) ──────────────────────────────
+#
+# Individual predictions-CSV row add/edit/delete, for the labeling tool's
+# accept/reject/hand-draw workflow. `row_index` is the row's 0-based position
+# in the CSV — stable within a session, the simplest workable identifier for
+# a single-desktop-user app (no need for synthetic per-row UUIDs). A small
+# per-file lock guards the read-modify-write cycle since the labeling UI can
+# fire mutations in quick succession.
+#
+# Known limitation: `apply_inference_threshold` rewrites the active CSV from
+# an `_original` backup when re-applying a global confidence threshold, which
+# would discard row-level edits made here. Not addressed in this pass.
+
+_csv_write_locks: dict[str, threading.Lock] = {}
+_csv_write_locks_guard = threading.Lock()
+
+
+def _get_csv_write_lock(csv_path: Path) -> threading.Lock:
+    key = str(csv_path)
+    with _csv_write_locks_guard:
+        lock = _csv_write_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _csv_write_locks[key] = lock
+        return lock
+
+
+def _resolve_label_csv(session: Session, run_id: uuid.UUID, label: str) -> tuple[PipelineRun, RunPaths, Path]:
+    """Resolve a pipeline run's inference-results CSV path for one model label."""
+    run = _get_run_or_404(session, run_id)
+    paths = _get_paths(session, run)
+    outputs = run.outputs or {}
+    inference_out = outputs.get("inference")
+    if not inference_out:
+        raise HTTPException(status_code=404, detail="No inference results found for this run.")
+
+    if isinstance(inference_out, str):
+        model_entries: list[dict] = [{"label": "Results", "csv_path": inference_out}]
+    elif isinstance(inference_out, list):
+        model_entries = inference_out
+    else:
+        model_entries = [{"label": lbl, "csv_path": rel} for lbl, rel in inference_out.items()]
+
+    entry = next((e for e in model_entries if e.get("label") == label), None)
+    if not entry or not entry.get("csv_path"):
+        raise HTTPException(status_code=404, detail=f"No inference result for label '{label}'")
+
+    csv_path = paths.abs(entry["csv_path"])
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail=f"Predictions CSV not found for label '{label}'")
+
+    return run, paths, csv_path
+
+
+def _read_csv_rows(csv_path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    return fieldnames, rows
+
+
+def _write_csv_rows(csv_path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+class InferenceRowCreate(BaseModel):
+    image: str
+    label_class: str = Field(alias="class")
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+    height: float | None = None
+    points: list[dict[str, float]] | None = None
+    model_config = {"populate_by_name": True}
+
+
+class InferenceRowUpdate(BaseModel):
+    label_class: str | None = Field(default=None, alias="class")
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+    height: float | None = None
+    points: list[dict[str, float]] | None = None
+    verified: bool | None = None
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/pipeline-runs/{id}/inference-results/{label}/rows")
+def add_inference_row(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    label: str,
+    body: InferenceRowCreate,
+) -> dict[str, Any]:
+    """Add one hand-drawn label row (box, polygon, or classification) — always verified."""
+    _run, _paths, csv_path = _resolve_label_csv(session, id, label)
+    with _get_csv_write_lock(csv_path):
+        fieldnames, rows = _read_csv_rows(csv_path)
+        if "verified" not in fieldnames:
+            fieldnames = [*fieldnames, "verified"]
+
+        new_row: dict[str, str] = dict.fromkeys(fieldnames, "")
+        new_row["image"] = body.image
+        new_row["class"] = body.label_class
+        new_row["confidence"] = "1.0"
+        new_row["verified"] = "1"
+        if None not in (body.x, body.y, body.width, body.height):
+            new_row["x"] = str(body.x)
+            new_row["y"] = str(body.y)
+            new_row["width"] = str(body.width)
+            new_row["height"] = str(body.height)
+        if body.points is not None:
+            new_row["points"] = json.dumps(body.points)
+
+        rows.append(new_row)
+        _write_csv_rows(csv_path, fieldnames, rows)
+
+    return {"status": "added", "row_index": len(rows) - 1}
+
+
+@router.patch("/pipeline-runs/{id}/inference-results/{label}/rows/{row_index}")
+def update_inference_row(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    label: str,
+    row_index: int,
+    body: InferenceRowUpdate,
+) -> dict[str, Any]:
+    """Partially update one label row — edited geometry/class, or mark verified on accept."""
+    _run, _paths, csv_path = _resolve_label_csv(session, id, label)
+    with _get_csv_write_lock(csv_path):
+        fieldnames, rows = _read_csv_rows(csv_path)
+        if row_index < 0 or row_index >= len(rows):
+            raise HTTPException(status_code=404, detail=f"Row {row_index} not found")
+        if "verified" not in fieldnames:
+            fieldnames = [*fieldnames, "verified"]
+
+        updates = body.model_dump(exclude_unset=True, by_alias=False)
+        row = rows[row_index]
+        if "label_class" in updates:
+            row["class"] = updates["label_class"]
+        for geom_field in ("x", "y", "width", "height"):
+            if geom_field in updates:
+                row[geom_field] = str(updates[geom_field]) if updates[geom_field] is not None else ""
+        if "points" in updates:
+            row["points"] = json.dumps(updates["points"]) if updates["points"] is not None else ""
+        if "verified" in updates:
+            row["verified"] = "1" if updates["verified"] else ""
+
+        rows[row_index] = row
+        _write_csv_rows(csv_path, fieldnames, rows)
+
+    return {"status": "updated", "row_index": row_index}
+
+
+@router.delete("/pipeline-runs/{id}/inference-results/{label}/rows/{row_index}")
+def delete_inference_row(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    label: str,
+    row_index: int,
+) -> dict[str, Any]:
+    """Reject/remove one label row."""
+    _run, _paths, csv_path = _resolve_label_csv(session, id, label)
+    with _get_csv_write_lock(csv_path):
+        fieldnames, rows = _read_csv_rows(csv_path)
+        if row_index < 0 or row_index >= len(rows):
+            raise HTTPException(status_code=404, detail=f"Row {row_index} not found")
+        del rows[row_index]
+        _write_csv_rows(csv_path, fieldnames, rows)
+
+    return {"status": "deleted", "row_index": row_index}
 
 
 # ── Apply confidence threshold to traits GeoJSON ─────────────────────────────

@@ -3,8 +3,33 @@
 export type _UseUploadedOrthoRequest = {
     file_upload_id?: (string | null);
     dem_file_upload_id?: (string | null);
+    thermal_file_upload_id?: (string | null);
     save_mode?: string;
     name?: (string | null);
+};
+
+export type AgmlDatasetLocation = {
+    continent?: (string | null);
+    country?: (string | null);
+};
+
+export type AgmlDatasetPublic = {
+    name: string;
+    ml_task?: (string | null);
+    ag_task?: (string | null);
+    location?: (AgmlDatasetLocation | null);
+    n_images?: (number | null);
+    sensor_modality?: (string | null);
+    platform?: (string | null);
+    real_synthetic?: (string | null);
+    input_data_format?: (string | Array<(string)> | null);
+    annotation_format?: (string | null);
+    docs_url?: (string | null);
+    classes?: ({
+    [key: string]: unknown;
+} | null);
+    parent_dataset?: (string | null);
+    selected?: boolean;
 };
 
 export type ApplyThresholdRequest = {
@@ -38,10 +63,26 @@ export type Body_reference_data_upload_reference_data = {
     file: (Blob | File);
 };
 
+export type Body_thermal_upload_weather_file = {
+    file: (Blob | File);
+};
+
 export type CheckExistingRequest = {
     target_root_dir: string;
     file_names: Array<(string)>;
     data_type?: string;
+    date?: (string | null);
+};
+
+export type ConvertDirectoryRequest = {
+    path: string;
+    platform?: string;
+    distance?: number;
+    humidity?: number;
+    emissivity?: number;
+    reflected_temperature?: number;
+    weather_file_id?: (string | null);
+    file_upload_id?: (string | null);
 };
 
 export type ConvertGeoTiffRequest = {
@@ -70,6 +111,7 @@ export type ExecuteStepRequest = {
     stitch_name?: (string | null);
     plot_marking_version?: (number | null);
     ortho_name?: (string | null);
+    generate_thermal?: boolean;
     ortho_version?: (number | null);
     boundary_version?: (number | null);
     exg_threshold?: number;
@@ -81,6 +123,12 @@ export type ExecuteStepRequest = {
     sync_mode?: string;
     sync_source_run_id?: (string | null);
     sync_max_extrapolation_sec?: number;
+    thermal_platform?: string;
+    thermal_distance?: number;
+    thermal_humidity?: number;
+    thermal_emissivity?: number;
+    thermal_reflected_temperature?: number;
+    thermal_weather_file_id?: (string | null);
 };
 
 export type FileUploadCreate = {
@@ -91,6 +139,9 @@ export type FileUploadCreate = {
     date: string;
     platform?: (string | null);
     sensor?: (string | null);
+    image_type?: (string | null);
+    thermal_converted?: boolean;
+    thermal_converted_dir?: (string | null);
     storage_path: string;
     msgs_synced_path?: (string | null);
 };
@@ -103,6 +154,9 @@ export type FileUploadPublic = {
     date: string;
     platform?: (string | null);
     sensor?: (string | null);
+    image_type?: (string | null);
+    thermal_converted?: boolean;
+    thermal_converted_dir?: (string | null);
     storage_path: string;
     msgs_synced_path: (string | null);
     id: string;
@@ -128,6 +182,9 @@ export type FileUploadUpdate = {
     date?: (string | null);
     platform?: (string | null);
     sensor?: (string | null);
+    image_type?: (string | null);
+    thermal_converted?: (boolean | null);
+    thermal_converted_dir?: (string | null);
     storage_path?: (string | null);
     status?: (string | null);
     file_count?: (number | null);
@@ -143,6 +200,12 @@ export type GcpSelectionRequest = {
         [key: string]: unknown;
     }>;
     gcp_locations_csv?: (string | null);
+    thermal_gcp_selections?: (Array<{
+    [key: string]: unknown;
+}> | null);
+    thermal_image_gps?: (Array<{
+    [key: string]: unknown;
+}> | null);
 };
 
 export type GeneratePlotGridRequest = {
@@ -156,6 +219,30 @@ export type GeneratePlotGridRequest = {
 
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
+};
+
+export type InferenceRowCreate = {
+    image: string;
+    class: string;
+    x?: (number | null);
+    y?: (number | null);
+    width?: (number | null);
+    height?: (number | null);
+    points?: (Array<{
+    [key: string]: (number);
+}> | null);
+};
+
+export type InferenceRowUpdate = {
+    class?: (string | null);
+    x?: (number | null);
+    y?: (number | null);
+    width?: (number | null);
+    height?: (number | null);
+    points?: (Array<{
+    [key: string]: (number);
+}> | null);
+    verified?: (boolean | null);
 };
 
 export type ItemCreate = {
@@ -180,6 +267,23 @@ export type ItemUpdate = {
     description?: (string | null);
 };
 
+/**
+ * Model leaderboard. Currently sourced from agml's own bundled prior
+ * benchmark data (`source="agml-bundled"`) — a small (~80 row), fully
+ * offline set of previously-run model results shipped inside the `agml`
+ * package itself. AgML's own hosted leaderboard is not yet published as a
+ * fetchable feed; when it is, this same contract can be repointed at that
+ * URL (`source="agml-github"`) without a breaking response-shape change.
+ */
+export type LeaderboardPublic = {
+    status?: string;
+    source?: (string | null);
+    updated_at?: (string | null);
+    models?: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
 export type LocalCopyRequest = {
     file_paths: Array<(string)>;
     data_type: string;
@@ -191,6 +295,7 @@ export type LocalCopyRequest = {
     date?: (string | null);
     platform?: (string | null);
     sensor?: (string | null);
+    image_type?: (string | null);
 };
 
 export type MarkStepCompleteBody = {
@@ -215,8 +320,14 @@ export type Message = {
 
 export type ModelConfig = {
     label: string;
-    roboflow_api_key: string;
-    roboflow_model_id: string;
+    source?: string;
+    roboflow_api_key?: (string | null);
+    roboflow_model_id?: (string | null);
+    weights_path?: (string | null);
+    hf_model_id?: (string | null);
+    hf_api_key?: (string | null);
+    hf_zero_shot?: boolean;
+    hf_prompt?: (string | null);
     task_type?: string;
 };
 
@@ -433,6 +544,23 @@ export type SavePlotGridRequest = {
     name?: (string | null);
 };
 
+export type SelectedAgmlDatasetCreate = {
+    dataset_name: string;
+    notes?: (string | null);
+};
+
+export type SelectedAgmlDatasetPublic = {
+    dataset_name: string;
+    notes: (string | null);
+    selected_at: string;
+    dataset_metadata?: (AgmlDatasetPublic | null);
+};
+
+export type SimilarDatasetsPublic = {
+    source: string;
+    candidates: Array<AgmlDatasetPublic>;
+};
+
 export type SystemInfoPublic = {
     cpu_count: number;
     total_ram_gb: number;
@@ -494,6 +622,17 @@ export type ValidationError = {
     type: string;
 };
 
+export type WeatherStationFilePublic = {
+    id: string;
+    name: string;
+    format: string;
+    original_filename: (string | null);
+    row_count: number;
+    start_time: (string | null);
+    end_time: (string | null);
+    created_at: string;
+};
+
 export type WorkspaceCreate = {
     name: string;
     description?: (string | null);
@@ -516,6 +655,58 @@ export type WorkspaceUpdate = {
     name?: (string | null);
     description?: (string | null);
 };
+
+export type AgmlListDatasetsData = {
+    agTask?: (string | null);
+    /**
+     * 'continent:africa' or 'country:denmark'
+     */
+    location?: (string | null);
+    mlTask?: (string | null);
+    nImagesMax?: (number | null);
+    nImagesMin?: (number | null);
+    platform?: (string | null);
+    realSynthetic?: (string | null);
+    search?: (string | null);
+    sensorModality?: (string | null);
+};
+
+export type AgmlListDatasetsResponse = (Array<AgmlDatasetPublic>);
+
+export type AgmlGetDatasetData = {
+    name: string;
+};
+
+export type AgmlGetDatasetResponse = (AgmlDatasetPublic);
+
+export type AgmlGetSimilarDatasetsData = {
+    limit?: number;
+    name: string;
+};
+
+export type AgmlGetSimilarDatasetsResponse = (SimilarDatasetsPublic);
+
+export type AgmlListSelectedResponse = (Array<SelectedAgmlDatasetPublic>);
+
+export type AgmlSelectDatasetData = {
+    requestBody: SelectedAgmlDatasetCreate;
+};
+
+export type AgmlSelectDatasetResponse = (SelectedAgmlDatasetPublic);
+
+export type AgmlUnselectDatasetData = {
+    name: string;
+};
+
+export type AgmlUnselectDatasetResponse = (unknown);
+
+export type AgmlGetDatasetBenchmarksData = {
+    name: string;
+};
+
+export type AgmlGetDatasetBenchmarksResponse = (unknown);
+
+export type AgmlGetLeaderboardResponse = (LeaderboardPublic);
 
 export type AnalyzeListRunsResponse = (Array<{
     [key: string]: unknown;
@@ -654,6 +845,10 @@ export type FilesListUploadedDemsResponse = (Array<{
     [key: string]: unknown;
 }>);
 
+export type FilesListUploadedThermalsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
 export type FilesReadFileData = {
     id: string;
 };
@@ -685,6 +880,18 @@ export type FilesListUploadImagesData = {
 };
 
 export type FilesListUploadImagesResponse = (unknown);
+
+export type FilesGetMsgsMetadataData = {
+    id: string;
+};
+
+export type FilesGetMsgsMetadataResponse = (unknown);
+
+export type FilesGetMetadataCsvsData = {
+    id: string;
+};
+
+export type FilesGetMetadataCsvsResponse = (unknown);
 
 export type FilesDownloadUploadZipData = {
     id: string;
@@ -921,6 +1128,14 @@ export type ProcessingListOutputsResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingThermalConversionResultsData = {
+    id: string;
+};
+
+export type ProcessingThermalConversionResultsResponse = ({
+    [key: string]: unknown;
+});
+
 export type ProcessingListPlotMarkingsData = {
     id: string;
 };
@@ -965,7 +1180,9 @@ export type ProcessingDeletePlotMarkingVersionData = {
 export type ProcessingDeletePlotMarkingVersionResponse = (null);
 
 export type ProcessingListImagesData = {
+    directions?: string;
     extensions?: string;
+    filterMode?: string;
     id: string;
 };
 
@@ -1045,9 +1262,18 @@ export type ProcessingSaveGcpSelectionResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingSkipGcpSelectionData = {
+    id: string;
+};
+
+export type ProcessingSkipGcpSelectionResponse = ({
+    [key: string]: unknown;
+});
+
 export type ProcessingGcpCandidatesData = {
     filterByGcp?: boolean;
     id: string;
+    mode?: string;
     radiusM?: number;
 };
 
@@ -1207,6 +1433,37 @@ export type ProcessingInferenceResultsResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingAddInferenceRowData = {
+    id: string;
+    label: string;
+    requestBody: InferenceRowCreate;
+};
+
+export type ProcessingAddInferenceRowResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingUpdateInferenceRowData = {
+    id: string;
+    label: string;
+    requestBody: InferenceRowUpdate;
+    rowIndex: number;
+};
+
+export type ProcessingUpdateInferenceRowResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingDeleteInferenceRowData = {
+    id: string;
+    label: string;
+    rowIndex: number;
+};
+
+export type ProcessingDeleteInferenceRowResponse = ({
+    [key: string]: unknown;
+});
+
 export type ProcessingMarkStepCompleteData = {
     id: string;
     requestBody: MarkStepCompleteBody;
@@ -1236,6 +1493,7 @@ export type ProcessingListStitchingsResponse = (Array<{
 export type ProcessingDownloadStitchingImagesData = {
     associationVersion?: (number | null);
     id: string;
+    squareSize?: (number | null);
     version: number;
 };
 
@@ -1306,6 +1564,7 @@ export type ProcessingDeleteInferenceResultResponse = ({
 export type ProcessingDownloadCropsData = {
     id: string;
     orthoVersion?: (number | null);
+    squareSize?: (number | null);
 };
 
 export type ProcessingDownloadCropsResponse = (unknown);
@@ -1370,6 +1629,34 @@ export type ReferenceDataListPlotsData = {
 
 export type ReferenceDataListPlotsResponse = (ReferencePlotsPublic);
 
+export type ReferenceDataListPlotsAllData = {
+    datasetId: string;
+};
+
+export type ReferenceDataListPlotsAllResponse = (unknown);
+
+export type ReferenceDataAggregateDatasetData = {
+    /**
+     * avg | min | max
+     */
+    aggregation?: string;
+    datasetId: string;
+    /**
+     * Trait column to aggregate
+     */
+    metric: string;
+};
+
+export type ReferenceDataAggregateDatasetResponse = ({
+    [key: string]: unknown;
+});
+
+export type ReferenceDataDownloadDatasetData = {
+    datasetId: string;
+};
+
+export type ReferenceDataDownloadDatasetResponse = (unknown);
+
 export type ReferenceDataListWorkspaceDatasetsData = {
     workspaceId: string;
 };
@@ -1412,6 +1699,14 @@ export type SettingsUpdateDataRootData = {
 
 export type SettingsUpdateDataRootResponse = (AppSettingPublic);
 
+export type SettingsReadDjiThermalSdkPathResponse = (AppSettingPublic);
+
+export type SettingsUpdateDjiThermalSdkPathData = {
+    requestBody: AppSettingUpdate;
+};
+
+export type SettingsUpdateDjiThermalSdkPathResponse = (AppSettingPublic);
+
 export type SettingsReadSystemInfoResponse = (SystemInfoPublic);
 
 export type SettingsReadDockerResourcesResponse = (DockerResourcesPublic);
@@ -1421,6 +1716,75 @@ export type SettingsUpdateDockerResourcesData = {
 };
 
 export type SettingsUpdateDockerResourcesResponse = (DockerResourcesPublic);
+
+export type ThermalUploadWeatherFileData = {
+    /**
+     * Weather file format — see thermal_utils.SUPPORTED_WEATHER_FORMATS
+     */
+    format?: string;
+    formData: Body_thermal_upload_weather_file;
+    /**
+     * Display name for this weather file
+     */
+    name: string;
+};
+
+export type ThermalUploadWeatherFileResponse = (WeatherStationFilePublic);
+
+export type ThermalListWeatherFilesResponse = (Array<WeatherStationFilePublic>);
+
+export type ThermalDeleteWeatherFileData = {
+    id: string;
+};
+
+export type ThermalDeleteWeatherFileResponse = ({
+    [key: string]: (string);
+});
+
+export type ThermalPreviewThermalImageData = {
+    /**
+     * Any matplotlib colormap name
+     */
+    colormap?: string;
+    /**
+     * Absolute path, or path relative to data_root, to a converted thermal GeoTIFF
+     */
+    path: string;
+};
+
+export type ThermalPreviewThermalImageResponse = (unknown);
+
+export type ThermalScanDirectoryData = {
+    /**
+     * Absolute path to a directory to scan
+     */
+    path: string;
+    platform?: string;
+};
+
+export type ThermalScanDirectoryResponse = ({
+    [key: string]: unknown;
+});
+
+export type ThermalConvertDirectoryData = {
+    requestBody: ConvertDirectoryRequest;
+};
+
+export type ThermalConvertDirectoryResponse = ({
+    [key: string]: (string);
+});
+
+export type ThermalPendingConversionsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type ThermalConvertDirectoryStatusData = {
+    jobId: string;
+};
+
+export type ThermalConvertDirectoryStatusResponse = ({
+    [key: string]: unknown;
+});
 
 export type UsersReadUsersData = {
     limit?: number;

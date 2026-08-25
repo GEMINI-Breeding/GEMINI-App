@@ -12,8 +12,20 @@ interface UploadParams {
   targetRootDir: string;
   reupload?: boolean;
   formValues?: Record<string, string>;
-  /** Called with absolute dest paths of all successfully uploaded files */
-  onComplete?: (destPaths: string[]) => void;
+  /**
+   * Called on a successful batch (no copy/extraction errors) with:
+   *  - destPaths: absolute dest paths of files that were newly copied this
+   *    run (files already present at the destination — skipped as
+   *    duplicates, not an error — are NOT included here)
+   *  - meta.destDir: the batch's destination directory, always present
+   *    even when every file was skipped as a duplicate
+   *  - meta.fileUploadId: id of the FileUpload DB record this batch was
+   *    recorded under
+   */
+  onComplete?: (
+    destPaths: string[],
+    meta: { destDir?: string; fileUploadId?: string }
+  ) => void;
   /** Called when a Docker-not-found/not-running error occurs during .bin extraction */
   onDockerError?: (message: string) => void;
 }
@@ -77,6 +89,9 @@ export function useFileUpload() {
               date: formValues.date || null,
               platform: formValues.platform || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultPlatform || null,
               sensor: formValues.sensor || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultSensor || null,
+              // Placeholder tag (rgb/thermal/multispectral) — not consumed by
+              // any pipeline logic yet, see backend FileUpload.image_type.
+              image_type: formValues.image_type || null,
             }),
           }
         );
@@ -199,7 +214,10 @@ export function useFileUpload() {
                       completedAt: new Date(),
                       title: `Uploaded ${data.count} file(s)`,
                     });
-                    onComplete?.(completedDestPaths);
+                    onComplete?.(completedDestPaths, {
+                      destDir: data.dest_dir as string | undefined,
+                      fileUploadId: data.file_upload_id as string | undefined,
+                    });
                   }
                   queryClient.invalidateQueries({ queryKey: ["workspace-card-images"] });
                   break;

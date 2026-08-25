@@ -9,38 +9,30 @@
  * Results can be expanded to fullscreen via the ExpandButton in the nav bar.
  */
 
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Maximize2,
   PanelRightClose,
   PanelRightOpen,
   Settings,
   Square,
+  Tag,
   ZoomIn,
   ZoomOut,
-  Maximize2,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
+import { UtilsService } from "@/client"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  useExpandable,
   ExpandButton,
   FullscreenModal,
+  useExpandable,
 } from "@/components/Common/ExpandableSection"
-import { cn } from "@/lib/utils"
-import { openUrl } from "@/lib/platform"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -49,7 +41,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { UtilsService } from "@/client"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { openUrl } from "@/lib/platform"
+import { LabelingTool } from "./LabelingTool"
+import { cn } from "@/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,10 +60,11 @@ interface Prediction {
   image: string
   class: string
   confidence: number
-  x: number
-  y: number
-  width: number
-  height: number
+  // Absent for classification predictions (whole-image label, no geometry).
+  x?: number
+  y?: number
+  width?: number
+  height?: number
   points?: Array<{ x: number; y: number }>
 }
 
@@ -75,8 +79,14 @@ interface ImageInfo {
 
 export interface ModelConfig {
   label: string
+  source?: string
   roboflow_api_key: string
   roboflow_model_id: string
+  weights_path?: string
+  hf_model_id?: string
+  hf_api_key?: string
+  hf_zero_shot?: boolean
+  hf_prompt?: string
   task_type: string
 }
 
@@ -128,26 +138,50 @@ interface InferenceToolProps {
 // ── Class colours ─────────────────────────────────────────────────────────────
 
 const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
-  "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#DDA0DD",
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#14b8a6",
+  "#6366f1",
+  "#FF6B6B",
+  "#4ECDC4",
+  "#45B7D1",
+  "#96CEB4",
+  "#DDA0DD",
 ]
 
 function classColour(cls: string): string {
   let hash = 0
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0
+  for (let i = 0; i < cls.length; i++)
+    hash = (hash * 31 + cls.charCodeAt(i)) | 0
   return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
 }
 
 // ── Client-side NMS ───────────────────────────────────────────────────────────
 
 function calcIou(a: Prediction, b: Prediction): number {
-  const ax0 = a.x - a.width / 2, ay0 = a.y - a.height / 2
-  const ax1 = a.x + a.width / 2, ay1 = a.y + a.height / 2
-  const bx0 = b.x - b.width / 2, by0 = b.y - b.height / 2
-  const bx1 = b.x + b.width / 2, by1 = b.y + b.height / 2
-  const ix0 = Math.max(ax0, bx0), iy0 = Math.max(ay0, by0)
-  const ix1 = Math.min(ax1, bx1), iy1 = Math.min(ay1, by1)
+  // Classification predictions have no geometry — nothing to de-duplicate spatially.
+  if (a.x == null || a.y == null || a.width == null || a.height == null)
+    return 0
+  if (b.x == null || b.y == null || b.width == null || b.height == null)
+    return 0
+  const ax0 = a.x - a.width / 2,
+    ay0 = a.y - a.height / 2
+  const ax1 = a.x + a.width / 2,
+    ay1 = a.y + a.height / 2
+  const bx0 = b.x - b.width / 2,
+    by0 = b.y - b.height / 2
+  const bx1 = b.x + b.width / 2,
+    by1 = b.y + b.height / 2
+  const ix0 = Math.max(ax0, bx0),
+    iy0 = Math.max(ay0, by0)
+  const ix1 = Math.min(ax1, bx1),
+    iy1 = Math.min(ay1, by1)
   if (ix1 <= ix0 || iy1 <= iy0) return 0
   const inter = (ix1 - ix0) * (iy1 - iy0)
   const union = a.width * a.height + b.width * b.height - inter
@@ -157,7 +191,9 @@ function calcIou(a: Prediction, b: Prediction): number {
 function applyNms(preds: Prediction[], iouThresh: number): Prediction[] {
   if (iouThresh >= 1.0) return preds
   const byClass: Record<string, Prediction[]> = {}
-  for (const p of preds) { (byClass[p.class] ??= []).push(p) }
+  for (const p of preds) {
+    ;(byClass[p.class] ??= []).push(p)
+  }
   const kept: Prediction[] = []
   for (const classPreds of Object.values(byClass)) {
     let remaining = [...classPreds].sort((a, b) => b.confidence - a.confidence)
@@ -172,7 +208,15 @@ function applyNms(preds: Prediction[], iouThresh: number): Prediction[] {
 
 function hexToRgba(hex: string, alpha: number): string {
   const c = hex.replace("#", "")
-  const num = parseInt(c.length === 3 ? c.split("").map((ch) => ch + ch).join("") : c, 16)
+  const num = parseInt(
+    c.length === 3
+      ? c
+          .split("")
+          .map((ch) => ch + ch)
+          .join("")
+      : c,
+    16,
+  )
   return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`
 }
 
@@ -195,7 +239,10 @@ function SectionHeader({
     >
       {label}
       <ChevronDown
-        className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-150", open && "rotate-180")}
+        className={cn(
+          "h-3.5 w-3.5 text-muted-foreground transition-transform duration-150",
+          open && "rotate-180",
+        )}
       />
     </button>
   )
@@ -213,11 +260,23 @@ interface ImageViewerProps {
   fullscreen?: boolean
 }
 
-function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels, fullscreen }: ImageViewerProps) {
+function ImageViewer({
+  image,
+  predictions,
+  hiddenClasses,
+  showMasks,
+  showLabels,
+  fullscreen,
+}: ImageViewerProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const dragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null)
+  const dragRef = useRef<{
+    startX: number
+    startY: number
+    startPanX: number
+    startPanY: number
+  } | null>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [zoom, setZoom] = useState(1)
   const [panX, setPanX] = useState(0)
@@ -230,12 +289,12 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     setPanX(0)
     setPanY(0)
     setDims(null)
-  }, [image.name])
+  }, [])
 
   // Redraw canvas whenever anything relevant changes
   useEffect(() => {
     drawDetections()
-  }, [dims, predictions, hiddenClasses, showMasks, showLabels, zoom, panX, panY])
+  }, [drawDetections])
 
   function drawDetections() {
     const canvas = canvasRef.current
@@ -280,6 +339,16 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     const filtered = predictions.filter((p) => !hiddenClasses.has(p.class))
 
     for (const pred of filtered) {
+      // Classification predictions have no geometry — rendered as a badge
+      // overlay outside the canvas instead (see classificationLabel below).
+      if (
+        pred.x == null ||
+        pred.y == null ||
+        pred.width == null ||
+        pred.height == null
+      )
+        continue
+
       const color = classColour(pred.class)
       const hasPoints = (pred.points?.length ?? 0) >= 3
 
@@ -339,8 +408,10 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25
     setZoom((z) => {
       const newZ = Math.max(1, Math.min(10, z * factor))
-      if (newZ === 1) { setPanX(0); setPanY(0) }
-      else {
+      if (newZ === 1) {
+        setPanX(0)
+        setPanY(0)
+      } else {
         const scale = newZ / z
         setPanX((px) => cx - (cx - px) * scale)
         setPanY((py) => cy - (cy - py) * scale)
@@ -353,7 +424,12 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     if (zoom <= 1) return
     e.preventDefault()
     setIsDragging(true)
-    dragRef.current = { startX: e.clientX, startY: e.clientY, startPanX: panX, startPanY: panY }
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startPanX: panX,
+      startPanY: panY,
+    }
   }
 
   function handleMouseMove(e: React.MouseEvent) {
@@ -368,12 +444,21 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
     setIsDragging(false)
   }
 
-  function fitScreen() { setZoom(1); setPanX(0); setPanY(0) }
-  function zoomIn() { setZoom((z) => Math.min(10, z * 1.25)) }
+  function fitScreen() {
+    setZoom(1)
+    setPanX(0)
+    setPanY(0)
+  }
+  function zoomIn() {
+    setZoom((z) => Math.min(10, z * 1.25))
+  }
   function zoomOut() {
     setZoom((z) => {
       const nz = Math.max(1, z / 1.25)
-      if (nz === 1) { setPanX(0); setPanY(0) }
+      if (nz === 1) {
+        setPanX(0)
+        setPanY(0)
+      }
       return nz
     })
   }
@@ -385,20 +470,48 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
 
   const containerHeight = fullscreen ? "calc(100vh - 160px)" : 640
 
+  // Classification predictions have no geometry to draw on canvas — show the
+  // top prediction as a badge over the image instead.
+  const classificationPred = predictions.find(
+    (p) => !hiddenClasses.has(p.class) && p.width == null && p.height == null,
+  )
+
   return (
     <div className="space-y-1">
       {/* Zoom toolbar */}
       <div className="flex items-center gap-1 justify-end">
-        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={zoomOut} disabled={zoom <= 1}>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          onClick={zoomOut}
+          disabled={zoom <= 1}
+        >
           <ZoomOut className="h-3.5 w-3.5" />
         </Button>
         <span className="text-xs text-muted-foreground w-12 text-center font-mono">
           {Math.round(zoom * 100)}%
         </span>
-        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={zoomIn} disabled={zoom >= 10}>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          onClick={zoomIn}
+          disabled={zoom >= 10}
+        >
           <ZoomIn className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={fitScreen} disabled={zoom === 1} title="Fit to view">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          onClick={fitScreen}
+          disabled={zoom === 1}
+          title="Fit to view"
+        >
           <Maximize2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -437,11 +550,31 @@ function ImageViewer({ image, predictions, hiddenClasses, showMasks, showLabels,
         />
         <canvas
           ref={canvasRef}
-          style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 10 }}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
         />
+        {classificationPred && showLabels && (
+          <div
+            className="absolute top-2 left-2 rounded px-2 py-1 text-xs font-medium text-white shadow"
+            style={{
+              backgroundColor: classColour(classificationPred.class),
+              zIndex: 11,
+            }}
+          >
+            {classificationPred.class}{" "}
+            {(classificationPred.confidence * 100).toFixed(0)}%
+          </div>
+        )}
       </div>
       {zoom > 1 && (
-        <p className="text-xs text-muted-foreground">Scroll to zoom · drag to pan</p>
+        <p className="text-xs text-muted-foreground">
+          Scroll to zoom · drag to pan
+        </p>
       )}
     </div>
   )
@@ -472,6 +605,7 @@ export function InferenceTool({
   const queryClient = useQueryClient()
   const [imageIdx, setImageIdx] = useState(0)
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined)
+  const [reviewLabel, setReviewLabel] = useState<string | null>(null)
   // 0–100 integer threshold applied client-side; API always returns at confidence ≥ 0.1
   const [confThreshold, setConfThreshold] = useState(50)
   // Plot metadata filters
@@ -487,7 +621,10 @@ export function InferenceTool({
   const [iouThreshold, setIouThreshold] = useState(50)
   const thresholdInitialized = useRef(false)
   const [showLabels, setShowLabels] = useState(true)
-  const [traitsStatus, setTraitsStatus] = useState<{ loading: boolean; message: string | null }>({ loading: false, message: null })
+  const [traitsStatus, setTraitsStatus] = useState<{
+    loading: boolean
+    message: string | null
+  }>({ loading: false, message: null })
   const [logLines, setLogLines] = useState<string[]>([])
   const [logTotal, setLogTotal] = useState<number | null>(null)
   const [showDockerDialog, setShowDockerDialog] = useState(false)
@@ -502,41 +639,68 @@ export function InferenceTool({
   const [showStats, setShowStats] = useState(true)
   const [showTraitsOutput, setShowTraitsOutput] = useState(false)
 
-  const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | undefined>(
-    stitchVersions?.[0]?.version
-  )
-  const [selectedAssocVersion, setSelectedAssocVersion] = useState<number | undefined>(
-    associationVersions?.[0]?.version
-  )
-  const [selectedTraitVersion, setSelectedTraitVersion] = useState<number | undefined>(
-    traitVersions?.[0]?.version
-  )
+  const [selectedStitchVersion, setSelectedStitchVersion] = useState<
+    number | undefined
+  >(stitchVersions?.[0]?.version)
+  const [selectedAssocVersion, setSelectedAssocVersion] = useState<
+    number | undefined
+  >(associationVersions?.[0]?.version)
+  const [selectedTraitVersion, setSelectedTraitVersion] = useState<
+    number | undefined
+  >(traitVersions?.[0]?.version)
 
   // Expand / fullscreen
   const exp = useExpandable()
   const [showControls, setShowControls] = useState(true)
 
-  const configuredModels = (initialModels ?? []).filter((m) => m.roboflow_model_id.trim())
-  const isGround = (stitchVersions?.length ?? 0) > 0 || (associationVersions?.length ?? 0) > 0
+  const configuredModels = (initialModels ?? []).filter((m) => {
+    if (m.source === "local_weights") return (m.weights_path ?? "").trim()
+    if (m.source === "huggingface") return (m.hf_model_id ?? "").trim()
+    return m.roboflow_model_id.trim()
+  })
+
+  // Per-run prompt overrides for HF zero-shot models, keyed by model label.
+  // Lets a user try different prompts across runs without editing the
+  // pipeline's saved default prompt each time.
+  const [promptOverrides, setPromptOverrides] = useState<
+    Record<string, string>
+  >({})
+
+  const isGround =
+    (stitchVersions?.length ?? 0) > 0 || (associationVersions?.length ?? 0) > 0
   const isAerial = (traitVersions?.length ?? 0) > 0
 
   async function handleApplyThreshold() {
     const label = selectedTraitsModel || availableModels[0] || null
     setTraitsStatus({ loading: true, message: null })
     try {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/apply-inference-threshold`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidence_threshold: traitsThreshold / 100, label }),
-      })
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/apply-inference-threshold`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confidence_threshold: traitsThreshold / 100,
+            label,
+          }),
+        },
+      )
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        setTraitsStatus({ loading: false, message: `Error: ${(err as any).detail ?? res.statusText}` })
+        setTraitsStatus({
+          loading: false,
+          message: `Error: ${(err as any).detail ?? res.statusText}`,
+        })
       } else {
         const data = await res.json()
         const applied = (data.applied as string[]).join(", ")
-        setTraitsStatus({ loading: false, message: `Applied conf=${traitsThreshold}% iou=${iouThreshold}% → ${applied}` })
-        queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] })
+        setTraitsStatus({
+          loading: false,
+          message: `Applied conf=${traitsThreshold}% iou=${iouThreshold}% → ${applied}`,
+        })
+        queryClient.invalidateQueries({
+          queryKey: ["inference-summary", runId],
+        })
       }
     } catch (e) {
       setTraitsStatus({ loading: false, message: `Error: ${String(e)}` })
@@ -545,7 +709,12 @@ export function InferenceTool({
 
   async function handleRun() {
     if (!configuredModels.length) return
-    if (inferenceMode === "local") {
+    // Only Roboflow's local mode needs Docker — local-weights and
+    // HuggingFace-local both run in-process.
+    const needsDocker =
+      inferenceMode === "local" &&
+      configuredModels.some((m) => (m.source ?? "roboflow") === "roboflow")
+    if (needsDocker) {
       try {
         const result = await UtilsService.dockerCheck()
         if (!result.available) {
@@ -557,8 +726,13 @@ export function InferenceTool({
         // If the check fails, proceed — the backend will surface Docker errors via SSE
       }
     }
+    const modelsForRun = configuredModels.map((m) =>
+      promptOverrides[m.label] !== undefined
+        ? { ...m, hf_prompt: promptOverrides[m.label] }
+        : m,
+    )
     onRunInference({
-      models: configuredModels,
+      models: modelsForRun,
       stitch_version: selectedStitchVersion,
       association_version: selectedAssocVersion,
       trait_version: selectedTraitVersion,
@@ -573,7 +747,9 @@ export function InferenceTool({
     setLogLines([])
     setLogTotal(null)
     setLogDone(0)
-    const es = new EventSource(apiUrl(`/api/v1/pipeline-runs/${runId}/progress`))
+    const es = new EventSource(
+      apiUrl(`/api/v1/pipeline-runs/${runId}/progress`),
+    )
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
@@ -584,30 +760,36 @@ export function InferenceTool({
         }
         if (data.event === "progress" && typeof data.progress === "number") {
           setLogDone((prev) => {
-            if (logTotal != null) return Math.round(data.progress / 100 * logTotal)
+            if (logTotal != null)
+              return Math.round((data.progress / 100) * logTotal)
             return prev
           })
         }
       } catch {}
     }
     return () => es.close()
-  }, [isRunning, runId])
+  }, [isRunning, runId, logTotal])
 
   // Auto-scroll log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [logLines])
+  }, [])
 
   // Fetch inference summary to restore the previously applied threshold
   const { data: summaryData } = useQuery({
     queryKey: ["inference-summary", runId],
     queryFn: async () => {
       const token = localStorage.getItem("access_token") || ""
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`), {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`),
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        },
+      )
       if (!res.ok) return []
-      return res.json() as Promise<Array<{ confidence_threshold?: number | null }>>
+      return res.json() as Promise<
+        Array<{ confidence_threshold?: number | null }>
+      >
     },
     enabled: inferenceComplete,
     staleTime: 30_000,
@@ -616,8 +798,11 @@ export function InferenceTool({
   // Seed the traits threshold slider from the last applied threshold (runs once)
   useEffect(() => {
     if (thresholdInitialized.current) return
-    const entries: Array<{ confidence_threshold?: number | null }> = summaryData ?? []
-    const stored = entries.find((e) => e.confidence_threshold != null)?.confidence_threshold
+    const entries: Array<{ confidence_threshold?: number | null }> =
+      summaryData ?? []
+    const stored = entries.find(
+      (e) => e.confidence_threshold != null,
+    )?.confidence_threshold
     if (stored != null) {
       const pct = Math.round(stored * 100)
       setTraitsThreshold(pct)
@@ -629,8 +814,12 @@ export function InferenceTool({
   const { data, isLoading } = useQuery({
     queryKey: ["inference-results", runId, activeModel],
     queryFn: async () => {
-      const modelParam = activeModel ? `?model=${encodeURIComponent(activeModel)}` : ""
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results${modelParam}`))
+      const modelParam = activeModel
+        ? `?model=${encodeURIComponent(activeModel)}`
+        : ""
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results${modelParam}`),
+      )
       if (!res.ok) return {}
       return res.json()
     },
@@ -644,39 +833,76 @@ export function InferenceTool({
   const currentModelLabel: string = (data as any)?.active_model ?? ""
 
   const hasSegmentation = predictions.some((p) => (p.points?.length ?? 0) >= 3)
+  const activeModelConfig =
+    configuredModels.find((m) => m.label === currentModelLabel) ??
+    configuredModels[0]
+  const isClassification = activeModelConfig?.task_type === "classification"
 
   // All unique classes across loaded predictions
   const allClasses = [...new Set(predictions.map((p) => p.class))].sort()
 
   // Check if any plot metadata exists
-  const hasPlotMeta = images.some((im) => im.row || im.col || im.accession || im.plot)
+  const hasPlotMeta = images.some(
+    (im) => im.row || im.col || im.accession || im.plot,
+  )
 
   // Apply metadata filters
-  const filteredImages = hasPlotMeta ? images.filter((im) => {
-    if (filterCol && !(im.col ?? "").toLowerCase().includes(filterCol.toLowerCase())) return false
-    if (filterRow && !(im.row ?? "").toLowerCase().includes(filterRow.toLowerCase())) return false
-    if (filterAccession && !(im.accession ?? "").toLowerCase().includes(filterAccession.toLowerCase())) return false
-    if (filterPlot && !(im.plot ?? im.name).toLowerCase().includes(filterPlot.toLowerCase())) return false
-    return true
-  }) : images
+  const filteredImages = hasPlotMeta
+    ? images.filter((im) => {
+        if (
+          filterCol &&
+          !(im.col ?? "").toLowerCase().includes(filterCol.toLowerCase())
+        )
+          return false
+        if (
+          filterRow &&
+          !(im.row ?? "").toLowerCase().includes(filterRow.toLowerCase())
+        )
+          return false
+        if (
+          filterAccession &&
+          !(im.accession ?? "")
+            .toLowerCase()
+            .includes(filterAccession.toLowerCase())
+        )
+          return false
+        if (
+          filterPlot &&
+          !(im.plot ?? im.name).toLowerCase().includes(filterPlot.toLowerCase())
+        )
+          return false
+        return true
+      })
+    : images
 
   // Reset viewer & filters when model changes
-  useEffect(() => { setImageIdx(0) }, [images.length, activeModel])
-  useEffect(() => { setHiddenClasses(new Set()); setShowMasks(true) }, [currentModelLabel])
+  useEffect(() => {
+    setImageIdx(0)
+  }, [])
+  useEffect(() => {
+    setHiddenClasses(new Set())
+    setShowMasks(true)
+  }, [])
   // Reset index when filter narrows results
-  useEffect(() => { setImageIdx(0) }, [filteredImages.length])
+  useEffect(() => {
+    setImageIdx(0)
+  }, [])
 
   const currentImage = filteredImages[imageIdx] ?? null
 
   // Predictions visible given current filters + client-side NMS (display-only, never modifies stored data)
   const visiblePreds = useMemo(() => {
     const confFiltered = predictions.filter(
-      (p) => p.confidence >= confThreshold / 100 && !hiddenClasses.has(p.class)
+      (p) => p.confidence >= confThreshold / 100 && !hiddenClasses.has(p.class),
     )
     if (iouThreshold >= 100) return confFiltered
     const byImage: Record<string, Prediction[]> = {}
-    for (const p of confFiltered) { (byImage[p.image] ??= []).push(p) }
-    return Object.values(byImage).flatMap((preds) => applyNms(preds, iouThreshold / 100))
+    for (const p of confFiltered) {
+      ;(byImage[p.image] ??= []).push(p)
+    }
+    return Object.values(byImage).flatMap((preds) =>
+      applyNms(preds, iouThreshold / 100),
+    )
   }, [predictions, confThreshold, hiddenClasses, iouThreshold])
   const currentPreds = currentImage
     ? visiblePreds.filter((p) => p.image === currentImage.name)
@@ -709,7 +935,8 @@ export function InferenceTool({
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
       if (e.key === "ArrowLeft") setImageIdx((i) => Math.max(0, i - 1))
-      if (e.key === "ArrowRight") setImageIdx((i) => Math.min(filteredImagesLenRef.current - 1, i + 1))
+      if (e.key === "ArrowRight")
+        setImageIdx((i) => Math.min(filteredImagesLenRef.current - 1, i + 1))
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -721,7 +948,9 @@ export function InferenceTool({
     <div className="flex items-center gap-2">
       <Button
         type="button"
-        variant="outline" size="icon" className="h-7 w-7"
+        variant="outline"
+        size="icon"
+        className="h-7 w-7"
         onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
         disabled={imageIdx <= 0}
       >
@@ -730,14 +959,23 @@ export function InferenceTool({
       <span className="text-xs text-muted-foreground font-mono shrink-0">
         {imageIdx + 1} / {filteredImages.length}
         {filteredImages.length !== images.length && (
-          <span className="text-muted-foreground/60"> (of {images.length})</span>
+          <span className="text-muted-foreground/60">
+            {" "}
+            (of {images.length})
+          </span>
         )}
       </span>
       <Button
         type="button"
-        variant="outline" size="icon" className="h-7 w-7"
-        onClick={() => setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))}
-        disabled={filteredImages.length === 0 || imageIdx >= filteredImages.length - 1}
+        variant="outline"
+        size="icon"
+        className="h-7 w-7"
+        onClick={() =>
+          setImageIdx((i) => Math.min(filteredImages.length - 1, i + 1))
+        }
+        disabled={
+          filteredImages.length === 0 || imageIdx >= filteredImages.length - 1
+        }
       >
         <ChevronRight className="w-3.5 h-3.5" />
       </Button>
@@ -745,21 +983,28 @@ export function InferenceTool({
         className="border-input bg-background rounded border px-2 py-1 text-xs flex-1 min-w-0"
         value={currentImage?.name ?? ""}
         onChange={(e) => {
-          const idx = filteredImages.findIndex((im) => im.name === e.target.value)
+          const idx = filteredImages.findIndex(
+            (im) => im.name === e.target.value,
+          )
           if (idx >= 0) setImageIdx(idx)
         }}
       >
         {filteredImages.map((im) => {
-          const detCount = visiblePreds.filter((p) => p.image === im.name).length
+          const imPreds = visiblePreds.filter((p) => p.image === im.name)
           const parts: string[] = []
           if (im.plot) parts.push(`Plot ${im.plot}`)
           if (im.col) parts.push(`Col ${im.col}`)
           if (im.row) parts.push(`Row ${im.row}`)
           if (im.accession) parts.push(im.accession)
           const label = parts.length > 0 ? parts.join(" · ") : im.name
+          const suffix = isClassification
+            ? imPreds[0]
+              ? `${imPreds[0].class} ${(imPreds[0].confidence * 100).toFixed(0)}%`
+              : "no prediction"
+            : `${imPreds.length} det`
           return (
             <option key={im.name} value={im.name}>
-              {label} ({detCount} det)
+              {label} ({suffix})
             </option>
           )
         })}
@@ -776,9 +1021,11 @@ export function InferenceTool({
         title={showControls ? "Hide controls panel" : "Show controls panel"}
         onClick={() => setShowControls((v) => !v)}
       >
-        {showControls
-          ? <PanelRightClose className="h-4 w-4" />
-          : <PanelRightOpen className="h-4 w-4" />}
+        {showControls ? (
+          <PanelRightClose className="h-4 w-4" />
+        ) : (
+          <PanelRightOpen className="h-4 w-4" />
+        )}
       </Button>
     </div>
   )
@@ -787,22 +1034,49 @@ export function InferenceTool({
 
   const controlsPanel = (
     <div className="space-y-3 rounded-lg border p-4">
-
       {/* Filter plots */}
       {hasPlotMeta && (
         <div className="space-y-1.5">
-          <SectionHeader label="Filter Plots" open={showFilters} onToggle={() => setShowFilters(v => !v)} />
+          <SectionHeader
+            label="Filter Plots"
+            open={showFilters}
+            onToggle={() => setShowFilters((v) => !v)}
+          />
           {showFilters && (
             <>
               <div className="grid grid-cols-2 gap-1.5">
-                {([
-                  { label: "Column", value: filterCol, set: setFilterCol, placeholder: "e.g. 1" },
-                  { label: "Row", value: filterRow, set: setFilterRow, placeholder: "e.g. 3" },
-                  { label: "Accession", value: filterAccession, set: setFilterAccession, placeholder: "Search…" },
-                  { label: "Plot", value: filterPlot, set: setFilterPlot, placeholder: "e.g. 101" },
-                ] as const).map(({ label, value, set, placeholder }) => (
+                {(
+                  [
+                    {
+                      label: "Column",
+                      value: filterCol,
+                      set: setFilterCol,
+                      placeholder: "e.g. 1",
+                    },
+                    {
+                      label: "Row",
+                      value: filterRow,
+                      set: setFilterRow,
+                      placeholder: "e.g. 3",
+                    },
+                    {
+                      label: "Accession",
+                      value: filterAccession,
+                      set: setFilterAccession,
+                      placeholder: "Search…",
+                    },
+                    {
+                      label: "Plot",
+                      value: filterPlot,
+                      set: setFilterPlot,
+                      placeholder: "e.g. 101",
+                    },
+                  ] as const
+                ).map(({ label, value, set, placeholder }) => (
                   <div key={label}>
-                    <label className="text-xs text-muted-foreground">{label}</label>
+                    <label className="text-xs text-muted-foreground">
+                      {label}
+                    </label>
                     <input
                       type="text"
                       className="border-input bg-background w-full rounded border px-2 py-1 text-xs mt-0.5"
@@ -817,7 +1091,12 @@ export function InferenceTool({
                 <button
                   type="button"
                   className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                  onClick={() => { setFilterCol(""); setFilterRow(""); setFilterAccession(""); setFilterPlot("") }}
+                  onClick={() => {
+                    setFilterCol("")
+                    setFilterRow("")
+                    setFilterAccession("")
+                    setFilterPlot("")
+                  }}
                 >
                   Clear filters
                 </button>
@@ -829,13 +1108,19 @@ export function InferenceTool({
 
       {/* Detection controls */}
       <div className="space-y-2">
-        <SectionHeader label="Detection Controls" open={showDetectionControls} onToggle={() => setShowDetectionControls(v => !v)} />
+        <SectionHeader
+          label="Detection Controls"
+          open={showDetectionControls}
+          onToggle={() => setShowDetectionControls((v) => !v)}
+        />
         {showDetectionControls && (
           <div className="space-y-3">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs">Confidence</Label>
-                <span className="text-xs font-mono font-medium">{confThreshold}%</span>
+                <span className="text-xs font-mono font-medium">
+                  {confThreshold}%
+                </span>
               </div>
               <input
                 type="range"
@@ -847,21 +1132,25 @@ export function InferenceTool({
                 className="w-full h-1.5 accent-primary"
               />
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">Overlap Threshold</Label>
-                <span className="text-xs font-mono font-medium">{iouThreshold}%</span>
+            {!isClassification && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Overlap Threshold</Label>
+                  <span className="text-xs font-mono font-medium">
+                    {iouThreshold}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={iouThreshold}
+                  onChange={(e) => setIouThreshold(Number(e.target.value))}
+                  className="w-full h-1.5 accent-primary"
+                />
               </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={iouThreshold}
-                onChange={(e) => setIouThreshold(Number(e.target.value))}
-                className="w-full h-1.5 accent-primary"
-              />
-            </div>
+            )}
             <div className="flex items-center justify-between">
               <Label className="text-xs">Show labels</Label>
               <button
@@ -869,7 +1158,9 @@ export function InferenceTool({
                 onClick={() => setShowLabels((v) => !v)}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${showLabels ? "bg-primary" : "bg-muted"}`}
               >
-                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showLabels ? "translate-x-4" : "translate-x-0"}`} />
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showLabels ? "translate-x-4" : "translate-x-0"}`}
+                />
               </button>
             </div>
             {hasSegmentation && (
@@ -880,7 +1171,9 @@ export function InferenceTool({
                   onClick={() => setShowMasks((v) => !v)}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${showMasks ? "bg-primary" : "bg-muted"}`}
                 >
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showMasks ? "translate-x-4" : "translate-x-0"}`} />
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${showMasks ? "translate-x-4" : "translate-x-0"}`}
+                  />
                 </button>
               </div>
             )}
@@ -891,7 +1184,11 @@ export function InferenceTool({
       {/* Class legend */}
       {allClasses.length > 0 && (
         <div className="space-y-1.5">
-          <SectionHeader label="Classes" open={showClasses} onToggle={() => setShowClasses(v => !v)} />
+          <SectionHeader
+            label="Classes"
+            open={showClasses}
+            onToggle={() => setShowClasses((v) => !v)}
+          />
           {showClasses && (
             <>
               <div className="space-y-1">
@@ -910,13 +1207,19 @@ export function InferenceTool({
                         className="inline-block h-3 w-3 shrink-0 rounded-sm border"
                         style={{ background: color, borderColor: color }}
                       />
-                      <span className="flex-1 text-left font-medium">{cls}</span>
-                      <span className="font-mono text-muted-foreground">{count}</span>
+                      <span className="flex-1 text-left font-medium">
+                        {cls}
+                      </span>
+                      <span className="font-mono text-muted-foreground">
+                        {count}
+                      </span>
                     </button>
                   )
                 })}
               </div>
-              <p className="text-xs text-muted-foreground">Click to toggle visibility</p>
+              <p className="text-xs text-muted-foreground">
+                Click to toggle visibility
+              </p>
             </>
           )}
         </div>
@@ -924,14 +1227,23 @@ export function InferenceTool({
 
       {/* Stats */}
       <div className="space-y-1.5">
-        <SectionHeader label="Stats" open={showStats} onToggle={() => setShowStats(v => !v)} />
+        <SectionHeader
+          label="Stats"
+          open={showStats}
+          onToggle={() => setShowStats((v) => !v)}
+        />
         {showStats && (
           <div className="border-t pt-2 grid grid-cols-2 gap-3 text-xs">
             <div className="space-y-1">
               <p className="font-semibold">This plot</p>
               <div className="flex justify-between text-muted-foreground">
-                <span>Detections</span>
-                <span className="font-mono">{currentImage ? predictions.filter((p) => p.image === currentImage.name).length : 0}</span>
+                <span>{isClassification ? "Predictions" : "Detections"}</span>
+                <span className="font-mono">
+                  {currentImage
+                    ? predictions.filter((p) => p.image === currentImage.name)
+                        .length
+                    : 0}
+                </span>
               </div>
               <div className="flex justify-between text-muted-foreground">
                 <span>Above threshold</span>
@@ -939,15 +1251,21 @@ export function InferenceTool({
               </div>
               <div className="flex justify-between text-muted-foreground">
                 <span>Classes</span>
-                <span className="font-mono">{allClasses.length - hiddenClasses.size}/{allClasses.length}</span>
+                <span className="font-mono">
+                  {allClasses.length - hiddenClasses.size}/{allClasses.length}
+                </span>
               </div>
             </div>
             <div className="space-y-1">
               <p className="font-semibold">All plots</p>
               <div className="flex justify-between text-muted-foreground">
-                <span>Detections</span>
+                <span>{isClassification ? "Predictions" : "Detections"}</span>
                 <span className="font-mono">
-                  {visiblePreds.filter((p) => filteredImages.some((im) => im.name === p.image)).length}
+                  {
+                    visiblePreds.filter((p) =>
+                      filteredImages.some((im) => im.name === p.image),
+                    ).length
+                  }
                 </span>
               </div>
               <div className="flex justify-between text-muted-foreground">
@@ -955,7 +1273,9 @@ export function InferenceTool({
                 <span className="font-mono">
                   {filteredImages.length}
                   {filteredImages.length !== images.length && (
-                    <span className="text-muted-foreground/60">/{images.length}</span>
+                    <span className="text-muted-foreground/60">
+                      /{images.length}
+                    </span>
                   )}
                 </span>
               </div>
@@ -966,23 +1286,34 @@ export function InferenceTool({
 
       {/* Traits output */}
       <div className="space-y-2 border-t pt-2">
-        <SectionHeader label="Traits Output" open={showTraitsOutput} onToggle={() => setShowTraitsOutput(v => !v)} />
+        <SectionHeader
+          label="Traits Output"
+          open={showTraitsOutput}
+          onToggle={() => setShowTraitsOutput((v) => !v)}
+        />
         {showTraitsOutput && (
           <>
             {availableModels.length > 1 && (
               <select
                 className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
                 value={selectedTraitsModel || availableModels[0]}
-                onChange={(e) => { setSelectedTraitsModel(e.target.value); setTraitsStatus({ loading: false, message: null }) }}
+                onChange={(e) => {
+                  setSelectedTraitsModel(e.target.value)
+                  setTraitsStatus({ loading: false, message: null })
+                }}
               >
                 {availableModels.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
               </select>
             )}
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Confidence</span>
+                <span className="text-xs text-muted-foreground">
+                  Confidence
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -991,29 +1322,45 @@ export function InferenceTool({
                   max={100}
                   step={5}
                   value={traitsThreshold}
-                  onChange={(e) => { const v = Number(e.target.value); setTraitsThreshold(v); setConfThreshold(v); setTraitsStatus({ loading: false, message: null }) }}
+                  onChange={(e) => {
+                    const v = Number(e.target.value)
+                    setTraitsThreshold(v)
+                    setConfThreshold(v)
+                    setTraitsStatus({ loading: false, message: null })
+                  }}
                   className="flex-1 h-1.5 accent-primary"
                 />
-                <span className="text-xs font-mono w-8 text-right shrink-0">{traitsThreshold}%</span>
+                <span className="text-xs font-mono w-8 text-right shrink-0">
+                  {traitsThreshold}%
+                </span>
               </div>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Overlap Threshold</span>
+            {!isClassification && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    Overlap Threshold
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={iouThreshold}
+                    onChange={(e) => {
+                      setIouThreshold(Number(e.target.value))
+                      setTraitsStatus({ loading: false, message: null })
+                    }}
+                    className="flex-1 h-1.5 accent-primary"
+                  />
+                  <span className="text-xs font-mono w-8 text-right shrink-0">
+                    {iouThreshold}%
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={iouThreshold}
-                  onChange={(e) => { setIouThreshold(Number(e.target.value)); setTraitsStatus({ loading: false, message: null }) }}
-                  className="flex-1 h-1.5 accent-primary"
-                />
-                <span className="text-xs font-mono w-8 text-right shrink-0">{iouThreshold}%</span>
-              </div>
-            </div>
+            )}
             <Button
               type="button"
               size="sm"
@@ -1022,12 +1369,19 @@ export function InferenceTool({
               disabled={traitsStatus.loading}
               onClick={handleApplyThreshold}
             >
-              {traitsStatus.loading
-                ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Applying…</>
-                : `Apply`}
+              {traitsStatus.loading ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  Applying…
+                </>
+              ) : (
+                `Apply`
+              )}
             </Button>
             {traitsStatus.message && (
-              <p className={`text-xs ${traitsStatus.message.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"}`}>
+              <p
+                className={`text-xs ${traitsStatus.message.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"}`}
+              >
                 {traitsStatus.message}
               </p>
             )}
@@ -1041,14 +1395,16 @@ export function InferenceTool({
 
   function ResultsGrid({ fullscreen }: { fullscreen?: boolean }) {
     return (
-      <div className={cn(
-        "grid gap-4 items-start",
-        showControls
-          ? fullscreen
-            ? "grid-cols-[1fr_320px] p-4 h-full"
-            : "grid-cols-[1fr_300px]"
-          : "grid-cols-[1fr]"
-      )}>
+      <div
+        className={cn(
+          "grid gap-4 items-start",
+          showControls
+            ? fullscreen
+              ? "grid-cols-[1fr_320px] p-4 h-full"
+              : "grid-cols-[1fr_300px]"
+            : "grid-cols-[1fr]",
+        )}
+      >
         {/* Left: image + navigation */}
         <div className="space-y-2">
           {navBar}
@@ -1072,201 +1428,340 @@ export function InferenceTool({
 
   return (
     <>
-    <div className="space-y-4">
-
-      {/* ── Config row: two cards + actions ── */}
-      <div className="flex items-stretch gap-4">
-
-        {/* Models card */}
-        <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Models</p>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Settings className="w-3 h-3" />Configure in pipeline settings
-            </span>
-          </div>
-          {configuredModels.length === 0 ? (
-            <p className="text-xs text-muted-foreground rounded border border-dashed p-2">
-              No models configured. Open pipeline settings to add Roboflow models.
+      <div className="space-y-4">
+        {/* ── Config row: two cards + actions ── */}
+        <div className="flex items-stretch gap-4">
+          {/* Models card */}
+          <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Models
+              </p>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Settings className="w-3 h-3" />
+                Configure in pipeline settings
+              </span>
+            </div>
+            {configuredModels.length === 0 ? (
+              <p className="text-xs text-muted-foreground rounded border border-dashed p-2">
+                No models configured. Open pipeline settings to add an
+                inference model.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {configuredModels.map((m, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5"
+                  >
+                    <span className="text-xs font-medium">
+                      {m.label ||
+                        (m.source === "local_weights"
+                          ? (m.weights_path ?? "").split(/[/\\]/).pop()
+                          : m.source === "huggingface"
+                            ? m.hf_model_id
+                            : m.roboflow_model_id)}
+                    </span>
+                    {m.source === "local_weights" && (
+                      <Badge variant="secondary" className="text-xs h-4">
+                        local weights
+                      </Badge>
+                    )}
+                    {m.source === "huggingface" && (
+                      <Badge variant="secondary" className="text-xs h-4">
+                        huggingface
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-xs h-4">
+                      {m.task_type}
+                    </Badge>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-5 w-5"
+                      title="Label & Review"
+                      onClick={() => setReviewLabel(m.label)}
+                    >
+                      <Tag className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {configuredModels.some(
+              (m) => m.source === "huggingface" && m.hf_zero_shot,
+            ) && (
+              <div className="space-y-1.5 border-t pt-1.5">
+                {configuredModels
+                  .filter((m) => m.source === "huggingface" && m.hf_zero_shot)
+                  .map((m) => (
+                    <div key={m.label} className="space-y-0.5">
+                      <Label className="text-muted-foreground text-xs">
+                        {m.label || m.hf_model_id} prompt{" "}
+                        <span className="font-normal">
+                          (candidate labels, comma-separated)
+                        </span>
+                      </Label>
+                      <Input
+                        className="h-7 text-xs"
+                        placeholder="weed, crop, soil"
+                        value={promptOverrides[m.label] ?? m.hf_prompt ?? ""}
+                        onChange={(e) =>
+                          setPromptOverrides((prev) => ({
+                            ...prev,
+                            [m.label]: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  ))}
+                <p className="text-xs text-muted-foreground">
+                  Editing here only applies to your next run — try different
+                  prompts without changing the pipeline's saved default.
+                </p>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Mode:{" "}
+              <span className="font-medium">
+                {inferenceMode === "local"
+                  ? configuredModels.some((m) => (m.source ?? "roboflow") === "roboflow")
+                    ? `Local (${localServerUrl ?? "http://localhost:9002"})`
+                    : "Local"
+                  : "Cloud"}
+              </span>
             </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {configuredModels.map((m, i) => (
-                <div key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5">
-                  <span className="text-xs font-medium">{m.label || m.roboflow_model_id}</span>
-                  <Badge variant="outline" className="text-xs h-4">{m.task_type}</Badge>
+          </div>
+
+          {/* Input Versions card */}
+          {(isGround || isAerial) && (
+            <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Input Versions
+              </p>
+              {isGround && (
+                <div className="space-y-1.5">
+                  {(stitchVersions?.length ?? 0) > 0 && (
+                    <div className="space-y-0.5">
+                      <Label className="text-xs text-muted-foreground">
+                        Stitch
+                      </Label>
+                      <select
+                        className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                        value={selectedStitchVersion ?? ""}
+                        onChange={(e) =>
+                          setSelectedStitchVersion(Number(e.target.value))
+                        }
+                      >
+                        {stitchVersions!.map((sv) => (
+                          <option key={sv.version} value={sv.version}>
+                            {sv.name
+                              ? `${sv.name} (v${sv.version})`
+                              : `v${sv.version}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {(associationVersions?.length ?? 0) > 0 && (
+                    <div className="space-y-0.5">
+                      <Label className="text-xs text-muted-foreground">
+                        Association
+                      </Label>
+                      <select
+                        className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                        value={selectedAssocVersion ?? ""}
+                        onChange={(e) =>
+                          setSelectedAssocVersion(Number(e.target.value))
+                        }
+                      >
+                        {associationVersions!.map((av) => (
+                          <option key={av.version} value={av.version}>
+                            v{av.version} (stitch v{av.stitch_version ?? "?"} ·
+                            boundary v{av.boundary_version ?? "?"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
+              {isAerial && (
+                <div className="space-y-0.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Trait Extraction
+                  </Label>
+                  <select
+                    className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
+                    value={selectedTraitVersion ?? ""}
+                    onChange={(e) =>
+                      setSelectedTraitVersion(Number(e.target.value))
+                    }
+                  >
+                    {traitVersions!.map((tv) => {
+                      const ortho = tv.ortho_name
+                        ? `${tv.ortho_name} (v${tv.ortho_version ?? "?"})`
+                        : `ortho v${tv.ortho_version ?? "?"}`
+                      const boundary =
+                        tv.boundary_version != null
+                          ? tv.boundary_name
+                            ? `${tv.boundary_name} (v${tv.boundary_version})`
+                            : `boundary v${tv.boundary_version}`
+                          : "canonical boundary"
+                      return (
+                        <option key={tv.version} value={tv.version}>
+                          v{tv.version} — {ortho} · {boundary} · {tv.plot_count}{" "}
+                          plots
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              )}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            Mode:{" "}
-            <span className="font-medium">
-              {inferenceMode === "local"
-                ? `Local (${localServerUrl ?? "http://localhost:9002"})`
-                : "Cloud (Roboflow)"}
-            </span>
-          </p>
+
+          {/* Run / Stop + Close */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            {isRunning ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isStopping}
+                onClick={onStop}
+              >
+                {isStopping ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Stopping…
+                  </>
+                ) : (
+                  <>
+                    <Square className="w-4 h-4 mr-2" />
+                    Stop
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={!configuredModels.length}
+                onClick={handleRun}
+              >
+                {inferenceComplete ? "Re-run Inference" : "Run Inference"}
+              </Button>
+            )}
+            <div className="flex items-center gap-2">
+              {!inferenceComplete && !isRunning && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    await fetch(
+                      apiUrl(
+                        `/api/v1/pipeline-runs/${runId}/mark-step-complete`,
+                      ),
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ step: "inference" }),
+                      },
+                    )
+                    queryClient.invalidateQueries({
+                      queryKey: ["pipeline-runs", runId],
+                    })
+                    onCancel()
+                  }}
+                >
+                  Skip
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
         </div>
 
-        {/* Input Versions card */}
-        {(isGround || isAerial) && (
-          <div className="flex-1 rounded-lg border bg-card p-4 space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Input Versions</p>
-            {isGround && (
-              <div className="space-y-1.5">
-                {(stitchVersions?.length ?? 0) > 0 && (
-                  <div className="space-y-0.5">
-                    <Label className="text-xs text-muted-foreground">Stitch</Label>
-                    <select
-                      className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
-                      value={selectedStitchVersion ?? ""}
-                      onChange={(e) => setSelectedStitchVersion(Number(e.target.value))}
-                    >
-                      {stitchVersions!.map((sv) => (
-                        <option key={sv.version} value={sv.version}>
-                          {sv.name ? `${sv.name} (v${sv.version})` : `v${sv.version}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+        {/* ── Log panel ── */}
+        {(isRunning || logLines.length > 0) && (
+          <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">
+                {isRunning ? "Running…" : "Last run"}
+                {logTotal != null && logTotal > 0 && (
+                  <span className="ml-2 font-mono">
+                    {logDone}/{logTotal}
+                  </span>
                 )}
-                {(associationVersions?.length ?? 0) > 0 && (
-                  <div className="space-y-0.5">
-                    <Label className="text-xs text-muted-foreground">Association</Label>
-                    <select
-                      className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
-                      value={selectedAssocVersion ?? ""}
-                      onChange={(e) => setSelectedAssocVersion(Number(e.target.value))}
-                    >
-                      {associationVersions!.map((av) => (
-                        <option key={av.version} value={av.version}>
-                          v{av.version} (stitch v{av.stitch_version ?? "?"} · boundary v{av.boundary_version ?? "?"})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+              </p>
+              {isRunning && (
+                <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+              )}
+            </div>
+            {logTotal != null && logTotal > 0 && (
+              <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{
+                    width: `${Math.round((logDone / logTotal) * 100)}%`,
+                  }}
+                />
               </div>
             )}
-            {isAerial && (
-              <div className="space-y-0.5">
-                <Label className="text-xs text-muted-foreground">Trait Extraction</Label>
-                <select
-                  className="border-input bg-background w-full rounded border px-2 py-1 text-xs"
-                  value={selectedTraitVersion ?? ""}
-                  onChange={(e) => setSelectedTraitVersion(Number(e.target.value))}
-                >
-                  {traitVersions!.map((tv) => {
-                    const ortho = tv.ortho_name ? `${tv.ortho_name} (v${tv.ortho_version ?? "?"})` : `ortho v${tv.ortho_version ?? "?"}`
-                    const boundary = tv.boundary_version != null
-                      ? (tv.boundary_name ? `${tv.boundary_name} (v${tv.boundary_version})` : `boundary v${tv.boundary_version}`)
-                      : "canonical boundary"
-                    return (
-                      <option key={tv.version} value={tv.version}>
-                        v{tv.version} — {ortho} · {boundary} · {tv.plot_count} plots
-                      </option>
-                    )
-                  })}
-                </select>
-              </div>
-            )}
+            <div
+              ref={logRef}
+              className="rounded border bg-muted/40 p-2 h-32 overflow-y-auto font-mono text-xs space-y-0.5"
+            >
+              {logLines.length === 0 ? (
+                <span className="text-muted-foreground">
+                  Waiting for output…
+                </span>
+              ) : (
+                logLines.map((line, i) => (
+                  <div key={i} className="leading-relaxed text-foreground/80">
+                    {line}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 
-        {/* Run / Stop + Close */}
-        <div className="shrink-0 flex flex-col items-end gap-2">
-          {isRunning ? (
-            <Button type="button" variant="destructive" disabled={isStopping} onClick={onStop}>
-              {isStopping
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Stopping…</>
-                : <><Square className="w-4 h-4 mr-2" />Stop</>}
-            </Button>
-          ) : (
-            <Button type="button" disabled={!configuredModels.length} onClick={handleRun}>
-              {inferenceComplete ? "Re-run Inference" : "Run Inference"}
-            </Button>
-          )}
-          <div className="flex items-center gap-2">
-            {!inferenceComplete && !isRunning && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/mark-step-complete`), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ step: "inference" }),
-                  })
-                  queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-                  onCancel()
-                }}
-              >
-                Skip
-              </Button>
-            )}
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Close</Button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Log panel ── */}
-      {(isRunning || logLines.length > 0) && (
-        <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground">
-              {isRunning ? "Running…" : "Last run"}
-              {logTotal != null && logTotal > 0 && (
-                <span className="ml-2 font-mono">{logDone}/{logTotal}</span>
-              )}
-            </p>
-            {isRunning && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
-          </div>
-          {logTotal != null && logTotal > 0 && (
-            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${Math.round((logDone / logTotal) * 100)}%` }}
-              />
-            </div>
-          )}
-          <div
-            ref={logRef}
-            className="rounded border bg-muted/40 p-2 h-32 overflow-y-auto font-mono text-xs space-y-0.5"
-          >
-            {logLines.length === 0 ? (
-              <span className="text-muted-foreground">Waiting for output…</span>
-            ) : (
-              logLines.map((line, i) => (
-                <div key={i} className="leading-relaxed text-foreground/80">{line}</div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Results ── */}
-      {inferenceComplete && !isRunning && (
-        <>
-          {isLoading ? (
+        {/* ── Results ── */}
+        {inferenceComplete &&
+          !isRunning &&
+          (isLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading results…
             </div>
           ) : !available ? (
-            <p className="text-sm text-muted-foreground">No prediction results found.</p>
+            <p className="text-sm text-muted-foreground">
+              No prediction results found.
+            </p>
           ) : (
             <div className="space-y-3">
               {/* Model selector */}
               {availableModels.length > 1 ? (
-                <Select value={currentModelLabel} onValueChange={setActiveModel}>
+                <Select
+                  value={currentModelLabel}
+                  onValueChange={setActiveModel}
+                >
                   <SelectTrigger className="w-52">
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableModels.map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1286,10 +1781,31 @@ export function InferenceTool({
                 <ResultsGrid fullscreen />
               </FullscreenModal>
             </div>
-          )}
-        </>
+          ))}
+      </div>
+
+      {reviewLabel && (
+        <FullscreenModal
+          open
+          onClose={() => setReviewLabel(null)}
+          title={`Label & Review — ${reviewLabel}`}
+        >
+          <LabelingTool
+            runId={runId}
+            label={reviewLabel}
+            taskType={
+              configuredModels.find((m) => m.label === reviewLabel)
+                ?.task_type ?? "detection"
+            }
+            onClose={() => setReviewLabel(null)}
+            onRunInference={onRunInference}
+            isRunning={isRunning}
+            logLines={logLines}
+            inferenceMode={inferenceMode}
+            localServerUrl={localServerUrl}
+          />
+        </FullscreenModal>
       )}
-    </div>
 
       {/* Docker required dialog for local inference mode */}
       <Dialog open={showDockerDialog} onOpenChange={setShowDockerDialog}>
@@ -1300,36 +1816,50 @@ export function InferenceTool({
               <div className="text-muted-foreground space-y-3 text-sm">
                 <p>
                   Local inference runs the{" "}
-                  <strong className="text-foreground">Roboflow Inference Server</strong>{" "}
-                  as a Docker container on your machine — no data leaves your network.
+                  <strong className="text-foreground">
+                    Roboflow Inference Server
+                  </strong>{" "}
+                  as a Docker container on your machine — no data leaves your
+                  network.
                 </p>
                 {dockerDenied ? (
                   <p>
-                    Docker is installed but your user does not have permission to access it.
-                    On Linux, add your user to the{" "}
+                    Docker is installed but your user does not have permission
+                    to access it. On Linux, add your user to the{" "}
                     <code className="text-foreground">docker</code> group:{" "}
-                    <code className="text-foreground text-xs">sudo usermod -aG docker $USER</code>{" "}
+                    <code className="text-foreground text-xs">
+                      sudo usermod -aG docker $USER
+                    </code>{" "}
                     then log out and back in.
                   </p>
                 ) : (
                   <p>
-                    Docker was not found or is not running. Install Docker Desktop and make
-                    sure it is running before retrying. The inference server image will
-                    download automatically on first use.
+                    Docker was not found or is not running. Install Docker
+                    Desktop and make sure it is running before retrying. The
+                    inference server image will download automatically on first
+                    use.
                   </p>
                 )}
                 <p>
-                  Alternatively, switch to <strong className="text-foreground">Cloud</strong>{" "}
-                  inference mode in the pipeline settings — no Docker needed.
+                  Alternatively, switch to{" "}
+                  <strong className="text-foreground">Cloud</strong> inference
+                  mode in the pipeline settings — no Docker needed.
                 </p>
               </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col gap-2 sm:flex-row">
-            <Button variant="outline" onClick={() => setShowDockerDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowDockerDialog(false)}
+            >
               Cancel
             </Button>
-            <Button onClick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>
+            <Button
+              onClick={() =>
+                openUrl("https://www.docker.com/products/docker-desktop/")
+              }
+            >
               Download Docker Desktop
             </Button>
           </DialogFooter>

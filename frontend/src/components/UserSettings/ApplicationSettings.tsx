@@ -4,8 +4,9 @@ import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Settings, Server, Info, RefreshCw, CheckCircle, AlertCircle } from "lucide-react"
+import { Settings, Server, Info, RefreshCw, CheckCircle, AlertCircle, Thermometer } from "lucide-react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
+import { WeatherFileUploadForm } from "@/features/files/components/WeatherFileUploadForm"
 import { openUrl } from "@/lib/platform"
 import { checkForUpdates, CURRENT_VERSION } from "@/hooks/useUpdateChecker"
 
@@ -67,6 +68,59 @@ async function fetchDockerResources(): Promise<DockerResources> {
   })
   if (!res.ok) throw new Error("Failed to fetch Docker resources")
   return res.json() as Promise<DockerResources>
+}
+
+async function fetchDjiThermalSdkPath(): Promise<string> {
+  const token = await getToken()
+  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/dji-thermal-sdk-path`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error("Failed to fetch DJI Thermal SDK path")
+  const data = await res.json()
+  return data.value as string
+}
+
+async function saveDjiThermalSdkPath(value: string): Promise<string> {
+  const token = await getToken()
+  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/dji-thermal-sdk-path`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ value }),
+  })
+  if (!res.ok) throw new Error("Failed to save DJI Thermal SDK path")
+  const data = await res.json()
+  return data.value as string
+}
+
+interface ThermalCapabilities {
+  platforms: {
+    dji: {
+      sdk_package_available: boolean
+      native_lib_source: "bundled" | "override"
+      native_lib_configured: boolean
+      native_lib_path: string | null
+      native_lib_available: boolean
+      // DJI ships no macOS build — on macOS conversion runs inside Docker
+      // instead of loading the library natively.
+      execution_mode: "native" | "docker"
+      docker_available: boolean | null
+      available: boolean
+    }
+  }
+  exiftool_available: boolean
+}
+
+async function fetchThermalCapabilities(): Promise<ThermalCapabilities> {
+  const token = await getToken()
+  const res = await fetch(`${OpenAPI.BASE}/api/v1/utils/capabilities/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error("Failed to fetch capabilities")
+  const data = await res.json()
+  return data.thermal as ThermalCapabilities
 }
 
 async function saveDockerResources(body: DockerResources): Promise<DockerResources> {
@@ -258,6 +312,129 @@ function DockerSettings() {
   )
 }
 
+function ThermalSettings() {
+  const [sdkPath, setSdkPath] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [caps, setCaps] = useState<ThermalCapabilities | null>(null)
+
+  const refreshCaps = useCallback(() => {
+    fetchThermalCapabilities().then(setCaps).catch(() => setCaps(null))
+  }, [])
+
+  useEffect(() => {
+    fetchDjiThermalSdkPath().then(setSdkPath)
+    refreshCaps()
+  }, [refreshCaps])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const result = await saveDjiThermalSdkPath(sdkPath)
+      setSdkPath(result)
+      setSaved(true)
+      refreshCaps()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const djiCaps = caps?.platforms.dji
+
+  return (
+    <div className="max-w-xl flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">DJI Thermal SDK</p>
+        <p className="text-muted-foreground text-sm">
+          Converts DJI drone thermal images (R-JPEG) into per-pixel Celsius
+          GeoTIFFs. This ships bundled with the app — no setup needed for
+          most users. The folder below is an optional override, only needed
+          to test a different SDK version than the one bundled.
+        </p>
+        {djiCaps && (
+          <div className="text-xs space-y-1">
+            <div className={`flex items-center gap-1.5 ${djiCaps.available ? "text-green-600" : "text-amber-600"}`}>
+              {djiCaps.available ? <CheckCircle className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+              {djiCaps.available
+                ? djiCaps.execution_mode === "docker"
+                  ? `DJI SDK ready (${djiCaps.native_lib_source}, via Docker)`
+                  : `DJI SDK ready (${djiCaps.native_lib_source})`
+                : "DJI SDK not available"}
+            </div>
+            {djiCaps.execution_mode === "docker" && (
+              <p className="text-muted-foreground">
+                DJI ships no native macOS build — conversion runs inside a
+                small Docker container instead.
+                {djiCaps.docker_available === false &&
+                  " Docker isn't reachable — install/start Docker Desktop, then retry."}
+              </p>
+            )}
+            {!djiCaps.native_lib_available && (
+              <p className="text-muted-foreground">
+                No library found at {djiCaps.native_lib_path}. If you're
+                running from source, see{" "}
+                <span className="font-mono">
+                  backend/vendor/dji_thermal_sdk/README.md
+                </span>{" "}
+                — packaged releases should have this bundled already.
+              </p>
+            )}
+            <div className={`flex items-center gap-1.5 ${caps?.exiftool_available ? "text-green-600" : "text-amber-600"}`}>
+              {caps?.exiftool_available ? <CheckCircle className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+              {caps?.exiftool_available ? "exiftool found" : "exiftool not found on PATH (required to preserve GPS/timestamp on converted images)"}
+            </div>
+          </div>
+        )}
+        <details className="mt-1">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground select-none">
+            Advanced: override SDK folder
+          </summary>
+          <div className="mt-2 grid gap-2">
+            <Label htmlFor="dji-sdk-path" className="text-xs">
+              SDK Folder Path{" "}
+              <span className="font-normal">(leave blank to use the bundled SDK)</span>
+            </Label>
+            <Input
+              id="dji-sdk-path"
+              value={sdkPath}
+              onChange={(e) => { setSdkPath(e.target.value); setSaved(false) }}
+              placeholder="/path/to/dji_thermal_sdk"
+            />
+            <div className="flex gap-3 items-center">
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+              {saved && <span className="text-sm text-green-600">Saved.</span>}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Download from{" "}
+              <button
+                type="button"
+                className="underline hover:text-foreground"
+                onClick={() => openUrl("https://www.dji.com/global/downloads/softwares/dji-thermal-sdk")}
+              >
+                DJI's downloads page
+              </button>{" "}
+              (v1.7+ for Matrice 4T support) and point this at the extracted folder.
+            </p>
+          </div>
+        </details>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t pt-4">
+        <p className="text-sm font-medium">Weather Station Files</p>
+        <p className="text-muted-foreground text-sm">
+          Upload a Campbell Scientific TOA5 .dat file to match per-image
+          humidity/ambient temperature by nearest timestamp during thermal
+          conversion.
+        </p>
+        <WeatherFileUploadForm />
+      </div>
+    </div>
+  )
+}
+
 type UpdateStatus =
   | { kind: "idle" }
   | { kind: "checking" }
@@ -334,11 +511,12 @@ const SETTINGS_NAV_GROUPS = [
   { items: [
     { id: "general", label: "General", icon: Settings },
     { id: "docker",  label: "Docker",  icon: Server  },
+    { id: "thermal", label: "Thermal", icon: Thermometer },
     { id: "about",   label: "About",   icon: Info    },
   ]},
 ] as const
 
-type SettingsSection = "general" | "docker" | "about"
+type SettingsSection = "general" | "docker" | "thermal" | "about"
 
 const ApplicationSettings = () => {
   const [active, setActive] = useState<SettingsSection>("general")
@@ -353,6 +531,7 @@ const ApplicationSettings = () => {
       <div className="flex-1 overflow-auto px-6 py-6">
         {active === "general" && <GeneralSettings />}
         {active === "docker"  && <DockerSettings />}
+        {active === "thermal" && <ThermalSettings />}
         {active === "about"   && <AboutSettings />}
       </div>
     </div>

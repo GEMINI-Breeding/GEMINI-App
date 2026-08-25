@@ -847,6 +847,9 @@ class LocalCopyRequest(BaseModel):
     date: str | None = None
     platform: str | None = None
     sensor: str | None = None
+    # Placeholder tag for image uploads — "rgb" | "thermal" | "multispectral" |
+    # None. Not consumed by any pipeline logic yet; see FileUpload.image_type.
+    image_type: str | None = None
 
 
 # copy local files directly on disk (faster for desktop/Tauri)
@@ -1139,6 +1142,12 @@ def _copy_local_stream(
             "skipped": skipped,
             "count": len(uploaded),
             "has_errors": extraction_failed,
+            "file_upload_id": str(file_upload_id),
+            # Destination directory for this batch, even when every file was
+            # skipped as a pre-existing duplicate (no per-file dest_path in
+            # that case) — callers that need "where did this land" shouldn't
+            # have to infer it from an uploaded file that may not exist.
+            "dest_dir": str(dest_dir),
         }
     )
 
@@ -1261,15 +1270,29 @@ def copy_local_files_stream(
                 date=body.date or "",
                 platform=body.platform,
                 sensor=body.sensor,
+                image_type=body.image_type,
                 storage_path=body.target_root_dir,
             ),
             owner_id=current_user.id,
         )
 
+    # Refresh image_type on an existing record too (but only when this batch
+    # actually specifies one) — otherwise a directory first uploaded via a
+    # non-tagged flow (e.g. the plain Upload tab, or before this tag existed)
+    # would never pick up a "thermal" tag from a later Guided Upload pass
+    # over the same folder, and the Guided Upload resume-conversion prompt
+    # would never find it.
+    update_fields: dict[str, Any] = {
+        "status": "processing",
+        "file_count": len(body.file_paths),
+    }
+    if body.image_type:
+        update_fields["image_type"] = body.image_type
+
     update_file_upload(
         session=session,
         db_file=file_upload,
-        file_in=FileUploadUpdate(status="processing", file_count=len(body.file_paths)),
+        file_in=FileUploadUpdate(**update_fields),
     )
 
     return StreamingResponse(

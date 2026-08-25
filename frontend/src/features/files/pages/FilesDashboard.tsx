@@ -1,20 +1,33 @@
-import { useState } from "react"
-import { Upload, FolderOpen } from "lucide-react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import { Upload, FolderOpen, Compass } from "lucide-react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
+import { GuidedUpload } from "./GuidedUpload"
 import { ManageData } from "./ManageData"
 import { UploadData } from "./UploadData"
 
 const NAV_GROUPS = [
   { items: [
     { id: "upload", label: "Upload", icon: Upload },
+    { id: "guided", label: "Guided Upload", icon: Compass },
     { id: "manage", label: "Manage", icon: FolderOpen },
   ]},
 ] as const
 
-type Section = "upload" | "manage"
+type Section = "upload" | "guided" | "manage"
 
 export function FilesDashboard() {
-  const [active, setActive] = useState<Section>("upload")
+  const navigate = useNavigate()
+  const { section } = useSearch({ from: "/_layout/files/" })
+  const active: Section = section ?? "upload"
+
+  function setActive(id: Section) {
+    navigate({
+      to: "/files",
+      // Switching top-level tab abandons whatever Guided Upload sub-view
+      // was selected — only carry section forward.
+      search: { section: id },
+    })
+  }
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
@@ -30,6 +43,7 @@ export function FilesDashboard() {
         />
         <div className="flex-1 overflow-auto px-6 py-6">
           {active === "upload" && <UploadData />}
+          {active === "guided" && <GuidedUpload />}
           {active === "manage" && <ManageData />}
         </div>
       </div>

@@ -5,7 +5,7 @@ import shutil
 from fastapi import APIRouter, Depends
 from pydantic.networks import EmailStr
 
-from app.api.deps import CurrentUser, get_current_active_superuser
+from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.models import Message
 from app.utils import generate_test_email, send_email
 
@@ -114,7 +114,7 @@ async def docker_check() -> dict:
 
 
 @router.get("/capabilities/")
-async def capabilities() -> dict:
+async def capabilities(session: SessionDep) -> dict:
     """
     Report availability of optional heavy dependencies used by processing steps.
     Called by the frontend to show warnings before running steps that require them.
@@ -161,6 +161,13 @@ async def capabilities() -> dict:
     except ImportError:
         pass
 
+    # ── Thermal conversion (DJI SDK + exiftool) ──────────────────────────────
+    from app.crud.app_settings import get_setting
+    from app.processing import thermal_utils
+
+    sdk_dir = get_setting(session=session, key="dji_thermal_sdk_path") or ""
+    thermal = thermal_utils.get_thermal_capabilities(sdk_dir=sdk_dir)
+
     import os as _os
     return {
         "agrowstitch": {"available": agrowstitch_available, "path": agrowstitch_path},
@@ -168,4 +175,5 @@ async def capabilities() -> dict:
         "cuda_available": cuda_available,
         "mps_available": mps_available,
         "cpu_count": _os.cpu_count() or 1,
+        "thermal": thermal,
     }

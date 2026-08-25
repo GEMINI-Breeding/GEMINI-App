@@ -21,6 +21,7 @@ import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
 import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
+import { Route as LayoutDatasetsIndexRouteImport } from './routes/_layout/datasets/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
 import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
@@ -88,6 +89,11 @@ const LayoutFilesIndexRoute = LayoutFilesIndexRouteImport.update({
   path: '/files/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutDatasetsIndexRoute = LayoutDatasetsIndexRouteImport.update({
+  id: '/datasets/',
+  path: '/datasets/',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAnalyzeIndexRoute = LayoutAnalyzeIndexRouteImport.update({
   id: '/analyze/',
   path: '/analyze/',
@@ -142,6 +148,7 @@ export interface FileRoutesByFullPath {
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/analyze': typeof LayoutAnalyzeIndexRoute
+  '/datasets': typeof LayoutDatasetsIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   '/': typeof LayoutIndexRoute
   '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
+  '/datasets': typeof LayoutDatasetsIndexRoute
   '/files': typeof LayoutFilesIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
@@ -183,6 +191,7 @@ export interface FileRoutesById {
   '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
   '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
+  '/_layout/datasets/': typeof LayoutDatasetsIndexRoute
   '/_layout/files/': typeof LayoutFilesIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/analyze/$runId'
     | '/process/$workspaceId'
     | '/analyze'
+    | '/datasets'
     | '/files'
     | '/process'
     | '/process/$workspaceId/pipeline'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/'
     | '/analyze/$runId'
     | '/analyze'
+    | '/datasets'
     | '/files'
     | '/process'
     | '/process/$workspaceId/pipeline'
@@ -245,6 +256,7 @@ export interface FileRouteTypes {
     | '/_layout/analyze/$runId'
     | '/_layout/process/$workspaceId'
     | '/_layout/analyze/'
+    | '/_layout/datasets/'
     | '/_layout/files/'
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
@@ -347,6 +359,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutFilesIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/datasets/': {
+      id: '/_layout/datasets/'
+      path: '/datasets'
+      fullPath: '/datasets'
+      preLoaderRoute: typeof LayoutDatasetsIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/analyze/': {
       id: '/_layout/analyze/'
       path: '/analyze'
@@ -430,6 +449,7 @@ interface LayoutRouteChildren {
   LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
   LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
+  LayoutDatasetsIndexRoute: typeof LayoutDatasetsIndexRoute
   LayoutFilesIndexRoute: typeof LayoutFilesIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
 }
@@ -443,6 +463,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
   LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,
+  LayoutDatasetsIndexRoute: LayoutDatasetsIndexRoute,
   LayoutFilesIndexRoute: LayoutFilesIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
 }

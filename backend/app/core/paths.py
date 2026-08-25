@@ -233,8 +233,18 @@ class RunPaths:
 
     @property
     def gcp_list(self) -> Path:
-        """Aerial: gcp_list.txt — pixel coordinates for each GCP."""
+        """Aerial: gcp_list.txt — pixel coordinates for each GCP, RGB images."""
         return self.intermediate_run / "gcp_list.txt"
+
+    @property
+    def gcp_list_thermal(self) -> Path:
+        """
+        Aerial: gcp_list_thermal.txt — pixel coordinates for each GCP, marked
+        on converted thermal images. Separate file from gcp_list — thermal
+        and RGB sensors have different lens/FOV/resolution, so the same
+        physical GCP lands at different pixel coordinates in each.
+        """
+        return self.intermediate_run / "gcp_list_thermal.txt"
 
     @property
     def geo_txt(self) -> Path:
@@ -242,9 +252,25 @@ class RunPaths:
         return self.intermediate_run / "geo.txt"
 
     @property
+    def geo_txt_thermal(self) -> Path:
+        """Aerial: geo_thermal.txt — converted thermal image GPS positions for ODM."""
+        return self.intermediate_run / "geo_thermal.txt"
+
+    @property
+    def thermal_converted_dir(self) -> Path:
+        """Aerial: Intermediate/.../thermal_converted/ — GeoTIFFs from run_thermal_conversion()."""
+        return self.intermediate_run / "thermal_converted"
+
+    @property
     def odm_working_dir(self) -> Path:
-        """Aerial: ODM temp/working directory."""
+        """Aerial: ODM temp/working directory (RGB)."""
         return self.intermediate_run / "temp"
+
+    @property
+    def odm_working_dir_thermal(self) -> Path:
+        """Aerial: ODM temp/working directory (thermal) — kept separate from the RGB one
+        so a thermal run doesn't clobber an in-progress or completed RGB run's working dir."""
+        return self.intermediate_run / "temp_thermal"
 
     @property
     def plot_images_dir(self) -> Path:

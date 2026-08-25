@@ -24,8 +24,9 @@ import {
   RefreshCw,
   FolderOpen,
   Minus,
+  Thermometer,
 } from "lucide-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribe } from "@/lib/sseManager";
 import { downloadFile, openUrl } from "@/lib/platform";
@@ -51,6 +52,7 @@ import {
   ProcessingService,
   PipelinesService,
   SettingsService,
+  ThermalService,
   UtilsService,
   type PipelineRunPublic,
   type PipelinePublic,
@@ -66,6 +68,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import useCustomToast from "@/hooks/useCustomToast";
 import { useProcess } from "@/contexts/ProcessContext";
 import {
@@ -106,6 +109,17 @@ interface StepDef {
   label: string;
   description: string;
   kind: StepKind;
+  /**
+   * Whether this step's button opens a dedicated RunTool.tsx page (vs
+   * running directly / via a config dialog in handleRunStep). "interactive"
+   * steps always have one; "compute" steps never do. Only meaningful for
+   * kind === "optional", where "optional" means "skippable" and is
+   * otherwise unrelated to whether a tool page exists — e.g. GCP Selection
+   * is optional AND has a tool page, Thermal Conversion is optional but
+   * runs via a plain config dialog like any other compute step. Defaults
+   * to false.
+   */
+  hasTool?: boolean;
 }
 
 const GROUND_STEPS: StepDef[] = [
@@ -154,6 +168,17 @@ const GROUND_STEPS: StepDef[] = [
 
 const AERIAL_STEPS: StepDef[] = [
   {
+    key: "thermal_conversion",
+    label: "Thermal Conversion",
+    description:
+      "Convert proprietary thermal images (e.g. DJI R-JPEG) into per-pixel Celsius GeoTIFFs. Optional — only relevant if this run's raw images are thermal. Runs before Data Sync since Data Sync's EXIF fix would corrupt raw thermal files if it touched them first.",
+    kind: "optional",
+    // No hasTool — runs via the config dialog in handleRunStep (distance/
+    // humidity/weather file), same as any other compute step, not a
+    // dedicated RunTool.tsx page. "optional" here only means "skippable"
+    // for non-thermal aerial runs.
+  },
+  {
     key: "data_sync",
     label: "Data Sync",
     description:
@@ -166,6 +191,7 @@ const AERIAL_STEPS: StepDef[] = [
     description:
       "Match drone images to ground control points, mark GCP pixels. Optional (highly recommended for a successful orthomosaic)",
     kind: "optional",
+    hasTool: true,
   },
   {
     key: "orthomosaic",
@@ -602,6 +628,87 @@ function PlotImagesDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Thermal conversion results (shown under Thermal Conversion) ───────────────
+
+interface ThermalConvertedImage {
+  name: string;
+  path: string;
+  min_temp: number;
+  max_temp: number;
+  mean_temp: number;
+  humidity: number;
+  ambient_temperature: number;
+  weather_source: string;
+}
+
+function ThermalConversionPanel({ runId }: { runId: string }) {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["thermal-conversion", runId],
+    queryFn: async () => {
+      const result = (await ProcessingService.thermalConversionResults({ id: runId })) as unknown as {
+        available: boolean;
+        platform?: string;
+        source?: string;
+        images: ThermalConvertedImage[];
+      };
+      // The backend may have just adopted a Guided-Upload conversion into
+      // this run (steps_completed/outputs) on this very call — refresh the
+      // run so the stepper reflects "done" without a manual reload.
+      if (result.available && result.source === "guided_upload") {
+        queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      }
+      return result;
+    },
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading thermal conversion results…
+      </div>
+    );
+  }
+
+  if (!data?.available || data.images.length === 0) {
+    return (
+      <p className="text-muted-foreground mt-3 text-xs">
+        No thermal conversion results yet — run the step above.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-xs text-muted-foreground">
+        {data.images.length} images converted ({data.platform})
+        {data.source === "guided_upload" && " — via Guided Upload"}
+      </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        {data.images.map((img) => (
+          <div key={img.name} className="rounded border overflow-hidden">
+            <img
+              src={apiUrl(
+                `/api/v1/thermal/preview?path=${encodeURIComponent(img.path)}`,
+              )}
+              alt={img.name}
+              className="w-full aspect-square object-cover bg-black/5"
+            />
+            <div className="p-1.5 text-[10px] text-muted-foreground truncate">
+              <div className="truncate font-medium text-foreground">{img.name}</div>
+              <div>
+                {img.min_temp.toFixed(1)}–{img.max_temp.toFixed(1)}°C (avg {img.mean_temp.toFixed(1)}°C)
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -2238,7 +2345,7 @@ function StepRow({
   // their own SSE event stream — global events (no step tag) from other steps must
   // not bleed into their log. Sequential steps include global events because those
   // events were necessarily emitted during that step's execution window.
-  const isInteractiveStep = step.kind === "interactive" || step.kind === "optional";
+  const isInteractiveStep = step.kind === "interactive" || (step.kind === "optional" && step.hasTool);
   const stepEvents = progressEvents.filter((e) =>
     isInteractiveStep ? e.step === step.key : !e.step || e.step === step.key
   );
@@ -2273,7 +2380,7 @@ function StepRow({
   const canRun =
     (status === "ready" || status === "completed" || status === "failed") &&
     !isExecuting;
-  const isInteractive = step.kind === "interactive" || step.kind === "optional";
+  const isInteractive = step.kind === "interactive" || (step.kind === "optional" && step.hasTool);
 
   const actionLabel = (() => {
     if (isActive) return isStopping ? "Stopping…" : "Running…";
@@ -2579,6 +2686,7 @@ interface OrthoVersion {
   rgb: string | null;
   dem: string | null;
   pyramid: string | null;
+  thermal: string | null;
   created_at: string | null;
   active: boolean;
   has_crops: boolean;
@@ -2861,6 +2969,11 @@ function OrthoVersionsPanel({
                       )}
                     </button>
                   )}
+                  {v.thermal && (
+                    <Badge variant="outline" className="ml-2 text-xs">
+                      Thermal
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
@@ -2876,6 +2989,24 @@ function OrthoVersionsPanel({
                     >
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
+                    {v.thermal && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="View thermal orthophoto"
+                        onClick={() =>
+                          window.open(
+                            apiUrl(
+                              `/api/v1/thermal/preview?path=${encodeURIComponent(v.thermal!)}`
+                            ),
+                            "_blank"
+                          )
+                        }
+                      >
+                        <Thermometer className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -3937,6 +4068,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
   // Orthomosaic name prompt
   const [showOrthoNameDialog, setShowOrthoNameDialog] = useState(false);
   const [orthoNameInput, setOrthoNameInput] = useState("");
+  const [generateThermalOrtho, setGenerateThermalOrtho] = useState(false);
 
   // Stitching name prompt
   const [showStitchNameDialog, setShowStitchNameDialog] = useState(false);
@@ -4019,6 +4151,13 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
 
   // Guarded step runner — checks Docker availability before starting orthomosaic
   async function handleRunStep(step: string) {
+    if (step === "thermal_conversion") {
+      ThermalService.listWeatherFiles()
+        .then((files) => setThermalWeatherFiles(files.map((f) => ({ id: f.id, name: f.name }))))
+        .catch(() => setThermalWeatherFiles([]));
+      setShowThermalDialog(true);
+      return;
+    }
     if (step === "associate_boundaries") {
       // Always show dialog so user can confirm which versions to use
       const stitchVers = pageStitchVersions ?? [];
@@ -4057,6 +4196,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       }
       // Prompt for a name before starting
       setOrthoNameInput("");
+      setGenerateThermalOrtho(false);
       setShowOrthoNameDialog(true);
       return;
     }
@@ -4069,6 +4209,7 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     executeMutation.mutate({
       step: "orthomosaic",
       ortho_name: orthoNameInput.trim() || undefined,
+      generate_thermal: generateThermalOrtho,
     } as any);
   }
 
@@ -4080,6 +4221,20 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
       ortho_version: traitOrthoVersion ?? undefined,
       boundary_version: traitBoundaryVersion ?? undefined,
       exg_threshold: traitExgThreshold,
+    } as any);
+  }
+
+  function startThermalConversion() {
+    setShowThermalDialog(false);
+    stopWasRequestedRef.current = false;
+    executeMutation.mutate({
+      step: "thermal_conversion",
+      thermal_platform: thermalPlatform,
+      thermal_distance: thermalDistance,
+      thermal_humidity: thermalHumidity,
+      thermal_emissivity: thermalEmissivity,
+      thermal_reflected_temperature: thermalReflectedTemp,
+      thermal_weather_file_id: thermalWeatherFileId || undefined,
     } as any);
   }
 
@@ -4103,6 +4258,18 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
   const [importSelectedThermalId, setImportSelectedThermalId] = useState<string>("");
   const [importSaveMode, setImportSaveMode] = useState<"new_version" | "replace">("new_version");
   const [importName, setImportName] = useState("");
+
+  // Thermal conversion dialog
+  const [showThermalDialog, setShowThermalDialog] = useState(false);
+  const [thermalPlatform, setThermalPlatform] = useState("dji");
+  const [thermalDistance, setThermalDistance] = useState(5.0);
+  const [thermalHumidity, setThermalHumidity] = useState(70.0);
+  const [thermalEmissivity, setThermalEmissivity] = useState(1.0);
+  const [thermalReflectedTemp, setThermalReflectedTemp] = useState(25.0);
+  const [thermalWeatherFileId, setThermalWeatherFileId] = useState<string>("");
+  const [thermalWeatherFiles, setThermalWeatherFiles] = useState<
+    { id: string; name: string }[]
+  >([]);
 
   // Data sync dialog
   const [showSyncDialog, setShowSyncDialog] = useState(false);
@@ -4728,17 +4895,31 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
                       );
                     }
                     if (
+                      step.key === "thermal_conversion" &&
+                      pipelineType === "aerial"
+                    ) {
+                      return <ThermalConversionPanel runId={runId} />;
+                    }
+                    if (
                       step.key === "trait_extraction" &&
                       pipelineType === "aerial"
                     ) {
                       return (
-                        <TraitRecordsPanel
-                          runId={runId}
-                          onDelete={(id) =>
-                            deleteTraitRecordMutation.mutate(id)
-                          }
-                          isDeleting={deleteTraitRecordMutation.isPending}
-                        />
+                        <>
+                          <TraitRecordsPanel
+                            runId={runId}
+                            onDelete={(id) =>
+                              deleteTraitRecordMutation.mutate(id)
+                            }
+                            isDeleting={deleteTraitRecordMutation.isPending}
+                          />
+                          <Link
+                            to="/datasets"
+                            className="text-xs text-muted-foreground hover:underline"
+                          >
+                            Browse AgML datasets →
+                          </Link>
+                        </>
                       );
                     }
                     if (step.key === "plot_marking" && pipelineType === "ground") {
@@ -4984,6 +5165,25 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
               onKeyDown={(e) => e.key === "Enter" && startOrthoWithName()}
               autoFocus
             />
+            {run.steps_completed?.thermal_conversion && (
+              <div className="mt-4 flex items-start gap-3">
+                <Checkbox
+                  id="generate-thermal-ortho"
+                  checked={generateThermalOrtho}
+                  onCheckedChange={(v) => setGenerateThermalOrtho(v === true)}
+                />
+                <div>
+                  <Label htmlFor="generate-thermal-ortho" className="font-normal">
+                    Also generate thermal orthophoto
+                  </Label>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    Runs a second, independent ODM reconstruction on the
+                    converted thermal images alongside the RGB one. Uses GCPs
+                    marked on the GCP Selection step's Thermal tab, if any.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -4993,6 +5193,96 @@ const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
               Cancel
             </Button>
             <Button onClick={startOrthoWithName}>Start</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Thermal conversion config dialog */}
+      <Dialog open={showThermalDialog} onOpenChange={setShowThermalDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Thermal Conversion</DialogTitle>
+            <DialogDescription>
+              Converts raw thermal images in this run to per-pixel Celsius
+              GeoTIFFs. Requires the DJI Thermal SDK to be configured in
+              Settings → Thermal.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-sm">Platform</Label>
+              <select
+                className="border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm"
+                value={thermalPlatform}
+                onChange={(e) => setThermalPlatform(e.target.value)}
+              >
+                <option value="dji">DJI</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-sm">Distance (m)</Label>
+                <Input
+                  type="number" step="0.5" min="0"
+                  className="mt-1"
+                  value={thermalDistance}
+                  onChange={(e) => setThermalDistance(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div>
+                <Label className="text-sm">Emissivity</Label>
+                <Input
+                  type="number" step="0.05" min="0" max="1"
+                  className="mt-1"
+                  value={thermalEmissivity}
+                  onChange={(e) => setThermalEmissivity(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm">Weather Station File (optional)</Label>
+              <select
+                className="border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm"
+                value={thermalWeatherFileId}
+                onChange={(e) => setThermalWeatherFileId(e.target.value)}
+              >
+                <option value="">None — use fixed values below</option>
+                {thermalWeatherFiles.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+              <p className="text-muted-foreground text-xs mt-1">
+                Upload weather files in Settings → Thermal.
+              </p>
+            </div>
+            {!thermalWeatherFileId && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-sm">Humidity (%)</Label>
+                  <Input
+                    type="number" step="1" min="0" max="100"
+                    className="mt-1"
+                    value={thermalHumidity}
+                    onChange={(e) => setThermalHumidity(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm">Ambient Temp (°C)</Label>
+                  <Input
+                    type="number" step="0.5"
+                    className="mt-1"
+                    value={thermalReflectedTemp}
+                    onChange={(e) => setThermalReflectedTemp(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowThermalDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={startThermalConversion}>Start</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

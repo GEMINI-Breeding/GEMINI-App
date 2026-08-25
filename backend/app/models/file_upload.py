@@ -17,6 +17,22 @@ class FileUploadBase(SQLModel):
     date: str = Field(max_length=50)
     platform: str | None = Field(default=None, max_length=255)
     sensor: str | None = Field(default=None, max_length=255)
+    # Placeholder tag for image uploads — "rgb" | "thermal" | "multispectral" | None.
+    # Not consumed by any pipeline logic yet; stored for future use (e.g. auto-
+    # suggesting relevant processing steps based on what kind of imagery this is).
+    image_type: str | None = Field(default=None, max_length=50)
+    # Set once a thermal conversion job (see thermal_jobs.py) finishes for this
+    # upload — lets the Guided Upload flow detect thermal uploads still
+    # awaiting conversion and offer to resume, even after navigating away or
+    # restarting the app (jobs themselves are in-memory/transient).
+    thermal_converted: bool = Field(default=False)
+    # Absolute path to the converted GeoTIFFs (data_root/thermal_converted/{job_id}/)
+    # when thermal_converted is True. Lets a PipelineRun created later from
+    # this same upload discover and adopt the already-converted images
+    # instead of showing "no results" and requiring a redundant re-run of
+    # the pipeline's own Thermal Conversion step — see
+    # processing.py:thermal_conversion_results().
+    thermal_converted_dir: str | None = Field(default=None, max_length=1000)
     storage_path: str = Field(max_length=1000)  # where files are stored
     msgs_synced_path: str | None = Field(default=None, max_length=1000)  # relative path to bundled GPS file (Farm-ng)
 
@@ -35,6 +51,9 @@ class FileUploadUpdate(SQLModel):
     date: str | None = Field(default=None, max_length=50)
     platform: str | None = Field(default=None, max_length=255)
     sensor: str | None = Field(default=None, max_length=255)
+    image_type: str | None = Field(default=None, max_length=50)
+    thermal_converted: bool | None = Field(default=None)
+    thermal_converted_dir: str | None = Field(default=None, max_length=1000)
     storage_path: str | None = Field(default=None, max_length=1000)
     status: str | None = Field(default=None, max_length=50)
     file_count: int | None = None

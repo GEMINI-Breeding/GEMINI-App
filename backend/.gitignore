@@ -10,3 +10,14 @@ build/
 dist/
 **/alembic**
 .DS_Store
+
+# DJI Thermal SDK — proprietary, DJI-licensed. Not redistributable as a bare
+# download; only the compiled Application (via gemi-backend.spec bundling)
+# may ship it. See vendor/dji_thermal_sdk/README.md.
+vendor/dji_thermal_sdk/utility/
+
+# exiftool — freely redistributable (GPL/Artistic), but ~50MB of vendored
+# binaries doesn't belong in git history. Bundled into packaged builds via
+# gemi-backend.spec, same as the DJI SDK. See vendor/exiftool/README.md.
+vendor/exiftool/macos_linux/
+vendor/exiftool/windows/

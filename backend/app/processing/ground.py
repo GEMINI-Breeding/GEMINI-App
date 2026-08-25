@@ -1519,7 +1519,11 @@ def run_inference(
 
     Each completed model run is appended as an entry in run.outputs["inference"] (list format).
     """
-    from app.processing.inference_utils import run_inference_on_image, merge_inference_into_geojson
+    from app.processing.inference_utils import (
+        run_inference_on_image,
+        run_classification_on_image,
+        merge_inference_into_geojson,
+    )
     from app.crud.pipeline import update_pipeline_run
     from app.models.pipeline import PipelineRunUpdate
     from datetime import datetime, timezone
@@ -1595,7 +1599,7 @@ def run_inference(
         return stem
 
     fieldnames = ["image", "plot_index", "plot_label", "accession", "row", "col", "model_id",
-                  "class", "confidence", "x", "y", "width", "height", "points"]
+                  "class", "confidence", "x", "y", "width", "height", "points", "verified"]
 
     # Read existing inference list (new list format); migrate old dict format if needed
     existing_inference = outputs.get("inference", [])
@@ -1626,21 +1630,68 @@ def run_inference(
         if stop_event.is_set():
             return {}
         label = model.get("label", "model")
-        api_key = model.get("roboflow_api_key", "")
-        model_id = model.get("roboflow_model_id", "")
+        source = model.get("source") or "roboflow"
+        api_key = model.get("roboflow_api_key") or ""
+        model_id = model.get("roboflow_model_id") or ""
+        weights_path = model.get("weights_path") or ""
         task_type = model.get("task_type", "detection")
+        hf_zero_shot = False
+        hf_prompt = ""
+        if source == "huggingface":
+            api_key = model.get("hf_api_key") or ""
+            model_id = model.get("hf_model_id") or ""
+            hf_zero_shot = bool(model.get("hf_zero_shot"))
+            hf_prompt = model.get("hf_prompt") or ""
+        elif source == "sam_auto":
+            # hf_model_id doubles as an optional SAM checkpoint override —
+            # blank uses inference_utils.DEFAULT_SAM_MODEL_ID.
+            model_id = model.get("hf_model_id") or ""
 
-        mode_tag = "local" if inference_mode == "local" else "cloud"
-        masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
-        emit({
-            "event": "log",
-            "message": (
-                f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
-                f"(stitch v{resolved_stitch_version}) — model: {model_id}, key: {masked_key}"
-            ),
-            "total": global_total,
-            "done": global_done,
-        })
+        if source == "local_weights":
+            mode_tag = "local-weights"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting local-weights inference on {len(plot_images)} plots "
+                    f"(stitch v{resolved_stitch_version}) — weights: {Path(weights_path).name if weights_path else '(none)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        elif source == "huggingface":
+            mode_tag = f"huggingface-{'local' if inference_mode == 'local' else 'cloud'}"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting HuggingFace ({inference_mode}) inference on {len(plot_images)} plots "
+                    f"(stitch v{resolved_stitch_version}) — model: {model_id or '(none)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        elif source == "sam_auto":
+            mode_tag = "sam-auto"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting SAM automatic segmentation on {len(plot_images)} plots "
+                    f"(stitch v{resolved_stitch_version}) — model: {model_id or '(default)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        else:
+            mode_tag = "local" if inference_mode == "local" else "cloud"
+            masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
+                    f"(stitch v{resolved_stitch_version}) — model: {model_id}, key: {masked_key}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         predictions_path = out_dir / f"roboflow_predictions_{safe_label}.csv"
@@ -1664,14 +1715,32 @@ def run_inference(
             def _warn(msg: str, _lbl: str = label) -> None:
                 emit({"event": "log", "message": f"  ⚠ [{_lbl}] {msg}"})
 
-            preds = run_inference_on_image(
-                img, api_key=api_key, model_id=model_id, task_type=task_type,
-                inference_mode=inference_mode,
-                local_server_url=local_server_url or "",
-                on_warning=_warn,
-            )
+            if task_type == "classification":
+                preds = run_classification_on_image(
+                    img, api_key=api_key, model_id=model_id,
+                    inference_mode=inference_mode,
+                    local_server_url=local_server_url or "",
+                    source=source,
+                    weights_path=weights_path,
+                    hf_zero_shot=hf_zero_shot,
+                    hf_prompt=hf_prompt,
+                )
+            else:
+                preds = run_inference_on_image(
+                    img, api_key=api_key, model_id=model_id, task_type=task_type,
+                    inference_mode=inference_mode,
+                    local_server_url=local_server_url or "",
+                    source=source,
+                    weights_path=weights_path,
+                    hf_zero_shot=hf_zero_shot,
+                    hf_prompt=hf_prompt,
+                    on_warning=_warn,
+                )
             global_done += 1
-            det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
+            if task_type == "classification":
+                det_label = f"{preds[0]['class']} ({preds[0]['confidence'] * 100:.0f}%)" if preds else "no prediction"
+            else:
+                det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
             pct = round(global_done / global_total * 100)
             emit({"event": "progress", "progress": pct})
             emit({
@@ -1692,7 +1761,7 @@ def run_inference(
                 p["accession"] = accession
                 p["row"] = row_val
                 p["col"] = col_val
-                p["model_id"] = model_id
+                p["model_id"] = weights_path if source == "local_weights" else model_id
                 p["points"] = _json.dumps(p["points"]) if p.get("points") else ""
             all_rows.extend(preds)
 
@@ -1706,11 +1775,12 @@ def run_inference(
         for r in all_rows:
             cls = r.get("class", "?")
             class_counts[cls] = class_counts.get(cls, 0) + 1
+        result_word = "predictions" if task_type == "classification" else "detections"
         if class_counts:
             breakdown = ", ".join(f"{cls}: {n}" for cls, n in sorted(class_counts.items()))
-            summary = f"[{label}] Done — {len(all_rows)} detections across {len(plot_images)} plots ({breakdown})"
+            summary = f"[{label}] Done — {len(all_rows)} {result_word} across {len(plot_images)} plots ({breakdown})"
         else:
-            summary = f"[{label}] Done — 0 detections across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
+            summary = f"[{label}] Done — 0 {result_word} across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
         emit({"event": "log", "message": summary})
         logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
 

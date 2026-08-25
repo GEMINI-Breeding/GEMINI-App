@@ -56,6 +56,8 @@ def save_gcp_selection(
     gcp_selections: list[dict[str, Any]],
     image_gps: list[dict[str, Any]],
     gcp_locations_csv: str | None = None,
+    thermal_gcp_selections: list[dict[str, Any]] | None = None,
+    thermal_image_gps: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     """
     Save GCP pixel selections and image GPS list.
@@ -74,6 +76,15 @@ def save_gcp_selection(
 
     gcp_locations_csv: optional raw CSV text if uploaded inline at GCP picker step.
                        Saved to Intermediate/{pipeline}/ and Raw/{pop}/ if absent.
+
+    thermal_gcp_selections / thermal_image_gps: same shape as the RGB pair
+    above, but marked against converted thermal GeoTIFFs (GcpPicker's
+    Thermal tab) — written to gcp_list_thermal.txt / geo_thermal.txt, kept
+    separate from the RGB files since thermal and RGB sensors have
+    different lens/FOV/resolution, so the same physical GCP lands at
+    different pixel coordinates in each. One Save action covers both sets
+    when the user has marked GCPs in both tabs; either can be omitted/empty
+    if the run has no thermal images or the user only marked RGB.
     """
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
@@ -93,6 +104,21 @@ def save_gcp_selection(
         for img in image_gps:
             f.write(f"{img['image']} {img['lon']} {img['lat']} {img['alt']}\n")
 
+    if thermal_gcp_selections:
+        with open(paths.gcp_list_thermal, "w") as f:
+            f.write("EPSG:4326\n")
+            for sel in thermal_gcp_selections:
+                f.write(
+                    f"{sel['lon']} {sel['lat']} {sel['alt']} "
+                    f"{sel['pixel_x']} {sel['pixel_y']} {sel['image']} {sel['label']}\n"
+                )
+
+    if thermal_image_gps:
+        with open(paths.geo_txt_thermal, "w") as f:
+            f.write("EPSG:4326\n")
+            for img in thermal_image_gps:
+                f.write(f"{img['image']} {img['lon']} {img['lat']} {img['alt']}\n")
+
     # Save inline gcp_locations.csv if provided
     if gcp_locations_csv:
         gcp_csv_path = paths.gcp_locations_intermediate
@@ -100,7 +126,10 @@ def save_gcp_selection(
         gcp_csv_path.write_text(gcp_locations_csv)
         logger.info("Saved inline gcp_locations.csv to %s", gcp_csv_path)
 
-    logger.info("Saved GCP selection for run %s (%d GCPs)", run_id, len(gcp_selections))
+    logger.info(
+        "Saved GCP selection for run %s (%d RGB GCPs, %d thermal GCPs)",
+        run_id, len(gcp_selections), len(thermal_gcp_selections or []),
+    )
     return {
         "gcp_selection": paths.rel(paths.gcp_list),
         "geo_txt": paths.rel(paths.geo_txt),
@@ -238,6 +267,270 @@ def _find_image_dir(paths: RunPaths) -> Path:
     return paths.raw / "Images"  # return expected path even if empty
 
 
+def _read_gps_exif(img_path: Path) -> dict[str, float | None]:
+    """
+    Extract GPS lat/lon/alt from an image's EXIF. Works for JPEG or TIFF —
+    PIL's EXIF reading is format-agnostic. Used as a fallback GPS source for
+    converted thermal GeoTIFFs (which aren't in msgs_synced.csv, since raw
+    thermal captures are excluded from Data Sync's scan — see
+    thermal_utils.is_raw_thermal_image) when building geo_thermal.txt for a
+    thermal ODM run. Same logic as processing.py's _read_exif_gps.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import Base as ExifBase, GPSTAGS
+
+        with Image.open(img_path) as img:
+            exif = img.getexif()
+            gps_info_raw = exif.get_ifd(ExifBase.GPSInfo)
+            if not gps_info_raw:
+                return {"lat": None, "lon": None, "alt": None}
+
+            gps = {GPSTAGS.get(k, k): v for k, v in gps_info_raw.items()}
+
+            def dms_to_deg(dms: tuple, ref: str) -> float:
+                d, m, s = (float(x) for x in dms)
+                deg = d + m / 60 + s / 3600
+                return -deg if ref in ("S", "W") else deg
+
+            lat = dms_to_deg(gps["GPSLatitude"], gps.get("GPSLatitudeRef", "N"))
+            lon = dms_to_deg(gps["GPSLongitude"], gps.get("GPSLongitudeRef", "E"))
+            alt_raw = gps.get("GPSAltitude")
+            alt = float(alt_raw) if alt_raw is not None else None
+            return {"lat": lat, "lon": lon, "alt": alt}
+    except Exception:
+        return {"lat": None, "lon": None, "alt": None}
+
+
+def _run_odm_docker(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+    odm_project: Path,
+    host_project: str,
+    host_images: str,
+    odm_options: str,
+    log_file: Path,
+    stop_event: threading.Event,
+    emit: Callable[[dict], None],
+    progress_label: str = "",
+    progress_range: tuple[int, int] = (0, 80),
+) -> Path | None:
+    """
+    Run ODM via Docker against a prepared project directory, streaming
+    log/progress events through `emit` until it completes. Shared by the
+    RGB and thermal orthomosaic passes in run_orthomosaic() — everything
+    about launching, log-tailing, stage-progress detection, stop-handling,
+    and cleanup is identical between them; only which images/GCPs/geo file
+    get mounted differs, which is the caller's job before calling this.
+
+    Returns the ODM project's `code/` dir on success, or None if stopped by
+    the user (stop_event) — callers should treat None as "return {} to the
+    step runner" same as the pre-refactor inline behavior. Raises
+    RuntimeError on a non-zero ODM exit code.
+
+    `progress_range` scales ODM's internal 0-100% stage progress into a
+    sub-window of the caller's overall progress bar — e.g. (0, 45) for an
+    RGB pass immediately followed by a (45, 90) thermal pass within the same
+    step, vs (0, 80) for an RGB-only run (matches the original behavior).
+    `progress_label`, when set, prefixes emitted messages (e.g. "RGB: ",
+    "Thermal: ") so a combined run's log/progress stream stays legible.
+    """
+    odm_code = odm_project / "code"
+    container_name = f"ODM-gemi-{run_id!s:.8}-{progress_label.lower() or 'rgb'}"
+
+    from app.crud.app_settings import get_docker_resource_flags
+    resource_flags = get_docker_resource_flags(session=session)
+    if resource_flags:
+        logger.info("Docker resource limits (ODM): %s", " ".join(resource_flags))
+    else:
+        logger.info("Docker resource limits (ODM): none (no limits set)")
+
+    docker_bin = _find_docker_bin() or "docker"
+    docker_cmd: list[str] = [
+        docker_bin, "run",
+        "--name", container_name,
+        "-i", "--rm",
+        *resource_flags,
+        "--security-opt=no-new-privileges",
+        *(["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
+        "-w", "/datasets",
+        "-v", f"{host_project}:/datasets:rw",
+        "-v", f"{host_images}:/datasets/code/images:ro",
+    ]
+    # Only mount timezone files if they exist as regular files (not present on all distros)
+    if Path("/etc/timezone").is_file():
+        docker_cmd += ["-v", "/etc/timezone:/etc/timezone:ro"]
+    if Path("/etc/localtime").exists():
+        docker_cmd += ["-v", "/etc/localtime:/etc/localtime:ro"]
+    gpu_available = _check_gpu()
+    if gpu_available:
+        docker_cmd += ["--gpus", "all", "opendronemap/odm:gpu"]
+    else:
+        docker_cmd.append("opendronemap/odm")
+
+    docker_cmd += ["--project-path", "/datasets", "code"] + odm_options.split()
+
+    prefix = f"{progress_label}: " if progress_label else ""
+    range_start, range_end = progress_range
+    logger.info("Starting ODM (%s): %s", progress_label or "RGB", " ".join(docker_cmd))
+    compute_mode = "GPU" if gpu_available else "CPU"
+    emit({"event": "progress", "message": f"{prefix}Starting ODM Docker container… ({compute_mode})", "progress": range_start})
+
+    with open(log_file, "w") as lf:
+        proc = subprocess.Popen(docker_cmd, stdout=lf, stderr=subprocess.STDOUT, env=_docker_env())
+
+    # Monitor log file for progress while ODM runs
+    stage_count = len(_ODM_PROGRESS_STAGES)
+    current_stage = -1
+    log_offset = 0  # byte position — only read new content each cycle
+
+    try:
+        while proc.poll() is None:
+            if stop_event.is_set():
+                proc.terminate()
+                try:
+                    subprocess.run([docker_bin, "stop", container_name], timeout=10, capture_output=True, env=_docker_env())
+                except Exception:
+                    pass
+                return None
+
+            try:
+                with open(log_file, "r", errors="replace") as lf:
+                    lf.seek(log_offset)
+                    new_text = lf.read()
+                    log_offset = lf.tell()
+
+                if new_text:
+                    # Emit each new non-empty line as a raw log event
+                    for line in new_text.splitlines():
+                        line = line.strip()
+                        if line:
+                            emit({"event": "log", "message": f"{prefix}{line}"})
+
+                    # Check for stage transitions in the full log so far
+                    full_text = log_file.read_text(errors="replace")
+                    for idx, stage in enumerate(_ODM_PROGRESS_STAGES):
+                        if stage in full_text and idx > current_stage:
+                            current_stage = idx
+                            frac = (idx + 1) / stage_count
+                            pct = round(range_start + frac * (range_end - range_start))
+                            emit({"event": "progress", "message": f"{prefix}{stage}", "progress": pct})
+            except OSError:
+                pass
+
+            time.sleep(10)
+
+        # Flush any remaining log lines written after the last sleep cycle
+        # (also catches output from processes that exit immediately)
+        try:
+            with open(log_file, "r", errors="replace") as lf:
+                lf.seek(log_offset)
+                remaining = lf.read()
+            for line in remaining.splitlines():
+                line = line.strip()
+                if line:
+                    emit({"event": "log", "message": f"{prefix}{line}"})
+        except OSError:
+            pass
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"ODM exited with code {proc.returncode}. See raw output above for details.")
+
+    except Exception:
+        try:
+            subprocess.run([docker_bin, "rm", "-f", container_name], timeout=5, capture_output=True, env=_docker_env())
+        except Exception:
+            pass
+        raise
+
+    return odm_code
+
+
+def _run_thermal_orthomosaic_pass(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+    paths: RunPaths,
+    odm_options: str,
+    container_data_root: str,
+    host_data_root: str,
+    stop_event: threading.Event,
+    emit: Callable[[dict], None],
+    progress_range: tuple[int, int],
+) -> Path | None:
+    """
+    Thermal counterpart to the RGB pass in run_orthomosaic() — an
+    independent ODM reconstruction directly on the converted thermal
+    GeoTIFFs (own SIFT features, own camera poses), not a reprojection
+    through the RGB reconstruction. This matches established practice for
+    DJI-class thermal drones: OpenDroneMap's own docs/community guidance is
+    to run ODM on the converted single-band GeoTIFFs as their own dataset —
+    see the plan doc / commit message for sources. Also why GCPs need
+    marking separately on thermal images: different lens/FOV/resolution
+    than RGB means pixel coordinates for the same physical GCP don't
+    transfer between the two image sets.
+
+    Returns the destination thermal orthophoto path on success, None if
+    there are no converted thermal images (nothing to do — not an error,
+    generate_thermal is an opt-in "if relevant" toggle) or if stopped by
+    the user (stop_event).
+    """
+    image_dir = paths.thermal_converted_dir
+    thermal_images = sorted(image_dir.glob("*.tif")) + sorted(image_dir.glob("*.tiff")) if image_dir.is_dir() else []
+    if not thermal_images:
+        emit({"event": "log", "message": "No converted thermal images found — skipping thermal orthophoto. Run Thermal Conversion first."})
+        return None
+
+    odm_project = paths.odm_working_dir_thermal / "project"
+    if paths.odm_working_dir_thermal.exists():
+        shutil.rmtree(paths.odm_working_dir_thermal, ignore_errors=True)
+    odm_code = odm_project / "code"
+    odm_code.mkdir(parents=True, exist_ok=True)
+
+    # GCPs/geo: use marks from the GCP tool's Thermal tab if present, else
+    # fall back to each image's own EXIF GPS (same accuracy tier as the
+    # "no GCPs marked" RGB fallback — see skip_gcp_selection) so a thermal
+    # orthophoto can still be generated without requiring thermal GCP marking.
+    gcp_dest = odm_code / "gcp_list.txt"
+    if paths.gcp_list_thermal.exists():
+        gcp_dest.write_text(paths.gcp_list_thermal.read_text())
+    else:
+        gcp_dest.write_text("EPSG:4326\n")
+
+    geo_dest = odm_code / "geo.txt"
+    if paths.geo_txt_thermal.exists():
+        geo_dest.write_text(paths.geo_txt_thermal.read_text())
+    else:
+        lines = ["EPSG:4326"]
+        for img_path in thermal_images:
+            gps = _read_gps_exif(img_path)
+            if gps["lat"] is not None and gps["lon"] is not None:
+                lines.append(f"{img_path.name} {gps['lon']} {gps['lat']} {gps['alt'] or 0}")
+        geo_dest.write_text("\n".join(lines) + "\n")
+
+    log_file = odm_code / "logs.txt"
+    log_file.write_text("")
+
+    host_project = str(odm_project).replace(container_data_root, host_data_root)
+    host_images = str(image_dir).replace(container_data_root, host_data_root)
+
+    odm_code_result = _run_odm_docker(
+        session=session, run_id=run_id, odm_project=odm_project,
+        host_project=host_project, host_images=host_images,
+        odm_options=odm_options, log_file=log_file,
+        stop_event=stop_event, emit=emit,
+        progress_label="Thermal", progress_range=progress_range,
+    )
+    if odm_code_result is None:
+        return None
+
+    ortho_src = odm_code / "odm_orthophoto" / "odm_orthophoto.tif"
+    if not ortho_src.exists():
+        raise FileNotFoundError(f"Thermal ODM orthomosaic not found at {ortho_src}")
+    return ortho_src
+
+
 def run_orthomosaic(
     *,
     session: Session,
@@ -250,6 +543,7 @@ def run_orthomosaic(
     feature_quality: str = "high",
     custom_odm_options: str = "",
     name: str | None = None,
+    generate_thermal: bool = False,
 ) -> dict[str, Any]:
     """
     Run OpenDroneMap via Docker to produce orthomosaic + DEM.
@@ -263,6 +557,13 @@ def run_orthomosaic(
       - Intermediate/{workspace}/{pop}/{run_seg}/temp/project/  (ODM working dir)
       - Processed/{workspace}/{pop}/{run_seg}/{date}-RGB.tif
       - Processed/{workspace}/{pop}/{run_seg}/{date}-DEM.tif
+
+    generate_thermal: if True, also runs an independent ODM reconstruction
+    on the converted thermal GeoTIFFs (Intermediate/.../thermal_converted/,
+    produced by run_thermal_conversion()) as a second pass within this same
+    step, writing {date}-Thermal-v{N}.tif and attaching it to the same
+    versioned outputs entry as the RGB ortho. No-op (logged, not an error)
+    if no converted thermal images exist yet — see _run_thermal_orthomosaic_pass.
     """
     if not _check_docker():
         raise RuntimeError("Docker is not installed or not in PATH. ODM requires Docker.")
@@ -355,112 +656,19 @@ def run_orthomosaic(
             f" --feature-quality {feature_quality}"
         )
 
-    container_name = f"ODM-gemi-{run_id!s:.8}"
+    rgb_progress_range = (0, 45) if generate_thermal else (0, 80)
+    odm_code_result = _run_odm_docker(
+        session=session, run_id=run_id, odm_project=odm_project,
+        host_project=host_project, host_images=host_images,
+        odm_options=odm_options, log_file=log_file,
+        stop_event=stop_event, emit=emit,
+        progress_label="RGB" if generate_thermal else "",
+        progress_range=rgb_progress_range,
+    )
+    if odm_code_result is None:
+        return {}  # stopped by user
 
-    from app.crud.app_settings import get_docker_resource_flags
-    resource_flags = get_docker_resource_flags(session=session)
-    if resource_flags:
-        logger.info("Docker resource limits (ODM): %s", " ".join(resource_flags))
-    else:
-        logger.info("Docker resource limits (ODM): none (no limits set)")
-
-    docker_bin = _find_docker_bin() or "docker"
-    docker_cmd: list[str] = [
-        docker_bin, "run",
-        "--name", container_name,
-        "-i", "--rm",
-        *resource_flags,
-        "--security-opt=no-new-privileges",
-        *(["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
-        "-w", "/datasets",
-        "-v", f"{host_project}:/datasets:rw",
-        "-v", f"{host_images}:/datasets/code/images:ro",
-    ]
-    # Only mount timezone files if they exist as regular files (not present on all distros)
-    from pathlib import Path as _Path
-    if _Path("/etc/timezone").is_file():
-        docker_cmd += ["-v", "/etc/timezone:/etc/timezone:ro"]
-    if _Path("/etc/localtime").exists():
-        docker_cmd += ["-v", "/etc/localtime:/etc/localtime:ro"]
-    gpu_available = _check_gpu()
-    if gpu_available:
-        docker_cmd += ["--gpus", "all", "opendronemap/odm:gpu"]
-    else:
-        docker_cmd.append("opendronemap/odm")
-
-    docker_cmd += ["--project-path", "/datasets", "code"] + odm_options.split()
-
-    logger.info("Starting ODM: %s", " ".join(docker_cmd))
-    compute_mode = "GPU" if gpu_available else "CPU"
-    emit({"event": "progress", "message": f"Starting ODM Docker container… ({compute_mode})", "progress": 0})
-
-    with open(log_file, "w") as lf:
-        proc = subprocess.Popen(docker_cmd, stdout=lf, stderr=subprocess.STDOUT, env=_docker_env())
-
-    # Monitor log file for progress while ODM runs
-    stage_count = len(_ODM_PROGRESS_STAGES)
-    current_stage = -1
-    log_offset = 0  # byte position — only read new content each cycle
-
-    try:
-        while proc.poll() is None:
-            if stop_event.is_set():
-                proc.terminate()
-                try:
-                    subprocess.run([docker_bin, "stop", container_name], timeout=10, capture_output=True, env=_docker_env())
-                except Exception:
-                    pass
-                return {}
-
-            try:
-                with open(log_file, "r", errors="replace") as lf:
-                    lf.seek(log_offset)
-                    new_text = lf.read()
-                    log_offset = lf.tell()
-
-                if new_text:
-                    # Emit each new non-empty line as a raw log event
-                    for line in new_text.splitlines():
-                        line = line.strip()
-                        if line:
-                            emit({"event": "log", "message": line})
-
-                    # Check for stage transitions in the full log so far
-                    full_text = log_file.read_text(errors="replace")
-                    for idx, stage in enumerate(_ODM_PROGRESS_STAGES):
-                        if stage in full_text and idx > current_stage:
-                            current_stage = idx
-                            pct = round((idx + 1) / stage_count * 80)
-                            emit({"event": "progress", "message": stage, "progress": pct})
-            except OSError:
-                pass
-
-            time.sleep(10)
-
-        # Flush any remaining log lines written after the last sleep cycle
-        # (also catches output from processes that exit immediately)
-        try:
-            with open(log_file, "r", errors="replace") as lf:
-                lf.seek(log_offset)
-                remaining = lf.read()
-            for line in remaining.splitlines():
-                line = line.strip()
-                if line:
-                    emit({"event": "log", "message": line})
-        except OSError:
-            pass
-
-        if proc.returncode != 0:
-            raise RuntimeError(f"ODM exited with code {proc.returncode}. See raw output above for details.")
-
-    except Exception:
-        try:
-            subprocess.run([docker_bin, "rm", "-f", container_name], timeout=5, capture_output=True, env=_docker_env())
-        except Exception:
-            pass
-        raise
-
-    emit({"event": "progress", "message": "Copying ODM outputs…", "progress": 82})
+    emit({"event": "progress", "message": "Copying RGB ODM outputs…", "progress": rgb_progress_range[1] + 2})
 
     # Copy outputs to Processed/
     ortho_src = odm_code / "odm_orthophoto" / "odm_orthophoto.tif"
@@ -476,7 +684,7 @@ def run_orthomosaic(
     shutil.copy2(ortho_src, rgb_dest)
     logger.info("Copied orthomosaic → %s", rgb_dest.name)
 
-    emit({"event": "progress", "message": "Generating pyramid (COG)…", "progress": 88})
+    emit({"event": "progress", "message": "Generating pyramid (COG)…", "progress": rgb_progress_range[1] + 6})
 
     pyramid_ok = False
     try:
@@ -498,6 +706,22 @@ def run_orthomosaic(
         logger.info("Copied DEM → %s", dem_dest.name)
         dem_ok = True
 
+    thermal_dest: Path | None = None
+    if generate_thermal:
+        thermal_src = _run_thermal_orthomosaic_pass(
+            session=session, run_id=run_id, paths=paths,
+            odm_options=odm_options,
+            container_data_root=container_data_root, host_data_root=host_data_root,
+            stop_event=stop_event, emit=emit,
+            progress_range=(rgb_progress_range[1] + 8, 96),
+        )
+        if thermal_src is None and stop_event.is_set():
+            return {}  # stopped by user during the thermal pass
+        if thermal_src is not None:
+            thermal_dest = paths.aerial_thermal_versioned(next_version)
+            shutil.copy2(thermal_src, thermal_dest)
+            logger.info("Copied thermal orthomosaic → %s", thermal_dest.name)
+
     emit({"event": "progress", "message": "Orthomosaic complete.", "progress": 100})
 
     from datetime import datetime as _dt, timezone as _tz
@@ -507,6 +731,7 @@ def run_orthomosaic(
         "rgb": paths.rel(rgb_dest),
         "dem": paths.rel(dem_dest) if dem_ok else None,
         "pyramid": paths.rel(pyramid_dest) if pyramid_ok else None,
+        "thermal": paths.rel(thermal_dest) if thermal_dest else None,
         "created_at": _dt.now(_tz.utc).isoformat(),
     }
 
@@ -1141,6 +1366,156 @@ def run_trait_extraction(
     }
 
 
+# ── Thermal conversion ───────────────────────────────────────────────────────
+# Converts proprietary radiometric thermal images (raw R-JPEGs) into
+# per-pixel-Celsius GeoTIFFs. Deliberately a standalone step that never
+# touches the raw thermal files sync.py's data-sync step would otherwise
+# process — sync.py's EXIF/rotation fix re-saves JPEGs via PIL, which would
+# silently corrupt DJI's proprietary R-JPEG payload if it ran first. See
+# thermal_utils.py for the platform/weather-format registries this wraps.
+
+def run_thermal_conversion(
+    *,
+    session: Session,
+    run_id: uuid.UUID,
+    stop_event: threading.Event,
+    emit: Callable[[dict], None],
+    platform: str = "dji",
+    distance: float = 5.0,
+    humidity: float = 70.0,
+    emissivity: float = 1.0,
+    reflected_temperature: float = 25.0,
+    weather_file_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Convert raw thermal images in this run's Raw/ directory into single-band
+    float32 GeoTIFFs (temperature in Celsius), writing to
+    Intermediate/.../thermal_converted/. Optionally matches per-image
+    humidity/ambient-temperature from an uploaded weather-station file by
+    nearest capture timestamp; falls back to the fixed humidity/
+    reflected_temperature values otherwise.
+    """
+    import rasterio
+
+    from app.processing import thermal_utils
+
+    paths = _get_paths(session, run_id)
+
+    image_dir = paths.raw / "Images"
+    if not image_dir.is_dir():
+        image_dir = paths.raw
+    thermal_images = thermal_utils.find_thermal_images(image_dir, platform=platform)
+
+    if not thermal_images:
+        raise FileNotFoundError(
+            f"No thermal images found in {image_dir} for platform '{platform}'. "
+            "Upload raw thermal images to this run first."
+        )
+
+    sdk_dir = ""
+    if platform == "dji":
+        from app.crud.app_settings import get_setting
+        sdk_dir = get_setting(session=session, key="dji_thermal_sdk_path") or ""
+
+    weather_matcher = None
+    weather_source_name: str | None = None
+    if weather_file_id:
+        from app.models.weather_station_file import WeatherStationFile
+        weather_record = session.get(WeatherStationFile, uuid.UUID(weather_file_id))
+        if weather_record and Path(weather_record.file_path).exists():
+            weather_df = thermal_utils.load_weather_file(
+                Path(weather_record.file_path), format=weather_record.format,
+            )
+            weather_matcher = thermal_utils.build_weather_matcher(
+                weather_df, fallback_humidity=humidity, fallback_ambient=reflected_temperature,
+            )
+            weather_source_name = weather_record.name
+
+    out_dir = paths.thermal_converted_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    total = len(thermal_images)
+    emit({
+        "event": "log",
+        "message": f"Converting {total} thermal images (platform: {platform})"
+        + (f", weather: {weather_source_name}" if weather_source_name else ""),
+        "total": total, "done": 0,
+    })
+
+    converted: list[dict[str, Any]] = []
+    errors = 0
+    for i, image_path in enumerate(thermal_images):
+        if stop_event.is_set():
+            emit({"event": "log", "message": f"Stopped after {i}/{total} images."})
+            return {}
+
+        image_humidity, image_ambient, weather_src = humidity, reflected_temperature, "fixed"
+        if weather_matcher:
+            ts = thermal_utils.extract_image_timestamp(image_path.name, platform=platform)
+            image_humidity, image_ambient, weather_src = weather_matcher(ts)
+
+        out_path = out_dir / (image_path.stem + ".tif")
+        try:
+            thermal_utils.convert_thermal_image(
+                image_path, out_path, platform=platform,
+                distance=distance, humidity=image_humidity,
+                emissivity=emissivity, reflected_temperature=image_ambient,
+                sdk_dir=sdk_dir,
+                # Only fires on macOS, and only while the Docker-based
+                # conversion tool is being built (first use) — the "" clear
+                # signal is a no-op here since this is a scrolling log, not
+                # a persistent status field.
+                on_progress=lambda msg: emit({"event": "log", "message": msg}) if msg else None,
+            )
+            with rasterio.open(out_path) as ds:
+                band = ds.read(1)
+            converted.append({
+                "name": out_path.name,
+                "path": paths.rel(out_path),
+                "min_temp": round(float(band.min()), 2),
+                "max_temp": round(float(band.max()), 2),
+                "mean_temp": round(float(band.mean()), 2),
+                "humidity": round(image_humidity, 2),
+                "ambient_temperature": round(image_ambient, 2),
+                "weather_source": weather_src,
+            })
+        except thermal_utils.ThermalConfigError:
+            # Config errors (missing SDK, bad params) won't resolve by
+            # retrying the next image — fail the whole step immediately with
+            # a clear message, same as inference_utils._InferenceConfigError.
+            raise
+        except Exception as exc:
+            errors += 1
+            logger.warning("Thermal conversion failed for %s: %s", image_path.name, exc)
+            emit({"event": "log", "message": f"  ⚠ {image_path.name} failed: {exc}"})
+
+        pct = round((i + 1) / total * 100)
+        emit({
+            "event": "progress", "progress": pct,
+            "total": total, "done": i + 1,
+        })
+
+    summary = (
+        f"Thermal conversion done — {len(converted)}/{total} converted"
+        + (f", {errors} errors" if errors else "")
+    )
+    emit({"event": "log", "message": summary})
+    logger.info(summary)
+
+    return {
+        "thermal_conversion": {
+            "dir": paths.rel(out_dir),
+            "platform": platform,
+            "images": converted,
+            "weather_file_id": weather_file_id,
+            "params": {
+                "distance": distance, "emissivity": emissivity,
+                "humidity": humidity, "reflected_temperature": reflected_temperature,
+            },
+        },
+    }
+
+
 # ── On-demand plot cropping ────────────────────────────────────────────────────
 
 def crop_plots_to_stream(
@@ -1217,7 +1592,11 @@ def run_inference(
     Each completed model run is appended as an entry in run.outputs["inference"] (list format).
     """
     import csv as _csv
-    from app.processing.inference_utils import run_inference_on_image, merge_inference_into_geojson
+    from app.processing.inference_utils import (
+        run_inference_on_image,
+        run_classification_on_image,
+        merge_inference_into_geojson,
+    )
     from app.crud.pipeline import update_pipeline_run
     from app.models.pipeline import PipelineRunUpdate, PipelineRun as _PipelineRun
     from datetime import datetime, timezone
@@ -1301,7 +1680,7 @@ def run_inference(
         ]
 
     fieldnames = ["image", "plot_id", "plot_label", "accession", "row", "col", "model_id",
-                  "class", "confidence", "x", "y", "width", "height", "points"]
+                  "class", "confidence", "x", "y", "width", "height", "points", "verified"]
     new_entries: list[dict] = []
     global_total = len(models) * len(plot_images)
     global_done = 0
@@ -1310,21 +1689,68 @@ def run_inference(
         if stop_event.is_set():
             return {}
         label = model.get("label", "model")
-        api_key = model.get("roboflow_api_key", "")
-        model_id = model.get("roboflow_model_id", "")
+        source = model.get("source") or "roboflow"
+        api_key = model.get("roboflow_api_key") or ""
+        model_id = model.get("roboflow_model_id") or ""
+        weights_path = model.get("weights_path") or ""
         task_type = model.get("task_type", "detection")
+        hf_zero_shot = False
+        hf_prompt = ""
+        if source == "huggingface":
+            api_key = model.get("hf_api_key") or ""
+            model_id = model.get("hf_model_id") or ""
+            hf_zero_shot = bool(model.get("hf_zero_shot"))
+            hf_prompt = model.get("hf_prompt") or ""
+        elif source == "sam_auto":
+            # hf_model_id doubles as an optional SAM checkpoint override —
+            # blank uses inference_utils.DEFAULT_SAM_MODEL_ID.
+            model_id = model.get("hf_model_id") or ""
 
-        mode_tag = "local" if inference_mode == "local" else "cloud"
-        masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
-        emit({
-            "event": "log",
-            "message": (
-                f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
-                f"(trait v{trait_version}) — model: {model_id}, key: {masked_key}"
-            ),
-            "total": global_total,
-            "done": global_done,
-        })
+        if source == "local_weights":
+            mode_tag = "local-weights"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting local-weights inference on {len(plot_images)} plots "
+                    f"(trait v{trait_version}) — weights: {Path(weights_path).name if weights_path else '(none)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        elif source == "huggingface":
+            mode_tag = f"huggingface-{'local' if inference_mode == 'local' else 'cloud'}"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting HuggingFace ({inference_mode}) inference on {len(plot_images)} plots "
+                    f"(trait v{trait_version}) — model: {model_id or '(none)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        elif source == "sam_auto":
+            mode_tag = "sam-auto"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting SAM automatic segmentation on {len(plot_images)} plots "
+                    f"(trait v{trait_version}) — model: {model_id or '(default)'}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
+        else:
+            mode_tag = "local" if inference_mode == "local" else "cloud"
+            masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
+            emit({
+                "event": "log",
+                "message": (
+                    f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
+                    f"(trait v{trait_version}) — model: {model_id}, key: {masked_key}"
+                ),
+                "total": global_total,
+                "done": global_done,
+            })
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         predictions_path = paths.processed_run / f"roboflow_predictions_{safe_label}.csv"
@@ -1338,14 +1764,32 @@ def run_inference(
             def _warn(msg: str, _lbl: str = label) -> None:
                 emit({"event": "log", "message": f"  ⚠ [{_lbl}] {msg}"})
 
-            preds = run_inference_on_image(
-                img, api_key=api_key, model_id=model_id, task_type=task_type,
-                inference_mode=inference_mode,
-                local_server_url=local_server_url or "",
-                on_warning=_warn,
-            )
+            if task_type == "classification":
+                preds = run_classification_on_image(
+                    img, api_key=api_key, model_id=model_id,
+                    inference_mode=inference_mode,
+                    local_server_url=local_server_url or "",
+                    source=source,
+                    weights_path=weights_path,
+                    hf_zero_shot=hf_zero_shot,
+                    hf_prompt=hf_prompt,
+                )
+            else:
+                preds = run_inference_on_image(
+                    img, api_key=api_key, model_id=model_id, task_type=task_type,
+                    inference_mode=inference_mode,
+                    local_server_url=local_server_url or "",
+                    source=source,
+                    weights_path=weights_path,
+                    hf_zero_shot=hf_zero_shot,
+                    hf_prompt=hf_prompt,
+                    on_warning=_warn,
+                )
             global_done += 1
-            det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
+            if task_type == "classification":
+                det_label = f"{preds[0]['class']} ({preds[0]['confidence'] * 100:.0f}%)" if preds else "no prediction"
+            else:
+                det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
             pct = round(global_done / global_total * 100)
             emit({"event": "progress", "progress": pct})
             emit({
@@ -1364,7 +1808,7 @@ def run_inference(
                 p["accession"] = meta.get("accession", "")
                 p["row"] = meta.get("row", "")
                 p["col"] = meta.get("col", "")
-                p["model_id"] = model_id
+                p["model_id"] = weights_path if source == "local_weights" else model_id
                 p["points"] = _json2.dumps(p["points"]) if p.get("points") else ""
             all_rows.extend(preds)
 
@@ -1378,11 +1822,12 @@ def run_inference(
         for r in all_rows:
             cls = r.get("class", "?")
             class_counts[cls] = class_counts.get(cls, 0) + 1
+        result_word = "predictions" if task_type == "classification" else "detections"
         if class_counts:
             breakdown = ", ".join(f"{cls}: {n}" for cls, n in sorted(class_counts.items()))
-            summary = f"[{label}] Done — {len(all_rows)} detections across {len(plot_images)} plots ({breakdown})"
+            summary = f"[{label}] Done — {len(all_rows)} {result_word} across {len(plot_images)} plots ({breakdown})"
         else:
-            summary = f"[{label}] Done — 0 detections across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
+            summary = f"[{label}] Done — 0 {result_word} across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
         emit({"event": "log", "message": summary})
         logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
 

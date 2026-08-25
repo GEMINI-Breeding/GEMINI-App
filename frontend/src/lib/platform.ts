@@ -62,6 +62,9 @@ export async function openUrl(url: string): Promise<void> {
 export async function pickFiles(opts?: {
   multiple?: boolean;
   accept?: string; // e.g. "image/*,.csv"
+  filters?: { name: string; extensions: string[] }[];
+  /** Pick a directory instead of individual files (Tauri only — see note below). */
+  directory?: boolean;
 }): Promise<File[] | string[] | null> {
   // E2E hook: the upload flow is Tauri-first and passes absolute paths to the
   // backend. Browsers strip absolute paths from File objects, so Playwright
@@ -78,16 +81,28 @@ export async function pickFiles(opts?: {
 
   if (isTauri()) {
     const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({ multiple: opts?.multiple ?? false, directory: false });
+    const selected = await open({
+      multiple: opts?.multiple ?? false,
+      directory: opts?.directory ?? false,
+      filters: opts?.filters,
+    });
     if (!selected) return null;
     return Array.isArray(selected) ? selected : [selected];
   }
 
-  // Browser fallback
+  // Browser fallback — directory picking returns individual File objects
+  // (via the non-standard but widely-supported `webkitdirectory` attribute),
+  // not a single directory path, since browsers don't expose real paths.
+  // Directory-path-dependent features (e.g. the thermal-directory scan) are
+  // effectively Tauri-only; this fallback exists so the picker doesn't throw
+  // in dev/browser mode, not to fully replicate the Tauri behavior.
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = opts?.multiple ?? false;
+    if (opts?.directory) {
+      (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true;
+    }
     if (opts?.accept) input.accept = opts.accept;
     input.onchange = () => {
       const files = input.files ? Array.from(input.files) : [];
