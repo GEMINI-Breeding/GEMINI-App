@@ -342,17 +342,25 @@ test.describe("Image Review (optional aerial step)", () => {
 
     // The GCP picker mounts its own ImageDotMap (separate from the one
     // in the Image Review step) — wait for the marker layer to populate.
+    // Wait for the settled state, not just "the kept ones have arrived".
+    // The marker map is rebuilt in place, so between the unfiltered first
+    // render and the filtered one there is a window where all 5 keys are
+    // present — `kept.every(...)` is already true there. Waiting only on
+    // that made the spec pass alone and fail in a full-suite run (slower
+    // machine, wider window). Require the excluded ones to be gone too,
+    // which is exactly what the assertion below checks.
     await page.waitForFunction(
-      ({ kept }) => {
+      ({ kept, excluded }) => {
         const w = window as unknown as {
           __imageDotMapMarkers__?: Map<string, unknown>
         }
         const m = w.__imageDotMapMarkers__
         if (!m) return false
-        return kept.every((n) => m.has(n))
+        return kept.every((n) => m.has(n)) && excluded.every((n) => !m.has(n))
       },
       {
         kept: DRONE_IMAGES.filter((n) => !targets.includes(n)),
+        excluded: targets,
       },
       { timeout: 30_000 },
     )
