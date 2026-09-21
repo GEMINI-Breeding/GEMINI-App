@@ -27,6 +27,7 @@ import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
+  DEFAULT_E2E_SEASON,
   dropFiles,
   fillUploadForm,
   navigateToUpload,
@@ -294,7 +295,7 @@ test.describe("Image Review (optional aerial step)", () => {
     // (Raw/.../{sensor}/), sibling of every per-dataset subdir — the
     // worker's _load_image_filter and the picker both read from there.
     const token = await getAuthToken(request, baseURL)
-    const scopePrefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/`
+    const scopePrefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/`
     const listRes = await request.get(
       new URL(`/api/files/list/gemini/${scopePrefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${token}` } },

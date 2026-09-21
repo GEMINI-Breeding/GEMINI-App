@@ -24,6 +24,17 @@ export async function selectDataType(page: Page, label: string): Promise<void> {
   ).toBeVisible()
 }
 
+/**
+ * Season used by `fillUploadForm` when a spec doesn't pass one.
+ *
+ * Season replaced the silently-derived "Year" path slot in 2026-05, so it is
+ * also the FIRST SEGMENT of every uploaded object key:
+ *   `Raw/{season}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}/`
+ * Specs that assert on object paths must build the prefix from this constant
+ * (or from the season they passed), never from the flight date's year.
+ */
+export const DEFAULT_E2E_SEASON = "S1"
+
 export interface UploadFormValues {
   experiment?: string
   season?: string
@@ -85,7 +96,7 @@ export async function fillUploadForm(
     // identity (e.g. season-rename, multi-season selection) can still
     // pass an explicit value.
     const value =
-      field === "season" && !values.season ? "S1" : values[field]
+      field === "season" && !values.season ? DEFAULT_E2E_SEASON : values[field]
     if (!value) continue
 
     if (field === "date") {

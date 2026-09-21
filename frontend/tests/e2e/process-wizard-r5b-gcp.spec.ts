@@ -37,6 +37,7 @@ import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
+  DEFAULT_E2E_SEASON,
   dropFiles,
   fillUploadForm,
   navigateToUpload,
@@ -363,7 +364,7 @@ test.describe("R5b: GCP picker", () => {
 
     // Backend verification.
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
+    const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
     const listRes = await request.get(
       new URL(`/api/files/list/gemini/${prefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${token}` } },
@@ -432,7 +433,7 @@ test.describe("R5b: GCP picker", () => {
 
     // No GCP sidecars must exist for this run.
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
+    const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
     const listRes = await request.get(
       new URL(`/api/files/list/gemini/${prefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${token}` } },
@@ -509,7 +510,7 @@ test.describe("R5b: GCP picker", () => {
 
     // Verify gcp_locations.csv now has both rows.
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
+    const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
     const csvText = await fetchMinioObjectText(
       request,
       baseURL,
@@ -686,7 +687,7 @@ test.describe("R5b: GCP picker", () => {
     })
 
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
+    const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
 
     // gcp_list.txt: one row referencing one of the two lassoed images.
     const gcpListText = await fetchMinioObjectText(
@@ -755,7 +756,7 @@ test.describe("R5b: GCP picker", () => {
 
     // Verify both rows exist in MinIO before deletion.
     const token = await getAuthToken(request, baseURL)
-    const prefix = `Raw/2022/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
+    const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
     {
       const csvText = await fetchMinioObjectText(
         request,
