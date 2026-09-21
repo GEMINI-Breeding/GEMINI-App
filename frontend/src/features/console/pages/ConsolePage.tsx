@@ -3,6 +3,7 @@ import { Check, Copy } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
+import { getToken } from "@/lib/auth"
 
 interface LogLine {
   level: string
@@ -35,9 +36,14 @@ export function ConsolePage() {
 
     const poll = async () => {
       try {
-        const token = localStorage.getItem("access_token") || ""
+        // Was `/api/v1/utils/logs` with the old backend's "access_token"
+        // localStorage key — wrong path AND wrong key, so this always
+        // 401'd or 404'd and the console sat empty. GEMINIbase mounts
+        // controllers at /api/<key>, and the token lives under
+        // "gemini.auth.token" (read via getToken()).
+        const token = getToken()
         const base = OpenAPI.BASE
-        const res = await fetch(`${base}/api/v1/utils/logs`, {
+        const res = await fetch(`${base}/api/utils/logs`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (!active) return

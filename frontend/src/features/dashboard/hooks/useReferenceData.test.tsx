@@ -55,7 +55,7 @@ describe("useReferenceDatasets", () => {
     )
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([{ id: "d1", name: "Test" }])
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/reference-data/")
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/reference_data/")
   })
 
   it("passes the Authorization header from localStorage", async () => {
@@ -98,13 +98,18 @@ describe("useReferenceDatasets", () => {
     expect((result.current.error as Error).message).toBe("HTTP 404")
   })
 
-  it("is disabled by default (Phase 10 gate) — no fetch on mount", async () => {
+  it("is enabled by default — the repointed route actually resolves", async () => {
+    // Was "is disabled by default (Phase 10 gate)". The hook pointed at the
+    // old backend's /api/v1/reference-data/, which 404s on GEMINIbase, so it
+    // was gated off and reference data was readable nowhere. The route does
+    // exist at /api/reference_data/, so the gate is gone.
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] })
     const { result } = renderHook(() => useReferenceDatasets(), {
       wrapper: makeWrapper(),
     })
-    await new Promise((r) => setTimeout(r, 0))
-    expect(fetchMock).not.toHaveBeenCalled()
-    expect(result.current.fetchStatus).toBe("idle")
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(fetchMock).toHaveBeenCalled()
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/reference_data/")
   })
 })
 
@@ -137,7 +142,7 @@ describe("useReferencePlots", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([{ id: "p1", plot_id: "A1" }])
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "/api/v1/reference-data/ds1/plots-all",
+      "/api/reference_data/id/ds1/plots-all",
     )
   })
 })
@@ -179,7 +184,7 @@ describe("useReferenceAggregate", () => {
     })
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "/api/v1/reference-data/ds1/aggregate?metric=plant%20height&aggregation=max",
+      "/api/reference_data/id/ds1/aggregate?metric=plant%20height&aggregation=max",
     )
   })
 })

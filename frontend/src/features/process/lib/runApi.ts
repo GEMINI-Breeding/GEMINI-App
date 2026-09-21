@@ -290,21 +290,20 @@ export async function executeStep(
     }
 
     case "associate_boundaries": {
-      // GEMINIbase has no ASSOCIATE_BOUNDARIES worker yet — see
-      // findings.md "Ground pipeline gaps". Treat as a client-side
-      // no-op until the JobType + worker land. The step's outputs
-      // record this so downstream consumers know the association is
-      // synthetic.
+      // GEMINIbase has no ASSOCIATE_BOUNDARIES worker yet. This used to
+      // mark the step `completed` with `synthetic: true` buried in its
+      // outputs, so the UI showed a green tick for an association that
+      // never happened. Report it as unavailable instead — no plot is
+      // matched to a polygon until the JobType + geo-worker handler land
+      // (merge_plan.md Phase 3, item 3A.7).
       setStepState(runId, "associate_boundaries", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
+        status: "unavailable",
         outputs: {
           ...(getRun(runId)?.steps.associate_boundaries?.outputs ?? {}),
-          synthetic: true,
-          note: "Client-side no-op until ASSOCIATE_BOUNDARIES JobType + geo-worker handler land. See findings.md Ground pipeline gaps.",
+          note: "Requires the ASSOCIATE_BOUNDARIES job type and a geo-worker handler, which this backend does not have yet.",
         },
       })
-      return { jobId: null, done: true }
+      return { jobId: null, done: false }
     }
 
     case "inference": {

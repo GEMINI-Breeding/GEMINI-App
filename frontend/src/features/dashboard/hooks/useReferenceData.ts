@@ -28,13 +28,19 @@ async function get<T>(path: string): Promise<T> {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Mirrors `ReferenceDatasetOutput` in the backend's rest_api/models.py.
+ * Note `dataset_date`, not `date` — the old `/api/v1` surface used `date`,
+ * and this type still said so while pointing at a 404, so the mismatch was
+ * invisible.
+ */
 export interface ReferenceDataset {
   id: string
   name: string
   experiment: string | null
   location: string | null
   population: string | null
-  date: string | null
+  dataset_date: string | null
   plot_count: number
   trait_columns: string[]
   created_at: string
@@ -63,18 +69,17 @@ export interface ReferenceAggregate {
 /**
  * All reference datasets (global list — used for the config UI picker).
  *
- * Phase 10 will rewire dashboard reference-data widgets onto the new
- * `/api/reference_data` surface. Until then the legacy `/api/v1/reference-data/`
- * URL doesn't resolve on GEMINIbase, so the query stays disabled by default
- * to keep the dashboard mount clean. Callers that want to opt in explicitly
- * (currently: none in production; the unit test overrides this) can pass
- * `{ enabled: true }`.
+ * These hooks used to call the old backend's `/api/v1/reference-data/...`
+ * paths, which 404 on GEMINIbase, so the query was disabled by default to
+ * keep the dashboard mount clean — reference data could be uploaded but was
+ * readable nowhere. The routes do exist, just at `/api/reference_data/`
+ * with an `/id/` segment, so they are now repointed and enabled.
  */
 export function useReferenceDatasets(options: { enabled?: boolean } = {}) {
   return useQuery<ReferenceDataset[]>({
     queryKey: ["reference-datasets"],
-    queryFn: () => get<ReferenceDataset[]>("/api/v1/reference-data/"),
-    enabled: options.enabled ?? false,
+    queryFn: () => get<ReferenceDataset[]>("/api/reference_data/"),
+    enabled: options.enabled ?? true,
     staleTime: 5 * 60_000,
     retry: (failureCount, error: any) =>
       error?.status !== 404 && failureCount < 2,
@@ -87,7 +92,7 @@ export function useReferencePlots(datasetId: string | null) {
     queryKey: ["reference-plots-all", datasetId],
     queryFn: () =>
       get<{ data: ReferencePlotRow[]; count: number }>(
-        `/api/v1/reference-data/${datasetId}/plots-all`,
+        `/api/reference_data/id/${datasetId}/plots-all`,
       ).then((r) => r.data),
     enabled: !!datasetId,
     staleTime: 10 * 60_000,
@@ -106,7 +111,7 @@ export function useReferenceAggregate(
     queryKey: ["reference-aggregate", datasetId, metric, aggregation],
     queryFn: () =>
       get<ReferenceAggregate>(
-        `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`,
+        `/api/reference_data/id/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`,
       ),
     enabled: !!datasetId && !!metric,
     staleTime: 10 * 60_000,
@@ -128,7 +133,7 @@ export function useMultiReferenceAggregates(
       queryKey: ["reference-aggregate", datasetId, metric, aggregation],
       queryFn: () =>
         get<ReferenceAggregate>(
-          `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
+          `/api/reference_data/id/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
         ),
       staleTime: 10 * 60_000,
       retry: (failureCount: number, error: any) =>

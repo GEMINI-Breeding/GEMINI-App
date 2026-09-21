@@ -35,6 +35,17 @@ export type RunStepStatus =
   | "completed"
   | "failed"
   | "skipped"
+  /**
+   * The step exists in the pipeline but this backend cannot perform it yet.
+   *
+   * Distinct from "skipped" (the user chose to pass on it) and from
+   * "completed" (work actually happened). Two steps used to mark themselves
+   * `completed` while doing nothing at all — `associate_boundaries` even
+   * recorded `synthetic: true` in its outputs — so a green tick meant
+   * either "done" or "silently did nothing" and the user couldn't tell.
+   * A step must never claim success for work that didn't run.
+   */
+  | "unavailable"
 
 export interface RunStepState {
   status: RunStepStatus

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react"
 
-import { FilesService, OpenAPI } from "@/client"
+import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
+import { readExifAutofill } from "../lib/exifAutofill"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
 import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
@@ -188,28 +189,27 @@ export function UploadData() {
   }
 
   /**
-   * On first selection try to pull EXIF date/platform/sensor to pre-fill the
-   * form. The extractMetadata endpoint is a throwing stub until Phase 12
-   * deletes the legacy-shim runtime augmentation — so this call is
-   * intentionally `.catch`ed and never blocks the upload.
+   * On first selection, pre-fill date/platform/sensor from the image's EXIF.
+   *
+   * This used to call `FilesService.extractMetadata`, which was a throwing
+   * shim for a route GEMINIbase never had, inside a bare `catch` — so the
+   * autofill silently did nothing and the user retyped what the file already
+   * knew. Now read locally with exifr; nothing is uploaded to fill the form.
+   * Still best-effort: no EXIF means the user fills it in as before.
    */
   const handleFilesSelected = useCallback(async (files: File[]) => {
-    const firstName = files[0]?.name
-    if (!firstName) return
-    try {
-      const meta = (await FilesService.extractMetadata({
-        requestBody: { file_name: firstName },
-      })) as { date?: string; platform?: string; sensor?: string }
-      setFormValues((prev) => {
-        const next = { ...prev }
-        if (meta.date && !next.date) next.date = meta.date
-        if (meta.platform && !next.platform) next.platform = meta.platform
-        if (meta.sensor && !next.sensor) next.sensor = meta.sensor
-        return next
-      })
-    } catch {
-      // extractMetadata is not implemented upstream — user fills in manually.
-    }
+    const first = files[0]
+    if (!first) return
+    const meta = await readExifAutofill(first)
+    if (!meta.date && !meta.platform && !meta.sensor) return
+    setFormValues((prev) => {
+      const next = { ...prev }
+      // Never clobber something the user already typed.
+      if (meta.date && !next.date) next.date = meta.date
+      if (meta.platform && !next.platform) next.platform = meta.platform
+      if (meta.sensor && !next.sensor) next.sensor = meta.sensor
+      return next
+    })
   }, [])
 
   const handleRgbUploadComplete = useCallback((destPaths: string[]) => {

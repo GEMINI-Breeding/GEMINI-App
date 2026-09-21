@@ -121,7 +121,26 @@ export function GeoTiffValidationCard({
     )
   }
 
-  if (checkState === "error" || !info) return null
+  // The CRS check couldn't run. Previously this returned null, so a
+  // non-WGS84 ortho was ingested with no indication that it had never been
+  // validated — indistinguishable from "checked and fine". GEMINIbase has
+  // no check-geotiff / convert-geotiff route yet (merge_plan.md Phase 3,
+  // item 3E), so say so rather than imply success.
+  if (checkState === "error" || !info) {
+    return (
+      <div
+        className="mt-2 flex items-center gap-2 text-amber-700 text-xs"
+        data-testid="geotiff-check-unavailable"
+      >
+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>
+          CRS not checked — this backend can't validate GeoTIFF projections
+          yet. If this file isn't WGS84 (EPSG:4326), reproject it before
+          processing.
+        </span>
+      </div>
+    )
+  }
 
   if (checkState === "ok") {
     return (

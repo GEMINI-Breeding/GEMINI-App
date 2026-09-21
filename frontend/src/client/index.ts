@@ -5,7 +5,9 @@ export { OpenAPI, type OpenAPIConfig } from './core/OpenAPI';
 export * from './sdk.gen';
 export * from './types.gen';
 
-// Phase 4 transition: re-export shims for services/types that existed in
-// the old FastAPI backend but have no GEMINIbase equivalent yet. Every
-// symbol here is a Phase 5 TODO — see `./legacy-shims.ts`.
-export * from './legacy-shims';
+// legacy-shims.ts is gone. It re-exported throwing stubs for services that
+// existed in the old FastAPI backend (ItemsService, WorkspacesService,
+// AnalyzeService, PipelinesService, ProcessingService, SettingsService) plus
+// `any`-typed aliases, so call sites compiled and failed at runtime instead.
+// Every consumer has been removed or repointed; anything this file exports
+// now is generated from the live OpenAPI schema and actually exists.

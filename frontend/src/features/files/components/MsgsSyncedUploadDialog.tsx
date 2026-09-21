@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -13,11 +12,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
-
-function apiUrl(path: string): string {
-  const base = OpenAPI.BASE.replace(/\/$/, "")
-  return base + path
-}
 
 // ── Expected pipeline columns ─────────────────────────────────────────────────
 
@@ -204,29 +198,37 @@ export function MsgsSyncedUploadDialog({
     reader.readAsText(file)
   }
 
+  // Save posted to `/api/v1/files/msgs-synced` with the old backend's
+  // "access_token" key. GEMINIbase has neither the route nor that key, so
+  // every Save failed with a generic "Failed to save" toast after the user
+  // had done all the column-mapping work. Until the remapped CSV can be
+  // written back to MinIO (merge_plan.md Phase 3, item 3E), offer the
+  // mapped file as a download so the work isn't lost — and say plainly
+  // that it isn't being saved server-side.
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const csvText = remapAndSerialize(parsedRows, mapping)
-      return fetch(apiUrl("/api/v1/files/msgs-synced"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-        body: JSON.stringify({
-          csv_text: csvText,
-          dest_path: destPath ?? "",
-        }),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text())
-        return r.json() as Promise<{ row_count: number }>
-      })
+      const name = (destPath?.split(/[\\/]/).pop() || "msgs_synced")
+        .replace(/\.csv$/i, "")
+        .concat("_remapped.csv")
+      const url = URL.createObjectURL(
+        new Blob([csvText], { type: "text/csv" }),
+      )
+      try {
+        const a = document.createElement("a")
+        a.href = url
+        a.download = name
+        a.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+      return { row_count: parsedRows.length }
     },
     onSuccess: (data) => {
       onSaved(data.row_count)
       handleClose()
     },
-    onError: () => showErrorToast("Failed to save msgs_synced.csv"),
+    onError: () => showErrorToast("Could not build the remapped CSV"),
   })
 
   const requiredMapped = TARGET_COLS.filter((t) => t.required).every(
@@ -350,6 +352,16 @@ export function MsgsSyncedUploadDialog({
           </div>
         )}
 
+        {step === "map" && (
+          <p
+            className="text-amber-700 text-xs"
+            data-testid="msgs-synced-download-only"
+          >
+            This backend can't store a remapped msgs_synced.csv yet, so the
+            mapped file downloads to your computer instead. Upload it as
+            "Synced Metadata" to attach it to this scope.
+          </p>
+        )}
         <DialogFooter>
           {step === "map" && (
             <Button variant="outline" onClick={() => setStep("upload")}>
@@ -364,7 +376,9 @@ export function MsgsSyncedUploadDialog({
               disabled={!requiredMapped || saveMutation.isPending}
               onClick={() => saveMutation.mutate()}
             >
-              {saveMutation.isPending ? "Saving…" : "Save msgs_synced.csv"}
+              {saveMutation.isPending
+                ? "Preparing…"
+                : "Download remapped CSV"}
             </Button>
           )}
         </DialogFooter>

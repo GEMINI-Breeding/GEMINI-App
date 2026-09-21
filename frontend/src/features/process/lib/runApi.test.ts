@@ -424,15 +424,22 @@ describe("executeStep", () => {
     })
   })
 
-  describe("associate_boundaries (no-op)", () => {
-    it("flips the step to completed with synthetic outputs and no job", async () => {
+  describe("associate_boundaries (not implemented in this backend)", () => {
+    // This test used to assert `status: "completed"` with `synthetic: true`
+    // in the outputs — i.e. it encoded the bug as the contract. A step that
+    // performs no work must not report success: the UI drew a green tick
+    // for an association that never happened, and `synthetic` was buried
+    // where no user would see it.
+    it("reports unavailable, not completed, and submits no job", async () => {
       const run = seedRun()
       const result = await executeStep(baseInput(run, "associate_boundaries"))
-      expect(result).toEqual({ jobId: null, done: true })
       expect(submitMock).not.toHaveBeenCalled()
       const ab = getRun(run.id)?.steps.associate_boundaries
-      expect(ab?.status).toBe("completed")
-      expect(ab?.outputs).toMatchObject({ synthetic: true })
+      expect(ab?.status).toBe("unavailable")
+      expect(ab?.status).not.toBe("completed")
+      // `done: false` keeps callers from advancing the wizard past it.
+      expect(result).toEqual({ jobId: null, done: false })
+      expect(ab?.completedAt).toBeUndefined()
     })
   })
 

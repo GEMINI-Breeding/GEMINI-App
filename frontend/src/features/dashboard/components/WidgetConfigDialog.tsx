@@ -769,7 +769,8 @@ function ReferenceDatasetSelector({
             {datasets.map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.name}
-                {d.date ? ` (${d.date})` : ""}
+                {/* dataset_date is an ISO datetime; show the date part only. */}
+                {d.dataset_date ? ` (${d.dataset_date.slice(0, 10)})` : ""}
               </SelectItem>
             ))}
           </SelectContent>

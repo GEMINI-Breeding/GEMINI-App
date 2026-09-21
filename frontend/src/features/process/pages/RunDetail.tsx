@@ -19,6 +19,7 @@ import { useNavigate, useParams } from "@tanstack/react-router"
 import {
   AlertCircle,
   ArrowLeft,
+  Ban,
   Check,
   ChevronDown,
   ChevronRight,
@@ -130,8 +131,11 @@ const GROUND_STEPS: StepDef[] = [
   {
     key: "data_sync",
     label: "Data Sync",
+    // Was "Extract GPS from image EXIF for accurate positioning", which
+    // this backend does not do — the step only confirms the upload landed.
+    // Ardupilot/MAVLink GPS merge and cross-sensor sync are Phase 3 (3A.8).
     description:
-      "Extract GPS from image EXIF for accurate positioning. No platform log required — skipped automatically if not present.",
+      "Confirm the uploaded images are present at the run's scope. GPS comes from each image's EXIF when it is read later in the pipeline; no separate sync runs here.",
     kind: "compute",
     wiredIn: "R4a",
   },
@@ -241,6 +245,8 @@ type StepStatus =
   | "ready"
   | "locked"
   | "skipped"
+  /** Backend can't do this step yet — never a success. See RunStepStatus. */
+  | "unavailable"
 
 function getStepStatus(
   stepKey: string,
@@ -253,6 +259,7 @@ function getStepStatus(
     if (state.status === "running") return "running"
     if (state.status === "failed") return "failed"
     if (state.status === "skipped") return "skipped"
+    if (state.status === "unavailable") return "unavailable"
   }
   // Not yet attempted: ready iff all preceding non-optional steps are done.
   const idx = steps.findIndex((s) => s.key === stepKey)
@@ -384,6 +391,8 @@ function StepRow(props: StepRowProps) {
         return <Clock className="text-primary h-5 w-5" />
       case "skipped":
         return <Minus className="text-muted-foreground h-5 w-5" />
+      case "unavailable":
+        return <Ban className="h-5 w-5 text-amber-600" />
       default:
         return <Lock className="text-muted-foreground h-5 w-5" />
     }
@@ -396,10 +405,14 @@ function StepRow(props: StepRowProps) {
     ready: "border-primary bg-primary/10",
     locked: "border-border bg-muted/30",
     skipped: "border-border bg-muted/30",
+    unavailable: "border-amber-500 bg-amber-500/10",
   }
 
   const isActive = status === "running"
   const isInteractive = step.kind === "interactive" || step.kind === "optional"
+  // "unavailable" is deliberately absent: there is nothing to run, and
+  // offering a button that silently does nothing is the behaviour this
+  // status exists to remove.
   const canRun =
     (status === "ready" || status === "completed" || status === "failed") &&
     !isExecuting
@@ -440,6 +453,15 @@ function StepRow(props: StepRowProps) {
               >
                 {step.label}
               </span>
+              {status === "unavailable" && (
+                <Badge
+                  variant="outline"
+                  className="border-amber-400 text-amber-700 text-xs"
+                  data-testid={`step-unavailable-${step.key}`}
+                >
+                  not available yet
+                </Badge>
+              )}
               {status === "skipped" && (
                 <Badge
                   variant="outline"
@@ -490,9 +512,16 @@ function StepRow(props: StepRowProps) {
                 variant={status === "completed" ? "outline" : "default"}
                 size="sm"
                 disabled={
-                  status === "locked" || isActive || (isExecuting && !isActive)
+                  status === "locked" ||
+                  status === "unavailable" ||
+                  isActive ||
+                  (isExecuting && !isActive)
                 }
-                title={warning}
+                title={
+                  status === "unavailable"
+                    ? "This backend cannot perform this step yet."
+                    : warning
+                }
                 onClick={() => {
                   if (isInteractive) onOpenTool()
                   else if (canRun) onRunStep()
@@ -530,6 +559,16 @@ function StepRow(props: StepRowProps) {
           >
             {step.description}
           </p>
+
+          {status === "unavailable" && (
+            <p
+              className="mt-1 text-xs text-amber-700"
+              data-testid={`step-unavailable-note-${step.key}`}
+            >
+              This backend cannot perform this step yet, so nothing has run.
+              Later steps that depend on it stay locked.
+            </p>
+          )}
 
           {isNext && status !== "completed" && !isActive && (
             <p className="text-primary mt-1 text-xs">Ready to start</p>
