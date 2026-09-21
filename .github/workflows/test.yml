@@ -145,7 +145,17 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Seed .env files
-        run: bash scripts/setup-backend.sh
+        run: |
+          bash scripts/setup-backend.sh
+          # The Playwright fixture DELETEs /api/e2e_cleanup?prefix=... after
+          # every test. That endpoint is gated off by default (it is a
+          # destructive prefix-delete, so it must not exist in a real
+          # deployment) and .env.example doesn't ship the flag — so in CI
+          # every one of those calls 404'd and each test's rows stayed in
+          # the database for the whole run. Enable it here rather than in
+          # setup-backend.sh, so a developer running that script doesn't
+          # silently get a destructive endpoint on their own stack.
+          echo "GEMINI_E2E_CLEANUP_ENABLED=1" >> backend/gemini/pipeline/.env
 
       - name: Bring up the full stack
         run: |

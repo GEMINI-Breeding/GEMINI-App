@@ -8,9 +8,17 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One retry, not two. e2e-workflows runs serially (workers: 1) and some
+  // specs allow 5-8 min, so at `retries: 2` a handful of genuinely-failing
+  // tests runs 3x each and the job spends hours re-failing. One retry still
+  // absorbs a real flake; anything failing twice is a signal, not noise.
+  retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? 'blob' : 'html',
+  // 'blob' buffers per-test output and only emits at the end, so a CI run
+  // that stalls shows no progress at all — which is exactly what made the
+  // 1h49m run undiagnosable. 'line' streams each result as it completes;
+  // the blob report is still written for the report artifact.
+  reporter: process.env.CI ? [['blob'], ['line']] : 'html',
   use: {
     /* Dedicated port for E2E so we don't collide with a user's regular
        `npm run dev` on 5173. */
