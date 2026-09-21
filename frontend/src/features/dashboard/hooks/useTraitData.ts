@@ -1,6 +1,21 @@
 /**
  * React Query wrappers for trait data used by dashboard widgets.
- * Reuses the same query keys as the Analyze tab for cache sharing.
+ *
+ * STATUS: every hook here reaches `analyzeApi`, which still targets the old
+ * FastAPI backend's `/api/v1/analyze/*` routes. GEMINIbase has no equivalent
+ * — the Analyze feature was rebuilt on `trait_records` + multivariate
+ * endpoints and does not use this module at all. So these hooks 404.
+ *
+ * `useTraitRecords` was gated with `enabled: false` to keep the mount quiet,
+ * but the rest were not: any configured widget fired a request that 404'd on
+ * the home page. No E2E spec visits the home dashboard, which is why the
+ * console errors were never caught.
+ *
+ * `DASHBOARD_DATA_AVAILABLE` is the single switch. While false, the hooks
+ * short-circuit instead of issuing doomed requests, and `DashboardBuilder`
+ * tells the user the data layer isn't connected rather than rendering
+ * permanently-empty widgets. Rewiring onto the new surface is merge_plan.md
+ * Phase 3, item 3D; flip this to true as part of that work.
  */
 
 import { useQueries, useQuery } from "@tanstack/react-query"
@@ -10,16 +25,20 @@ import {
   type TraitsResponse,
 } from "@/features/analyze/api"
 
+/**
+ * False until the dashboard is rewired onto GEMINIbase's trait surface.
+ * Every hook below checks it, so no widget issues a request that can only
+ * 404. See the module header.
+ */
+export const DASHBOARD_DATA_AVAILABLE = false
+
 // ── All trait records (catalog) ───────────────────────────────────────────────
 
-// Phase 10 rewires the dashboard onto the new analyze surface; until then the
-// `/api/v1/analyze/*` endpoints don't exist on GEMINIbase. Gate this off so the
-// dashboard mounts cleanly without console errors during the migration.
 export function useTraitRecords() {
   return useQuery({
     queryKey: ["trait-records"],
     queryFn: () => analyzeApi.listTraitRecords(),
-    enabled: false,
+    enabled: DASHBOARD_DATA_AVAILABLE,
     staleTime: 30_000,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
@@ -32,7 +51,7 @@ export function useTraitRecordGeojson(recordId: string | null) {
   return useQuery({
     queryKey: ["trait-record-geojson", recordId],
     queryFn: () => analyzeApi.getTraitRecordGeojson(recordId!),
-    enabled: !!recordId,
+    enabled: DASHBOARD_DATA_AVAILABLE && !!recordId,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     // Don't retry 404s — the file is missing on disk, retrying won't help
@@ -48,6 +67,7 @@ export function useMultiTraitGeojson(recordIds: string[]) {
     queries: recordIds.map((id) => ({
       queryKey: ["trait-record-geojson", id],
       queryFn: () => analyzeApi.getTraitRecordGeojson(id),
+      enabled: DASHBOARD_DATA_AVAILABLE,
       staleTime: 5 * 60_000,
       retry: (failureCount: number, error: any) =>
         error?.status !== 404 && failureCount < 2,
@@ -69,7 +89,7 @@ export function useImagePlotIds(recordId: string | null) {
   return useQuery({
     queryKey: ["trait-record-image-plot-ids", recordId],
     queryFn: () => analyzeApi.getTraitRecordImagePlotIds(recordId!),
-    enabled: !!recordId,
+    enabled: DASHBOARD_DATA_AVAILABLE && !!recordId,
     staleTime: 5 * 60_000,
     select: (d) => d.plot_ids,
   })

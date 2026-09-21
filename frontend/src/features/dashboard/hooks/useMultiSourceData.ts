@@ -224,7 +224,7 @@ export function useMultiSourceData(
     queries: refDatasetIds.map((datasetId) => ({
       queryKey: ["reference-plots-all", datasetId],
       queryFn: () =>
-        fetch(apiUrl(`/api/v1/reference-data/${datasetId}/plots-all`), {
+        fetch(apiUrl(`/api/reference_data/id/${datasetId}/plots-all`), {
           headers: authHeaders(),
         }).then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -274,7 +274,7 @@ export function useMultiSourceData(
       queryFn: () =>
         fetch(
           apiUrl(
-            `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
+            `/api/reference_data/id/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
           ),
           { headers: authHeaders() },
         ).then(async (res) => {

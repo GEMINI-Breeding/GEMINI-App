@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/table"
 import {
   applyFilters,
+  DASHBOARD_DATA_AVAILABLE,
   formatDashboardValue,
   useMultiTraitGeojson,
   useTraitRecordGeojson,
@@ -169,6 +170,10 @@ export function PlotViewerWidget({
     return [...ids]
   }, [allRecords, activeIds])
 
+  // `/api/v1/pipeline-runs/{id}/inference-results` is an old-backend route
+  // with no GEMINIbase equivalent. activeRunIds is empty while the dashboard
+  // data layer is off, so this wouldn't fire anyway — gate it explicitly so
+  // that stays true if the records hook is ever re-enabled ahead of this one.
   const inferenceResults = useQueries({
     queries: activeRunIds.map((runId) => ({
       queryKey: ["inference-results", runId],
@@ -176,6 +181,7 @@ export function PlotViewerWidget({
         fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), {
           headers: authHeaders(),
         }).then((r) => (r.ok ? r.json() : null)),
+      enabled: DASHBOARD_DATA_AVAILABLE,
       staleTime: 60_000,
     })),
   })

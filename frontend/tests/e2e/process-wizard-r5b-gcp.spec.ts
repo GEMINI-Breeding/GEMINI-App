@@ -650,20 +650,43 @@ test.describe("R5b: GCP picker", () => {
         target,
         { timeout: 10_000 },
       )
-      const handle = await page.evaluateHandle((name) => {
-        const w = window as unknown as {
-          __imageDotMapMarkers__?: Map<
-            string,
-            { _path?: SVGElement; getElement?: () => SVGElement | null }
-          >
+      // Resolve the handle and click it in a retry loop. ImageDotMap mutates
+      // one long-lived marker map in place, so a re-render between
+      // evaluateHandle() and click() detaches the element we grabbed and the
+      // click fails with "Element is not attached to the DOM". Waiting for a
+      // marker to exist (above) doesn't help: the element can be replaced
+      // after that wait returns. Reproduced at ~2-in-3 with --repeat-each=3.
+      let clicked = false
+      let lastErr: unknown = null
+      for (let attempt = 0; attempt < 5 && !clicked; attempt++) {
+        const handle = await page.evaluateHandle((name) => {
+          const w = window as unknown as {
+            __imageDotMapMarkers__?: Map<
+              string,
+              { _path?: SVGElement; getElement?: () => SVGElement | null }
+            >
+          }
+          const m = w.__imageDotMapMarkers__?.get(name)
+          if (!m) return null
+          return (m.getElement?.() ?? m._path) as SVGElement | null
+        }, target)
+        const el = handle.asElement()
+        if (!el) {
+          lastErr = new Error(`marker handle missing for ${target}`)
+          await page.waitForTimeout(150)
+          continue
         }
-        const m = w.__imageDotMapMarkers__?.get(name)
-        if (!m) return null
-        return (m.getElement?.() ?? m._path) as SVGElement | null
-      }, target)
-      const el = handle.asElement()
-      if (!el) throw new Error(`marker handle missing for ${target}`)
-      await el.click({ modifiers: ["Shift"] })
+        try {
+          await el.click({ modifiers: ["Shift"], timeout: 3_000 })
+          clicked = true
+        } catch (err) {
+          lastErr = err
+          await page.waitForTimeout(150)
+        } finally {
+          await handle.dispose()
+        }
+      }
+      if (!clicked) throw lastErr ?? new Error(`could not click ${target}`)
       await page.waitForTimeout(120)
     }
 
