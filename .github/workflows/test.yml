@@ -159,10 +159,19 @@ jobs:
 
       - name: Bring up the full stack
         run: |
+          # Every worker whose job type a spec can submit must be up, or
+          # that job sits in PENDING until the spec times out. thermal was
+          # missing since the thermal specs landed (1c51ff4): all three
+          # THERMAL_EXTRACT specs waited out their timeout and then
+          # retried, which is most of why this job ran to 45 min.
+          # odm is listed for RUN_ODM; the heavy ODM spec is gated behind
+          # RUN_HEAVY_E2E, but the worker must exist for the job to be
+          # picked up at all.
           docker compose -f docker-compose.yaml up -d --build \
             rest-api db storage storage-init logger titiler \
             geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga \
-            geminibase-worker-gwas
+            geminibase-worker-gwas geminibase-worker-thermal \
+            geminibase-worker-odm geminibase-nodeodm
 
       - name: Wait for /healthz
         run: |
@@ -182,6 +191,27 @@ jobs:
           # so go through `poetry run`.
           docker compose -f docker-compose.yaml exec -T rest-api \
             poetry run geminibase bootstrap-superuser
+
+      - name: Assert every worker is actually running
+        run: |
+          # A worker that failed to start doesn't fail the bring-up — its
+          # jobs just sit in PENDING until the spec times out, which reads
+          # as a slow/flaky test rather than a missing service. Fail here
+          # instead, with the name of the service that's down.
+          missing=0
+          for s in geminibase-worker-ml geminibase-worker-geo \
+                   geminibase-worker-amiga geminibase-worker-gwas \
+                   geminibase-worker-thermal geminibase-worker-odm; do
+            state=$(docker inspect -f '{{.State.Running}}' "$s" 2>/dev/null || echo "absent")
+            if [ "$state" != "true" ]; then
+              echo "::error::worker $s is not running (state: $state)"
+              docker compose -f docker-compose.yaml logs "$s" 2>&1 | tail -40 || true
+              missing=1
+            else
+              echo "ok: $s"
+            fi
+          done
+          exit $missing
 
       - name: Install frontend deps
         working-directory: frontend
