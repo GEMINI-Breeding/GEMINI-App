@@ -55,12 +55,7 @@ build_backend() {
         log "WARNING: vendor/AgRowStitch not found — stitching will not be available"
     fi
 
-    if [[ -d "vendor/LightGlue" ]]; then
-        log "Installing LightGlue from vendor/..."
-        uv pip install vendor/LightGlue
-    else
-        log "WARNING: vendor/LightGlue not found — AgRowStitch matching may fail"
-    fi
+    # LightGlue is declared in pyproject.toml and installed by uv sync above
 
     # kornia + kornia_rs: required for Amiga .bin extraction (bin_to_images lives at backend/bin_to_images/)
     uv pip install kornia kornia_rs
