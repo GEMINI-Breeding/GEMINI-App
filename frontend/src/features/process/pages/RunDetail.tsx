@@ -68,6 +68,11 @@ import {
   TraitExtractionDialog,
 } from "@/features/process/components/TraitExtractionDialog"
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
+import {
+  capabilityWarningForStep,
+  useCapabilities,
+  useDockerStatus,
+} from "@/features/process/hooks/useCapabilities"
 import { usePlotGeometryVersions } from "@/features/process/hooks/usePlotGeometry"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import {
@@ -883,6 +888,11 @@ export function RunDetail() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const { addProcess, updateProcess, processes } = useProcess()
   const queryClient = useQueryClient()
+  // Preflight: warn before submitting a step the backend can't service
+  // (no AgRowStitch in the stitch worker, no Docker for ODM). Both probes
+  // have existed on the backend all along with no caller.
+  const { data: capabilities } = useCapabilities()
+  const { data: dockerStatus } = useDockerStatus()
 
   // Per-step ortho options. Seeded from the pipeline's default once the
   // pipeline record loads (it's a hook, so it can be undefined on first
@@ -1662,6 +1672,11 @@ export function RunDetail() {
                     lastProgress={lastProgress}
                     isExecuting={isAnyExecuting}
                     errorMessage={run?.steps[step.key]?.error}
+                    warning={capabilityWarningForStep(
+                      step.key,
+                      capabilities,
+                      dockerStatus,
+                    )}
                     onRunStep={() => handleRunStep(step.key)}
                     onOpenTool={() => handleOpenTool(step.key)}
                     onStopStep={() => handleStopStep(step.key)}
