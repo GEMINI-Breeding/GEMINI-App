@@ -228,13 +228,36 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
 
     // Scope: pick experiment (auto-selected if only one visible, but set
     // it explicitly), then season + site.
+    //
+    // AerialScopePicker renders a "Loading…" paragraph in the experiment
+    // slot until the experiments query resolves, and only then mounts the
+    // Select. Clicking as soon as the trigger exists races that swap: the
+    // layout shifts under the cursor and the click lands on the Season
+    // trigger that moved into the old position (seen in CI as a 5-min
+    // timeout whose call log shows id="process-season" receiving the
+    // click). Waiting for the trigger to report a resolved value keeps
+    // the click on the intended control.
     const expSelect = page.getByTestId("process-experiment-select")
+    await expect(expSelect).toBeVisible()
+    await expect(page.getByTestId("process-season-select")).toBeVisible()
+    await expect(expSelect).toBeEnabled()
     await expSelect.click()
     await page.getByRole("option", { name: experiment }).click()
-    await page.getByTestId("process-season-select").click()
+    // Each selection refetches the next level, so re-assert between steps
+    // rather than chaining clicks through a shifting layout.
+    await expect(expSelect).toContainText(experiment)
+
+    const seasonSelect = page.getByTestId("process-season-select")
+    await expect(seasonSelect).toBeEnabled()
+    await seasonSelect.click()
     await page.getByRole("option", { name: season }).click()
-    await page.getByTestId("process-site-select").click()
+    await expect(seasonSelect).toContainText(season)
+
+    const siteSelect = page.getByTestId("process-site-select")
+    await expect(siteSelect).toBeEnabled()
+    await siteSelect.click()
     await page.getByRole("option", { name: site }).click()
+    await expect(siteSelect).toContainText(site)
 
     // Polygons load → pick the trait.
     await expect(page.getByTestId("analyze-map-trait")).toBeVisible()
