@@ -72,5 +72,12 @@ export default defineConfig({
     command: 'npm run dev -- --port 5273 --strictPort',
     url: 'http://localhost:5273',
     reuseExistingServer: !process.env.CI,
+    env: {
+      // Suppress the daily update check. It calls the live GitHub releases
+      // API and raises a persistent toast that overlays the page and
+      // intercepts clicks (it broke the analyze-map-overlap spec on the
+      // import wizard's Continue button). See useUpdateChecker.ts.
+      VITE_DISABLE_UPDATE_CHECK: '1',
+    },
   },
 });

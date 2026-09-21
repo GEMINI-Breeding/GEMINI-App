@@ -371,6 +371,18 @@ export function BoundaryMap({
     })
 
     return () => {
+      // Unmounting mid-zoom leaves Leaflet's zoom-transition callback to
+      // fire against a map whose panes are already gone, throwing
+      // "Cannot read properties of undefined (reading '_leaflet_pos')"
+      // from _onZoomTransitionEnd. It's harmless to the user but it's a
+      // real uncaught pageerror — it fails the E2E console guard when a
+      // spec navigates away while the map is still animating. Stop the
+      // animation and drop the handler before tearing the map down.
+      map.off("zoomanim")
+      // `_animatingZoom` is Leaflet-internal, hence the local widening.
+      const animating = map as L.Map & { _animatingZoom?: boolean }
+      if (animating._animatingZoom) animating._animatingZoom = false
+      map.stop()
       map.remove()
       mapRef.current = null
       layerRef.current = null

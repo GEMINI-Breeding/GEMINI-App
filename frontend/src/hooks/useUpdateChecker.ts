@@ -27,6 +27,24 @@ const UPDATE_CHECK_URL =
   (import.meta.env.VITE_UPDATE_CHECK_URL as string | undefined) ??
   "https://api.github.com/repos/GEMINI-Breeding/GEMINI-App/releases/latest"
 
+/**
+ * Opt-out switch for the periodic check (`VITE_DISABLE_UPDATE_CHECK=1`).
+ *
+ * Playwright sets this on its dev server. Without it every E2E run makes a
+ * live call to the GitHub releases API and — because CURRENT_VERSION is
+ * behind the published release — raises a persistent "update available"
+ * toast that sits above the page and swallows clicks on whatever is
+ * underneath. That is a real failure we hit: the toast intercepted the
+ * import wizard's Continue button. It also makes the suite depend on a
+ * rate-limited third-party endpoint.
+ *
+ * Only the automatic on-mount check is suppressed. `checkForUpdates()`
+ * stays callable, so the manual "Check for updates" button in Application
+ * Settings still works.
+ */
+const UPDATE_CHECK_DISABLED =
+  (import.meta.env.VITE_DISABLE_UPDATE_CHECK as string | undefined) === "1"
+
 /** Parse "vX.Y.Z" or "X.Y.Z" into [major, minor, patch]. */
 function parseVersion(tag: string): [number, number, number] {
   const clean = tag.replace(/^v/, "")
@@ -90,6 +108,7 @@ export function useUpdateChecker({
   onUpdateAvailable,
 }: UseUpdateCheckerOptions) {
   useEffect(() => {
+    if (UPDATE_CHECK_DISABLED) return
     async function check() {
       const now = Date.now()
       const lastCheck = Number(localStorage.getItem(LS_KEY) ?? "0")
