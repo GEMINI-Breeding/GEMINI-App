@@ -219,6 +219,14 @@ export function ProcessScopeSelectors() {
     .map((p) => ({ id: String(p.id), name: p.population_name ?? "(unnamed)" }))
 
   return (
+    // Every SelectTrigger below carries `w-full min-w-0`. The shared
+    // trigger primitive is `w-fit whitespace-nowrap`, so it sizes to its
+    // CONTENT, not to its grid cell: a long experiment name grows the
+    // button until it overlaps the neighbouring columns, and the Season
+    // trigger ends up covering Experiment and swallowing its clicks.
+    // `line-clamp-1` on the inner value doesn't help — it clamps the text,
+    // not the button. min-w-0 is required because a grid item's default
+    // min-width:auto refuses to shrink below its content.
     <div className="grid grid-cols-4 gap-3">
       <div>
         <Label htmlFor="process-experiment" className="mb-1.5 text-xs">
@@ -243,6 +251,7 @@ export function ProcessScopeSelectors() {
             <SelectTrigger
               id="process-experiment"
               data-testid="process-experiment-select"
+              className="w-full min-w-0"
             >
               <SelectValue placeholder="Select experiment" />
             </SelectTrigger>
@@ -270,6 +279,7 @@ export function ProcessScopeSelectors() {
           <SelectTrigger
             id="process-season"
             data-testid="process-season-select"
+            className="w-full min-w-0"
           >
             <SelectValue
               placeholder={
@@ -301,7 +311,11 @@ export function ProcessScopeSelectors() {
           onValueChange={(v) => setSiteId(v || null)}
           disabled={!experimentId || loadingSites || siteOptions.length === 0}
         >
-          <SelectTrigger id="process-site" data-testid="process-site-select">
+          <SelectTrigger
+            id="process-site"
+            data-testid="process-site-select"
+            className="w-full min-w-0"
+          >
             <SelectValue
               placeholder={
                 !experimentId
@@ -339,6 +353,7 @@ export function ProcessScopeSelectors() {
           <SelectTrigger
             id="process-population"
             data-testid="process-population-select"
+            className="w-full min-w-0"
           >
             <SelectValue
               placeholder={

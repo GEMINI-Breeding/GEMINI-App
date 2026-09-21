@@ -227,24 +227,19 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     await page.getByTestId("analyze-tab-map").click()
 
     // Scope: pick experiment (auto-selected if only one visible, but set
-    // it explicitly), then season + site.
+    // it explicitly), then season + site. Each selection refetches the
+    // level below it, so assert the trigger shows its chosen value before
+    // moving on rather than chaining clicks through a re-rendering row.
     //
-    // AerialScopePicker renders a "Loading…" paragraph in the experiment
-    // slot until the experiments query resolves, and only then mounts the
-    // Select. Clicking as soon as the trigger exists races that swap: the
-    // layout shifts under the cursor and the click lands on the Season
-    // trigger that moved into the old position (seen in CI as a 5-min
-    // timeout whose call log shows id="process-season" receiving the
-    // click). Waiting for the trigger to report a resolved value keeps
-    // the click on the intended control.
+    // This spec's experiment name is long enough that it used to overflow
+    // the scope picker's grid cell and push the Season trigger on top of
+    // Experiment, which swallowed the click — fixed in AerialScopePicker
+    // by constraining the triggers to their cells (see the comment there).
     const expSelect = page.getByTestId("process-experiment-select")
     await expect(expSelect).toBeVisible()
-    await expect(page.getByTestId("process-season-select")).toBeVisible()
     await expect(expSelect).toBeEnabled()
     await expSelect.click()
     await page.getByRole("option", { name: experiment }).click()
-    // Each selection refetches the next level, so re-assert between steps
-    // rather than chaining clicks through a shifting layout.
     await expect(expSelect).toContainText(experiment)
 
     const seasonSelect = page.getByTestId("process-season-select")
