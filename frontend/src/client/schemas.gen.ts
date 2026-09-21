@@ -7914,6 +7914,16 @@ export const TraitRecordBulkInputSchema = {
                 }
             ]
         },
+        population_name: {
+            oneOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
         dataset_name: {
             oneOf: [
                 {

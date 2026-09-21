@@ -35,6 +35,12 @@ export type PlotGeometryStateSnapshot = {
     cols: number
     spacing_m: number
     angle_deg: number
+    /** Field-coordinate offsets + plot-number order (alembic-free; lives
+     *  in the snapshot). Optional for back-compat with pre-offset
+     *  snapshots — absence means 0 / "row-major". */
+    row_offset?: number
+    col_offset?: number
+    fill_pattern?: "row-major" | "snake"
   }
   created_from?: "draw" | "grid" | "import"
   field_design?: FieldDesign

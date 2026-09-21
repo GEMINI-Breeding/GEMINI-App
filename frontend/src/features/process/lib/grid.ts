@@ -13,6 +13,13 @@
 
 const EARTH_RADIUS_M = 6_378_137
 
+/** How plot numbers run across the grid.
+ *  - "row-major": every row counts left→right (1,2,3 / 4,5,6 / …).
+ *  - "snake": rows alternate direction (1,2,3 / 6,5,4 / …) — matches
+ *    serpentine field-planting/harvest order.
+ *  Irregular numbering that fits neither → use a field-design CSV. */
+export type FillPattern = "row-major" | "snake"
+
 export type GridParams = {
   rows: number
   cols: number
@@ -22,6 +29,14 @@ export type GridParams = {
   gapXMeters?: number
   /** Vertical gap between plots, in meters. */
   gapYMeters?: number
+  /** Field-row of the grid's top row (0 = field origin). Lets a grid
+   *  drawn over a *subset* of the field emit the field's true row/col,
+   *  so trait records keyed by field position join. Default 0. */
+  rowOffset?: number
+  /** Field-column of the grid's left column (0 = field origin). */
+  colOffset?: number
+  /** Plot-number assignment order. Default "row-major". */
+  fillPattern?: FillPattern
 }
 
 type LngLat = [number, number]
@@ -91,8 +106,10 @@ export function generateGridFeatures(
   const cellHDeg = (heightDeg - (rows - 1) * gapYDeg) / rows
 
   const angleRad = (params.angleDeg * Math.PI) / 180
+  const rowOffset = Math.trunc(params.rowOffset ?? 0)
+  const colOffset = Math.trunc(params.colOffset ?? 0)
+  const fillPattern: FillPattern = params.fillPattern ?? "row-major"
   const features: GeoJSON.Feature[] = []
-  let plotNum = 1
 
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
@@ -113,16 +130,25 @@ export function generateGridFeatures(
           ? corners
           : corners.map((p) => rotate(p, [cx, cy], angleRad))
 
+      // Plot number follows the chosen fill order. Snake reverses the
+      // column index on odd rows so the running number physically
+      // back-and-forths down the field. Both are 1-based and continuous.
+      const effC = fillPattern === "snake" && r % 2 === 1 ? cols - 1 - c : c
+      const plot = r * cols + effC + 1
+
       features.push({
         type: "Feature",
         properties: {
-          plot: plotNum,
-          row: r + 1,
-          col: c + 1,
+          // Field coordinates: local grid position + the offset that
+          // places this block within the full field. Downstream the
+          // trait join keys on these, so offsets make a subset-ortho's
+          // plots line up with the field's true numbering.
+          plot,
+          row: r + 1 + rowOffset,
+          col: c + 1 + colOffset,
         },
         geometry: { type: "Polygon", coordinates: [rotated] },
       })
-      plotNum += 1
     }
   }
   return features

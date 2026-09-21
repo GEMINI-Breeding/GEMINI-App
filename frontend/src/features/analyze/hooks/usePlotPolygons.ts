@@ -124,6 +124,11 @@ export type UsePlotPolygonsArgs = {
   experimentId?: string | null
   seasonId?: string | null
   siteId?: string | null
+  /** Optional population narrowing. plot_number is unique only within a
+   *  population, so when set the geojson endpoint returns just this
+   *  population's plots — letting the trait join key on plot_number
+   *  alone. Omitted → all populations in the experiment/season/site. */
+  populationId?: string | null
   /** MinIO directory string — used as a fallback when scope IDs aren't
    *  yet available (e.g. the user picked a date/platform/sensor but
    *  hasn't materialized plots for this scope yet). */
@@ -133,7 +138,7 @@ export type UsePlotPolygonsArgs = {
 export function usePlotPolygons(
   args: UsePlotPolygonsArgs,
 ): UseQueryResult<PlotPolygonFC | null, Error> {
-  const { experimentId, seasonId, siteId, directory } = args
+  const { experimentId, seasonId, siteId, populationId, directory } = args
   const hasIds = Boolean(experimentId && seasonId && siteId)
   const enabled = hasIds || Boolean(directory && directory.length > 0)
   return useQuery<PlotPolygonFC | null, Error>({
@@ -143,6 +148,7 @@ export function usePlotPolygons(
       experimentId ?? null,
       seasonId ?? null,
       siteId ?? null,
+      populationId ?? null,
       directory ?? null,
     ],
     enabled,
@@ -155,6 +161,7 @@ export function usePlotPolygons(
             experimentId: experimentId as string,
             seasonId: seasonId as string,
             siteId: siteId as string,
+            populationId: populationId ?? undefined,
           })
           const projected = projectGeojsonResponse(fc)
           // If the scope has no materialized plots yet but the user has

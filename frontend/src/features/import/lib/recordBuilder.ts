@@ -262,6 +262,10 @@ export interface TraitRecordGroup {
   /** Fixed collection date (yyyy-mm-dd) when the sheet's
    *  collectionDateMode === "fixed" and a date was set. */
   collectionDate?: string
+  /** Population name for this sheet (when set). Sent as the bulk POST's
+   *  `population_name` so records are population-scoped — the analyze map
+   *  joins by plot_number, which is unique only within a population. */
+  population?: string
 }
 
 interface BuildTraitRecordsOptions {
@@ -459,6 +463,7 @@ export function buildTraitRecords(
           traitColumnHeader: trait.columnHeader,
           bySeasonSite,
           collectionDate: sheetCollectionDate,
+          population: config.populationName.trim() || undefined,
         })
         perTraitTotal.set(traitKey, count)
         grandTotal += count

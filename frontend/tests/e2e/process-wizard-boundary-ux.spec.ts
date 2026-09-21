@@ -299,6 +299,182 @@ test.describe("Plot Boundary Prep — UX behaviors", () => {
       page.locator("text=/0 plots? across 0 blocks?/i"),
     ).toBeVisible()
   })
+
+  test("plot-number offsets + snake fill pattern emit field coordinates", async ({
+    page,
+    runPrefix,
+  }) => {
+    const experiment = `${runPrefix}-off-exp`
+    const location = "Davis"
+    const population = "Cowpea"
+    const date = "2022-06-27"
+    const platform = "DJI"
+    const sensor = "FC6310S"
+    const workspaceName = `${runPrefix}-off-workspace`
+    const pipelineName = `${runPrefix}-off-pipeline`
+
+    // ── 1. Upload images so the run-scope picker has something to find. ─
+    await navigateToUpload(page)
+    await selectDataType(page, "Image Data")
+    await fillUploadForm(page, {
+      experiment,
+      location,
+      population,
+      date,
+      platform,
+      sensor,
+    })
+    await dropFiles(
+      page,
+      DRONE_IMAGES.map((n) => fixturePath("images", "drone", n)),
+    )
+    await submitUploadAndWait(page, DRONE_IMAGES.length)
+
+    // ── 2. Workspace + aerial pipeline. ─────────────────────────────────
+    await page.goto("/process")
+    await page.locator('[data-onboarding="process-new-workspace"]').click()
+    await page.getByLabel(/workspace name/i).fill(workspaceName)
+    await page.getByRole("button", { name: /create workspace/i }).click()
+    await page.getByText(workspaceName, { exact: true }).click()
+    await page.getByRole("button", { name: /create aerial pipeline/i }).click()
+    await page.getByLabel(/pipeline name/i).fill(pipelineName)
+    await page.getByRole("button", { name: /^next$/i }).click()
+    await page.getByRole("button", { name: /^next$/i }).click()
+    await page.getByRole("button", { name: /create pipeline/i }).click()
+
+    // ── 3. Create the run. ──────────────────────────────────────────────
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
+    const uploadRow = page
+      .getByTestId("upload-row")
+      .filter({ hasText: experiment })
+      .filter({ hasText: date })
+      .filter({ hasText: platform })
+      .filter({ hasText: sensor })
+      .first()
+    await expect(uploadRow).toBeVisible({ timeout: 30_000 })
+    await uploadRow.click()
+    await page.getByRole("button", { name: /create run/i }).click()
+
+    // ── 4. Direct-nav to the boundary-prep tool. ────────────────────────
+    const runUrl = page.url()
+    const runId = runUrl.split("/").pop()
+    const wsId = runUrl.split("/process/")[1].split("/")[0]
+    await page.goto(
+      `/process/${wsId}/tool?runId=${runId}&step=plot_boundary_prep`,
+    )
+    await expect(
+      page.getByRole("heading", { name: /plot boundary prep/i }),
+    ).toBeVisible()
+
+    // ── 5. Draw an outer rectangle (same synthetic-draw path as above). ─
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __leafletMap__?: {
+          getBounds(): {
+            getSouthWest(): { lat: number; lng: number }
+            getNorthEast(): { lat: number; lng: number }
+          }
+          fire(name: string, payload: unknown): void
+        }
+        L?: {
+          polygon(ring: [number, number][]): { addTo(map: unknown): unknown }
+        }
+      }
+      const map = w.__leafletMap__
+      if (!map || !w.L) throw new Error("leaflet map handle missing")
+      const L = w.L
+      const b = map.getBounds()
+      const sw = b.getSouthWest()
+      const ne = b.getNorthEast()
+      const w2 = (ne.lng - sw.lng) * 0.4
+      const h2 = (ne.lat - sw.lat) * 0.4
+      const cx = (sw.lng + ne.lng) / 2
+      const cy = (sw.lat + ne.lat) / 2
+      const ring: [number, number][] = [
+        [cy - h2 / 2, cx - w2 / 2],
+        [cy - h2 / 2, cx + w2 / 2],
+        [cy + h2 / 2, cx + w2 / 2],
+        [cy + h2 / 2, cx - w2 / 2],
+        [cy - h2 / 2, cx - w2 / 2],
+      ]
+      const layer = L.polygon(ring)
+      layer.addTo(map)
+      map.fire("pm:create", { layer, shape: "Polygon" })
+    })
+
+    // ── 6. Set a 2×3 grid with offsets + snake numbering. ───────────────
+    await page.getByTestId("boundary-rows").fill("2")
+    await page.keyboard.press("Tab")
+    await page.getByTestId("boundary-cols").fill("3")
+    await page.keyboard.press("Tab")
+    // Row offset 1, col offset 23 → field rows start at 2, cols at 24
+    // (the real-world "ortho covers a subset of the field" case).
+    await page.getByTestId("boundary-row-offset").fill("1")
+    await page.keyboard.press("Tab")
+    await page.getByTestId("boundary-col-offset").fill("23")
+    await page.keyboard.press("Tab")
+    // Snake numbering: row 1 → 1,2,3 ; row 2 → 6,5,4.
+    await page.getByTestId("boundary-fill-pattern").click()
+    await page.getByRole("option", { name: /snake/i }).click()
+
+    await page.getByRole("button", { name: /generate plot grid/i }).click()
+    await expect(page.locator("text=/6 plots? across 1 block/i")).toBeVisible()
+
+    // ── 7. Assert generated cells carry field-coordinate row/col + snake
+    //       plot numbers. Read each cell's GeoJSON props via the same map
+    //       handle the UX test uses — no API, no React internals. ────────
+    const cells = await page.evaluate(() => {
+      const w = window as unknown as {
+        __leafletMap__?: { eachLayer?: (cb: (l: unknown) => void) => void }
+      }
+      const out: Array<{ plot: number; row: number; col: number }> = []
+      const seen = new Set<string>()
+      w.__leafletMap__?.eachLayer?.((l) => {
+        const layer = l as { toGeoJSON?: () => GeoJSON.Feature }
+        const gj = (() => {
+          try {
+            return layer.toGeoJSON?.()
+          } catch {
+            return undefined
+          }
+        })()
+        const p = gj?.properties as Record<string, unknown> | undefined
+        if (!p || p.role === "outer") return
+        const cellId = p.cellId
+        if (typeof cellId !== "string" || seen.has(cellId)) return
+        if (
+          typeof p.plot === "number" &&
+          typeof p.row === "number" &&
+          typeof p.col === "number"
+        ) {
+          seen.add(cellId)
+          out.push({ plot: p.plot, row: p.row, col: p.col })
+        }
+      })
+      return out
+    })
+
+    expect(cells, "6 grid cells with numeric plot/row/col").toHaveLength(6)
+
+    // Field rows = 2..3 (offset 1), field cols = 24..26 (offset 23).
+    const rows = [...new Set(cells.map((c) => c.row))].sort((a, b) => a - b)
+    const cols = [...new Set(cells.map((c) => c.col))].sort((a, b) => a - b)
+    expect(rows).toEqual([2, 3])
+    expect(cols).toEqual([24, 25, 26])
+
+    // Snake plot numbering: the top row (row 2) reads 1,2,3 left→right;
+    // the next row (row 3) reads 6,5,4 left→right (i.e. reversed).
+    const byCol = (r: number) =>
+      cells
+        .filter((c) => c.row === r)
+        .sort((a, b) => a.col - b.col)
+        .map((c) => c.plot)
+    expect(byCol(2)).toEqual([1, 2, 3])
+    expect(byCol(3)).toEqual([6, 5, 4])
+  })
 })
 
 /**

@@ -1415,6 +1415,7 @@ export type TraitRecordBulkInput = {
     experiment_name?: (string | null);
     season_name?: (string | null);
     site_name?: (string | null);
+    population_name?: (string | null);
     dataset_name?: (string | null);
     collection_date?: (string | null);
 };
@@ -2963,6 +2964,7 @@ export type ApiPlotsIdPlotIdSiteGetPlotSiteResponse = (SiteOutput);
 
 export type ApiPlotsGeojsonGetPlotsGeojsonData = {
     experimentId: string;
+    populationId?: (string | null);
     seasonId: string;
     siteId: string;
 };
@@ -3703,6 +3705,7 @@ export type ApiTraitsIdTraitIdRecordsSearchTraitRecordsData = {
     plotColumnNumber?: (number | null);
     plotNumber?: (number | null);
     plotRowNumber?: (number | null);
+    populationName?: (string | null);
     seasonName?: (string | null);
     siteName?: (string | null);
     traitId: string;

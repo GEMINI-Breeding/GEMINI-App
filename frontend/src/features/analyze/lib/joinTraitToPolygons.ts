@@ -21,14 +21,27 @@ import type { PlotPolygonFC } from "@/features/analyze/hooks/usePlotPolygons"
  * scalar `plot` — joinable. Callers reduce values from the same key
  * by mean.
  */
+/**
+ * How to build the join key:
+ *   - `"plotrc"` (default): `plot_number-row-col` composite. Disambiguates
+ *     when plot_number repeats across rows, but requires the boundary grid's
+ *     row/col to match the trait records' row/col exactly.
+ *   - `"plot"`: `plot_number` alone. Correct when both sides are scoped to a
+ *     single population (plot_number is unique within a population), which is
+ *     what the analyze map does when a population is selected.
+ */
+export type PlotKeyMode = "plotrc" | "plot"
+
 export function plotKey(
   plotNumber: number | string | null | undefined,
   row?: number | string | null,
   col?: number | string | null,
+  mode: PlotKeyMode = "plotrc",
 ): string | null {
   if (plotNumber === null || plotNumber === undefined || plotNumber === "")
     return null
   const p = String(plotNumber)
+  if (mode === "plot") return p
   const hasRC =
     row !== null &&
     row !== undefined &&
@@ -51,7 +64,9 @@ export function plotKey(
  */
 export function reduceTraitRecordsToMeanByPlot(
   records: TraitRecordOutput[],
+  opts: { keyMode?: PlotKeyMode } = {},
 ): Map<string, number> {
+  const keyMode = opts.keyMode ?? "plotrc"
   const sums = new Map<string, { sum: number; count: number }>()
   for (const r of records) {
     const v =
@@ -63,6 +78,7 @@ export function reduceTraitRecordsToMeanByPlot(
       r.plot_number ?? null,
       (r as { plot_row_number?: number | null }).plot_row_number ?? null,
       (r as { plot_column_number?: number | null }).plot_column_number ?? null,
+      keyMode,
     )
     if (key === null) continue
     const prev = sums.get(key)
@@ -93,6 +109,7 @@ export function joinTraitToPolygons(
   fc: PlotPolygonFC,
   values: Map<string, number>,
   column: string,
+  keyMode: PlotKeyMode = "plotrc",
 ): PlotPolygonFC {
   return {
     type: "FeatureCollection",
@@ -102,6 +119,7 @@ export function joinTraitToPolygons(
         props.plot_number ?? null,
         props.plot_row_number ?? null,
         props.plot_column_number ?? null,
+        keyMode,
       )
       const v = key !== null ? values.get(key) : undefined
       const nextProps =

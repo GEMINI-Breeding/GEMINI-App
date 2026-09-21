@@ -1,4 +1,5 @@
 import type { FieldDesign } from "@/features/process/lib/fieldDesign"
+import type { FillPattern } from "@/features/process/lib/grid"
 
 export type BlockParams = {
   label: string
@@ -6,6 +7,13 @@ export type BlockParams = {
   cols: number
   angle: number
   gapMeters: number
+  /** Field-row/col of this block's top-left plot (0 = field origin).
+   *  Lets a grid drawn over a subset of the field emit field-coordinate
+   *  row/col so trait records keyed by field position join. */
+  rowOffset: number
+  colOffset: number
+  /** Plot-number assignment order across the grid. */
+  fillPattern: FillPattern
 }
 
 export const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
@@ -13,6 +21,9 @@ export const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
   cols: 10,
   angle: 0,
   gapMeters: 0,
+  rowOffset: 0,
+  colOffset: 0,
+  fillPattern: "row-major",
 }
 
 export type PlotBoundaryEditorState = {

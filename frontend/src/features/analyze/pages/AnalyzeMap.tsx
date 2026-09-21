@@ -34,7 +34,7 @@ import {
 import { TraitMap } from "@/features/process/components/TraitMap"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
 import { usePlotTraitValues } from "../hooks/usePlotTraitValues"
-import { joinTraitToPolygons } from "../lib/joinTraitToPolygons"
+import { joinTraitToPolygons, plotKey } from "../lib/joinTraitToPolygons"
 
 const STORAGE_KEY = "gemini.analyze.map.fields.v1"
 
@@ -68,10 +68,15 @@ export function AnalyzeMap() {
   }, [fields])
 
   const hasScopeIds = Boolean(ctx.experimentId && ctx.seasonId && ctx.siteId)
+  // Population narrows the join so plot_number alone is the key (it's unique
+  // only within a population). When no population is picked we fall back to
+  // the experiment/season/site scope + the composite plot+row+col key.
+  const joinKeyMode = ctx.populationId ? "plot" : "plotrc"
   const polygonsQuery = usePlotPolygons({
     experimentId: ctx.experimentId,
     seasonId: ctx.seasonId,
     siteId: ctx.siteId,
+    populationId: ctx.populationId,
   })
   const polygonsFc = polygonsQuery.data ?? null
   const hasPolygons = polygonsFc !== null && polygonsFc.features.length > 0
@@ -99,21 +104,71 @@ export function AnalyzeMap() {
     experimentName: ctx.experimentName || null,
     seasonName: ctx.seasonName || null,
     siteName: ctx.siteName || null,
+    populationName: ctx.populationName || null,
   })
+
+  const traitValues = valuesQuery.data?.values ?? null
 
   // Join the values onto the polygons. When no trait is chosen we just
   // pass the unjoined FC through (TraitMap will render outline-only).
   const joinedFc = useMemo(() => {
     if (!polygonsFc) return null
-    if (!selectedTrait || !valuesQuery.data || valuesQuery.data.size === 0) {
+    if (!selectedTrait || !traitValues || traitValues.size === 0) {
       return polygonsFc
     }
     return joinTraitToPolygons(
       polygonsFc,
-      valuesQuery.data,
+      traitValues,
       selectedTrait.trait_name,
+      joinKeyMode,
     )
-  }, [polygonsFc, selectedTrait, valuesQuery.data])
+  }, [polygonsFc, selectedTrait, traitValues, joinKeyMode])
+
+  // Zero-overlap diagnostic: a trait can have records in this scope yet
+  // share no plot key with the displayed boundaries (e.g. the boundary
+  // grid numbered plots 1..N locally while the trait sheet uses the
+  // field's true 701.. numbering). Without this the map just shows the
+  // "no value" gray everywhere, indistinguishable from "no data".
+  const overlap = useMemo(() => {
+    if (!selectedTrait || !polygonsFc || !traitValues) return null
+    const recordCount = valuesQuery.data?.recordCount ?? 0
+    if (recordCount === 0) return null // genuinely no records → not this case
+    let matched = 0
+    for (const f of polygonsFc.features) {
+      const props = f.properties ?? {}
+      const key = plotKey(
+        props.plot_number ?? null,
+        props.plot_row_number ?? null,
+        props.plot_column_number ?? null,
+        joinKeyMode,
+      )
+      if (key !== null && traitValues.has(key)) matched += 1
+    }
+    if (matched > 0) return null // some overlap → heatmap renders, no warning
+    // Plot-number ranges for the message.
+    let pMin = Number.POSITIVE_INFINITY
+    let pMax = Number.NEGATIVE_INFINITY
+    for (const f of polygonsFc.features) {
+      const n = (f.properties as { plot_number?: number | null })?.plot_number
+      if (typeof n === "number" && Number.isFinite(n)) {
+        if (n < pMin) pMin = n
+        if (n > pMax) pMax = n
+      }
+    }
+    return {
+      recordCount,
+      recordRange: valuesQuery.data?.plotNumberRange ?? null,
+      boundaryRange: Number.isFinite(pMin) ? { min: pMin, max: pMax } : null,
+      populationScoped: Boolean(ctx.populationId),
+    }
+  }, [
+    selectedTrait,
+    polygonsFc,
+    traitValues,
+    valuesQuery.data,
+    joinKeyMode,
+    ctx.populationId,
+  ])
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-map">
@@ -185,11 +240,34 @@ export function AnalyzeMap() {
         </p>
       )}
 
+      {overlap && (
+        <p
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          data-testid="analyze-map-no-trait-overlap"
+        >
+          {selectedTrait?.trait_name} has {overlap.recordCount} record
+          {overlap.recordCount === 1 ? "" : "s"} in this scope, but none match
+          the plot numbering of these boundaries
+          {overlap.recordRange
+            ? ` (records use plots ${overlap.recordRange.min}–${overlap.recordRange.max}`
+            : ""}
+          {overlap.recordRange && overlap.boundaryRange
+            ? `; boundaries use ${overlap.boundaryRange.min}–${overlap.boundaryRange.max})`
+            : overlap.recordRange
+              ? ")"
+              : ""}
+          .{" "}
+          {overlap.populationScoped
+            ? "Set a plot-number offset / fill pattern in the Plot Boundary tool, or upload the matching field-design CSV, so the boundary plot numbers match the records."
+            : "Select the matching Population above to join by plot number, or set a plot-number offset in the Plot Boundary tool."}
+        </p>
+      )}
+
       {hasPolygons && joinedFc && (
         <TraitMap
           data={joinedFc}
           traitColumn={
-            selectedTrait && valuesQuery.data && valuesQuery.data.size > 0
+            selectedTrait && traitValues && traitValues.size > 0
               ? selectedTrait.trait_name
               : undefined
           }

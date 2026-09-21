@@ -25,6 +25,7 @@ export interface FetchTraitRecordsOptions {
   experimentName?: string | null
   seasonName?: string | null
   siteName?: string | null
+  populationName?: string | null
   collectionDate?: string | null
 }
 
@@ -38,6 +39,8 @@ export async function fetchTraitRecords(
     params.set("experiment_name", options.experimentName)
   if (options.seasonName) params.set("season_name", options.seasonName)
   if (options.siteName) params.set("site_name", options.siteName)
+  if (options.populationName)
+    params.set("population_name", options.populationName)
   if (options.collectionDate)
     params.set("collection_date", options.collectionDate)
   const qs = params.toString()

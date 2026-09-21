@@ -16,6 +16,14 @@
 #         Dockerfile triggers a full image rebuild for that service.
 #         No more stale-image footguns when the submodule pointer bumps.
 #
+# It also downgrades every service's restart policy from the submodule's
+# `always` to `unless-stopped`. With `always`, the Docker daemon brings
+# containers back up every time it starts — so launching Docker Desktop
+# silently resurrected the whole stack even after `docker compose stop`.
+# `unless-stopped` keeps the same crash-recovery behaviour but honours an
+# explicit stop across daemon restarts. (`storage-init` is a one-shot that
+# runs and exits; it has no restart policy and is deliberately left alone.)
+#
 # Usage:
 #   docker compose watch       # dev mode — live sync + auto-rebuild
 #   docker compose up -d       # normal mode — `develop:` is a no-op
@@ -27,11 +35,13 @@
 #     `docker compose down`, the next `up` recreates the container from
 #     the image, so any synced edits not yet in the image are lost.
 #     Run `--build` when you want them baked in.
-#   - The override only adds `develop:` blocks; existing service
-#     definitions in the submodule's compose are untouched.
+#   - The override only adds `develop:` blocks and `restart:` keys;
+#     existing service definitions in the submodule's compose are
+#     otherwise untouched.
 
 services:
   rest-api:
+    restart: unless-stopped
     develop:
       watch:
         # rest-api Python source is already bind-mounted at
@@ -47,6 +57,7 @@ services:
           path: ./backend/poetry.lock
 
   geminibase-worker-ml:
+    restart: unless-stopped
     develop:
       watch:
         - action: sync+restart
@@ -60,6 +71,7 @@ services:
           path: ./backend/poetry.lock
 
   geminibase-worker-geo:
+    restart: unless-stopped
     develop:
       watch:
         - action: sync+restart
@@ -73,6 +85,7 @@ services:
           path: ./backend/poetry.lock
 
   geminibase-worker-odm:
+    restart: unless-stopped
     develop:
       watch:
         # odm worker already has a bind mount, but no reload — restart
@@ -88,6 +101,7 @@ services:
           path: ./backend/poetry.lock
 
   geminibase-worker-gwas:
+    restart: unless-stopped
     develop:
       watch:
         # gwas Dockerfile uses /geminibase as WORKDIR (different from
@@ -103,6 +117,7 @@ services:
           path: ./backend/poetry.lock
 
   geminibase-worker-thermal:
+    restart: unless-stopped
     develop:
       watch:
         - action: sync+restart
@@ -124,3 +139,23 @@ services:
   #     docker compose --profile geminibase-ui up -d
   geminibase-ui:
     profiles: ["geminibase-ui"]
+
+  # Services with no dev-loop overrides of their own — present here only to
+  # relax the submodule's `restart: always` (see header).
+  db:
+    restart: unless-stopped
+
+  storage:
+    restart: unless-stopped
+
+  logger:
+    restart: unless-stopped
+
+  titiler:
+    restart: unless-stopped
+
+  geminibase-nodeodm:
+    restart: unless-stopped
+
+  geminibase-worker-amiga:
+    restart: unless-stopped

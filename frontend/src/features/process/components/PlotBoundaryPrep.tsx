@@ -41,6 +41,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumberField } from "@/components/ui/number-field"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
@@ -67,7 +74,10 @@ import {
   type FieldDesign,
   mergeLabelsIntoExisting,
 } from "@/features/process/lib/fieldDesign"
-import { generateGridFeatures } from "@/features/process/lib/grid"
+import {
+  type FillPattern,
+  generateGridFeatures,
+} from "@/features/process/lib/grid"
 import { rotateFeatures } from "@/features/process/lib/groupTransform"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
@@ -189,13 +199,18 @@ export function PlotBoundaryPrep({
   // to global defaults, so the inputs always render something sensible.
   const activeParams: BlockParams =
     activeBlockId && blocks[activeBlockId]
-      ? blocks[activeBlockId]
+      ? // Spread defaults under the stored block so blocks persisted
+        // before rowOffset/colOffset/fillPattern existed still render
+        // sensible values (undefined → default) instead of NaN inputs.
+        // `blocks[activeBlockId]` is BlockParams, so its label is present.
+        { ...DEFAULT_BLOCK_PARAMS, ...blocks[activeBlockId] }
       : {
           label: "",
           ...DEFAULT_BLOCK_PARAMS,
           ...(pendingDefaultParams ?? {}),
         }
-  const { rows, cols, angle, gapMeters } = activeParams
+  const { rows, cols, angle, gapMeters, rowOffset, colOffset, fillPattern } =
+    activeParams
 
   // History.state can change after a setter runs in this render; use a
   // ref to get the latest state inside callbacks without re-binding.
@@ -247,6 +262,10 @@ export function PlotBoundaryPrep({
   const setCols = (v: number) => updateActiveParams({ cols: v })
   const setAngle = (v: number) => updateActiveParams({ angle: v })
   const setGapMeters = (v: number) => updateActiveParams({ gapMeters: v })
+  const setRowOffset = (v: number) => updateActiveParams({ rowOffset: v })
+  const setColOffset = (v: number) => updateActiveParams({ colOffset: v })
+  const setFillPattern = (v: FillPattern) =>
+    updateActiveParams({ fillPattern: v })
 
   // Reconcile an incoming feature list (from the map or grid generation)
   // with per-block state, returning the next EditorState. Mirrors the
@@ -579,6 +598,9 @@ export function PlotBoundaryPrep({
           cols: grid?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
           angle: grid?.angle_deg ?? DEFAULT_BLOCK_PARAMS.angle,
           gapMeters: grid?.spacing_m ?? DEFAULT_BLOCK_PARAMS.gapMeters,
+          rowOffset: grid?.row_offset ?? DEFAULT_BLOCK_PARAMS.rowOffset,
+          colOffset: grid?.col_offset ?? DEFAULT_BLOCK_PARAMS.colOffset,
+          fillPattern: grid?.fill_pattern ?? DEFAULT_BLOCK_PARAMS.fillPattern,
         }
       }
       nextState = {
@@ -634,6 +656,10 @@ export function PlotBoundaryPrep({
       angleDeg: angle,
       gapXMeters: gapMeters,
       gapYMeters: gapMeters,
+      // Field-coordinate offsets + plot-number order. In field-design
+      // mode the CSV is authoritative for plot/row/col, so don't apply
+      // the manual offsets/fill-pattern (they'd double-shift the labels).
+      ...(gridMode === "fd" ? {} : { rowOffset, colOffset, fillPattern }),
     })
     // Stamp every cell with the parent blockId + the block label so the
     // map can colour them together and so saved snapshots carry the
@@ -811,7 +837,15 @@ export function PlotBoundaryPrep({
     }
     const snapshot: PlotGeometryStateSnapshot = {
       boundaries: { type: "FeatureCollection", features: plotFeatures },
-      grid: { rows, cols, spacing_m: gapMeters, angle_deg: angle },
+      grid: {
+        rows,
+        cols,
+        spacing_m: gapMeters,
+        angle_deg: angle,
+        row_offset: rowOffset,
+        col_offset: colOffset,
+        fill_pattern: fillPattern,
+      },
       created_from: plotFeatures.length > 1 ? "grid" : "draw",
       // Only persist the field design when the user is on the field-
       // design tab. Otherwise toggling to Manual + saving would still
@@ -1159,7 +1193,73 @@ export function PlotBoundaryPrep({
                         onCommit={setGapMeters}
                       />
                     </div>
+                    <div>
+                      <Label
+                        htmlFor="grid-row-offset"
+                        className="mb-1.5 text-xs"
+                      >
+                        Row offset
+                      </Label>
+                      <NumberField
+                        id="grid-row-offset"
+                        data-testid="boundary-row-offset"
+                        integer
+                        min={0}
+                        step={1}
+                        value={rowOffset}
+                        onCommit={setRowOffset}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="grid-col-offset"
+                        className="mb-1.5 text-xs"
+                      >
+                        Col offset
+                      </Label>
+                      <NumberField
+                        id="grid-col-offset"
+                        data-testid="boundary-col-offset"
+                        integer
+                        min={0}
+                        step={1}
+                        value={colOffset}
+                        onCommit={setColOffset}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Label
+                        htmlFor="grid-fill-pattern"
+                        className="mb-1.5 text-xs"
+                      >
+                        Plot numbering
+                      </Label>
+                      <Select
+                        value={fillPattern}
+                        onValueChange={(v) => setFillPattern(v as FillPattern)}
+                      >
+                        <SelectTrigger
+                          id="grid-fill-pattern"
+                          data-testid="boundary-fill-pattern"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="row-major">
+                            Row by row (1,2,3 / 4,5,6)
+                          </SelectItem>
+                          <SelectItem value="snake">
+                            Snake (1,2,3 / 6,5,4)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Offsets place this block within the full field (0 = field
+                    origin). Irregular numbering that fits neither pattern → use
+                    a field-design CSV.
+                  </p>
                 </TabsContent>
 
                 <TabsContent value="fd" className="space-y-3 pt-3">

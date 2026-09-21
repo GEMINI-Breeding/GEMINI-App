@@ -4074,6 +4074,7 @@ export class PlotsService {
      * @param data.experimentId
      * @param data.seasonId
      * @param data.siteId
+     * @param data.populationId
      * @returns unknown Request fulfilled, document follows
      * @throws ApiError
      */
@@ -4084,7 +4085,8 @@ export class PlotsService {
             query: {
                 experiment_id: data.experimentId,
                 season_id: data.seasonId,
-                site_id: data.siteId
+                site_id: data.siteId,
+                population_id: data.populationId
             },
             errors: {
                 400: 'Bad request syntax or unsupported method'
@@ -6380,6 +6382,7 @@ export class TraitsService {
      * @param data.experimentName
      * @param data.seasonName
      * @param data.siteName
+     * @param data.populationName
      * @param data.plotNumber
      * @param data.plotRowNumber
      * @param data.plotColumnNumber
@@ -6398,6 +6401,7 @@ export class TraitsService {
                 experiment_name: data.experimentName,
                 season_name: data.seasonName,
                 site_name: data.siteName,
+                population_name: data.populationName,
                 plot_number: data.plotNumber,
                 plot_row_number: data.plotRowNumber,
                 plot_column_number: data.plotColumnNumber,

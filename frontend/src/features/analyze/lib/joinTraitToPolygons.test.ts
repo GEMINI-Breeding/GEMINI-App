@@ -65,6 +65,48 @@ describe("plotKey", () => {
   })
 })
 
+describe('plotKey — "plot" mode (population-scoped)', () => {
+  it("keys on plot_number alone, ignoring row/col", () => {
+    expect(plotKey(701, 2, 24, "plot")).toBe("701")
+    expect(plotKey(701, 9, 9, "plot")).toBe("701")
+  })
+  it("still returns null when plot is missing", () => {
+    expect(plotKey(null, 1, 1, "plot")).toBeNull()
+  })
+})
+
+describe("population-scoped join (keyMode plot)", () => {
+  it("matches records to polygons by plot_number even when row/col differ", () => {
+    // Real-world case: trait records carry the field's true row/col
+    // (e.g. 2/24) while the drawn boundary grid numbered locally
+    // (row 1, col 1). With population scoping, plot_number alone joins.
+    const values = reduceTraitRecordsToMeanByPlot([rec(701, 15, 2, 24)], {
+      keyMode: "plot",
+    })
+    expect(values.get("701")).toBeCloseTo(15)
+    const out = joinTraitToPolygons(
+      fc([{ plot_number: 701, plot_row_number: 1, plot_column_number: 1 }]),
+      values,
+      "Stand_count",
+      "plot",
+    )
+    expect(out.features[0].properties.Stand_count).toBeCloseTo(15)
+  })
+
+  it("does NOT match under the default plotrc mode (regression guard)", () => {
+    // Same data, composite key → no overlap, every plot stays empty.
+    const values = reduceTraitRecordsToMeanByPlot([rec(701, 15, 2, 24)])
+    const out = joinTraitToPolygons(
+      fc([{ plot_number: 701, plot_row_number: 1, plot_column_number: 1 }]),
+      values,
+      "Stand_count",
+    )
+    expect(
+      (out.features[0].properties as Record<string, unknown>).Stand_count,
+    ).toBeUndefined()
+  })
+})
+
 describe("reduceTraitRecordsToMeanByPlot", () => {
   it("computes mean per plot key", () => {
     const m = reduceTraitRecordsToMeanByPlot([

@@ -62,4 +62,41 @@ describe("generateGridFeatures", () => {
     )
     expect(empty).toEqual([])
   })
+
+  it("applies row/col offsets to emit field-coordinate row/col", () => {
+    const features = generateGridFeatures(OUTER, {
+      rows: 2,
+      cols: 3,
+      angleDeg: 0,
+      rowOffset: 1,
+      colOffset: 23,
+    })
+    // First cell: local (1,1) → field (1+1, 1+23) = (2, 24).
+    expect(features[0].properties).toMatchObject({ row: 2, col: 24 })
+    // Last cell: local (2,3) → field (3, 26).
+    expect(features[5].properties).toMatchObject({ row: 3, col: 26 })
+    // plot numbers are unaffected by offsets (still 1..N).
+    expect(features[0].properties?.plot).toBe(1)
+    expect(features[5].properties?.plot).toBe(6)
+  })
+
+  it("numbers row-major by default (every row left→right)", () => {
+    const f = generateGridFeatures(OUTER, { rows: 2, cols: 3, angleDeg: 0 })
+    // row 1: 1,2,3 ; row 2: 4,5,6
+    expect(f.map((x) => x.properties?.plot)).toEqual([1, 2, 3, 4, 5, 6])
+  })
+
+  it("numbers snake/serpentine: odd rows reverse direction", () => {
+    const f = generateGridFeatures(OUTER, {
+      rows: 2,
+      cols: 3,
+      angleDeg: 0,
+      fillPattern: "snake",
+    })
+    // row 0 (1,2,3) L→R; row 1 (6,5,4) R→L. Walk order is still
+    // (r0c0,r0c1,r0c2, r1c0,r1c1,r1c2).
+    expect(f.map((x) => x.properties?.plot)).toEqual([1, 2, 3, 6, 5, 4])
+    // row/col labels stay geometric regardless of numbering.
+    expect(f[3].properties).toMatchObject({ plot: 6, row: 2, col: 1 })
+  })
 })
