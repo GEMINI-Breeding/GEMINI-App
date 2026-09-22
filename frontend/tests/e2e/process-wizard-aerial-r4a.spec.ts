@@ -68,6 +68,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     if (!baseURL) throw new Error("baseURL not configured")
 
     const experiment = `${runPrefix}-r4a-exp`
+    const season = "2022"
     const location = "Davis"
     const population = "Cowpea"
     const date = "2022-06-27"
@@ -81,6 +82,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     await selectDataType(page, "Image Data")
     await fillUploadForm(page, {
       experiment,
+      season,
       location,
       population,
       date,
@@ -363,7 +365,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     const earlyToken = (
       (await earlyTokenRes.json()) as { access_token: string }
     ).access_token
-    const earlyProcessedPrefix = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const earlyProcessedPrefix = `Processed/${season}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
     const earlyListRes = await request.get(
       new URL(
         `/api/files/list/gemini/${earlyProcessedPrefix}`,
@@ -587,7 +589,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     expect(tokenRes.ok()).toBe(true)
     const { access_token } = (await tokenRes.json()) as { access_token: string }
 
-    const processedPrefix = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const processedPrefix = `Processed/${season}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
     const listRes = await request.get(
       new URL(`/api/files/list/gemini/${processedPrefix}`, baseURL).toString(),
       { headers: { Authorization: `Bearer ${access_token}` } },
@@ -719,7 +721,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     // its state_snapshot.field_design carries the CSV's accession values.
     // processedPrefix() in src/features/process/lib/paths.ts has a
     // trailing slash; list_for_directory matches by exact equality.
-    const dirPath = `Processed/2022/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
+    const dirPath = `Processed/${season}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/`
     const versionsRes = await request.post(
       new URL("/api/plot_geometry/versions/list", baseURL).toString(),
       {
@@ -770,6 +772,24 @@ test.describe("R4a: aerial wizard happy path", () => {
         loaded.state_snapshot.boundaries.features.map((f) => f.properties),
       )}`,
     ).toBeGreaterThan(0)
+
+    // ── 8b. Split the ortho into per-plot images. A required compute step
+    //        between boundaries and trait extraction; it gates the latter
+    //        and feeds the Analyze-map plot viewer. ─────────────────────
+    const splitRow = page.getByTestId("step-row-split_orthomosaic")
+    await expect(splitRow).toHaveAttribute("data-status", "ready", {
+      timeout: 15_000,
+    })
+    await splitRow.getByRole("button", { name: /run step/i }).click()
+    await expect(splitRow).toHaveAttribute("data-status", "completed", {
+      timeout: 5 * 60_000,
+    })
+    await expect(splitRow.getByText(/no plot images yet/i)).toBeHidden({
+      timeout: 30_000,
+    })
+    await expect(splitRow.locator("img").first()).toBeVisible({
+      timeout: 30_000,
+    })
 
     // ── 9. Trait extraction: drive the dialog and wait for COMPLETED. ────
     // Regression test for the "toast says complete but the row says pending"
@@ -915,7 +935,7 @@ test.describe("R4a: aerial wizard happy path", () => {
 
     const seasonLookup = await request.get(
       new URL(
-        `/api/seasons?season_name=${encodeURIComponent("2022")}&experiment_name=${encodeURIComponent(experiment)}`,
+        `/api/seasons?season_name=${encodeURIComponent(season)}&experiment_name=${encodeURIComponent(experiment)}`,
         baseURL,
       ).toString(),
       { headers: { Authorization: `Bearer ${access_token}` } },
@@ -926,10 +946,10 @@ test.describe("R4a: aerial wizard happy path", () => {
       season_name?: string
     }>
     const seasonId =
-      seasonHits.find((s) => s.season_name === "2022")?.id ?? null
+      seasonHits.find((s) => s.season_name === season)?.id ?? null
     expect(
       seasonId,
-      "expected season 2022 to exist (Plot materialization auto-creates)",
+      `expected season ${season} to exist (Plot materialization auto-creates)`,
     ).toBeTruthy()
 
     // GET /api/sites defaults experiment_name='Experiment A' when no
@@ -991,6 +1011,16 @@ test.describe("R4a: aerial wizard happy path", () => {
       (r) => r.url().includes("/api/plots/geojson") && r.ok(),
       { timeout: 30_000 },
     )
+    // The run just produced an orthomosaic under this population, so the
+    // map defaults its underlay to it and MapLibre fetches TiTiler tiles.
+    // Armed before navigation: the underlay resolves as soon as the
+    // population listing lands.
+    const orthoTileRequest = page.waitForRequest(
+      (r) =>
+        r.url().includes("/titiler/cog/tiles/") &&
+        /odm_orthophoto[^/]*\.tif/.test(decodeURIComponent(r.url())),
+      { timeout: 45_000 },
+    )
     await page.goto("/analyze?view=map")
     await expect(page.getByTestId("analyze-tab-map")).toBeVisible()
     await expect(page.getByTestId("analyze-map")).toBeVisible()
@@ -1037,5 +1067,18 @@ test.describe("R4a: aerial wizard happy path", () => {
       Number(hi),
       `legend range should be non-degenerate; got [${lo}, ${hi}]`,
     ).toBeGreaterThan(Number(lo))
+
+    // ── Ortho underlay + opacity controls ────────────────────────────
+    await orthoTileRequest
+    const underlaySelect = page.getByTestId("analyze-map-underlay")
+    await expect(underlaySelect).not.toContainText("None")
+    await expect(page.getByTestId("analyze-map-ortho-opacity")).toBeVisible()
+    await page.getByTestId("analyze-map-fill-opacity").fill("0.3")
+    await expect(page.getByText("Plot fill opacity (30%)")).toBeVisible()
+
+    await underlaySelect.click({ force: true })
+    await page.getByRole("option", { name: "None" }).click()
+    await expect(underlaySelect).toContainText("None")
+    await expect(page.getByTestId("analyze-map-ortho-opacity")).toBeHidden()
   })
 })

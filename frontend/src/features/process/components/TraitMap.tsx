@@ -35,6 +35,7 @@ const OSM_TILES = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"]
 function buildStyle(
   basemap: "esri" | "osm",
   orthoTileUrl: string | undefined,
+  orthoOpacity = 1,
 ): StyleSpecification {
   const baseTiles = basemap === "esri" ? ESRI_TILES : OSM_TILES
   const baseAttr =
@@ -59,7 +60,12 @@ function buildStyle(
       tiles: [orthoTileUrl],
       tileSize: 256,
     }
-    style.layers.push({ id: "ortho", type: "raster", source: "ortho" })
+    style.layers.push({
+      id: "ortho",
+      type: "raster",
+      source: "ortho",
+      paint: { "raster-opacity": orthoOpacity },
+    })
   }
   return style
 }
@@ -136,6 +142,10 @@ export type TraitMapProps = {
    * stays `pickable` either way, for tooltips).
    */
   onPlotClick?: (plot: number, props: Record<string, unknown>) => void
+  /** 0–1 multiplier on polygon fill alpha, so the ortho shows through. */
+  fillOpacity?: number
+  /** 0–1 opacity of the ortho underlay. */
+  orthoOpacity?: number
 }
 
 export function TraitMap({
@@ -144,6 +154,8 @@ export function TraitMap({
   orthoTileUrl,
   basemap = "esri",
   onPlotClick,
+  fillOpacity = 1,
+  orthoOpacity = 1,
 }: TraitMapProps) {
   const { range, viewState } = useMemo(() => {
     let lo = Infinity
@@ -177,9 +189,15 @@ export function TraitMap({
   }, [data, traitColumn])
 
   const mapStyle = useMemo(
-    () => buildStyle(basemap, orthoTileUrl),
-    [basemap, orthoTileUrl],
+    () => buildStyle(basemap, orthoTileUrl, orthoOpacity),
+    [basemap, orthoTileUrl, orthoOpacity],
   )
+  const scaleAlpha = (c: Color): Color => [
+    c[0],
+    c[1],
+    c[2],
+    Math.round(c[3] * Math.min(1, Math.max(0, fillOpacity))),
+  ]
 
   const layer = new GeoJsonLayer({
     id: "traits",
@@ -192,11 +210,12 @@ export function TraitMap({
       const props = (f.properties ?? {}) as Record<string, unknown>
       const v = props[traitColumn]
       if (typeof v !== "number" || !Number.isFinite(v))
-        return [200, 200, 200, 120]
+        return scaleAlpha([200, 200, 200, 120])
       const [lo, hi] = range
       const t = hi === lo ? 0.5 : (v - lo) / (hi - lo)
-      return viridis(t)
+      return scaleAlpha(viridis(t))
     },
+    updateTriggers: { getFillColor: [traitColumn, range, fillOpacity] },
     getLineColor: traitColumn ? [40, 40, 40, 220] : [255, 220, 50, 240],
     lineWidthMinPixels: traitColumn ? 1 : 2,
   })

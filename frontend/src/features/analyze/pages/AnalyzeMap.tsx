@@ -32,9 +32,10 @@ import {
   useAerialScopeContext,
 } from "@/features/process/components/AerialScopePicker"
 import { TraitMap } from "@/features/process/components/TraitMap"
+import { buildTitilerTileUrl } from "@/features/process/lib/activeOrtho"
 import { processedPopulationPrefix } from "@/features/process/lib/paths"
 import { PlotImageDialog } from "../components/PlotImageDialog"
-import { usePlotImages } from "../hooks/usePlotImages"
+import { usePlotImages, usePopulationOrthos } from "../hooks/usePlotImages"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
 import { usePlotTraitValues } from "../hooks/usePlotTraitValues"
 import { joinTraitToPolygons, plotKey } from "../lib/joinTraitToPolygons"
@@ -125,6 +126,27 @@ export function AnalyzeMap() {
         })
       : null
   const plotImagesQuery = usePlotImages(plotImagesPrefix)
+
+  // Ortho underlay: every orthomosaic in scope, newest first.
+  // "" = follow the newest; "__none__" = no underlay.
+  // Without a population, list the whole site so a run over any
+  // population can still sit under the plots.
+  const sitePrefix =
+    ctx.seasonName && ctx.experimentName && ctx.siteName
+      ? `Processed/${ctx.seasonName}/${ctx.experimentName}/${ctx.siteName}/`
+      : null
+  const orthosQuery = usePopulationOrthos(
+    plotImagesPrefix ?? sitePrefix,
+    !plotImagesPrefix,
+  )
+  const orthos = orthosQuery.data ?? []
+  const [underlayChoice, setUnderlayChoice] = useState("")
+  const [fillOpacity, setFillOpacity] = useState(0.8)
+  const [orthoOpacity, setOrthoOpacity] = useState(1)
+  const underlay =
+    underlayChoice === "__none__"
+      ? null
+      : (orthos.find((o) => o.s3Url === underlayChoice) ?? orthos[0] ?? null)
   const [clickedPlot, setClickedPlot] = useState<{
     plot: number
     props: Record<string, unknown>
@@ -231,6 +253,52 @@ export function AnalyzeMap() {
             </SelectContent>
           </Select>
         </div>
+
+        <div className="space-y-1">
+          <Label
+            htmlFor="analyze-map-underlay"
+            className="text-xs text-muted-foreground"
+          >
+            Ortho underlay
+          </Label>
+          <Select
+            value={underlay ? underlay.s3Url : "__none__"}
+            onValueChange={setUnderlayChoice}
+          >
+            <SelectTrigger
+              id="analyze-map-underlay"
+              data-testid="analyze-map-underlay"
+              className="w-72"
+            >
+              <SelectValue
+                placeholder={orthosQuery.isLoading ? "Loading orthos…" : "None"}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">None</SelectItem>
+              {orthos.map((o) => (
+                <SelectItem key={o.s3Url} value={o.s3Url}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <OpacitySlider
+          id="analyze-map-fill-opacity"
+          label="Plot fill"
+          value={fillOpacity}
+          onChange={setFillOpacity}
+        />
+        {underlay && (
+          <OpacitySlider
+            id="analyze-map-ortho-opacity"
+            label="Ortho"
+            value={orthoOpacity}
+            onChange={setOrthoOpacity}
+          />
+        )}
       </div>
 
       {!hasScopeIds && (
@@ -293,6 +361,11 @@ export function AnalyzeMap() {
               : undefined
           }
           onPlotClick={(plot, props) => setClickedPlot({ plot, props })}
+          orthoTileUrl={
+            underlay ? buildTitilerTileUrl(underlay.s3Url) : undefined
+          }
+          orthoOpacity={orthoOpacity}
+          fillOpacity={fillOpacity}
         />
       )}
 
@@ -307,6 +380,37 @@ export function AnalyzeMap() {
             : null
         }
         loading={plotImagesQuery.isLoading}
+      />
+    </div>
+  )
+}
+
+function OpacitySlider({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
+        {label} opacity ({Math.round(value * 100)}%)
+      </Label>
+      <input
+        id={id}
+        data-testid={id}
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="block w-32"
       />
     </div>
   )

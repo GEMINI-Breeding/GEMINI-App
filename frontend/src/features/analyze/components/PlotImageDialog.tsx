@@ -113,7 +113,6 @@ export function PlotImageDialog({
             Couldn’t load this plot’s image.
           </p>
         ) : url ? (
-          // biome-ignore lint/a11y/useAltText: alt is set below
           <img
             src={url}
             alt={plot != null ? `Plot ${plot}` : "Plot image"}

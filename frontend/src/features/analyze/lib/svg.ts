@@ -28,13 +28,12 @@ export function divergingColor(v: number): string {
     const g = Math.round(255 - t * (255 - 102))
     const b = Math.round(255 - t * (255 - 172))
     return `rgb(${r},${g},${b})`
-  } else {
-    const t = -clamped
-    const r = Math.round(255 - t * (255 - 178))
-    const g = Math.round(255 - t * (255 - 24))
-    const b = Math.round(255 - t * (255 - 43))
-    return `rgb(${r},${g},${b})`
   }
+  const t = -clamped
+  const r = Math.round(255 - t * (255 - 178))
+  const g = Math.round(255 - t * (255 - 24))
+  const b = Math.round(255 - t * (255 - 43))
+  return `rgb(${r},${g},${b})`
 }
 
 // Quantize a number in [0, 1] to a viridis-ish sequential color.

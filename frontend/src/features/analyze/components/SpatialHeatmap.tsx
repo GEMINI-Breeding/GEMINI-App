@@ -15,7 +15,10 @@ const SITE_GAP = 32
 export function SpatialHeatmap({ response }: Props) {
   if (response.status !== "ok" || response.sites.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground" data-testid="mv-spatial-empty">
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="mv-spatial-empty"
+      >
         {response.message ?? "No spatial data available."}
       </p>
     )
@@ -83,7 +86,12 @@ function SiteGrid({ site, traitName }: SiteProps) {
         </span>
       </div>
       <div className="overflow-auto rounded-md border">
-        <svg width={width} height={height}>
+        <svg
+          width={width}
+          height={height}
+          role="img"
+          aria-label="Spatial field heatmap"
+        >
           {Array.from({ length: nCols }, (_, ci) => {
             const colNum = site.min_col + ci
             return (
@@ -150,8 +158,12 @@ function SiteGrid({ site, traitName }: SiteProps) {
                     <title>
                       {`${traitName}: ${cell.value.toFixed(3)}\n` +
                         `Row ${rowNum}, Col ${colNum}` +
-                        (cell.accession_name ? `\n${cell.accession_name}` : "") +
-                        (cell.plot_number != null ? `\nPlot ${cell.plot_number}` : "")}
+                        (cell.accession_name
+                          ? `\n${cell.accession_name}`
+                          : "") +
+                        (cell.plot_number != null
+                          ? `\nPlot ${cell.plot_number}`
+                          : "")}
                     </title>
                   </rect>
                   <text

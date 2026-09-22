@@ -47,8 +47,11 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium">Correlation method</label>
+        <label htmlFor="mv-correlation-method" className="text-sm font-medium">
+          Correlation method
+        </label>
         <select
+          id="mv-correlation-method"
           className="h-9 rounded-md border bg-background px-3 text-sm"
           value={method}
           onChange={(e) => setMethod(e.target.value as Method)}
@@ -64,7 +67,12 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
       </div>
 
       <div className="overflow-auto rounded-md border" data-testid="mv-heatmap">
-        <svg width={width} height={height}>
+        <svg
+          width={width}
+          height={height}
+          role="img"
+          aria-label="Trait correlation matrix"
+        >
           {m.trait_names.map((name, j) => {
             // Pivot at the top-left of each column's cell strip; text starts
             // at pivot and rotates -45° so labels read up-and-to-the-right.
@@ -102,6 +110,7 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
               const fg = value == null ? "#666" : textOn(bg)
               return (
                 <g key={`${i}-${j}`}>
+                  {/* biome-ignore lint/a11y/useSemanticElements: an SVG <rect> cannot be a <button> */}
                   <rect
                     x={cx}
                     y={cy}
@@ -110,8 +119,15 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
                     fill={bg}
                     stroke="#fff"
                     strokeWidth={1}
+                    role="button"
+                    tabIndex={i !== j && value != null ? 0 : -1}
+                    aria-label={`${m.trait_names[i]} × ${m.trait_names[j]}`}
                     onClick={() => {
                       if (i !== j && value != null) setDrill({ i, j })
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && i !== j && value != null)
+                        setDrill({ i, j })
                     }}
                     style={{
                       cursor: i !== j && value != null ? "pointer" : "default",
@@ -277,6 +293,8 @@ function ScatterDrill({ matrix, traitX, traitY, corr, method }: ScatterProps) {
           width={width}
           height={height}
           className="rounded-md border bg-background"
+          role="img"
+          aria-label="Correlation scatter plot"
           data-testid="mv-scatter-svg"
         >
           {/* axes */}
@@ -314,7 +332,9 @@ function ScatterDrill({ matrix, traitX, traitY, corr, method }: ScatterProps) {
               fill="#1d4ed8"
               fillOpacity={0.6}
             >
-              {p.label && <title>{`${p.label}: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`}</title>}
+              {p.label && (
+                <title>{`${p.label}: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`}</title>
+              )}
             </circle>
           ))}
           {/* axis labels */}

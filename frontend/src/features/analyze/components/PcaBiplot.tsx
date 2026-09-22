@@ -39,6 +39,12 @@ export function PcaBiplot({ response }: Props) {
     )
   }
 
+  return <PcaBiplotBody response={response} />
+}
+
+// Split from the guard above so hooks never run after an early return
+// (an empty → populated response would otherwise change the hook count).
+function PcaBiplotBody({ response }: Props) {
   const k = response.n_components
   const [xPc, setXPc] = useState(0)
   const [yPc, setYPc] = useState(Math.min(1, k - 1))
@@ -126,6 +132,8 @@ export function PcaBiplot({ response }: Props) {
         width={WIDTH}
         height={HEIGHT}
         className="rounded-md border bg-background"
+        role="img"
+        aria-label="PCA biplot"
         data-testid="mv-pca-svg"
       >
         {/* Axes through origin */}
@@ -201,7 +209,10 @@ export function PcaBiplot({ response }: Props) {
           const x1 = xScale(lx)
           const y1 = yScale(ly)
           return (
-            <g key={l.trait_name} data-testid={`mv-pca-loading-${l.trait_name}`}>
+            <g
+              key={l.trait_name}
+              data-testid={`mv-pca-loading-${l.trait_name}`}
+            >
               <line
                 x1={x0}
                 y1={y0}
@@ -283,8 +294,11 @@ function PCAxisSelect({
 }) {
   return (
     <div className="space-y-1">
-      <label className="text-xs text-muted-foreground">{label}</label>
+      <label htmlFor={testId} className="text-xs text-muted-foreground">
+        {label}
+      </label>
       <select
+        id={testId}
         className="h-9 w-32 rounded-md border bg-background px-3 text-sm"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -329,8 +343,16 @@ function Scree({ evr }: { evr: number[] }) {
   const barW = (w - pad * 2) / evr.length
   return (
     <div className="flex flex-col gap-1" data-testid="mv-pca-scree">
-      <span className="text-xs text-muted-foreground">Scree (explained variance)</span>
-      <svg width={w} height={h} className="rounded-md border bg-background">
+      <span className="text-xs text-muted-foreground">
+        Scree (explained variance)
+      </span>
+      <svg
+        width={w}
+        height={h}
+        className="rounded-md border bg-background"
+        role="img"
+        aria-label="Scree plot"
+      >
         {evr.map((v, i) => {
           const bh = ((h - pad * 2) * v) / max
           const x = pad + i * barW

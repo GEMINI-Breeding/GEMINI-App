@@ -2,14 +2,14 @@ import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
 import {
-  ExperimentsService,
-  SeasonsService,
-  SitesService,
-  PopulationsService,
   type ExperimentOutput,
-  type SeasonOutput,
-  type SiteOutput,
+  ExperimentsService,
   type PopulationOutput,
+  PopulationsService,
+  type SeasonOutput,
+  SeasonsService,
+  type SiteOutput,
+  SitesService,
   type TraitOutput,
 } from "@/client"
 import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
@@ -20,12 +20,12 @@ import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
 import { ManovaTable } from "../components/ManovaTable"
 import { PcaBiplot } from "../components/PcaBiplot"
 import {
+  type Aggregation,
+  type CorrelationResponse,
   fetchCorrelation,
   fetchManova,
   fetchMatrix,
   fetchPCA,
-  type Aggregation,
-  type CorrelationResponse,
   type ManovaResponse,
   type MatrixResponse,
   type MultivariateRequest,
@@ -152,7 +152,7 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
       populations: populations.size ? [...populations] : undefined,
       aggregation,
       aggregation_date:
-        aggregation === "date" ? aggregationDate ?? undefined : undefined,
+        aggregation === "date" ? (aggregationDate ?? undefined) : undefined,
       collapse_replicates: collapseReplicates,
     }
   }

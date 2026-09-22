@@ -1,8 +1,8 @@
 import { type CSSProperties, useMemo, useState } from "react"
 
 import type {
-  HeritabilityPanel as HPanel,
   HeritabilityResponse,
+  HeritabilityPanel as HPanel,
 } from "../lib/multivariate"
 
 interface Props {
@@ -29,6 +29,12 @@ export function HeritabilityPanel({ response }: Props) {
     )
   }
 
+  return <HeritabilityPanelBody response={response} />
+}
+
+// Split from the guard above so hooks never run after an early return
+// (an empty → populated response would otherwise change the hook count).
+function HeritabilityPanelBody({ response }: Props) {
   // Group cards by trait.
   const byTrait = useMemo(() => {
     const m = new Map<string, HPanel[]>()
@@ -44,8 +50,8 @@ export function HeritabilityPanel({ response }: Props) {
     <section className="flex flex-col gap-6" data-testid="mv-heritability">
       <p className="text-xs text-muted-foreground">
         Broad-sense H² per (trait, env) via REML. H² = σ²_g / (σ²_g + σ²_e /
-        mean reps). Per-env only — across-env decomposition is not produced
-        from this fit.
+        mean reps). Per-env only — across-env decomposition is not produced from
+        this fit.
       </p>
       {[...byTrait.entries()].map(([trait, panels]) => (
         <div key={trait} className="flex flex-col gap-3">
@@ -89,7 +95,10 @@ function Card({ panel }: { panel: HPanel }) {
             σ²_g = {fmt(panel.var_g)} · σ²_e = {fmt(panel.var_e)}
           </div>
           {panel.grand_mean != null && (
-            <div className="text-xs tabular-nums" data-testid="mv-h2-card-grand-mean">
+            <div
+              className="text-xs tabular-nums"
+              data-testid="mv-h2-card-grand-mean"
+            >
               mean = {formatMean(panel.grand_mean)}
             </div>
           )}
@@ -185,10 +194,7 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
     if (colorMode === "off") return null
     const refByCol = new Map<string, number | null>()
     for (const c of cols) {
-      const ref =
-        colorMode === "column"
-          ? c.grandMean
-          : pooledMean
+      const ref = colorMode === "column" ? c.grandMean : pooledMean
       refByCol.set(c.key, ref)
     }
     if (colorMode === "column") {
@@ -225,7 +231,9 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
 
   const sortedAccessions = (() => {
     if (!sortBy) return accessions
-    const col = cols.find((c) => c.trait === sortBy.trait && c.env === sortBy.env)
+    const col = cols.find(
+      (c) => c.trait === sortBy.trait && c.env === sortBy.env,
+    )
     if (!col) return accessions
     return [...accessions].sort((a, b) => {
       const va = col.map.get(a)
@@ -250,10 +258,7 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
     if (!colorScale) return {}
     const ref = colorScale.refByCol.get(col.key)
     if (ref == null) return {}
-    const max =
-      colorScale.maxByCol?.get(col.key) ??
-      colorScale.globalMax ??
-      0
+    const max = colorScale.maxByCol?.get(col.key) ?? colorScale.globalMax ?? 0
     if (max <= 0) return {}
     const dev = value - ref
     const t = Math.max(-1, Math.min(1, dev / max))
@@ -271,10 +276,7 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
           <span className="text-muted-foreground">Color by</span>
           <ColorModeToggle value={colorMode} onChange={setColorMode} />
           {colorMode !== "off" && (
-            <ColorLegend
-              mode={colorMode}
-              pooledMean={pooledMean}
-            />
+            <ColorLegend mode={colorMode} pooledMean={pooledMean} />
           )}
         </div>
       </div>
@@ -286,7 +288,8 @@ function BlupsTable({ panels }: { panels: HPanel[] }) {
                 Accession
               </th>
               {cols.map((c) => {
-                const active = sortBy && sortBy.trait === c.trait && sortBy.env === c.env
+                const active =
+                  sortBy && sortBy.trait === c.trait && sortBy.env === c.env
                 return (
                   <th
                     key={c.key}

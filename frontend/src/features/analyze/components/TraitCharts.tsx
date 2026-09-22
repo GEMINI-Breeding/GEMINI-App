@@ -98,7 +98,12 @@ function extractUnique(
 function pickGenotype(record: TraitRecordOutput): string | null {
   const info = record.record_info as Record<string, unknown> | undefined
   if (!info) return null
-  for (const key of ["accession_name", "line_name", "germplasm_alias", "genotype"]) {
+  for (const key of [
+    "accession_name",
+    "line_name",
+    "germplasm_alias",
+    "genotype",
+  ]) {
     const v = info[key]
     if (v != null) {
       const s = String(v).trim()
@@ -595,8 +600,8 @@ function AnovaChart({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        ANOVA uses raw per-plot values — averaging replicates would erase
-        the within-genotype variation the F-test measures.
+        ANOVA uses raw per-plot values — averaging replicates would erase the
+        within-genotype variation the F-test measures.
       </p>
       <AnovaTable response={data} />
     </div>

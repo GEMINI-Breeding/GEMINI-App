@@ -305,6 +305,7 @@ const progressBuffer = new Map<string, number | null>()
 
 function ProgressLog({ events }: { events: RunProgressEvent[] }) {
   const ref = useRef<HTMLDivElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to scroll whenever a new event arrives
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" })
   }, [events.length])
@@ -1103,10 +1104,18 @@ export function RunDetail() {
       // the page reloaded after the wsManager's in-memory lastEvent cache
       // was wiped), the periodic poll guarantees the UI settles within ~10s
       // instead of hanging on a stale "running".
+      // Every compute step writes under Processed/ (ortho, plot images,
+      // trait GeoJSON), so refetch that listing whenever one finishes —
+      // otherwise the step's panel keeps showing the pre-job files.
+      const refreshProcessedListing = () =>
+        queryClient.invalidateQueries({
+          queryKey: ["files", "list", scope ? processedPrefix(scope) : null],
+        })
       const settleFromJobStatus = (job: JobOutput | null | undefined) => {
         if (!job) return
         const status = String(job.status ?? "")
         if (status === "COMPLETED") {
+          refreshProcessedListing()
           // Orthomosaic: append the new OrthoVersionMeta atomically with
           // marking the step completed. mergeOrthoVersionFromJobResult is
           // idempotent on jobId, so re-firing here after the WS path already
@@ -1179,17 +1188,10 @@ export function RunDetail() {
               // RUN_ODM landed. Trigger a fresh poll so settleFromJobStatus
               // fetches the job, reads result.orthophoto_path, and appends
               // a new OrthoVersionMeta to outputs.versions (idempotent on
-              // jobId). Then refetch the Processed/ listing so the new
-              // TIF appears in OrthoVersionsPanel without a page reload.
+              // jobId), which also refetches the Processed/ listing.
               pollOnce()
-              queryClient.invalidateQueries({
-                queryKey: [
-                  "files",
-                  "list",
-                  scope ? processedPrefix(scope) : null,
-                ],
-              })
             } else {
+              refreshProcessedListing()
               setStepState(runId, stepKey, {
                 status: "completed",
                 completedAt: new Date(evt.timestamp).toISOString(),

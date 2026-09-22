@@ -121,10 +121,7 @@ export interface SpatialResponse {
 export function fetchSpatial(
   req: MultivariateRequest,
 ): Promise<SpatialResponse> {
-  return postJson<SpatialResponse>(
-    "/api/multivariate_analysis/spatial",
-    req,
-  )
+  return postJson<SpatialResponse>("/api/multivariate_analysis/spatial", req)
 }
 
 export interface AnovaTerm {
@@ -155,13 +152,8 @@ export interface AnovaResponse {
   message?: string | null
 }
 
-export function fetchAnova(
-  req: MultivariateRequest,
-): Promise<AnovaResponse> {
-  return postJson<AnovaResponse>(
-    "/api/multivariate_analysis/anova",
-    req,
-  )
+export function fetchAnova(req: MultivariateRequest): Promise<AnovaResponse> {
+  return postJson<AnovaResponse>("/api/multivariate_analysis/anova", req)
 }
 
 export interface BLUP {
@@ -291,8 +283,6 @@ export interface ManovaResponse {
   message?: string | null
 }
 
-export function fetchManova(
-  req: MultivariateRequest,
-): Promise<ManovaResponse> {
+export function fetchManova(req: MultivariateRequest): Promise<ManovaResponse> {
   return postJson<ManovaResponse>("/api/multivariate_analysis/manova", req)
 }

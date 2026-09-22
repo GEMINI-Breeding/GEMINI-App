@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 
 import type { FileMetadata } from "@/client"
 
-import { indexPlotImages, plotNumberFromImageName } from "./usePlotImages"
+import {
+  indexPlotImages,
+  orthosFromListing,
+  plotNumberFromImageName,
+} from "./usePlotImages"
 
 const f = (object_name: string): FileMetadata =>
   ({ object_name }) as FileMetadata
@@ -69,5 +73,66 @@ describe("indexPlotImages", () => {
 
   it("returns an empty map for an empty listing", () => {
     expect(indexPlotImages([]).size).toBe(0)
+  })
+})
+
+describe("orthosFromListing", () => {
+  const POP = "Processed/2024/Exp/Davis/Cowpea/"
+  const f = (object_name: string, last_modified = "2024-01-01T00:00:00Z") =>
+    ({ object_name, last_modified }) as FileMetadata
+
+  it("prefers the -Pyramid COG sibling when it exists", () => {
+    const out = orthosFromListing([
+      f(`${POP}2024-06-01/Drone/RGB/odm_orthophoto-abc.tif`),
+      f(`${POP}2024-06-01/Drone/RGB/odm_orthophoto-abc-Pyramid.tif`),
+    ])
+    expect(out).toEqual([
+      {
+        label: "2024-06-01 · Drone/RGB",
+        s3Url: `s3://gemini/${POP}2024-06-01/Drone/RGB/odm_orthophoto-abc-Pyramid.tif`,
+        date: "2024-06-01",
+      },
+    ])
+  })
+
+  it("keeps the newest ortho per folder and lists flights newest first", () => {
+    const out = orthosFromListing([
+      f(
+        `${POP}2024-06-01/Drone/RGB/odm_orthophoto-old.tif`,
+        "2024-06-02T00:00:00Z",
+      ),
+      f(
+        `${POP}2024-06-01/Drone/RGB/odm_orthophoto-new.tif`,
+        "2024-06-09T00:00:00Z",
+      ),
+      f(`${POP}2024-07-15/Drone/RGB/odm_orthophoto-x.tif`),
+    ])
+    expect(out.map((o) => o.date)).toEqual(["2024-07-15", "2024-06-01"])
+    expect(out[1].s3Url).toContain("odm_orthophoto-new.tif")
+  })
+
+  it("ignores plot images, DEMs and other files", () => {
+    expect(
+      orthosFromListing([
+        f(`${POP}2024-06-01/Drone/RGB/PlotImages/plot_1_accession_A.png`),
+        f(`${POP}2024-06-01/Drone/RGB/dem.tif`),
+      ]),
+    ).toEqual([])
+  })
+})
+
+describe("orthosFromListing at site level", () => {
+  it("names the population when listing a whole site", () => {
+    const out = orthosFromListing(
+      [
+        {
+          object_name:
+            "Processed/2024/Exp/Davis/Cowpea/2024-06-01/Drone/RGB/odm_orthophoto-a.tif",
+          last_modified: "2024-06-02T00:00:00Z",
+        } as FileMetadata,
+      ],
+      true,
+    )
+    expect(out[0].label).toBe("2024-06-01 · Drone/RGB · Cowpea")
   })
 })

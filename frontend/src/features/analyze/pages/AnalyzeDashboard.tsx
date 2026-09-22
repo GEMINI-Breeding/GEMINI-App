@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { idAsString } from "@/features/admin/lib/ids"
 import { TraitCharts } from "../components/TraitCharts"
 import { AnalyzeMap } from "./AnalyzeMap"
+import { AnalyzeTable } from "./AnalyzeTable"
 import { MultivariateAnalyze } from "./MultivariateAnalyze"
 
 export function AnalyzeDashboard() {
@@ -55,8 +56,8 @@ export function AnalyzeDashboard() {
             to: "/analyze",
             search: {
               view:
-                v === "multi" || v === "map"
-                  ? (v as "multi" | "map")
+                v === "multi" || v === "map" || v === "table"
+                  ? (v as "multi" | "map" | "table")
                   : undefined,
             },
             replace: false,
@@ -72,6 +73,9 @@ export function AnalyzeDashboard() {
           </TabsTrigger>
           <TabsTrigger value="map" data-testid="analyze-tab-map">
             Map
+          </TabsTrigger>
+          <TabsTrigger value="table" data-testid="analyze-tab-table">
+            Table
           </TabsTrigger>
         </TabsList>
 
@@ -136,6 +140,9 @@ export function AnalyzeDashboard() {
 
         <TabsContent value="map" className="mt-6">
           <AnalyzeMap />
+        </TabsContent>
+        <TabsContent value="table" className="mt-6">
+          <AnalyzeTable />
         </TabsContent>
       </Tabs>
     </div>

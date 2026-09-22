@@ -92,8 +92,7 @@ describe("multivariate API client", () => {
         "/api/multivariate_analysis/matrix",
       ],
       [
-        () =>
-          fetchSpatial({ trait_names: ["a"], aggregation: "mean" }),
+        () => fetchSpatial({ trait_names: ["a"], aggregation: "mean" }),
         "/api/multivariate_analysis/spatial",
       ],
       [

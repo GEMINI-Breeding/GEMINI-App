@@ -12,8 +12,6 @@ const HEIGHT = 480
 const PAD = { left: 64, right: 16, top: 16, bottom: 56 }
 
 export function GgeBiplot({ response }: Props) {
-  const [showPolygon, setShowPolygon] = useState(true)
-
   if (response.status !== "ok") {
     return (
       <p className="text-sm text-muted-foreground" data-testid="mv-gge-empty">
@@ -22,6 +20,13 @@ export function GgeBiplot({ response }: Props) {
     )
   }
 
+  return <GgeBiplotBody response={response} />
+}
+
+// Split from the guard above so hooks never run after an early return
+// (an empty → populated response would otherwise change the hook count).
+function GgeBiplotBody({ response }: Props) {
+  const [showPolygon, setShowPolygon] = useState(true)
   // Joint extent across genotype + env scores so both fit the frame.
   const allX = [
     ...response.accession_scores.map((s) => s.pc1),
@@ -50,21 +55,17 @@ export function GgeBiplot({ response }: Props) {
 
   const polygonPath = useMemo(() => {
     if (!showPolygon || response.polygon.length < 3) return null
-    const byName = new Map(
-      response.accession_scores.map((s) => [s.name, s]),
-    )
+    const byName = new Map(response.accession_scores.map((s) => [s.name, s]))
     const pts = response.polygon
       .map((n) => byName.get(n))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
     if (pts.length < 3) return null
-    return (
-      pts
-        .map((p, i) => {
-          const cmd = i === 0 ? "M" : "L"
-          return `${cmd}${xScale(p.pc1).toFixed(2)},${yScale(p.pc2).toFixed(2)}`
-        })
-        .join(" ") + " Z"
-    )
+    return `${pts
+      .map((p, i) => {
+        const cmd = i === 0 ? "M" : "L"
+        return `${cmd}${xScale(p.pc1).toFixed(2)},${yScale(p.pc2).toFixed(2)}`
+      })
+      .join(" ")} Z`
   }, [response.polygon, response.accession_scores, showPolygon, xScale, yScale])
 
   const evr = response.explained_variance_ratio
@@ -93,6 +94,8 @@ export function GgeBiplot({ response }: Props) {
         width={WIDTH}
         height={HEIGHT}
         className="rounded-md border bg-background"
+        role="img"
+        aria-label="GGE biplot"
         data-testid="mv-gge-svg"
       >
         {/* Axes through origin */}
@@ -175,10 +178,7 @@ export function GgeBiplot({ response }: Props) {
 
         {/* Accession points */}
         {response.accession_scores.map((s) => (
-          <g
-            key={`acc-${s.name}`}
-            data-testid={`mv-gge-acc-${s.name}`}
-          >
+          <g key={`acc-${s.name}`} data-testid={`mv-gge-acc-${s.name}`}>
             <circle
               cx={xScale(s.pc1)}
               cy={yScale(s.pc2)}

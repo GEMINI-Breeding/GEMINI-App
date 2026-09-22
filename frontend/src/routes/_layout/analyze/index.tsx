@@ -4,7 +4,7 @@ import { z } from "zod"
 import { AnalyzeDashboard } from "@/features/analyze/pages/AnalyzeDashboard"
 
 const analyzeSearchSchema = z.object({
-  view: z.enum(["single", "multi", "map"]).optional(),
+  view: z.enum(["single", "multi", "map", "table"]).optional(),
 })
 
 export const Route = createFileRoute("/_layout/analyze/")({
