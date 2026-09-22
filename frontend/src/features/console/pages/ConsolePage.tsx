@@ -9,6 +9,8 @@ interface LogLine {
   level: string
   message: string
   ts: number
+  /** "api", or the worker that logged it: "ml", "odm", "geo", … */
+  source?: string
 }
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -24,6 +26,9 @@ export function ConsolePage() {
   const [sidecarLog, setSidecarLog] = useState<string>("")
   const [autoScroll, setAutoScroll] = useState(true)
   const [filter, setFilter] = useState("")
+  const [source, setSource] = useState("")
+  // "Clear" hides everything logged so far; polling keeps adding newer lines.
+  const [clearedAt, setClearedAt] = useState(0)
   const [copied, setCopied] = useState(false)
   const [status, setStatus] = useState<"connecting" | "ok" | "error">(
     "connecting",
@@ -81,11 +86,21 @@ export function ConsolePage() {
     }
   }, [])
 
+  const sources = [...new Set(lines.map((l) => l.source ?? "api"))].sort()
+  const filtered = lines.filter(
+    (l) =>
+      l.ts > clearedAt &&
+      (!source || (l.source ?? "api") === source) &&
+      (!filter || l.message.toLowerCase().includes(filter.toLowerCase())),
+  )
+
+  // Follow new lines while auto-scroll is on.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when a line arrives
   useEffect(() => {
     if (autoScroll) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" })
     }
-  }, [autoScroll])
+  }, [autoScroll, filtered.length])
 
   const handleScroll = () => {
     const el = containerRef.current
@@ -94,14 +109,10 @@ export function ConsolePage() {
     setAutoScroll(atBottom)
   }
 
-  const filtered = filter
-    ? lines.filter((l) =>
-        l.message.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : lines
-
   const handleCopy = () => {
-    const text = filtered.map((l) => l.message).join("\n")
+    const text = filtered
+      .map((l) => `[${l.source ?? "api"}] ${l.message}`)
+      .join("\n")
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -138,6 +149,20 @@ export function ConsolePage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            className="h-8 rounded border border-border bg-background px-2 text-xs text-foreground"
+            data-testid="console-source-filter"
+            aria-label="Log source"
+          >
+            <option value="">All sources</option>
+            {sources.map((s) => (
+              <option key={s} value={s}>
+                {s === "api" ? "API" : `${s} worker`}
+              </option>
+            ))}
+          </select>
           <input
             type="text"
             placeholder="Filter…"
@@ -163,7 +188,9 @@ export function ConsolePage() {
             variant="outline"
             size="sm"
             className="h-8 text-xs"
-            onClick={() => setLines([])}
+            onClick={() =>
+              setClearedAt(lines.length ? lines[lines.length - 1].ts : 0)
+            }
           >
             Clear
           </Button>
@@ -199,7 +226,12 @@ export function ConsolePage() {
             <div
               key={i}
               className={`leading-5 whitespace-pre-wrap break-all ${LEVEL_COLOR[line.level] ?? "text-zinc-300"}`}
+              data-testid="console-line"
+              data-source={line.source ?? "api"}
             >
+              <span className="mr-2 text-zinc-500">
+                [{line.source ?? "api"}]
+              </span>
               {line.message}
             </div>
           ))
