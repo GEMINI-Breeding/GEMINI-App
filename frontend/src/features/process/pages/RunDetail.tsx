@@ -68,13 +68,21 @@ import {
   type TraitDialogState,
   TraitExtractionDialog,
 } from "@/features/process/components/TraitExtractionDialog"
+import {
+  featureBbox,
+  type PreviewPlot,
+} from "@/features/process/components/TraitPreview"
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
 import {
   capabilityWarningForStep,
   useCapabilities,
   useDockerStatus,
 } from "@/features/process/hooks/useCapabilities"
-import { usePlotGeometryVersions } from "@/features/process/hooks/usePlotGeometry"
+import {
+  useLoadPlotGeometryVersion,
+  usePlotGeometryVersions,
+} from "@/features/process/hooks/usePlotGeometry"
+import { s3UrlForOrtho } from "@/features/process/lib/activeOrtho"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import {
   buildOrthoVersions,
@@ -1114,25 +1122,67 @@ export function RunDetail() {
       )
     : undefined
 
-  // The dialog picks the newest ortho when it opens — but if the file
-  // listings hadn't loaded yet there was nothing to pick, and Run stayed
-  // disabled until the user chose one by hand. Fill it in once they arrive.
+  // Live threshold preview: the chosen boundary version's plots, cropped
+  // from the chosen ortho by TiTiler.
+  const previewBoundaries = useLoadPlotGeometryVersion(
+    traitDialogOpen && scope ? processedPrefix(scope) : null,
+    traitDialogOpen ? traitDialogState.boundaryVersion : null,
+  )
+  const traitPreview = useMemo(() => {
+    const feats = (
+      previewBoundaries.data?.state_snapshot?.boundaries as
+        | { features?: GeoJSON.Feature[] }
+        | undefined
+    )?.features
+    if (!traitOrtho || !feats?.length) return null
+    const plots: PreviewPlot[] = []
+    for (const [i, f] of feats.entries()) {
+      const p = (f.properties ?? {}) as Record<string, unknown>
+      if (p.role === "outer") continue
+      const bbox = featureBbox(f)
+      if (!bbox) continue
+      const n = p.plot ?? p.plot_number
+      plots.push({ label: n != null ? `Plot ${n}` : `Plot #${i + 1}`, bbox })
+    }
+    return plots.length ? { s3Url: s3UrlForOrtho(traitOrtho), plots } : null
+  }, [previewBoundaries.data, traitOrtho])
+
+  // The dialog picks the newest ortho and the active boundary version when
+  // it opens — but if those listings hadn't loaded yet there was nothing to
+  // pick, and Run stayed disabled until the user chose by hand. Fill them
+  // in once they arrive.
   const newestOrtho = scope
     ? buildOrthoVersions(run, scope, orthoFiles)[0]
     : undefined
+  const defaultBoundaryVersion =
+    boundaryVersions.find((b) => b.is_active)?.version ??
+    boundaryVersions[0]?.version ??
+    null
   useEffect(() => {
-    if (!traitDialogOpen || traitDialogState.orthoVersion !== null) return
-    if (!newestOrtho) return
+    if (!traitDialogOpen) return
+    const needOrtho = traitDialogState.orthoVersion === null && !!newestOrtho
+    const needBoundary =
+      traitDialogState.boundaryVersion === null &&
+      defaultBoundaryVersion !== null
+    if (!needOrtho && !needBoundary) return
     setTraitDialogState((s) => ({
       ...s,
-      orthoVersion: newestOrtho.version,
-      demPath:
-        s.demPath ?? demForOrtho(newestOrtho, orthoFiles, importedDemPath),
+      ...(needOrtho && newestOrtho
+        ? {
+            orthoVersion: newestOrtho.version,
+            demPath:
+              s.demPath ??
+              demForOrtho(newestOrtho, orthoFiles, importedDemPath),
+          }
+        : {}),
+      ...(needBoundary ? { boundaryVersion: defaultBoundaryVersion } : {}),
     }))
   }, [
     traitDialogOpen,
     traitDialogState.orthoVersion,
+    traitDialogState.boundaryVersion,
     newestOrtho,
+    defaultBoundaryVersion,
     orthoFiles,
     importedDemPath,
   ])
@@ -1942,6 +1992,7 @@ export function RunDetail() {
           (o, i, a) => a.findIndex((x) => x.path === o.path) === i,
         )}
         thermalOptions={thermalOptions(flightFiles, traitOrtho?.path ?? null)}
+        preview={traitPreview}
       />
 
       <ThermalGpsBlockedDialog

@@ -179,6 +179,28 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
     await expect(page.getByTestId("trait-thermal")).toContainText(
       "e2e_test_thermal.tif",
     )
+
+    // Live threshold preview: one plot cropped from the ortho, masked in
+    // the browser with the worker's rule.
+    const previewVf = page.getByTestId("trait-preview-vf")
+    await expect(previewVf).toHaveText(/Vegetation fraction \d\.\d{4}/, {
+      timeout: 30_000,
+    })
+    const vfAt = async () =>
+      Number(((await previewVf.textContent()) ?? "").replace(/[^\d.]/g, ""))
+    const vfDefault = await vfAt()
+    const previewPlot = (
+      (await page.getByTestId("trait-preview-plot").textContent()) ?? ""
+    ).replace(/\D/g, "")
+    const slider = page.getByTestId("trait-exg-threshold")
+    await slider.focus()
+    await page.keyboard.press("End") // 0.50: far stricter
+    await expect.poll(vfAt).toBeLessThan(vfDefault)
+    await page.keyboard.press("Home")
+    for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight")
+    await expect(page.getByText("0.10", { exact: true })).toBeVisible()
+    await expect.poll(vfAt).toBe(vfDefault)
+
     await page.getByRole("button", { name: "Run Trait Extraction" }).click()
     await expect(traitRow).toHaveAttribute("data-status", "completed", {
       timeout: 3 * 60_000,
@@ -207,6 +229,17 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
     // Sort by temperature so a plot with vegetation leads.
     await table.getByTestId("analyze-table-sort-trait-Temp_veg_avg_C").click()
     await expect(rows.first()).toContainText("27.5")
+
+    // The preview agrees with the extraction for the previewed plot (the
+    // preview's crop is resampled, so allow a small difference).
+    await table.getByTestId("analyze-table-query").fill(`plot:${previewPlot}`)
+    await expect(rows).toHaveCount(1)
+    const cells = await rows.first().locator("td").allTextContents()
+    const header = await table.locator("thead th").allTextContents()
+    const vfCol = header.findIndex((h) => h.includes("Vegetation_Fraction"))
+    expect(vfCol).toBeGreaterThan(-1)
+    expect(Math.abs(Number(cells[vfCol]) - vfDefault)).toBeLessThan(0.05)
+    await table.getByTestId("analyze-table-query").fill("")
 
     // ── 6. Re-run replaces; deleting a run removes its values. ──────────
     // How many trait records this flight holds (read-only catalog).

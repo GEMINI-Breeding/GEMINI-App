@@ -32,6 +32,7 @@ import {
 import type { PlotGeometryVersion } from "@/features/process/hooks/usePlotGeometry"
 import type { OrthoVersion } from "@/features/process/lib/orthoVersions"
 import type { RasterOption } from "@/features/process/lib/traitInputs"
+import { type PreviewPlot, TraitPreview } from "./TraitPreview"
 
 const NONE = "__none__"
 
@@ -59,6 +60,8 @@ export interface TraitDialogProps {
   submitting?: boolean
   demOptions?: RasterOption[]
   thermalOptions?: RasterOption[]
+  /** For the live threshold preview: the chosen ortho and the plots. */
+  preview?: { s3Url: string; plots: PreviewPlot[] } | null
 }
 
 export function TraitExtractionDialog({
@@ -72,6 +75,7 @@ export function TraitExtractionDialog({
   submitting = false,
   demOptions = [],
   thermalOptions = [],
+  preview = null,
 }: TraitDialogProps) {
   const orthoOptions = orthoVersions.length > 0
   const boundaryOptions = boundaryVersions.length > 0
@@ -79,7 +83,7 @@ export function TraitExtractionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Configure Trait Extraction</DialogTitle>
           <DialogDescription>
@@ -224,6 +228,13 @@ export function TraitExtractionDialog({
               Lower values detect more vegetation; higher values are stricter.
               Worker default is 0.10.
             </p>
+            {preview && (
+              <TraitPreview
+                s3Url={preview.s3Url}
+                plots={preview.plots}
+                threshold={state.exgThreshold}
+              />
+            )}
           </div>
         </div>
 
