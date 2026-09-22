@@ -49,6 +49,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { BoundaryImportPicker } from "@/features/process/components/BoundaryImportPicker"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
 import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
@@ -78,7 +79,10 @@ import {
   type FillPattern,
   generateGridFeatures,
 } from "@/features/process/lib/grid"
-import { rotateFeatures } from "@/features/process/lib/groupTransform"
+import {
+  mirrorFeatures,
+  rotateFeatures,
+} from "@/features/process/lib/groupTransform"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { processedPrefix } from "@/features/process/lib/paths"
 import {
@@ -170,7 +174,12 @@ export function PlotBoundaryPrep({
   } = history.state
 
   // UI-only state — not part of editor history.
-  const [versionToLoad, setVersionToLoad] = useState<number | null>(null)
+  // What the editor last loaded: one of this directory's versions, or one
+  // imported from another directory (another date / sensor / experiment).
+  const [loadSource, setLoadSource] = useState<{
+    directory: string
+    version: number
+  } | null>(null)
   const [versionName, setVersionName] = useState("")
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -544,7 +553,10 @@ export function PlotBoundaryPrep({
     [features],
   )
 
-  const loaded = useLoadPlotGeometryVersion(directory, versionToLoad)
+  const loaded = useLoadPlotGeometryVersion(
+    loadSource?.directory ?? null,
+    loadSource?.version ?? null,
+  )
   useEffect(() => {
     if (!loaded.data?.state_snapshot) return
     const fc = loaded.data.state_snapshot.boundaries
@@ -984,6 +996,20 @@ export function PlotBoundaryPrep({
                         ),
                       },
                       { tag: "rotate" },
+                    )
+                  }}
+                  onFlip={(axis) => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: mirrorFeatures(
+                          stateRef.current.features,
+                          sel,
+                          axis,
+                        ),
+                      },
+                      { tag: "flip" },
                     )
                   }}
                   onDelete={() => {
@@ -1474,12 +1500,28 @@ export function PlotBoundaryPrep({
       <Tabs defaultValue="versions">
         <TabsList>
           <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="import" data-testid="boundary-import-tab">
+            Import from…
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="versions" className="pt-3">
           <VersionPicker
             directory={directory}
-            activeVersion={versionToLoad}
-            onLoad={(v) => setVersionToLoad(v)}
+            activeVersion={
+              loadSource?.directory === directory ? loadSource.version : null
+            }
+            onLoad={(v) => setLoadSource({ directory, version: v })}
+          />
+        </TabsContent>
+        <TabsContent value="import" className="pt-3">
+          <BoundaryImportPicker
+            directory={directory}
+            onImport={(dir, version, plotCount) => {
+              setLoadSource({ directory: dir, version })
+              showSuccessToast(
+                `Imported ${plotCount} plots. Check the fit, then save to keep them here.`,
+              )
+            }}
           />
         </TabsContent>
       </Tabs>

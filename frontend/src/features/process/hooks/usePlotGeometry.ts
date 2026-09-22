@@ -80,6 +80,22 @@ export function usePlotGeometryVersions(directory: string | null | undefined) {
   })
 }
 
+/** One saved version anywhere, for "Import boundaries from…". */
+export type PlotGeometryVersionEverywhere = PlotGeometryVersion & {
+  directory: string
+  plot_count: number
+}
+
+export function useAllPlotGeometryVersions(enabled = true) {
+  return useQuery<PlotGeometryVersionEverywhere[], Error>({
+    queryKey: ["plot-geometry", "versions", "all"],
+    queryFn: async () =>
+      ((await PlotGeometryService.apiPlotGeometryVersionsAllListAllVersions()) ??
+        []) as unknown as PlotGeometryVersionEverywhere[],
+    enabled: isLoggedIn() && enabled,
+  })
+}
+
 export function useLoadPlotGeometryVersion(
   directory: string | null | undefined,
   version: number | null,

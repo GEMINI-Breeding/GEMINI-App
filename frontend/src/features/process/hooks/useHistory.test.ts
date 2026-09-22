@@ -120,4 +120,25 @@ describe("useHistory", () => {
     expect(result.current.canUndo).toBe(false)
     expect(result.current.canRedo).toBe(false)
   })
+
+  it("clearHistory with no argument keeps the current present", () => {
+    const { result } = renderHook(() => useHistory({ n: 0 }))
+    act(() => result.current.set({ n: 7 }))
+    act(() => result.current.clearHistory())
+    expect(result.current.state).toEqual({ n: 7 })
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it("actions keep their identity across edits", () => {
+    // PlotBoundaryPrep's snapshot-load effect depends on replace and
+    // clearHistory; if either changed identity after an edit, the effect
+    // re-ran after its own replace() and looped forever.
+    const { result } = renderHook(() => useHistory({ n: 0 }))
+    const first = result.current
+    act(() => result.current.set({ n: 1 }))
+    act(() => result.current.replace({ n: 2 }))
+    expect(result.current.clearHistory).toBe(first.clearHistory)
+    expect(result.current.replace).toBe(first.replace)
+    expect(result.current.set).toBe(first.set)
+  })
 })

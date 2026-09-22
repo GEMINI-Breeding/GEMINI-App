@@ -6,6 +6,8 @@ import { NumberField } from "@/components/ui/number-field"
 export type SelectionActionBarProps = {
   count: number
   onRotate: (degrees: number) => void
+  /** Renumber from the opposite side: rows = top↔bottom, cols = left↔right. */
+  onFlip: (axis: "rows" | "cols") => void
   onDelete: () => void
   onClear: () => void
   onSelectAllInBlock: () => void
@@ -25,6 +27,7 @@ export type SelectionActionBarProps = {
 export function SelectionActionBar({
   count,
   onRotate,
+  onFlip,
   onDelete,
   onClear,
   onSelectAllInBlock,
@@ -131,6 +134,26 @@ export function SelectionActionBar({
           onClick={() => onRotate(10)}
         >
           +10°
+        </Button>
+
+        <span className="ml-2 text-xs">Flip:</span>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid="selection-flip-rows"
+          title="Renumber top ↔ bottom (plots keep their numbers, swap footprints)"
+          onClick={() => onFlip("rows")}
+        >
+          ↕
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid="selection-flip-cols"
+          title="Renumber left ↔ right (plots keep their numbers, swap footprints)"
+          onClick={() => onFlip("cols")}
+        >
+          ↔
         </Button>
 
         <div className="ml-auto">

@@ -474,8 +474,79 @@ test.describe("Plot Boundary Prep — UX behaviors", () => {
         .map((c) => c.plot)
     expect(byCol(2)).toEqual([1, 2, 3])
     expect(byCol(3)).toEqual([6, 5, 4])
+
+    // ── 8. Flip rows: plots keep their numbers but swap footprints with
+    //       their top↔bottom partner, so plot 1 now sits where plot 6 was.
+    //       Undo puts them back. ─────────────────────────────────────────
+    const before = await readCellCentroids(page)
+    const anyCell = await page.evaluate(() => {
+      const w = window as unknown as {
+        __leafletMap__?: { eachLayer?: (cb: (l: unknown) => void) => void }
+      }
+      const ids: string[] = []
+      w.__leafletMap__?.eachLayer?.((l) => {
+        const gj = (l as { toGeoJSON?: () => GeoJSON.Feature }).toGeoJSON?.()
+        const c = (gj?.properties as Record<string, unknown> | undefined)
+          ?.cellId
+        if (typeof c === "string") ids.push(c)
+      })
+      return ids[0] ?? null
+    })
+    expect(anyCell).toBeTruthy()
+    await fireCellClick(page, anyCell as string, "replace")
+    await page.getByTestId("select-all-in-block").click()
+    await expect(page.getByTestId("selection-count")).toHaveText(
+      "6 cells selected",
+    )
+    await page.getByTestId("selection-flip-rows").click()
+    const flipped = await readCellCentroids(page)
+    const near = (a: [number, number], b: [number, number]) =>
+      Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9
+    expect(near(flipped[1], before[6]), "plot 1 → plot 6's footprint").toBe(
+      true,
+    )
+    expect(near(flipped[6], before[1]), "plot 6 → plot 1's footprint").toBe(
+      true,
+    )
+    expect(near(flipped[2], before[5]), "plot 2 → plot 5's footprint").toBe(
+      true,
+    )
+    await expect(page.locator("text=/6 plots? across 1 block/i")).toBeVisible()
+
+    await page.keyboard.press("ControlOrMeta+z")
+    const undone = await readCellCentroids(page)
+    expect(near(undone[1], before[1]), "undo restores plot 1").toBe(true)
   })
 })
+
+/** Plot number → centroid of its polygon, read off the live map layers. */
+async function readCellCentroids(
+  page: import("@playwright/test").Page,
+): Promise<Record<number, [number, number]>> {
+  return page.evaluate(() => {
+    const w = window as unknown as {
+      __leafletMap__?: { eachLayer?: (cb: (l: unknown) => void) => void }
+    }
+    const out: Record<number, [number, number]> = {}
+    w.__leafletMap__?.eachLayer?.((l) => {
+      const gj = (() => {
+        try {
+          return (l as { toGeoJSON?: () => GeoJSON.Feature }).toGeoJSON?.()
+        } catch {
+          return undefined
+        }
+      })()
+      const p = gj?.properties as Record<string, unknown> | undefined
+      if (!p || p.role === "outer" || typeof p.plot !== "number") return
+      if (gj?.geometry?.type !== "Polygon") return
+      const ring = (gj.geometry as GeoJSON.Polygon).coordinates[0].slice(0, -1)
+      const cx = ring.reduce((a, c) => a + c[0], 0) / ring.length
+      const cy = ring.reduce((a, c) => a + c[1], 0) / ring.length
+      out[p.plot] = [cx, cy]
+    })
+    return out
+  })
+}
 
 /**
  * Drive a cell click through the same Leaflet event chain a real DOM

@@ -2821,6 +2821,10 @@ export type ApiPlotGeometryStitchDirectionGetStitchDirectionResponse = ({
     [key: string]: unknown;
 });
 
+export type ApiPlotGeometryVersionsAllListAllVersionsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
 export type ApiPlotGeometryVersionsListListVersionsData = {
     requestBody: VersionListRequest;
 };

@@ -14,7 +14,8 @@ type Action<T> =
   | { kind: "REPLACE"; entry: HistoryEntry<T> }
   | { kind: "UNDO" }
   | { kind: "REDO" }
-  | { kind: "CLEAR"; entry: HistoryEntry<T> }
+  /** `state` omitted → keep the current present, dropping only past/future. */
+  | { kind: "CLEAR"; state?: T; hasState: boolean }
 
 const COALESCE_MS = 1000
 
@@ -54,7 +55,14 @@ function reduce<T>(s: InternalState<T>, a: Action<T>): InternalState<T> {
       }
     }
     case "CLEAR":
-      return { past: [], present: a.entry, future: [] }
+      return {
+        past: [],
+        present: {
+          state: a.hasState ? (a.state as T) : s.present.state,
+          ts: Date.now(),
+        },
+        future: [],
+      }
   }
 }
 
@@ -103,18 +111,18 @@ export function useHistory<T>(
 
   const undo = useCallback(() => dispatch({ kind: "UNDO" }), [])
   const redo = useCallback(() => dispatch({ kind: "REDO" }), [])
-  const clearHistory = useCallback(
-    (newPresent?: T) => {
-      dispatch({
-        kind: "CLEAR",
-        entry: {
-          state: newPresent !== undefined ? newPresent : state.present.state,
-          ts: Date.now(),
-        },
-      })
-    },
-    [state.present.state],
-  )
+  // Stable, like the other actions: the reducer reads the current present
+  // itself. It used to close over `state.present.state`, so its identity
+  // changed on every edit — and PlotBoundaryPrep's snapshot-load effect,
+  // which lists it as a dependency, re-ran after its own replace() and
+  // re-applied the snapshot forever (Maximum update depth on "Load").
+  const clearHistory = useCallback((newPresent?: T) => {
+    dispatch({
+      kind: "CLEAR",
+      state: newPresent,
+      hasState: newPresent !== undefined,
+    })
+  }, [])
 
   return useMemo(
     () => ({

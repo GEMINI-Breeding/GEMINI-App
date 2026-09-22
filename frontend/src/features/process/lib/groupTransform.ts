@@ -124,3 +124,57 @@ export function rotateFeatures(
     }
   })
 }
+
+/**
+ * Flip the selected cells' numbering across the grid's own axes.
+ *
+ * `"rows"` mirrors top↔bottom (row r takes row minRow+maxRow−r's place),
+ * `"cols"` mirrors left↔right. Each selected cell takes the geometry of
+ * its mirror partner while keeping its own properties (plot / row / col /
+ * accession), so the same footprint ends up numbered from the opposite
+ * corner. Swapping geometry — rather than reflecting coordinates across a
+ * lat/lng axis, as main did — keeps a rotated grid exactly in place.
+ *
+ * Cells without numeric row/col, or whose partner isn't selected, stay
+ * where they are.
+ */
+export function mirrorFeatures(
+  features: GeoJSON.Feature[],
+  selected: ReadonlySet<string>,
+  axis: "rows" | "cols",
+): GeoJSON.Feature[] {
+  if (selected.size === 0) return features
+  type Cell = { row: number; col: number; geometry: GeoJSON.Polygon }
+  const cells = new Map<string, Cell>()
+  const byPos = new Map<string, GeoJSON.Polygon>()
+  let minR = Infinity
+  let maxR = -Infinity
+  let minC = Infinity
+  let maxC = -Infinity
+  for (const f of features) {
+    const id = selectedCellIdOf(f)
+    if (!id || !selected.has(id) || !isPolygonFeature(f)) continue
+    const p = (f.properties ?? {}) as Record<string, unknown>
+    const row = Number(p.row)
+    const col = Number(p.col)
+    if (!Number.isFinite(row) || !Number.isFinite(col)) continue
+    cells.set(id, { row, col, geometry: f.geometry })
+    byPos.set(`${row},${col}`, f.geometry)
+    minR = Math.min(minR, row)
+    maxR = Math.max(maxR, row)
+    minC = Math.min(minC, col)
+    maxC = Math.max(maxC, col)
+  }
+  if (cells.size === 0) return features
+  return features.map((f) => {
+    const id = selectedCellIdOf(f)
+    const cell = id ? cells.get(id) : undefined
+    if (!cell) return f
+    const pr = axis === "rows" ? minR + maxR - cell.row : cell.row
+    const pc = axis === "cols" ? minC + maxC - cell.col : cell.col
+    const partner = byPos.get(`${pr},${pc}`)
+    return partner && partner !== cell.geometry
+      ? { ...f, geometry: partner }
+      : f
+  })
+}

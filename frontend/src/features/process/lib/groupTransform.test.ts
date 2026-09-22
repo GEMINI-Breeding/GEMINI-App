@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  mirrorFeatures,
   rotateFeatures,
   selectionCentroid,
   translateFeatures,
@@ -159,5 +160,90 @@ describe("rotateFeatures", () => {
       col: 7,
       plot: "P-42",
     })
+  })
+})
+
+describe("mirrorFeatures", () => {
+  // 2 rows × 3 cols; each cell's geometry is a unit square at (col, row).
+  const sq = (x: number, y: number): GeoJSON.Polygon => ({
+    type: "Polygon",
+    coordinates: [
+      [
+        [x, y],
+        [x + 1, y],
+        [x + 1, y + 1],
+        [x, y + 1],
+        [x, y],
+      ],
+    ],
+  })
+  const grid = (): GeoJSON.Feature[] => {
+    const out: GeoJSON.Feature[] = [
+      {
+        type: "Feature",
+        properties: { role: "outer", blockId: "block-1" },
+        geometry: sq(0, 0),
+      },
+    ]
+    let plot = 1
+    for (let row = 1; row <= 2; row++)
+      for (let col = 1; col <= 3; col++)
+        out.push({
+          type: "Feature",
+          properties: { cellId: `c${row}${col}`, plot: plot++, row, col },
+          geometry: sq(col, row),
+        })
+    return out
+  }
+  const all = new Set(["c11", "c12", "c13", "c21", "c22", "c23"])
+  const at = (fs: GeoJSON.Feature[], plot: number) =>
+    (
+      fs.find((f) => (f.properties as { plot?: number }).plot === plot)
+        ?.geometry as GeoJSON.Polygon
+    ).coordinates[0][0]
+
+  it("rows: plot 1 takes the bottom-left footprint, plot 4 the top-left", () => {
+    const out = mirrorFeatures(grid(), all, "rows")
+    expect(at(out, 1)).toEqual([1, 2])
+    expect(at(out, 4)).toEqual([1, 1])
+    expect(at(out, 3)).toEqual([3, 2])
+  })
+
+  it("cols: plot 1 takes the top-right footprint", () => {
+    const out = mirrorFeatures(grid(), all, "cols")
+    expect(at(out, 1)).toEqual([3, 1])
+    expect(at(out, 2)).toEqual([2, 1]) // middle column stays
+  })
+
+  it("keeps properties, the footprint set, and the outer untouched", () => {
+    const before = grid()
+    const out = mirrorFeatures(before, all, "rows")
+    expect(out[0]).toBe(before[0])
+    expect(out.map((f) => f.properties)).toEqual(
+      before.map((f) => f.properties),
+    )
+    const footprints = (fs: GeoJSON.Feature[]) =>
+      fs
+        .slice(1)
+        .map((f) => JSON.stringify((f.geometry as GeoJSON.Polygon).coordinates))
+        .sort()
+    expect(footprints(out)).toEqual(footprints(before))
+  })
+
+  it("twice is identity", () => {
+    const before = grid()
+    const twice = mirrorFeatures(
+      mirrorFeatures(before, all, "cols"),
+      all,
+      "cols",
+    )
+    expect(twice.map((f) => f.geometry)).toEqual(before.map((f) => f.geometry))
+  })
+
+  it("only flips within the selection", () => {
+    const out = mirrorFeatures(grid(), new Set(["c11", "c21"]), "rows")
+    expect(at(out, 1)).toEqual([1, 2])
+    expect(at(out, 4)).toEqual([1, 1])
+    expect(at(out, 2)).toEqual([2, 1]) // unselected
   })
 })
