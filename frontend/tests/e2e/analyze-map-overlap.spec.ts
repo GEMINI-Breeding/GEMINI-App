@@ -267,5 +267,39 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     await expect(banner).toBeVisible({ timeout: 30_000 })
     await expect(banner).toContainText(/701/)
     await expect(banner).toContainText(/none match/i)
+
+    // ── Click-through: clicking a plot opens its image dialog. ──────────
+    // The polygons are a deck.gl WebGL layer, so there is no DOM node per
+    // plot — click the canvas where the grid is drawn. The map fits its
+    // view to the polygons' bbox, so the centre is inside a plot.
+    const mapBox = page.getByTestId("trait-map-container")
+    await expect(mapBox).toBeVisible()
+    const box = await mapBox.boundingBox()
+    if (!box) throw new Error("trait map has no box")
+    // Deck resolves clicks from pointer down+up at the same spot; a bare
+    // mouse.click sometimes lands before the hover/pick state settles.
+    const cx = box.x + box.width / 2
+    const cy = box.y + box.height / 2
+    await page.mouse.move(cx, cy)
+    await page.waitForTimeout(300)
+    await page.mouse.down()
+    await page.waitForTimeout(60)
+    await page.mouse.up()
+    await page.waitForTimeout(800)
+
+    const dialog = page.getByTestId("plot-image-dialog")
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    // This run never executed SPLIT_ORTHOMOSAIC (no ODM ortho exists), so
+    // the honest state is "no image yet" — NOT a broken image or a silent
+    // empty dialog. That distinction is the point: the user is told what
+    // to do about it.
+    await expect(page.getByTestId("plot-image-missing")).toBeVisible()
+    await expect(page.getByTestId("plot-image-missing")).toContainText(
+      /split into plot images/i,
+    )
+    // Close via the dialog's own control. Escape doesn't reach it here:
+    // the click left focus on the deck.gl canvas, not inside the dialog.
+    await dialog.getByRole("button", { name: /close/i }).click()
+    await expect(dialog).toBeHidden()
   })
 })

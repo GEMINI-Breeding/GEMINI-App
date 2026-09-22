@@ -32,6 +32,9 @@ import {
   useAerialScopeContext,
 } from "@/features/process/components/AerialScopePicker"
 import { TraitMap } from "@/features/process/components/TraitMap"
+import { processedPopulationPrefix } from "@/features/process/lib/paths"
+import { PlotImageDialog } from "../components/PlotImageDialog"
+import { usePlotImages } from "../hooks/usePlotImages"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
 import { usePlotTraitValues } from "../hooks/usePlotTraitValues"
 import { joinTraitToPolygons, plotKey } from "../lib/joinTraitToPolygons"
@@ -108,6 +111,24 @@ export function AnalyzeMap() {
   })
 
   const traitValues = valuesQuery.data?.values ?? null
+
+  // Per-plot PNGs for the click-through. The scope has no flight date, so
+  // list from the population prefix and let usePlotImages index every
+  // PlotImages/ directory under it.
+  const plotImagesPrefix =
+    ctx.seasonName && ctx.experimentName && ctx.siteName && ctx.populationName
+      ? processedPopulationPrefix({
+          year: ctx.seasonName,
+          experiment: ctx.experimentName,
+          location: ctx.siteName,
+          population: ctx.populationName,
+        })
+      : null
+  const plotImagesQuery = usePlotImages(plotImagesPrefix)
+  const [clickedPlot, setClickedPlot] = useState<{
+    plot: number
+    props: Record<string, unknown>
+  } | null>(null)
 
   // Join the values onto the polygons. When no trait is chosen we just
   // pass the unjoined FC through (TraitMap will render outline-only).
@@ -271,8 +292,22 @@ export function AnalyzeMap() {
               ? selectedTrait.trait_name
               : undefined
           }
+          onPlotClick={(plot, props) => setClickedPlot({ plot, props })}
         />
       )}
+
+      <PlotImageDialog
+        open={clickedPlot !== null}
+        onClose={() => setClickedPlot(null)}
+        plot={clickedPlot?.plot ?? null}
+        properties={clickedPlot?.props}
+        objectPath={
+          clickedPlot
+            ? (plotImagesQuery.data?.get(clickedPlot.plot) ?? null)
+            : null
+        }
+        loading={plotImagesQuery.isLoading}
+      />
     </div>
   )
 }

@@ -56,11 +56,21 @@ export function classColour(cls: string): string {
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Old Phase-pre-migration analyze URL. Kept as a stub returning empty
- * string so the Phase-10 callsites (TraitMap / TraitsTable / MasterTable /
- * QueryTab / PlotViewerWidget) keep compiling until Phase 10 rewires them
- * onto `objectPath`. Returning empty string makes the fetch fail predictably
- * (rather than 404'ing against a nonexistent endpoint).
+ * Always returns "" — there is no `(recordId, plotId)` → image route on
+ * GEMINIbase, and there is no plan to add one.
+ *
+ * The old backend addressed plot images by trait-record id. GEMINIbase
+ * addresses them by MinIO object path, which is what `objectImageUrl` +
+ * `objectPath` do, and what the Analyze map's click-through now uses (see
+ * `features/analyze/hooks/usePlotImages.ts`, which indexes the PNGs
+ * SPLIT_ORTHOMOSAIC writes).
+ *
+ * The one remaining caller is `PlotImage`'s `recordId`/`plotId` branch,
+ * reached only from the dashboard's PlotViewerWidget — whose whole data
+ * layer is gated off behind `DASHBOARD_DATA_AVAILABLE`. Returning "" makes
+ * that branch render the component's error state rather than fetching a
+ * route that doesn't exist. Delete this together with that branch when the
+ * dashboard is rewired onto object paths (merge_plan.md Phase 3, 3D).
  */
 export function plotImageUrl(_recordId: string, _plotId: string): string {
   return ""

@@ -130,6 +130,12 @@ export type TraitMapProps = {
   orthoTileUrl?: string
   /** Basemap layer behind the ortho/polygons. Default Esri (satellite). */
   basemap?: "esri" | "osm"
+  /**
+   * Fires when a plot polygon is clicked, with its plot number and raw
+   * feature properties. Omit to leave the map non-interactive (the layer
+   * stays `pickable` either way, for tooltips).
+   */
+  onPlotClick?: (plot: number, props: Record<string, unknown>) => void
 }
 
 export function TraitMap({
@@ -137,6 +143,7 @@ export function TraitMap({
   traitColumn,
   orthoTileUrl,
   basemap = "esri",
+  onPlotClick,
 }: TraitMapProps) {
   const { range, viewState } = useMemo(() => {
     let lo = Infinity
@@ -203,6 +210,26 @@ export function TraitMap({
         initialViewState={viewState}
         controller={true}
         layers={[layer]}
+        // On the DeckGL component, not the layer: `getTooltip` lives here
+        // and demonstrably receives picking info, whereas a layer-level
+        // onClick did not fire (the tooltip showed the plot while the
+        // handler stayed silent).
+        onClick={
+          onPlotClick
+            ? (info) => {
+                const object = (info as { object?: GeoJSON.Feature | null })
+                  .object
+                if (!object) return
+                const props = (object.properties ?? {}) as Record<
+                  string,
+                  unknown
+                >
+                const raw = props.plot ?? props.plot_number
+                const plot = typeof raw === "number" ? raw : Number(raw)
+                if (Number.isFinite(plot)) onPlotClick(plot, props)
+              }
+            : undefined
+        }
         style={{
           position: "absolute",
           top: "0",

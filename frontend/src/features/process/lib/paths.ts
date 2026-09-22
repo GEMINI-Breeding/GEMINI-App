@@ -45,6 +45,24 @@ export function yearFromDate(date: string | null | undefined): string {
  * COG, log, traits, plot-boundaries) are scope-wide products of one or
  * more datasets fed to the same job.
  */
+/**
+ * Processed prefix down to the POPULATION — no date/platform/sensor.
+ *
+ * The Analyze scope is experiment/season/site/population: plots and
+ * trait_records aren't tied to a flight date, so a page that wants every
+ * artifact for a field (e.g. all PlotImages/ across flights) has to list
+ * from here and recurse.
+ */
+export function processedPopulationPrefix(scope: {
+  year: string
+  experiment: string
+  location: string
+  population: string
+}): string {
+  const { year, experiment, location, population } = scope
+  return `Processed/${year}/${experiment}/${location}/${population}/`
+}
+
 export function processedPrefix(scope: AerialScope): string {
   const { year, experiment, location, population, date, platform, sensor } =
     scope
