@@ -88,6 +88,7 @@ export const DashboardCanvas = forwardRef<HTMLDivElement, DashboardCanvasProps>(
     return (
       <div
         ref={ref}
+        data-testid="dashboard-canvas"
         className={`flex-1 min-h-0 relative transition-colors duration-100 overscroll-contain
           ${isDragging ? "overflow-hidden" : "overflow-y-auto"}
           ${isOver ? "bg-primary/[0.03]" : ""}`}

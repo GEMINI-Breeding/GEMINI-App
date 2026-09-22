@@ -8,7 +8,6 @@
  * - Per-column value filters inline in the table header
  */
 
-import { useQueries } from "@tanstack/react-query"
 import {
   ChevronDown,
   ChevronLeft,
@@ -24,11 +23,7 @@ import {
   X,
 } from "lucide-react"
 import { useMemo, useState } from "react"
-import {
-  authHeaders,
-  PlotImage,
-  type Prediction,
-} from "@/components/Common/PlotImage"
+import { PlotImage, type Prediction } from "@/components/Common/PlotImage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,7 +46,6 @@ import {
 } from "@/components/ui/table"
 import {
   applyFilters,
-  DASHBOARD_DATA_AVAILABLE,
   formatDashboardValue,
   useMultiTraitGeojson,
   useTraitRecordGeojson,
@@ -59,10 +53,12 @@ import {
 } from "../hooks/useTraitData"
 import type { PlotViewerConfig } from "../types"
 
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  return base ? `${base}${path}` : path
-}
+// Detection overlay: main fetched per-run box predictions from
+// `/api/v1/pipeline-runs/{id}/inference-results`, which GEMINIbase does not
+// have. Detection *counts* reach the dashboard as ordinary traits
+// ("<class> count (<label>)"); boxes would need their own route, so the
+// overlay stays empty and its toggle hidden.
+const NO_PREDICTIONS: Record<string, Prediction[]> = {}
 
 // ── Column filter dropdown ────────────────────────────────────────────────────
 
@@ -82,6 +78,7 @@ function ColFilterDropdown({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          type="button"
           className={`ml-0.5 inline-flex items-center rounded p-0.5 transition-colors hover:bg-muted ${isActive ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
           title={`Filter ${col.replace(/_/g, " ")}`}
         >
@@ -159,48 +156,7 @@ export function PlotViewerWidget({
     return []
   }, [config.traitRecordIds, config.traitRecordId])
 
-  // Batch-fetch inference results for all active records (for detection overlay)
-  const activeRunIds = useMemo(() => {
-    if (!allRecords) return [] as string[]
-    const ids = new Set<string>()
-    activeIds.forEach((rid) => {
-      const rec = allRecords.find((r) => r.id === rid)
-      if (rec?.run_id) ids.add(rec.run_id)
-    })
-    return [...ids]
-  }, [allRecords, activeIds])
-
-  // `/api/v1/pipeline-runs/{id}/inference-results` is an old-backend route
-  // with no GEMINIbase equivalent. activeRunIds is empty while the dashboard
-  // data layer is off, so this wouldn't fire anyway — gate it explicitly so
-  // that stays true if the records hook is ever re-enabled ahead of this one.
-  const inferenceResults = useQueries({
-    queries: activeRunIds.map((runId) => ({
-      queryKey: ["inference-results", runId],
-      queryFn: () =>
-        fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), {
-          headers: authHeaders(),
-        }).then((r) => (r.ok ? r.json() : null)),
-      enabled: DASHBOARD_DATA_AVAILABLE,
-      staleTime: 60_000,
-    })),
-  })
-
-  const predsByPlot = useMemo<Record<string, Prediction[]>>(() => {
-    const map: Record<string, Prediction[]> = {}
-    inferenceResults.forEach((res) => {
-      const data = res.data
-      if (!data?.available) return
-      const images: Array<{ name: string; plot?: string }> = data.images ?? []
-      const predictions: Prediction[] = data.predictions ?? []
-      for (const img of images) {
-        if (!img.plot) continue
-        const preds = predictions.filter((p) => p.image === img.name)
-        if (preds.length > 0) map[img.plot] = preds
-      }
-    })
-    return map
-  }, [inferenceResults])
+  const predsByPlot = NO_PREDICTIONS
 
   const inferenceAvailable = Object.keys(predsByPlot).length > 0
 
@@ -272,7 +228,7 @@ export function PlotViewerWidget({
           source: label,
         })
       })
-      geoData.metric_columns.slice(0, 4).forEach((m) => metricSet.add(m))
+      for (const m of geoData.metric_columns.slice(0, 4)) metricSet.add(m)
     })
     return { allPlots: plots, metricCols: [...metricSet].slice(0, 4) }
   }, [activeIds, singleGeo.data, multiGeo.data, filters, allRecords])
@@ -386,6 +342,7 @@ export function PlotViewerWidget({
         </div>
         {activeColFilterCount > 0 && (
           <button
+            type="button"
             className="text-xs text-primary hover:underline whitespace-nowrap"
             onClick={() => setColFilters({})}
           >
@@ -394,6 +351,7 @@ export function PlotViewerWidget({
           </button>
         )}
         <button
+          type="button"
           className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => setTableCollapsed((v) => !v)}
           title={tableCollapsed ? "Show plot list" : "Hide plot list"}
@@ -448,6 +406,7 @@ export function PlotViewerWidget({
                   >
                     <TableCell className="py-1">
                       <button
+                        type="button"
                         onClick={() => togglePin(p)}
                         className={`p-0.5 rounded transition-colors ${isPinned ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
                         title={isPinned ? "Unpin" : "Pin plot"}
@@ -499,6 +458,7 @@ export function PlotViewerWidget({
               {inferenceAvailable && (
                 <>
                   <button
+                    type="button"
                     onClick={() => setShowDetections((v) => !v)}
                     title={
                       showDetections ? "Hide detections" : "Show detections"
@@ -510,6 +470,7 @@ export function PlotViewerWidget({
                   </button>
                   {showDetections && (
                     <button
+                      type="button"
                       onClick={() => setShowLabels((v) => !v)}
                       className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
                     >
@@ -520,6 +481,7 @@ export function PlotViewerWidget({
                   {showDetections && uniqueClasses.length > 1 && (
                     <div className="flex items-center gap-0.5 border rounded text-xs">
                       <button
+                        type="button"
                         onClick={() =>
                           setActiveClass((c) => {
                             const i = uniqueClasses.indexOf(c ?? "")
@@ -534,6 +496,7 @@ export function PlotViewerWidget({
                         {activeClass ?? "All"}
                       </span>
                       <button
+                        type="button"
                         onClick={() =>
                           setActiveClass((c) => {
                             const i = uniqueClasses.indexOf(c ?? "")
@@ -575,6 +538,7 @@ export function PlotViewerWidget({
                       {p.plotId}
                     </span>
                     <button
+                      type="button"
                       onClick={() => togglePin(p)}
                       className="text-muted-foreground hover:text-destructive"
                     >
@@ -588,8 +552,11 @@ export function PlotViewerWidget({
                   )}
                   <div className="w-full" style={{ height: 220 }}>
                     <PlotImage
-                      recordId={p.recordId}
-                      plotId={p.plotId}
+                      objectPath={
+                        typeof p.properties._image === "string"
+                          ? `gemini/${p.properties._image}`
+                          : undefined
+                      }
                       rotate={
                         allRecords?.find((r) => r.id === p.recordId)
                           ?.pipeline_type === "ground"

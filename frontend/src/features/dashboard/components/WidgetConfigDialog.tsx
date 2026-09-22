@@ -74,7 +74,10 @@ function RecordSelector({
         value={value || "__none__"}
         onValueChange={(v) => onChange(v === "__none__" ? null : v)}
       >
-        <SelectTrigger className="h-8 text-xs">
+        <SelectTrigger
+          className="h-8 text-xs"
+          data-testid={`widget-record-${label.split(" ")[0].toLowerCase()}`}
+        >
           <SelectValue placeholder="Select a pipeline run…" />
         </SelectTrigger>
         <SelectContent>
@@ -330,7 +333,10 @@ function MetricSelect({
           value={value || "__none__"}
           onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
         >
-          <SelectTrigger className="h-8 text-xs">
+          <SelectTrigger
+            className="h-8 text-xs"
+            data-testid={`widget-metric-${label.split(" ")[0].toLowerCase()}`}
+          >
             <SelectValue placeholder="Select metric…" />
           </SelectTrigger>
           <SelectContent>

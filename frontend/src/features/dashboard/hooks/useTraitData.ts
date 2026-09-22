@@ -1,77 +1,71 @@
 /**
  * React Query wrappers for trait data used by dashboard widgets.
  *
- * STATUS: every hook here reaches `analyzeApi`, which still targets the old
- * FastAPI backend's `/api/v1/analyze/*` routes. GEMINIbase has no equivalent
- * — the Analyze feature was rebuilt on `trait_records` + multivariate
- * endpoints and does not use this module at all. So these hooks 404.
- *
- * `useTraitRecords` was gated with `enabled: false` to keep the mount quiet,
- * but the rest were not: any configured widget fired a request that 404'd on
- * the home page. No E2E spec visits the home dashboard, which is why the
- * console errors were never caught.
- *
- * `DASHBOARD_DATA_AVAILABLE` is the single switch. While false, the hooks
- * short-circuit instead of issuing doomed requests, and `DashboardBuilder`
- * tells the user the data layer isn't connected rather than rendering
- * permanently-empty widgets. Rewiring onto the new surface is merge_plan.md
- * Phase 3, item 3D; flip this to true as part of that work.
+ * Widgets were written against main's "trait record" (one extraction run's
+ * GeoJSON). They now read GEMINIbase through the adapter in
+ * `../lib/traitCatalog.ts` + `../lib/recordSource.ts`: a record is every
+ * trait value sharing an experiment, season, site, population and date.
  */
 
 import { useQueries, useQuery } from "@tanstack/react-query"
-import {
-  analyzeApi,
-  type TraitRecord,
-  type TraitsResponse,
-} from "@/features/analyze/api"
-
-/**
- * False until the dashboard is rewired onto GEMINIbase's trait surface.
- * Every hook below checks it, so no widget issues a request that can only
- * 404. See the module header.
- */
-export const DASHBOARD_DATA_AVAILABLE = false
+import type { TraitRecord, TraitsResponse } from "@/features/analyze/api"
+import { fetchRecordGeojson, fetchTraitRecords } from "../lib/recordSource"
 
 // ── All trait records (catalog) ───────────────────────────────────────────────
 
 export function useTraitRecords() {
   return useQuery({
     queryKey: ["trait-records"],
-    queryFn: () => analyzeApi.listTraitRecords(),
-    enabled: DASHBOARD_DATA_AVAILABLE,
+    queryFn: fetchTraitRecords,
     staleTime: 30_000,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   })
 }
 
-// ── GeoJSON for a single trait record ─────────────────────────────────────────
+// ── GeoJSON for one or more records ───────────────────────────────────────────
+
+/**
+ * Query options for one record's per-plot FeatureCollection. The matrix
+ * endpoint needs the trait names, which come from the catalog, so it waits
+ * for `records`. A saved widget whose record is gone fails with a message
+ * rather than silently rendering nothing.
+ */
+export function recordGeojsonQuery(
+  id: string,
+  records: TraitRecord[] | undefined,
+) {
+  return {
+    queryKey: ["trait-record-geojson", id],
+    queryFn: (): Promise<TraitsResponse> => {
+      const rec = records?.find((r) => r.id === id)
+      if (!rec) {
+        throw new Error(
+          "This trait record no longer exists. Edit the widget and pick another.",
+        )
+      }
+      return fetchRecordGeojson(id, rec.trait_columns)
+    },
+    enabled: Boolean(id) && records !== undefined,
+    staleTime: 5 * 60_000,
+    retry: false,
+  }
+}
 
 export function useTraitRecordGeojson(recordId: string | null) {
+  const { data: records } = useTraitRecords()
   return useQuery({
-    queryKey: ["trait-record-geojson", recordId],
-    queryFn: () => analyzeApi.getTraitRecordGeojson(recordId!),
-    enabled: DASHBOARD_DATA_AVAILABLE && !!recordId,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: true,
-    // Don't retry 404s — the file is missing on disk, retrying won't help
-    retry: (failureCount, error: any) =>
-      error?.status !== 404 && failureCount < 2,
+    ...recordGeojsonQuery(recordId ?? "", records),
+    enabled: Boolean(recordId) && records !== undefined,
   })
 }
 
 // ── GeoJSON for multiple records (temporal charts) ────────────────────────────
 
 export function useMultiTraitGeojson(recordIds: string[]) {
+  const { data: records } = useTraitRecords()
   const results = useQueries({
-    queries: recordIds.map((id) => ({
-      queryKey: ["trait-record-geojson", id],
-      queryFn: () => analyzeApi.getTraitRecordGeojson(id),
-      enabled: DASHBOARD_DATA_AVAILABLE,
-      staleTime: 5 * 60_000,
-      retry: (failureCount: number, error: any) =>
-        error?.status !== 404 && failureCount < 2,
-    })),
+    queries: recordIds.map((id) => recordGeojsonQuery(id, records)),
   })
 
   const loading = results.some((r) => r.isLoading)
@@ -81,18 +75,6 @@ export function useMultiTraitGeojson(recordIds: string[]) {
   const firstValid = data.find((d) => d !== null) ?? null
 
   return { data, loading, error, firstValid }
-}
-
-// ── Plot IDs with images for a record ─────────────────────────────────────────
-
-export function useImagePlotIds(recordId: string | null) {
-  return useQuery({
-    queryKey: ["trait-record-image-plot-ids", recordId],
-    queryFn: () => analyzeApi.getTraitRecordImagePlotIds(recordId!),
-    enabled: DASHBOARD_DATA_AVAILABLE && !!recordId,
-    staleTime: 5 * 60_000,
-    select: (d) => d.plot_ids,
-  })
 }
 
 // ── Value formatter ───────────────────────────────────────────────────────────

@@ -56,27 +56,6 @@ export function classColour(cls: string): string {
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Always returns "" — there is no `(recordId, plotId)` → image route on
- * GEMINIbase, and there is no plan to add one.
- *
- * The old backend addressed plot images by trait-record id. GEMINIbase
- * addresses them by MinIO object path, which is what `objectImageUrl` +
- * `objectPath` do, and what the Analyze map's click-through now uses (see
- * `features/analyze/hooks/usePlotImages.ts`, which indexes the PNGs
- * SPLIT_ORTHOMOSAIC writes).
- *
- * The one remaining caller is `PlotImage`'s `recordId`/`plotId` branch,
- * reached only from the dashboard's PlotViewerWidget — whose whole data
- * layer is gated off behind `DASHBOARD_DATA_AVAILABLE`. Returning "" makes
- * that branch render the component's error state rather than fetching a
- * route that doesn't exist. Delete this together with that branch when the
- * dashboard is rewired onto object paths (merge_plan.md Phase 3, 3D).
- */
-export function plotImageUrl(_recordId: string, _plotId: string): string {
-  return ""
-}
-
-/**
  * Build the GEMINIbase file-download URL for a MinIO object path. The
  * backend mounts everything in the bucket called "gemini" by default, so
  * pass paths in the form "gemini/Processed/.../plot_3_accession_X.png".
@@ -107,13 +86,6 @@ export function authHeaders(): Record<string, string> {
 
 export interface PlotImageProps {
   /**
-   * Phase 10 (Analyze) callsite; pair with `plotId`. Until those callsites
-   * are rewritten onto `objectPath`, the URL helper returns an empty
-   * string and this code path is effectively non-functional.
-   */
-  recordId?: string
-  plotId?: string
-  /**
    * Phase 8+ callsite. MinIO object path (e.g. "gemini/Processed/.../plot.png");
    * served via `/api/files/download/{path}` with the standard JWT.
    */
@@ -129,8 +101,6 @@ export interface PlotImageProps {
 }
 
 export function PlotImage({
-  recordId,
-  plotId,
   objectPath,
   rotate = false,
   predictions = [],
@@ -170,18 +140,13 @@ export function PlotImage({
     return () => obs.disconnect()
   }, [])
 
-  // Fetch image (authenticated). Prefer objectPath (Phase 8+); fall back to
-  // the legacy (recordId, plotId) pair (Phase 10 — currently non-functional
-  // until those callsites are rewritten).
+  // Fetch image (authenticated) by its MinIO object path. No path means
+  // there is no image for this plot (e.g. the ortho was never split).
   useEffect(() => {
     setBlobUrl(null)
     setErrored(false)
     setDims(null)
-    const url = objectPath
-      ? objectImageUrl(objectPath)
-      : recordId && plotId
-        ? plotImageUrl(recordId, plotId)
-        : ""
+    const url = objectPath ? objectImageUrl(objectPath) : ""
     if (!url) {
       setErrored(true)
       return
@@ -207,7 +172,7 @@ export function PlotImage({
       revoked = true
       if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl)
     }
-  }, [recordId, plotId, objectPath])
+  }, [objectPath])
 
   // Draw detection overlay — correct coordinate math for both orientations
   useEffect(() => {
@@ -346,7 +311,7 @@ export function PlotImage({
         <>
           <img
             src={blobUrl}
-            alt={`plot ${plotId ?? objectPath ?? ""}`}
+            alt={`plot ${objectPath ?? ""}`}
             style={imgStyle}
             onLoad={(e) =>
               setDims({

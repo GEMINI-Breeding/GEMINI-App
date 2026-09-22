@@ -17,12 +17,12 @@
 
 import { useQueries } from "@tanstack/react-query"
 import { useMemo } from "react"
-import { analyzeApi } from "@/features/analyze/api"
 import type { DataSource } from "../types"
 import { sourceKey } from "../types"
 import {
   applyFilters,
   buildTemporalSeries,
+  recordGeojsonQuery,
   useTraitRecords,
 } from "./useTraitData"
 
@@ -153,7 +153,8 @@ export function useMultiSourceData(
   sources: DataSource[],
   groupByField?: string | null,
 ) {
-  const { data: allRecords = [] } = useTraitRecords()
+  const recordsQuery = useTraitRecords()
+  const allRecords = recordsQuery.data ?? []
 
   // ── Batch-fetch GeoJSON for all pipeline sources ──────────────────────────
 
@@ -189,13 +190,9 @@ export function useMultiSourceData(
   )
 
   const geoJsonResults = useQueries({
-    queries: allGeoJsonIds.map((id) => ({
-      queryKey: ["trait-record-geojson", id],
-      queryFn: () => analyzeApi.getTraitRecordGeojson(id),
-      staleTime: 5 * 60_000,
-      retry: (failureCount: number, error: any) =>
-        error?.status !== 404 && failureCount < 2,
-    })),
+    queries: allGeoJsonIds.map((id) =>
+      recordGeojsonQuery(id, recordsQuery.data),
+    ),
   })
 
   const geoJsonByRecordId = useMemo(() => {

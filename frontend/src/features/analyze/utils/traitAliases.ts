@@ -23,12 +23,15 @@ export const POSITION_KEY_SET = new Set([...COL_KEY_SET, ...ROW_KEY_SET])
  * - alias-aware: all COL_KEY_SET members ("col", "column", "bed") are treated
  *   as the same column, and all ROW_KEY_SET members ("row", "tier") likewise.
  *   The first alias encountered wins.
+ * - `_`-prefixed keys are internal (e.g. the dashboard's `_image` object
+ *   path) and never offered as columns or filters.
  */
 export function deduplicateKeys(keys: string[]): string[] {
   const seen = new Set<string>()
   const aliasGroupSeen = new Set<string>() // "col" | "row" — one per alias group
 
   return keys.filter((k) => {
+    if (k.startsWith("_")) return false
     const lower = k.toLowerCase()
     // Collapse alias groups first
     const group = COL_KEY_SET.has(lower)

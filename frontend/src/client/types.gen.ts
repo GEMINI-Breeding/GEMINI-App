@@ -2669,6 +2669,8 @@ export type ApiMultivariateAnalysisAnovaAnovaData = {
 
 export type ApiMultivariateAnalysisAnovaAnovaResponse = (unknown);
 
+export type ApiMultivariateAnalysisCatalogCatalogResponse = (unknown);
+
 export type ApiMultivariateAnalysisCorrelationCorrelationData = {
     requestBody: MultivariateRequest;
 };

@@ -80,7 +80,10 @@ export function KpiWidget({ config }: KpiWidgetProps) {
         {label} <span className="normal-case">({aggLabel})</span>
       </span>
       <div className="flex items-baseline gap-3">
-        <span className="text-3xl font-bold text-foreground">
+        <span
+          className="text-3xl font-bold text-foreground"
+          data-testid="kpi-value"
+        >
           {fmt(value, aggregation)}
         </span>
         {changeLabel && (

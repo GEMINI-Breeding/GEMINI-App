@@ -23,10 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useDrag } from "../hooks/useDrag"
-import {
-  DASHBOARD_DATA_AVAILABLE,
-  useTraitRecords,
-} from "../hooks/useTraitData"
+import { useTraitRecords } from "../hooks/useTraitData"
 import { useDashboardStore } from "../store"
 import type { DashboardWidget } from "../types"
 import { DashboardCanvas } from "./DashboardCanvas"
@@ -317,21 +314,6 @@ export function DashboardBuilder() {
               </Button>
             </div>
           </div>
-
-          {/* The widgets' data layer still points at the old backend's
-              /api/v1/analyze/* routes, which GEMINIbase doesn't have. Say so
-              once, here, instead of letting every widget render an empty
-              chart that looks like "no data for this selection". */}
-          {!DASHBOARD_DATA_AVAILABLE && (
-            <div
-              className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-800 text-xs"
-              data-testid="dashboard-data-unavailable"
-            >
-              Dashboard widgets aren't connected to this backend's trait data
-              yet, so they will stay empty. Use the Analyze tab for trait charts
-              and maps in the meantime.
-            </div>
-          )}
 
           {/* Tab bar */}
           <div className="h-9 px-4 flex items-center bg-muted/30">

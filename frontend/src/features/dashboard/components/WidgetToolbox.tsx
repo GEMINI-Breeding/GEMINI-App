@@ -320,6 +320,7 @@ export function WidgetToolbox({
                 const item = (
                   <div
                     key={t.templateId}
+                    data-testid={`widget-template-${t.templateId}`}
                     onMouseDown={(e) => onDragStart(e, t.templateId)}
                     className={`flex items-center gap-2 rounded-md cursor-grab active:cursor-grabbing select-none transition-all border
                       ${isCollapsed ? "p-1.5 justify-center" : "p-2"}

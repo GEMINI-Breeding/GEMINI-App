@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 
-import { authHeaders, objectImageUrl, plotImageUrl } from "./PlotImage"
+import { authHeaders, objectImageUrl } from "./PlotImage"
 
 afterEach(() => {
   localStorage.removeItem("gemini.auth.token")
@@ -23,14 +23,6 @@ describe("objectImageUrl", () => {
     expect(objectImageUrl("gemini/x/y.png")).toBe(
       "http://example:7777/api/files/download/gemini/x/y.png",
     )
-  })
-})
-
-describe("plotImageUrl (legacy)", () => {
-  it("returns empty string until Phase 10 rewrites callsites onto objectPath", () => {
-    // Stub for the Analyze code path; intentionally non-functional so the
-    // request fails predictably (rather than 404'ing against a missing route).
-    expect(plotImageUrl("rid", "pid")).toBe("")
   })
 })
 
