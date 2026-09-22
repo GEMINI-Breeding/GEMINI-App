@@ -211,9 +211,7 @@ export function MsgsSyncedUploadDialog({
       const name = (destPath?.split(/[\\/]/).pop() || "msgs_synced")
         .replace(/\.csv$/i, "")
         .concat("_remapped.csv")
-      const url = URL.createObjectURL(
-        new Blob([csvText], { type: "text/csv" }),
-      )
+      const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }))
       try {
         const a = document.createElement("a")
         a.href = url
@@ -358,8 +356,8 @@ export function MsgsSyncedUploadDialog({
             data-testid="msgs-synced-download-only"
           >
             This backend can't store a remapped msgs_synced.csv yet, so the
-            mapped file downloads to your computer instead. Upload it as
-            "Synced Metadata" to attach it to this scope.
+            mapped file downloads to your computer instead. Upload it as "Synced
+            Metadata" to attach it to this scope.
           </p>
         )}
         <DialogFooter>
@@ -376,9 +374,7 @@ export function MsgsSyncedUploadDialog({
               disabled={!requiredMapped || saveMutation.isPending}
               onClick={() => saveMutation.mutate()}
             >
-              {saveMutation.isPending
-                ? "Preparing…"
-                : "Download remapped CSV"}
+              {saveMutation.isPending ? "Preparing…" : "Download remapped CSV"}
             </Button>
           )}
         </DialogFooter>

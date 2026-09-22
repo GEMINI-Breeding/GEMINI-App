@@ -261,7 +261,11 @@ export function deriveTemperatureCelsius(
     if (!sidecar.planck) {
       throw new Error("FLIR sidecar missing Planck constants")
     }
-    return planckSignalToCelsius(counts, sidecar.planck, sidecar.emissivity ?? 1)
+    return planckSignalToCelsius(
+      counts,
+      sidecar.planck,
+      sidecar.emissivity ?? 1,
+    )
   }
   // Linear modes carry scale/offset on the sidecar (worker.py writes
   // them for boson_tlinear_high|low + user_defined).

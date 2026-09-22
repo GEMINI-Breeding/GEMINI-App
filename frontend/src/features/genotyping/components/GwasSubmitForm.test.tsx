@@ -46,15 +46,11 @@ beforeEach(() => {
   vi.spyOn(
     ExperimentsService,
     "apiExperimentsAllGetAllExperiments",
-  ).mockResolvedValue([
-    { id: "exp-1", experiment_name: "GEMINI" },
-  ] as never)
+  ).mockResolvedValue([{ id: "exp-1", experiment_name: "GEMINI" }] as never)
   vi.spyOn(
     ExperimentsService,
     "apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets",
-  ).mockResolvedValue([
-    { id: "ds-1", dataset_name: "Phenotype set" },
-  ] as never)
+  ).mockResolvedValue([{ id: "ds-1", dataset_name: "Phenotype set" }] as never)
   vi.spyOn(
     DatasetsService,
     "apiDatasetsIdDatasetIdTraitsGetAssociatedTraits",
@@ -74,9 +70,14 @@ beforeEach(() => {
   ] as never)
 })
 
-async function pickExperimentAndDataset(user: ReturnType<typeof userEvent.setup>) {
+async function pickExperimentAndDataset(
+  user: ReturnType<typeof userEvent.setup>,
+) {
   await screen.findByRole("option", { name: "GEMINI" })
-  await user.selectOptions(screen.getByTestId("gwas-experiment-select"), "exp-1")
+  await user.selectOptions(
+    screen.getByTestId("gwas-experiment-select"),
+    "exp-1",
+  )
   await screen.findByRole("option", { name: "Phenotype set" })
   await user.selectOptions(screen.getByTestId("gwas-dataset-select"), "ds-1")
 }
@@ -132,9 +133,9 @@ describe("GwasSubmitForm", () => {
     await waitFor(() => {
       expect(GwasService.apiGwasSubmitSubmitGwas).toHaveBeenCalledTimes(1)
     })
-    const call = (GwasService.apiGwasSubmitSubmitGwas as unknown as ReturnType<
-      typeof vi.fn
-    >).mock.calls[0][0]
+    const call = (
+      GwasService.apiGwasSubmitSubmitGwas as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls[0][0]
     expect(call.requestBody).toMatchObject({
       model: "lmm",
       trait_ids: ["trait-1", "trait-2"],
@@ -152,16 +153,17 @@ describe("GwasSubmitForm", () => {
     await user.selectOptions(screen.getByTestId("gwas-model-select"), "mvlmm")
 
     expect(
-      (screen.getByTestId("gwas-lmm-test-select") as HTMLSelectElement).disabled,
+      (screen.getByTestId("gwas-lmm-test-select") as HTMLSelectElement)
+        .disabled,
     ).toBe(true)
 
     await user.click(screen.getByTestId("gwas-submit"))
     await waitFor(() => {
       expect(GwasService.apiGwasSubmitSubmitGwas).toHaveBeenCalledTimes(1)
     })
-    const call = (GwasService.apiGwasSubmitSubmitGwas as unknown as ReturnType<
-      typeof vi.fn
-    >).mock.calls[0][0]
+    const call = (
+      GwasService.apiGwasSubmitSubmitGwas as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls[0][0]
     expect(call.requestBody).toMatchObject({
       model: "mvlmm",
       trait_ids: ["trait-1", "trait-2"],

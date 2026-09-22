@@ -15,7 +15,7 @@
  */
 import { useQuery } from "@tanstack/react-query"
 
-import { DatasetsService, type DatasetOutput } from "@/client"
+import { type DatasetOutput, DatasetsService } from "@/client"
 
 const DATASETS_PAGE_SIZE = 500
 

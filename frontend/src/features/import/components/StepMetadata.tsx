@@ -396,10 +396,10 @@ export function StepMetadata({
             <div>
               <h4 className="font-medium text-sm">Thermal Calibration</h4>
               <p className="text-muted-foreground text-xs">
-                Boson TIFFs don't record which mode the camera was in;
-                pick the matching calibration so the worker can compute
-                per-pixel temperatures. FLIR One Pro JPEGs are
-                self-describing — pick "FLIR One Pro" for those.
+                Boson TIFFs don't record which mode the camera was in; pick the
+                matching calibration so the worker can compute per-pixel
+                temperatures. FLIR One Pro JPEGs are self-describing — pick
+                "FLIR One Pro" for those.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -521,9 +521,9 @@ export function StepMetadata({
                   >
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>
-                      A dataset with this name already exists. New records
-                      will be merged into the existing dataset — change
-                      the name if you want a separate dataset.
+                      A dataset with this name already exists. New records will
+                      be merged into the existing dataset — change the name if
+                      you want a separate dataset.
                     </span>
                   </p>
                 )}

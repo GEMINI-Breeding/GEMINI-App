@@ -60,9 +60,7 @@ function processProgress(process: Process): number {
       (i) => i.status === "completed" || i.status === "skipped",
     ).length
     const running = process.items.filter((i) => i.status === "running").length
-    return Math.round(
-      mapUploadProgress(((done + running * 0.5) / total) * 100),
-    )
+    return Math.round(mapUploadProgress(((done + running * 0.5) / total) * 100))
   }
   const total = process.items.length
   if (total === 0) return process.status === "completed" ? 100 : 0

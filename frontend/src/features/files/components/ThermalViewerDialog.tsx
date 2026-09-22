@@ -38,8 +38,8 @@ import {
   applyPalette,
   decodeRawThermalTiff,
   deriveTemperatureCelsius,
-  paletteLut,
   type PaletteName,
+  paletteLut,
   percentileWindow,
   type ThermalSidecar,
 } from "@/features/files/lib/thermal"
@@ -96,7 +96,10 @@ function deriveSidecarPaths(rgbObjectName: string): {
   }
 }
 
-async function fetchObject(bucket: string, objectName: string): Promise<Response> {
+async function fetchObject(
+  bucket: string,
+  objectName: string,
+): Promise<Response> {
   return fetch(apiUrl(`/api/files/download/${bucket}/${objectName}`), {
     headers: { Authorization: `Bearer ${getToken()}` },
   })
@@ -230,7 +233,9 @@ export function ThermalViewerDialog({
     const rect = canvas.getBoundingClientRect()
     // Translate from CSS pixels to image-pixel coordinates so the HUD
     // samples the right cell regardless of the canvas's display size.
-    const px = Math.floor(((e.clientX - rect.left) / rect.width) * thermal.width)
+    const px = Math.floor(
+      ((e.clientX - rect.left) / rect.width) * thermal.width,
+    )
     const py = Math.floor(
       ((e.clientY - rect.top) / rect.height) * thermal.height,
     )
@@ -249,10 +254,7 @@ export function ThermalViewerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-4xl"
-        data-testid="thermal-viewer-dialog"
-      >
+      <DialogContent className="max-w-4xl" data-testid="thermal-viewer-dialog">
         <DialogHeader>
           <DialogTitle>
             Thermal Viewer
@@ -269,10 +271,7 @@ export function ThermalViewerDialog({
         </DialogHeader>
 
         {loadError && (
-          <div
-            className="text-destructive text-sm"
-            data-testid="thermal-error"
-          >
+          <div className="text-destructive text-sm" data-testid="thermal-error">
             {loadError}
           </div>
         )}
@@ -365,16 +364,14 @@ export function ThermalViewerDialog({
               </div>
             </div>
 
-            <div
-              className="text-sm font-mono"
-              data-testid="thermal-hud"
-            >
+            <div className="text-sm font-mono" data-testid="thermal-hud">
               {hover ? (
                 <span>
                   pixel ({hover.x}, {hover.y}) — counts: {hover.count}
                   {isRadiometric && hover.tempC !== null && (
                     <span data-testid="thermal-hud-temp">
-                      {" "}— T ={" "}
+                      {" "}
+                      — T ={" "}
                       {Number.isFinite(hover.tempC)
                         ? `${hover.tempC.toFixed(2)} °C`
                         : "NaN"}

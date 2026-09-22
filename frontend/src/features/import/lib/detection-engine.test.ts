@@ -276,8 +276,16 @@ describe("detectFiles", () => {
     // exercise the path that would otherwise classify as drone_imagery.
     const head = makeFlirJpegHead()
     const files = [
-      makeBinaryFile(head, "240725_IMG_01206.jpg", "2024-07-25/240725_IMG_01206.jpg"),
-      makeBinaryFile(head, "240725_IMG_01207.jpg", "2024-07-25/240725_IMG_01207.jpg"),
+      makeBinaryFile(
+        head,
+        "240725_IMG_01206.jpg",
+        "2024-07-25/240725_IMG_01206.jpg",
+      ),
+      makeBinaryFile(
+        head,
+        "240725_IMG_01207.jpg",
+        "2024-07-25/240725_IMG_01207.jpg",
+      ),
     ]
     const result = await detectFiles(files)
     expect(result.dataCategories).toContain("thermal")
@@ -288,8 +296,16 @@ describe("detectFiles", () => {
   it("classifies drone_low_res (FLIR JPEGs in a dated folder) as thermal", async () => {
     const head = makeFlirJpegHead()
     const files = [
-      makeBinaryFile(head, "240725_IMG_00385.jpg", "2024-07-25/240725_IMG_00385.jpg"),
-      makeBinaryFile(head, "240725_IMG_00386.jpg", "2024-07-25/240725_IMG_00386.jpg"),
+      makeBinaryFile(
+        head,
+        "240725_IMG_00385.jpg",
+        "2024-07-25/240725_IMG_00385.jpg",
+      ),
+      makeBinaryFile(
+        head,
+        "240725_IMG_00386.jpg",
+        "2024-07-25/240725_IMG_00386.jpg",
+      ),
     ]
     const result = await detectFiles(files)
     expect(result.dataCategories).toContain("thermal")

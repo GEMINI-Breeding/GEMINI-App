@@ -74,12 +74,9 @@ describe("parseSpreadsheet", () => {
 
   it("auto-skips a banner row in a CSV (≥4-populated-cells heuristic)", async () => {
     // Banner row has 1 populated cell; row 2 is the real header with 4.
-    const csv = [
-      "Project notes,,,",
-      "plot,a,b,c",
-      "1,5,6,7",
-      "2,8,9,10",
-    ].join("\n")
+    const csv = ["Project notes,,,", "plot,a,b,c", "1,5,6,7", "2,8,9,10"].join(
+      "\n",
+    )
     const f = new File([csv], "banner.csv", { type: "text/csv" })
     const sheets = await parseSpreadsheet(f)
     expect(sheets[0].headers).toEqual(["plot", "a", "b", "c"])
@@ -102,11 +99,7 @@ describe("parseSpreadsheet", () => {
   })
 
   it("skipRows: 0 disables the auto-detect even if a banner is present", async () => {
-    const csv = [
-      "Project notes,,,",
-      "plot,a,b,c",
-      "1,5,6,7",
-    ].join("\n")
+    const csv = ["Project notes,,,", "plot,a,b,c", "1,5,6,7"].join("\n")
     const f = new File([csv], "banner.csv", { type: "text/csv" })
     const sheets = await parseSpreadsheet(f, { skipRows: 0 })
     // With explicit skipRows: 0, the banner row becomes the header.
@@ -114,11 +107,7 @@ describe("parseSpreadsheet", () => {
   })
 
   it("skipRows works on TSV", async () => {
-    const text = [
-      "junk\theader\trow",
-      "plot\ta\tb\tc",
-      "1\t5\t6\t7",
-    ].join("\n")
+    const text = ["junk\theader\trow", "plot\ta\tb\tc", "1\t5\t6\t7"].join("\n")
     const f = new File([text], "data.tsv", {
       type: "text/tab-separated-values",
     })

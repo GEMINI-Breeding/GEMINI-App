@@ -564,8 +564,8 @@ function SkipRowsField({
         />
       </div>
       <p className="text-muted-foreground text-xs">
-        Drop this many lines before the header. Auto-detected from the file
-        on open — adjust if the preview below doesn&apos;t look right.
+        Drop this many lines before the header. Auto-detected from the file on
+        open — adjust if the preview below doesn&apos;t look right.
       </p>
     </div>
   )
@@ -663,8 +663,8 @@ function PlotColumnsSection({
         <h3 className="font-medium">Plot columns</h3>
       </div>
       <p className="text-muted-foreground text-sm">
-        Trait records can attach to plots. Plot number, row, and column are
-        all optional — leave them unmapped if your data has no plot context.
+        Trait records can attach to plots. Plot number, row, and column are all
+        optional — leave them unmapped if your data has no plot context.
       </p>
       {plotUnmapped && (
         <p

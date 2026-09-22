@@ -106,10 +106,10 @@ export function ThermalCalibrationField({
       <div>
         <h4 className="font-medium text-sm">Thermal data detected</h4>
         <p className="text-muted-foreground text-xs">
-          We found thermal frames in this batch. Pick the calibration mode
-          that matches the camera so the extraction worker can compute
-          per-pixel temperature. FLIR One Pro JPEGs are self-describing;
-          Boson TIFFs need a mode pick.
+          We found thermal frames in this batch. Pick the calibration mode that
+          matches the camera so the extraction worker can compute per-pixel
+          temperature. FLIR One Pro JPEGs are self-describing; Boson TIFFs need
+          a mode pick.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -119,10 +119,7 @@ export function ThermalCalibrationField({
             value={mode}
             onValueChange={(v) => setMode(v as ThermalCalibrationMode)}
           >
-            <SelectTrigger
-              id="thermal-mode"
-              data-testid="thermal-mode-trigger"
-            >
+            <SelectTrigger id="thermal-mode" data-testid="thermal-mode-trigger">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

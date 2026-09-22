@@ -693,20 +693,12 @@ export async function detectFiles(
 
   if (hasThermal) {
     suggestedSensorType = "Thermal Camera"
-    suggestedPlatform = hasAmiga
-      ? "Amiga Robot"
-      : hasDJI
-        ? "DJI Drone"
-        : null
+    suggestedPlatform = hasAmiga ? "Amiga Robot" : hasDJI ? "DJI Drone" : null
     // Format reflects what's actually on disk so downstream "data type"
     // chips render something meaningful. JPEG = FLIR One Pro–class, TIFF =
     // Boson-class raw.
-    const hasJpeg = files.some((f) =>
-      JPEG_EXTENSIONS.has(getExtension(f.name)),
-    )
-    const hasTiff = files.some((f) =>
-      TIFF_EXTENSIONS.has(getExtension(f.name)),
-    )
+    const hasJpeg = files.some((f) => JPEG_EXTENSIONS.has(getExtension(f.name)))
+    const hasTiff = files.some((f) => TIFF_EXTENSIONS.has(getExtension(f.name)))
     suggestedDataFormat = hasJpeg
       ? "Thermal JPEG"
       : hasTiff

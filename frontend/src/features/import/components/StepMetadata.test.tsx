@@ -83,10 +83,9 @@ beforeEach(() => {
   // useExistingDatasetNames fires on mount; default to "no existing
   // datasets" so the conflict warning stays hidden unless a test
   // overrides this mock.
-  vi.spyOn(
-    DatasetsService,
-    "apiDatasetsAllGetAllDatasets",
-  ).mockResolvedValue([] as never)
+  vi.spyOn(DatasetsService, "apiDatasetsAllGetAllDatasets").mockResolvedValue(
+    [] as never,
+  )
 })
 
 afterEach(() => {
@@ -208,12 +207,9 @@ describe("StepMetadata", () => {
   it("warns when a typed dataset name collides with an existing dataset", async () => {
     // Surface an existing dataset called "GEMINI - 2026-05-01" so the
     // initial dataset name we pass in trips the conflict warning.
-    vi.spyOn(
-      DatasetsService,
-      "apiDatasetsAllGetAllDatasets",
-    ).mockResolvedValue([
-      { id: "ds-existing", dataset_name: "GEMINI - 2026-05-01" },
-    ] as never)
+    vi.spyOn(DatasetsService, "apiDatasetsAllGetAllDatasets").mockResolvedValue(
+      [{ id: "ds-existing", dataset_name: "GEMINI - 2026-05-01" }] as never,
+    )
     render(
       <StepMetadata
         detection={detection()}
@@ -223,7 +219,11 @@ describe("StepMetadata", () => {
           sensorPlatformName: "",
           sensorName: "",
           datasetNames: ["GEMINI - 2026-05-01"],
-          createNew: { experiment: false, sensorPlatform: false, sensor: false },
+          createNew: {
+            experiment: false,
+            sensorPlatform: false,
+            sensor: false,
+          },
         }}
         onNext={() => {}}
         onBack={() => {}}
@@ -256,7 +256,11 @@ describe("StepMetadata", () => {
           sensorName: "",
           // Default mock returns no datasets, so this name can't collide.
           datasetNames: ["GEMINI - Traits - 2026-05-01 - a3f7"],
-          createNew: { experiment: false, sensorPlatform: false, sensor: false },
+          createNew: {
+            experiment: false,
+            sensorPlatform: false,
+            sensor: false,
+          },
         }}
         onNext={() => {}}
         onBack={() => {}}
@@ -309,9 +313,7 @@ describe("StepMetadata", () => {
       />,
       { wrapper },
     )
-    expect(
-      await screen.findByTestId("thermal-calibration"),
-    ).toBeInTheDocument()
+    expect(await screen.findByTestId("thermal-calibration")).toBeInTheDocument()
     await user.click(screen.getByTestId("metadata-continue"))
     const m = onNext.mock.calls[0][0]
     expect(m.thermalCalibration).toEqual({ mode: "flir_one_pro" })

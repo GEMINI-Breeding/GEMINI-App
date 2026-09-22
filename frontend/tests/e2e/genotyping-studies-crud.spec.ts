@@ -89,9 +89,7 @@ test.describe("Phase 9a: Genotyping Studies CRUD", () => {
     ).toBeVisible()
 
     await page.getByRole("tab", { name: /gwas/i }).click()
-    await expect(
-      page.getByTestId("genotyping-study-gwas-tab"),
-    ).toBeVisible()
+    await expect(page.getByTestId("genotyping-study-gwas-tab")).toBeVisible()
 
     // Back to dashboard.
     await page.goto("/genotyping")

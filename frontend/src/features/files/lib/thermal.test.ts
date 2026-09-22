@@ -39,7 +39,12 @@ function buildSyntheticUncompressedTiff(
 
   v.setUint16(headerLen, numEntries, true)
   let entry = headerLen + 2
-  const writeEntry = (tag: number, type: number, count: number, value: number) => {
+  const writeEntry = (
+    tag: number,
+    type: number,
+    count: number,
+    value: number,
+  ) => {
     v.setUint16(entry, tag, true)
     v.setUint16(entry + 2, type, true)
     v.setUint32(entry + 4, count, true)

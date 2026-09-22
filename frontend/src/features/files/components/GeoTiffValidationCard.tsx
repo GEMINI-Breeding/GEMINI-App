@@ -134,9 +134,8 @@ export function GeoTiffValidationCard({
       >
         <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
         <span>
-          CRS not checked — this backend can't validate GeoTIFF projections
-          yet. If this file isn't WGS84 (EPSG:4326), reproject it before
-          processing.
+          CRS not checked — this backend can't validate GeoTIFF projections yet.
+          If this file isn't WGS84 (EPSG:4326), reproject it before processing.
         </span>
       </div>
     )

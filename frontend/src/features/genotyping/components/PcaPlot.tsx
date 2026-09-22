@@ -20,7 +20,10 @@ import {
 } from "recharts"
 
 import { authHeaders } from "@/components/Common/PlotImage"
-import { parsePcaEigenvec, type PcaTable } from "@/features/genotyping/lib/pcaEigenvec"
+import {
+  type PcaTable,
+  parsePcaEigenvec,
+} from "@/features/genotyping/lib/pcaEigenvec"
 
 export interface PcaPlotProps {
   /**
@@ -96,10 +99,7 @@ export function PcaPlot({ src }: PcaPlotProps) {
   }
   if (state.table.points.length === 0 || state.table.nPcs < 2) {
     return (
-      <p
-        className="text-muted-foreground text-xs"
-        data-testid="gwas-pca-empty"
-      >
+      <p className="text-muted-foreground text-xs" data-testid="gwas-pca-empty">
         PCA file has no plottable rows.
       </p>
     )

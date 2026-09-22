@@ -139,19 +139,14 @@ async function runThermalUploadAndVerify(
   expect(submitted.parameters?.thermal_calibration?.mode).toBe(
     c.expectedDefaultMode,
   )
-  expect(
-    submitted.id,
-    "THERMAL_EXTRACT job id must be returned",
-  ).toBeTruthy()
+  expect(submitted.id, "THERMAL_EXTRACT job id must be returned").toBeTruthy()
 
   // Option-A migration contract: the dataset_prefix the worker sees
   // must include an 8-hex per-dataset segment between {sensor}/ and
   // the trailing slash. Without this, two uploads at the same scope
   // would commingle on disk.
   const datasetPrefix = submitted.parameters?.dataset_prefix ?? ""
-  expect(datasetPrefix).toMatch(
-    new RegExp(`/${sensor}/[0-9a-f]{8}/$`),
-  )
+  expect(datasetPrefix).toMatch(new RegExp(`/${sensor}/[0-9a-f]{8}/$`))
 
   // Worker terminal state — same signal the amiga + image specs use.
   await expect(page.getByText(/^Done$/i).first()).toBeVisible({

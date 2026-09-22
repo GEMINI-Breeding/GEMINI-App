@@ -30,7 +30,20 @@ test.describe("Analyze — Multivariate MANOVA", () => {
       B: { h: 14, w: 7 },
       C: { h: 18, w: 9 },
     }
-    const accessions = ["A", "B", "B", "C", "A", "C", "B", "A", "C", "A", "B", "C"]
+    const accessions = [
+      "A",
+      "B",
+      "B",
+      "C",
+      "A",
+      "C",
+      "B",
+      "A",
+      "C",
+      "A",
+      "B",
+      "C",
+    ]
     const csvRows = accessions.map((acc, i) => {
       const plot = i + 1
       const jitter = ((plot * 37) % 10) / 50 // small deterministic noise

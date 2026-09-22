@@ -7,7 +7,11 @@
  */
 import type { JobOutput } from "@/client"
 
-export type GwasStatusVariant = "default" | "secondary" | "destructive" | "outline"
+export type GwasStatusVariant =
+  | "default"
+  | "secondary"
+  | "destructive"
+  | "outline"
 
 export interface GwasArtifacts {
   manhattan?: string
@@ -58,7 +62,9 @@ export interface GwasResult {
   top_hits?: GwasTopHit[]
 }
 
-export function parseGwasResult(job: JobOutput | null | undefined): GwasResult | null {
+export function parseGwasResult(
+  job: JobOutput | null | undefined,
+): GwasResult | null {
   if (!job || !job.result || typeof job.result !== "object") return null
   return job.result as unknown as GwasResult
 }
@@ -66,7 +72,8 @@ export function parseGwasResult(job: JobOutput | null | undefined): GwasResult |
 export function parseProgressDetail(
   job: JobOutput | null | undefined,
 ): Record<string, unknown> | null {
-  if (!job?.progress_detail || typeof job.progress_detail !== "object") return null
+  if (!job?.progress_detail || typeof job.progress_detail !== "object")
+    return null
   return job.progress_detail as Record<string, unknown>
 }
 

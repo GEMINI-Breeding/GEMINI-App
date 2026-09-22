@@ -36,9 +36,11 @@ describe("parsePcaEigenvec", () => {
   })
 
   it("skips rows that are too short", () => {
-    const text = ["#FID\tIID\tPC1\tPC2", "0\tLINE_A\t0.1", "0\tLINE_B\t0.2\t0.3"].join(
-      "\n",
-    )
+    const text = [
+      "#FID\tIID\tPC1\tPC2",
+      "0\tLINE_A\t0.1",
+      "0\tLINE_B\t0.2\t0.3",
+    ].join("\n")
     const { points } = parsePcaEigenvec(text)
     expect(points).toHaveLength(1)
     expect(points[0].sample).toBe("LINE_B")

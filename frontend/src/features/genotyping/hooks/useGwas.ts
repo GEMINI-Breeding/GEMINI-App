@@ -8,8 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   DatasetsService,
   ExperimentsService,
-  type GwasSubmitInput,
   GwasService,
+  type GwasSubmitInput,
   type JobOutput,
   JobsService,
   type TraitOutput,
@@ -24,7 +24,9 @@ export function useSubmitGwas() {
   const qc = useQueryClient()
   return useMutation<JobOutput[], Error, GwasSubmitInput>({
     mutationFn: async (requestBody) =>
-      GwasService.apiGwasSubmitSubmitGwas({ requestBody }) as Promise<JobOutput[]>,
+      GwasService.apiGwasSubmitSubmitGwas({ requestBody }) as Promise<
+        JobOutput[]
+      >,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] })
     },
@@ -47,9 +49,11 @@ export function useExperimentDatasets(experimentId: string | null | undefined) {
     queryKey: ["experiments", experimentId ?? "", "datasets"],
     enabled: Boolean(experimentId),
     queryFn: () =>
-      ExperimentsService.apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets({
-        experimentId: experimentId as string,
-      }),
+      ExperimentsService.apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets(
+        {
+          experimentId: experimentId as string,
+        },
+      ),
   })
 }
 
@@ -71,7 +75,9 @@ export function useStudyGwasJobs(
   const filtered = studyId
     ? jobs.filter((j) => {
         const params = j.parameters as { study_id?: unknown } | null | undefined
-        return params != null && String(params.study_id ?? "") === String(studyId)
+        return (
+          params != null && String(params.study_id ?? "") === String(studyId)
+        )
       })
     : jobs
   return { ...query, data: filtered }
@@ -90,8 +96,7 @@ export function useGwasJob(jobId: string | null | undefined) {
 export function useDeleteGwasJob() {
   const qc = useQueryClient()
   return useMutation<unknown, Error, string>({
-    mutationFn: (jobId: string) =>
-      JobsService.apiJobsJobIdDeleteJob({ jobId }),
+    mutationFn: (jobId: string) => JobsService.apiJobsJobIdDeleteJob({ jobId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] })
     },
@@ -138,7 +143,10 @@ export function jobTraitNames(
   nameMap: Map<string, string> | undefined,
 ): string[] {
   const params = job.parameters as
-    | { trait_id?: string | number | null; trait_ids?: Array<string | number> | null }
+    | {
+        trait_id?: string | number | null
+        trait_ids?: Array<string | number> | null
+      }
     | null
     | undefined
   if (!params) return []

@@ -111,9 +111,7 @@ test.describe("Per-dataset delete — imagery", () => {
     await page
       .locator(`[data-testid="manage-data-delete-dataset-${datasetName}"]`)
       .click()
-    await page
-      .getByRole("button", { name: /delete dataset/i })
-      .click()
+    await page.getByRole("button", { name: /delete dataset/i }).click()
 
     // 1. Dataset row gone from Manage Data.
     await expect(

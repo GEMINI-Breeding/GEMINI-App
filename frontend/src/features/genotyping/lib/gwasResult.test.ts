@@ -10,15 +10,15 @@ import {
 
 describe("s3UrlToDownload", () => {
   it("converts a well-formed s3:// URL into the /api/files/download path", () => {
-    expect(
-      s3UrlToDownload("s3://gemini/gwas/abc-123/manhattan.png"),
-    ).toBe("/api/files/download/gemini/gwas/abc-123/manhattan.png")
+    expect(s3UrlToDownload("s3://gemini/gwas/abc-123/manhattan.png")).toBe(
+      "/api/files/download/gemini/gwas/abc-123/manhattan.png",
+    )
   })
 
   it("preserves nested keys with multiple slashes", () => {
-    expect(
-      s3UrlToDownload("s3://gemini/gwas/job/sub/path/file.txt"),
-    ).toBe("/api/files/download/gemini/gwas/job/sub/path/file.txt")
+    expect(s3UrlToDownload("s3://gemini/gwas/job/sub/path/file.txt")).toBe(
+      "/api/files/download/gemini/gwas/job/sub/path/file.txt",
+    )
   })
 
   it("returns null when not an s3:// URL", () => {
@@ -70,9 +70,7 @@ describe("parseGwasResult", () => {
   })
 
   it("returns null when result is missing or not an object", () => {
-    expect(
-      parseGwasResult({ job_type: "RUN_GWAS", result: null }),
-    ).toBeNull()
+    expect(parseGwasResult({ job_type: "RUN_GWAS", result: null })).toBeNull()
     // The OpenAPI type says result is `Record<string, unknown> | null`, but
     // at runtime a backend that wrote a string would still flow through.
     expect(

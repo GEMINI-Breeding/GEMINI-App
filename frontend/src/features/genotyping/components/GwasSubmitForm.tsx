@@ -7,23 +7,23 @@
  * `gwas-study-select` testid stays on a disabled, decorative read-only
  * input so E2E parity holds).
  */
+
+import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, Play } from "lucide-react"
 import { useMemo, useState } from "react"
-
 import { ExperimentsService, type GwasSubmitInput } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProcess } from "@/contexts/ProcessContext"
 import { idAsString } from "@/features/admin/lib/ids"
+import { useGenotypingStudy } from "@/features/genotyping/hooks/useGenotypingStudies"
 import {
   useDatasetTraits,
   useExperimentDatasets,
   useSubmitGwas,
 } from "@/features/genotyping/hooks/useGwas"
-import { useGenotypingStudy } from "@/features/genotyping/hooks/useGenotypingStudies"
 import useCustomToast from "@/hooks/useCustomToast"
-import { useQuery } from "@tanstack/react-query"
 
 type Model = "lmm" | "mvlmm" | "bslmm"
 type LmmTest = "wald" | "lrt" | "score" | "all"
@@ -135,9 +135,7 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
         if (jobs.length === 1) {
           showSuccessToast("GWAS job submitted")
         } else {
-          showSuccessToast(
-            `${jobs.length} GWAS jobs submitted (one per trait)`,
-          )
+          showSuccessToast(`${jobs.length} GWAS jobs submitted (one per trait)`)
         }
 
         const first = jobs[0]

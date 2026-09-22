@@ -27,12 +27,10 @@ test.describe("Analyze — Multivariate PCA", () => {
     // 12 plots; the 4 traits all track a shared "growth" factor with small
     // independent noise. PC1 should dominate and all 4 loading arrows
     // point roughly the same way.
-    const seedRows: number[] = [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-    ]
+    const seedRows: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     const rows = seedRows.map((p) => {
       const base = p
-      const noise = () => (Math.sin(p * 13) * 0.3 + Math.cos(p * 7) * 0.2)
+      const noise = () => Math.sin(p * 13) * 0.3 + Math.cos(p * 7) * 0.2
       return `${p},${1 + ((p - 1) % 3)},${1 + Math.floor((p - 1) / 3)},${base + noise()},${base * 1.2 + noise()},${base * 0.9 + noise()},${base * 1.1 + noise()}`
     })
     const csv = [

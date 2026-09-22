@@ -35,7 +35,10 @@ vi.mock("@/features/genotyping/hooks/useGwas", () => ({
   useTraitNameMap: (...args: unknown[]) => useTraitNameMapMock(...args),
   // jobTraitNames is a pure helper — re-export the real one. We import
   // it dynamically inside the mock factory to keep the mock self-contained.
-  jobTraitNames: (job: { parameters?: unknown }, names?: Map<string, string>) => {
+  jobTraitNames: (
+    job: { parameters?: unknown },
+    names?: Map<string, string>,
+  ) => {
     const params = (job.parameters ?? {}) as {
       trait_id?: string | null
       trait_ids?: string[] | null
@@ -78,7 +81,11 @@ describe("GwasRunsSidebar", () => {
         id: "job-1",
         status: "COMPLETED",
         created_at: "2026-05-01T00:00:00Z",
-        parameters: { study_id: "study-A", trait_id: "trait-yield", model: "lmm" },
+        parameters: {
+          study_id: "study-A",
+          trait_id: "trait-yield",
+          model: "lmm",
+        },
       },
       {
         id: "job-2",
@@ -116,14 +123,15 @@ describe("GwasRunsSidebar", () => {
         id: "job-7",
         status: "RUNNING",
         created_at: "2026-05-03T00:00:00Z",
-        parameters: { study_id: "study-A", trait_id: "trait-height", model: "lmm" },
+        parameters: {
+          study_id: "study-A",
+          trait_id: "trait-height",
+          model: "lmm",
+        },
       },
     ])
     render(<GwasRunsSidebar studyId="study-A" currentJobId="other" />)
     const row = screen.getByTestId("gwas-sidebar-item-job-7")
-    expect(row).toHaveAttribute(
-      "href",
-      "/genotyping/study-A/gwas/job-7",
-    )
+    expect(row).toHaveAttribute("href", "/genotyping/study-A/gwas/job-7")
   })
 })

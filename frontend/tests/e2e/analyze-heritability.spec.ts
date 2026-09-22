@@ -90,9 +90,7 @@ test.describe("Analyze — Heritability chart", () => {
       .click()
 
     await page.getByTestId("trait-charts-chart-type").click()
-    await page
-      .getByRole("option", { name: "Heritability + BLUPs" })
-      .click()
+    await page.getByRole("option", { name: "Heritability + BLUPs" }).click()
 
     const h2 = page.getByTestId("mv-heritability")
     await expect(h2).toBeVisible({ timeout: 30_000 })

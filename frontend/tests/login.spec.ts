@@ -116,31 +116,31 @@ test("Logged-out user cannot access protected routes", async ({ page }) => {
   await page.waitForURL("/login")
 })
 
-test(
-  "Redirects to /login when the stored token is rejected",
-  async ({ page, consoleErrorGuard }) => {
-    // Was test.fixme'd in April with a note blaming an "SDK-vs-axios
-    // ambiguity". Un-fixme'ing it showed the premise was wrong, not the
-    // plumbing: the old test planted a bad token and opened /settings, but
-    // that route renders a static panel and makes NO authenticated call, so
-    // nothing ever 401s and the interceptor never runs. `_layout`'s guard
-    // only checks that a token EXISTS, not that it's valid, so the user sat
-    // in the app shell — exactly what the test observed, for a reason that
-    // had nothing to do with axios.
-    //
-    // Drive a route that actually queries the backend. That's the real
-    // guarantee: a rejected token must not leave you inside the app.
-    consoleErrorGuard.expectError(/\/api\//)
-    await page.goto("/login")
-    await page.evaluate(() => {
-      localStorage.setItem("gemini.auth.token", "invalid_token")
-    })
-    await page.goto("/genotyping")
-    await page.waitForURL("/login", { timeout: 20_000 })
-    await expect(page).toHaveURL("/login")
-    // And the rejected token is cleared, so a reload doesn't re-enter.
-    expect(
-      await page.evaluate(() => localStorage.getItem("gemini.auth.token")),
-    ).toBeFalsy()
-  },
-)
+test("Redirects to /login when the stored token is rejected", async ({
+  page,
+  consoleErrorGuard,
+}) => {
+  // Was test.fixme'd in April with a note blaming an "SDK-vs-axios
+  // ambiguity". Un-fixme'ing it showed the premise was wrong, not the
+  // plumbing: the old test planted a bad token and opened /settings, but
+  // that route renders a static panel and makes NO authenticated call, so
+  // nothing ever 401s and the interceptor never runs. `_layout`'s guard
+  // only checks that a token EXISTS, not that it's valid, so the user sat
+  // in the app shell — exactly what the test observed, for a reason that
+  // had nothing to do with axios.
+  //
+  // Drive a route that actually queries the backend. That's the real
+  // guarantee: a rejected token must not leave you inside the app.
+  consoleErrorGuard.expectError(/\/api\//)
+  await page.goto("/login")
+  await page.evaluate(() => {
+    localStorage.setItem("gemini.auth.token", "invalid_token")
+  })
+  await page.goto("/genotyping")
+  await page.waitForURL("/login", { timeout: 20_000 })
+  await expect(page).toHaveURL("/login")
+  // And the rejected token is cleared, so a reload doesn't re-enter.
+  expect(
+    await page.evaluate(() => localStorage.getItem("gemini.auth.token")),
+  ).toBeFalsy()
+})

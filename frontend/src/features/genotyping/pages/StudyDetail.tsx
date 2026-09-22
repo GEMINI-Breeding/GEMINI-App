@@ -22,7 +22,12 @@ import {
   useGenotypingStudyExperiments,
 } from "@/features/genotyping/hooks/useGenotypingStudies"
 
-export const STUDY_TABS = ["experiments", "records", "variants", "gwas"] as const
+export const STUDY_TABS = [
+  "experiments",
+  "records",
+  "variants",
+  "gwas",
+] as const
 export type StudyTab = (typeof STUDY_TABS)[number]
 
 function StudyInfoBlock({ studyId }: { studyId: string }) {

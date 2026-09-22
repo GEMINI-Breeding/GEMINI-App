@@ -108,15 +108,15 @@ function rgbTiffBytes(): Uint8Array {
 
 describe("jpegLooksLikeFlir", () => {
   it("flags a JPEG that contains the 'FLIR Systems' EXIF Make string", async () => {
-    expect(
-      await jpegLooksLikeFlir(asFile(flirJpegBytes(), "flir.jpg")),
-    ).toBe(true)
+    expect(await jpegLooksLikeFlir(asFile(flirJpegBytes(), "flir.jpg"))).toBe(
+      true,
+    )
   })
 
   it("rejects a plain RGB JPEG", async () => {
-    expect(
-      await jpegLooksLikeFlir(asFile(rgbJpegBytes(), "rgb.jpg")),
-    ).toBe(false)
+    expect(await jpegLooksLikeFlir(asFile(rgbJpegBytes(), "rgb.jpg"))).toBe(
+      false,
+    )
   })
 })
 
@@ -159,9 +159,9 @@ describe("tiffLooksLikeThermal", () => {
   })
 
   it("rejects a plain 8-bit RGB TIFF", async () => {
-    expect(
-      await tiffLooksLikeThermal(asFile(rgbTiffBytes(), "rgb.tif")),
-    ).toBe(false)
+    expect(await tiffLooksLikeThermal(asFile(rgbTiffBytes(), "rgb.tif"))).toBe(
+      false,
+    )
   })
 
   it("rejects malformed / non-TIFF bytes", async () => {

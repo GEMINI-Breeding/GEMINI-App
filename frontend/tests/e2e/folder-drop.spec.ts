@@ -31,9 +31,7 @@ async function unlockDropzoneForImageData(
   await page.goto("/files")
   await page.locator('[data-onboarding="files-tab-upload"]').click()
   await page.locator('[data-onboarding="files-data-type-selector"]').click()
-  await page
-    .getByRole("menuitem", { name: "Image Data", exact: true })
-    .click()
+  await page.getByRole("menuitem", { name: "Image Data", exact: true }).click()
   await fillUploadForm(page, {
     experiment: `${runPrefix}-exp`,
     location: `${runPrefix}-loc`,

@@ -72,9 +72,7 @@ test.describe("Multi-dataset ODM (Option A)", () => {
     // tolerates but Chromium logs as a console error. Whitelist that
     // one URL pattern so the guard's strict pass still catches real
     // regressions.
-    consoleErrorGuard.expectError(
-      /RawThermal\/thermal_dataset\.json/,
-    )
+    consoleErrorGuard.expectError(/RawThermal\/thermal_dataset\.json/)
     const scope: RunScope = {
       experiment: `${runPrefix}-exp`,
       location: `${runPrefix}-loc`,
@@ -163,9 +161,9 @@ test.describe("Multi-dataset ODM (Option A)", () => {
     const keepShortId = allShortIds[0]
     const dropShortId = allShortIds[1]
     await chips.filter({ hasText: dropShortId }).first().click()
-    await expect(
-      page.getByText(/1 of 2 datasets selected/i),
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText(/1 of 2 datasets selected/i)).toBeVisible({
+      timeout: 5_000,
+    })
 
     // Data Sync gates orthomosaic — flip it to completed (no-op
     // step that just confirms images exist at the scope).
@@ -185,8 +183,7 @@ test.describe("Multi-dataset ODM (Option A)", () => {
     await expect(orthoRow).toBeVisible({ timeout: 15_000 })
     const submitJobResp = page.waitForResponse(
       (r) =>
-        r.url().includes("/api/jobs/submit") &&
-        r.request().method() === "POST",
+        r.url().includes("/api/jobs/submit") && r.request().method() === "POST",
       { timeout: 60_000 },
     )
     await orthoRow.getByRole("button", { name: /run step/i }).click()

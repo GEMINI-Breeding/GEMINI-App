@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { dataTypes } from "@/config/dataTypes"
+import { idAsString } from "@/features/admin/lib/ids"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
 import {
   type PostUploadJob,
@@ -19,30 +20,29 @@ import {
   useUploadQueue,
 } from "@/features/files/hooks/useUploadQueue"
 import {
-  createOrGetDatasetForUpload,
-  extractDatasetShortId,
-} from "@/features/files/lib/datasetForUpload"
-import { idAsString } from "@/features/admin/lib/ids"
-import type {
-  SensorClassification,
-  ThermalCalibration,
-  ThermalCalibrationMode,
-} from "@/features/import/lib/types"
-import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
-import { probeFilesForThermal } from "@/lib/thermalProbe"
-import { ThermalCalibrationField } from "./ThermalCalibrationField"
-import {
   type ResolvedScope,
   type UploadScopeChoices,
   useResolveScope,
 } from "@/features/files/hooks/useUploadScope"
+import {
+  createOrGetDatasetForUpload,
+  extractDatasetShortId,
+} from "@/features/files/lib/datasetForUpload"
 import {
   humanFieldLabel,
   missingFormFields,
   requiredFormFields,
 } from "@/features/files/lib/uploadFieldRequirements"
 import { isExtensionAllowed } from "@/features/files/utils/extensions"
+import type {
+  SensorClassification,
+  ThermalCalibration,
+  ThermalCalibrationMode,
+} from "@/features/import/lib/types"
 import useCustomToast from "@/hooks/useCustomToast"
+import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
+import { probeFilesForThermal } from "@/lib/thermalProbe"
+import { ThermalCalibrationField } from "./ThermalCalibrationField"
 import { UploadZone } from "./UploadZone"
 
 // Form-field key (the dataTypes config language) → scope key (the entity
@@ -561,9 +561,7 @@ export function UploadList({
           sensorTypeId: SensorType.Thermal,
           dataTypeId: DataType.Image,
           dataFormatId:
-            thermalHint === "boson_tiff"
-              ? DataFormat.TIFF
-              : DataFormat.JPEG,
+            thermalHint === "boson_tiff" ? DataFormat.TIFF : DataFormat.JPEG,
         }
       } else {
         sensorClassification = {

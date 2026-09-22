@@ -14,7 +14,9 @@ describe("autoDatasetName", () => {
   it("strips non-alphanumeric characters from the data type", () => {
     const when = new Date(2026, 0, 1, 0, 0, 0)
     const name = autoDatasetName("Exp", "Farm-ng Binary File", when)
-    expect(name).toMatch(/^Exp__FarmngBinaryFile__20260101__000000__[0-9a-f]{4}$/)
+    expect(name).toMatch(
+      /^Exp__FarmngBinaryFile__20260101__000000__[0-9a-f]{4}$/,
+    )
   })
 
   it("two calls in the same second collide-avoidance via the rand tail", () => {

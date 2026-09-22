@@ -286,9 +286,7 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
     )
     // Capture the studyId from the URL once we're on the detail page.
     const studyDetailUrl = new URL(page.url())
-    const studyIdMatch = studyDetailUrl.pathname.match(
-      /\/genotyping\/([^/]+)$/,
-    )
+    const studyIdMatch = studyDetailUrl.pathname.match(/\/genotyping\/([^/]+)$/)
     expect(studyIdMatch).toBeTruthy()
     const studyId = studyIdMatch![1]
 
@@ -301,18 +299,18 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
     // ─── 4. Submit a GWAS run ─────────────────────────────────────────
     // Wait until the experiment dropdown is populated, then pick our entities.
     const expSelect = page.getByTestId("gwas-experiment-select")
-    await expect(expSelect.locator("option", { hasText: experimentName }))
-      .toHaveCount(1, { timeout: 15_000 })
+    await expect(
+      expSelect.locator("option", { hasText: experimentName }),
+    ).toHaveCount(1, { timeout: 15_000 })
     await expSelect.selectOption({ label: experimentName })
 
     const datasetSelect = page.getByTestId("gwas-dataset-select")
     // Wait for the trait dataset to appear after the experiment selection.
     await expect(datasetSelect).toBeEnabled({ timeout: 15_000 })
     await expect
-      .poll(
-        async () => (await datasetSelect.locator("option").count()) > 1,
-        { timeout: 15_000 },
-      )
+      .poll(async () => (await datasetSelect.locator("option").count()) > 1, {
+        timeout: 15_000,
+      })
       .toBe(true)
     // Pick the dataset whose name carries our prefix.
     const datasetOption = datasetSelect.locator("option", {
@@ -426,9 +424,7 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
       expect(loaded).toBe(true)
     }).toPass({ timeout: 30_000 })
 
-    const rows = page.locator(
-      '[data-testid="gwas-top-hits-table"] tbody tr',
-    )
+    const rows = page.locator('[data-testid="gwas-top-hits-table"] tbody tr')
     expect(await rows.count()).toBeGreaterThanOrEqual(1)
 
     // Polish-3 regression: the primary "Download sumstats" button is
@@ -461,9 +457,7 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
       { hasText: traitName },
     )
     await expect(traitCell).toBeVisible({ timeout: 15_000 })
-    await expect(
-      page.getByTestId(`gwas-recent-view-${jobId}`),
-    ).toBeVisible()
+    await expect(page.getByTestId(`gwas-recent-view-${jobId}`)).toBeVisible()
 
     // Polish-6 regression: per-row delete sweeps both the job row
     // (DB) and the MinIO artifacts under gwas/{job_id}/. We click
@@ -475,9 +469,9 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
     await page.getByTestId(`gwas-recent-delete-${jobId}`).click()
     await expect(page.getByTestId("confirm-dialog")).toBeVisible()
     await page.getByTestId("confirm-dialog-confirm").click()
-    await expect(
-      page.getByTestId(`gwas-recent-row-${jobId}`),
-    ).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByTestId(`gwas-recent-row-${jobId}`)).toHaveCount(0, {
+      timeout: 15_000,
+    })
 
     const deletedCheck = await request.get(`${API_URL}/api/jobs/${jobId}`, {
       headers: { Authorization: authHeader() },
@@ -602,8 +596,9 @@ test.describe("Phase 9d': GWAS end-to-end", () => {
     await page.goto(`/genotyping/${studyId}?tab=gwas`)
 
     const expSelect = page.getByTestId("gwas-experiment-select")
-    await expect(expSelect.locator("option", { hasText: experimentName }))
-      .toHaveCount(1, { timeout: 15_000 })
+    await expect(
+      expSelect.locator("option", { hasText: experimentName }),
+    ).toHaveCount(1, { timeout: 15_000 })
     await expSelect.selectOption({ label: experimentName })
     const datasetSelect = page.getByTestId("gwas-dataset-select")
     await expect(datasetSelect).toBeEnabled({ timeout: 15_000 })

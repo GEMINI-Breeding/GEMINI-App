@@ -104,11 +104,7 @@ export async function tiffLooksLikeThermal(file: FileLike): Promise<boolean> {
     const littleEndian = head[0] === 0x49 && head[1] === 0x49
     const bigEndian = head[0] === 0x4d && head[1] === 0x4d
     if (!littleEndian && !bigEndian) return false
-    const headView = new DataView(
-      head.buffer,
-      head.byteOffset,
-      head.byteLength,
-    )
+    const headView = new DataView(head.buffer, head.byteOffset, head.byteLength)
     const le = littleEndian
     const magic = headView.getUint16(2, le)
     if (magic !== 42) return false
@@ -143,9 +139,7 @@ export async function tiffLooksLikeThermal(file: FileLike): Promise<boolean> {
         photometric = value
       }
     }
-    return (
-      bitsPerSample === 16 && samplesPerPixel === 1 && photometric === 1
-    )
+    return bitsPerSample === 16 && samplesPerPixel === 1 && photometric === 1
   } catch {
     return false
   }

@@ -416,9 +416,9 @@ describe("buildTraitRecords", () => {
       })
       expect(grandTotal).toBe(2)
       expect(groups).toHaveLength(1)
-      expect(
-        groups[0].bySeasonSite.get("Spring::Davis Field A")?.length,
-      ).toBe(2)
+      expect(groups[0].bySeasonSite.get("Spring::Davis Field A")?.length).toBe(
+        2,
+      )
     })
 
     it("omits plot_number / plot_row_number / plot_column_number keys", () => {

@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog"
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
-import { readExifAutofill } from "../lib/exifAutofill"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
 import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
@@ -24,6 +23,7 @@ import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
 import { UploadZone } from "../components/UploadZone"
 import { useResolveScope } from "../hooks/useUploadScope"
+import { readExifAutofill } from "../lib/exifAutofill"
 import {
   humanFieldLabel,
   missingFormFields,

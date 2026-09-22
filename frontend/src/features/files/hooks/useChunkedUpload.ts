@@ -68,7 +68,8 @@ export function useChunkedUpload() {
       file: File,
       opts: ChunkedUploadOpts,
     ): Promise<ChunkedUploadItemResult> => {
-      const { objectPath, processId, itemId, experimentId, datasetId, signal } = opts
+      const { objectPath, processId, itemId, experimentId, datasetId, signal } =
+        opts
       const fileIdentifier = computeFileIdentifier(file)
 
       updateProcessItem(processId, itemId, {

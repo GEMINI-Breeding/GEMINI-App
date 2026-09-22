@@ -77,7 +77,7 @@ describe("useSubmitGwas", () => {
     vi.clearAllMocks()
   })
 
-  it("forwards the GwasSubmitInput as requestBody and invalidates [\"jobs\"]", async () => {
+  it('forwards the GwasSubmitInput as requestBody and invalidates ["jobs"]', async () => {
     const { qc, Wrapper } = makeWrapper()
     const invalidate = vi.spyOn(qc, "invalidateQueries")
 

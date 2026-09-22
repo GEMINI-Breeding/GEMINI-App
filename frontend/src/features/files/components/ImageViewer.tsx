@@ -363,8 +363,11 @@ export function ImageViewer() {
     }
     return { sidecarKeys, previewJpegByOriginal, previewJpegs }
   }, [allFiles])
-  const { sidecarKeys: thermalSidecarKeys, previewJpegByOriginal, previewJpegs } =
-    thermalIndices
+  const {
+    sidecarKeys: thermalSidecarKeys,
+    previewJpegByOriginal,
+    previewJpegs,
+  } = thermalIndices
 
   function isThermalImage(file: FileMetadata): boolean {
     // Match `…/Images/{base}.{ext}` against `…/RawThermal/{base}.json`.
@@ -738,9 +741,7 @@ export function ImageViewer() {
                     key={f.object_name}
                     file={f}
                     isThermal={isThermalImage(f)}
-                    previewObjectName={previewJpegByOriginal.get(
-                      f.object_name,
-                    )}
+                    previewObjectName={previewJpegByOriginal.get(f.object_name)}
                     onOpen={setThermalOpenFile}
                   />
                 ))}

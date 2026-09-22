@@ -24,7 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useCancelJob } from "@/features/process/hooks/useJobs"
 import { idAsString } from "@/features/admin/lib/ids"
 import {
   jobTraitNames,
@@ -32,7 +31,11 @@ import {
   useStudyGwasJobs,
   useTraitNameMap,
 } from "@/features/genotyping/hooks/useGwas"
-import { displayStage, statusVariant } from "@/features/genotyping/lib/gwasResult"
+import {
+  displayStage,
+  statusVariant,
+} from "@/features/genotyping/lib/gwasResult"
+import { useCancelJob } from "@/features/process/hooks/useJobs"
 import useCustomToast from "@/hooks/useCustomToast"
 
 export interface GwasRecentRunsProps {
@@ -57,7 +60,11 @@ export function GwasRecentRuns({ studyId }: GwasRecentRunsProps) {
     .map((j) => ({ id: idAsString(j.id), createdAt: j.created_at ?? "" }))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]?.id
 
-  async function handleDelete(jobId: string, status: string, traitLabel: string) {
+  async function handleDelete(
+    jobId: string,
+    status: string,
+    traitLabel: string,
+  ) {
     const statusLower = status.toLowerCase()
     const isLive = statusLower === "pending" || statusLower === "running"
     const ok = await confirm({

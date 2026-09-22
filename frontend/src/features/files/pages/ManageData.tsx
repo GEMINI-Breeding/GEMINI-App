@@ -524,9 +524,8 @@ function DatasetRow({
       title: `Delete dataset "${datasetName}"?`,
       description: (
         <span>
-          This removes every file uploaded under this batch from
-          storage, plus any records that reference it.{" "}
-          <strong>This cannot be undone.</strong>
+          This removes every file uploaded under this batch from storage, plus
+          any records that reference it. <strong>This cannot be undone.</strong>
         </span>
       ),
       confirmLabel: "Delete dataset",

@@ -48,13 +48,21 @@ describe("buildDatasetName", () => {
       buildDatasetName({ expName: null, category: "csv_tabular", hex: "a3f7" }),
     ).toBe("Collection - Traits - a3f7")
     expect(
-      buildDatasetName({ expName: "   ", category: "csv_tabular", hex: "a3f7" }),
+      buildDatasetName({
+        expName: "   ",
+        category: "csv_tabular",
+        hex: "a3f7",
+      }),
     ).toBe("Collection - Traits - a3f7")
   })
 
   it("renders category labels for known categories", () => {
     expect(
-      buildDatasetName({ expName: "X", category: "drone_imagery", hex: "0001" }),
+      buildDatasetName({
+        expName: "X",
+        category: "drone_imagery",
+        hex: "0001",
+      }),
     ).toBe("X - Imagery - 0001")
     expect(
       buildDatasetName({ expName: "X", category: "genomic", hex: "0002" }),

@@ -100,8 +100,8 @@ test.describe("Analyze — ANOVA chart", () => {
     ).toBeVisible()
 
     // No replication warning — we have 3 reps per accession
-    await expect(
-      panel.getByTestId("mv-anova-replication-warning"),
-    ).toHaveCount(0)
+    await expect(panel.getByTestId("mv-anova-replication-warning")).toHaveCount(
+      0,
+    )
   })
 })

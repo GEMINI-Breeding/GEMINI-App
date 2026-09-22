@@ -12,10 +12,7 @@
  */
 import { useQuery } from "@tanstack/react-query"
 
-import {
-  type GenotypeRecordOutput,
-  GenotypingStudiesService,
-} from "@/client"
+import { type GenotypeRecordOutput, GenotypingStudiesService } from "@/client"
 import { genotypingStudiesQueryKey } from "./useGenotypingStudies"
 
 export type GenotypeRecordsParams = {
