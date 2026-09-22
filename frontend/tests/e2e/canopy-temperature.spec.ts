@@ -18,7 +18,7 @@
 import { readFileSync } from "node:fs"
 
 import type { Page } from "@playwright/test"
-
+import { authHeader } from "../helpers/apiClient"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
@@ -52,6 +52,7 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
 
   test("imported RGB + thermal orthos → Temp_veg_avg_C per plot", async ({
     page,
+    request,
     runPrefix,
   }) => {
     const experiment = `${runPrefix}-ctemp-exp`
@@ -115,16 +116,19 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
     )
 
     // ── 3. Boundaries over the ortho, then Split. ───────────────────────
+    // The map fits to the ortho's bounds once TiTiler answers; draw inside.
+    // Armed before navigating, or a fast answer is missed.
+    const tilejson = page.waitForResponse(
+      (r) => r.url().includes("tilejson.json"),
+      { timeout: 30_000 },
+    )
     await page.goto(
       `/process/${wsId}/tool?runId=${runId}&step=plot_boundary_prep`,
     )
     await expect(
       page.getByRole("heading", { name: /plot boundary prep/i }),
     ).toBeVisible()
-    // The map fits to the ortho's bounds once TiTiler answers; draw inside.
-    await page.waitForResponse((r) => r.url().includes("tilejson.json"), {
-      timeout: 30_000,
-    })
+    await tilejson
     await page.waitForTimeout(1000)
     await page.evaluate(() => {
       const w = window as unknown as {
@@ -233,5 +237,67 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
     // Sort by temperature so a plot with vegetation leads.
     await table.getByTestId("analyze-table-sort-trait-Temp_veg_avg_C").click()
     await expect(rows.first()).toContainText("27.5")
+
+    // ── 6. Re-run replaces; deleting a run removes its values. ──────────
+    // How many trait records this flight holds (read-only catalog).
+    const recordCount = async () => {
+      const res = await request.get("/api/multivariate_analysis/catalog", {
+        headers: { Authorization: authHeader() },
+      })
+      const entries = (await res.json()) as Array<{
+        experiment_name: string
+        collection_date: string
+        record_count: number
+      }>
+      return (
+        entries.find(
+          (e) => e.experiment_name === experiment && e.collection_date === date,
+        )?.record_count ?? 0
+      )
+    }
+    // One run's values: up to 6 plots × 2 traits (a plot with no
+    // vegetation pixels has no canopy temperature, so no record).
+    const firstCount = await recordCount()
+    expect(firstCount).toBeGreaterThan(6)
+    expect(firstCount).toBeLessThanOrEqual(12)
+
+    await page.goto(`/process/${wsId}/run/${runId}`)
+    const traitRow2 = page.getByTestId("step-row-trait_extraction")
+    await traitRow2.getByRole("button", { name: /re-run|run step/i }).click()
+    await page.getByTestId("trait-thermal").click()
+    await page
+      .getByRole("option", {
+        name: `${platform}/Thermal · e2e_test_thermal.tif`,
+      })
+      .click()
+    await page.getByRole("button", { name: "Run Trait Extraction" }).click()
+    const panel = page.getByTestId("trait-records-panel")
+    const runRows = panel.locator('[data-testid^="trait-record-row-"]')
+    await expect(runRows).toHaveCount(2, { timeout: 15_000 })
+    const newest = await runRows
+      .first()
+      .getAttribute("data-testid")
+      .then((t) => (t ?? "").replace("trait-record-row-", ""))
+    const older = await runRows
+      .nth(1)
+      .getAttribute("data-testid")
+      .then((t) => (t ?? "").replace("trait-record-row-", ""))
+    await expect(panel.getByTestId(`trait-record-live-${newest}`)).toHaveText(
+      "Yes",
+      { timeout: 3 * 60_000 },
+    )
+    await expect(panel.getByTestId(`trait-record-live-${older}`)).toHaveText(
+      "No — replaced or deleted",
+    )
+    // Replaced, not appended: still one run's worth of records.
+    expect(await recordCount()).toBe(firstCount)
+
+    await panel.getByTestId(`trait-record-delete-${newest}`).click()
+    await page.getByTestId("confirm-dialog-confirm").click()
+    await expect(panel.getByTestId(`trait-record-live-${newest}`)).toHaveText(
+      "No — replaced or deleted",
+      { timeout: 15_000 },
+    )
+    await expect.poll(recordCount, { timeout: 15_000 }).toBe(0)
   })
 })

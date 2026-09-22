@@ -1114,6 +1114,29 @@ export function RunDetail() {
       )
     : undefined
 
+  // The dialog picks the newest ortho when it opens — but if the file
+  // listings hadn't loaded yet there was nothing to pick, and Run stayed
+  // disabled until the user chose one by hand. Fill it in once they arrive.
+  const newestOrtho = scope
+    ? buildOrthoVersions(run, scope, orthoFiles)[0]
+    : undefined
+  useEffect(() => {
+    if (!traitDialogOpen || traitDialogState.orthoVersion !== null) return
+    if (!newestOrtho) return
+    setTraitDialogState((s) => ({
+      ...s,
+      orthoVersion: newestOrtho.version,
+      demPath:
+        s.demPath ?? demForOrtho(newestOrtho, orthoFiles, importedDemPath),
+    }))
+  }, [
+    traitDialogOpen,
+    traitDialogState.orthoVersion,
+    newestOrtho,
+    orthoFiles,
+    importedDemPath,
+  ])
+
   // Run-level WS subscription: any step that has a *running* job gets its
   // events fed into the per-runId buffer so the StepRow log + progress bar
   // animate. We re-subscribe when the running job changes.

@@ -11,6 +11,8 @@ export interface BatchInferenceResult {
   counts_by_class?: Record<string, number>
   errors?: Record<string, string>
   ingested?: Record<string, number>
+  /** Dataset the counts were saved into (one per run); absent if none saved. */
+  dataset_name?: string
 }
 
 export function isBatchInferenceResult(r: unknown): r is BatchInferenceResult {

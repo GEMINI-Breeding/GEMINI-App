@@ -12,10 +12,12 @@
  * trait-record naming) once analyzeApi has a GEMINIbase-backed equivalent.
  */
 import { type Query, useQueries } from "@tanstack/react-query"
-import { Download, Loader2 } from "lucide-react"
+import { Download, Loader2, Trash2 } from "lucide-react"
+import { useState } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import {
   Table,
   TableBody,
@@ -24,7 +26,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  useDeleteRunResults,
+  useExperimentDatasetNames,
+} from "@/features/process/lib/runResults"
 import type { Run } from "@/features/process/lib/runStore"
+import useCustomToast from "@/hooks/useCustomToast"
 
 function downloadAuthed(filePath: string, suggestedName: string) {
   const token = localStorage.getItem("gemini.auth.token") ?? ""
@@ -50,6 +57,37 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
   // Newest first: jobIds is appended-in-order in runStore, so reverse for
   // the panel.
   const jobIds = [...(run.steps.trait_extraction?.jobIds ?? [])].reverse()
+  const experiment = run.uploadScope?.experiment
+  const deleteRunResults = useDeleteRunResults()
+  const confirm = useConfirm()
+  const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const onDelete = async (jobId: string, datasetName: string) => {
+    if (!experiment) return
+    const ok = await confirm({
+      title: "Delete this run's trait values?",
+      description: (
+        <span>
+          Removes the per-plot values this extraction wrote, so Analyze no
+          longer uses them. The traits GeoJSON file stays and can be downloaded.{" "}
+          <strong>This cannot be undone.</strong>
+        </span>
+      ),
+      confirmLabel: "Delete values",
+      variant: "destructive",
+    })
+    if (!ok) return
+    setDeleting(jobId)
+    try {
+      await deleteRunResults(experiment, datasetName)
+      showSuccessToast("Trait values deleted")
+    } catch (e) {
+      showErrorToastWithCopy(e instanceof Error ? e.message : "Delete failed")
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   // Pull each job's current state. Cheap because the WS subscription in
   // RunDetail already keeps the running ones live; this is for completed
@@ -76,6 +114,11 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
     })),
   })
 
+  const datasetNames = useExperimentDatasetNames(
+    experiment,
+    jobIds.filter((_, i) => queries[i]?.data?.status === "COMPLETED"),
+  )
+
   if (jobIds.length === 0) {
     return (
       <p className="text-muted-foreground rounded border bg-muted/30 p-2 text-xs">
@@ -93,6 +136,7 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
             <TableHead>Status</TableHead>
             <TableHead>Created</TableHead>
             <TableHead>Output</TableHead>
+            <TableHead>In Analyze</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -108,6 +152,13 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
               job?.result as { output_traits_geojson_path?: string } | null
             )?.output_traits_geojson_path
             const filename = outputPath?.split("/").pop() ?? "traits.geojson"
+            const datasetName = (
+              job?.result as { dataset_name?: string } | null
+            )?.dataset_name
+            // Live = its dataset still exists; a later run replaces it.
+            const live =
+              datasetName !== undefined &&
+              datasetNames.data?.has(datasetName) === true
             return (
               <TableRow
                 key={jobId}
@@ -129,7 +180,32 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
                 <TableCell className="text-muted-foreground break-all text-xs">
                   {outputPath ?? "—"}
                 </TableCell>
+                <TableCell
+                  className="text-xs"
+                  data-testid={`trait-record-live-${jobId.slice(0, 8)}`}
+                >
+                  {job?.status !== "COMPLETED" || !datasetName
+                    ? "—"
+                    : datasetNames.isLoading
+                      ? "…"
+                      : live
+                        ? "Yes"
+                        : "No — replaced or deleted"}
+                </TableCell>
                 <TableCell className="text-right">
+                  {live && datasetName && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Delete this run's trait values"
+                      className="h-7 w-7"
+                      disabled={deleting === jobId}
+                      data-testid={`trait-record-delete-${jobId.slice(0, 8)}`}
+                      onClick={() => onDelete(jobId, datasetName)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   {outputPath ? (
                     <Button
                       variant="ghost"

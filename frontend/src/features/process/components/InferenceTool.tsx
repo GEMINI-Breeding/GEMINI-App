@@ -17,7 +17,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight, Loader2, Play } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Play, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
@@ -35,6 +35,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -58,6 +59,10 @@ import {
   rawScopePrefix,
 } from "@/features/process/lib/paths"
 import { executeStep } from "@/features/process/lib/runApi"
+import {
+  useDeleteRunResults,
+  useExperimentDatasetNames,
+} from "@/features/process/lib/runResults"
 import type { Pipeline, Run } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
@@ -68,11 +73,44 @@ const DEFAULT_BUCKET = "gemini"
 function BatchInferenceSummary({
   result,
   fileStem,
+  experiment,
 }: {
   result: BatchInferenceResult
   fileStem: string
+  experiment?: string
 }) {
   const rows = summaryRows(result)
+  // Saved counts are one dataset per run; a later run with the same label
+  // replaces them, and deleting removes them from Analyze.
+  const datasetNames = useExperimentDatasetNames(experiment, [fileStem])
+  const deleteRunResults = useDeleteRunResults()
+  const confirm = useConfirm()
+  const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
+  const savedLive =
+    !!result.dataset_name &&
+    datasetNames.data?.has(result.dataset_name) === true
+  const deleteCounts = async () => {
+    if (!experiment || !result.dataset_name) return
+    const ok = await confirm({
+      title: "Delete the saved counts from this run?",
+      description: (
+        <span>
+          Removes the detection-count traits this run saved, so Analyze no
+          longer uses them. The per-plot table and CSV here are unaffected.{" "}
+          <strong>This cannot be undone.</strong>
+        </span>
+      ),
+      confirmLabel: "Delete counts",
+      variant: "destructive",
+    })
+    if (!ok) return
+    try {
+      await deleteRunResults(experiment, result.dataset_name)
+      showSuccessToast("Saved counts deleted")
+    } catch (e) {
+      showErrorToastWithCopy(e instanceof Error ? e.message : "Delete failed")
+    }
+  }
   const failed = rows.filter((r) => r.error).length
   const ingested = Object.values(result.ingested ?? {})[0]
   const download = () => {
@@ -97,7 +135,9 @@ function BatchInferenceSummary({
           images inferred · {result.total_detections ?? 0} detections
           {failed > 0 ? ` · ${failed} failed` : ""}
           {typeof ingested === "number"
-            ? ` · counts saved as traits for ${ingested} plots`
+            ? savedLive || datasetNames.isLoading || !result.dataset_name
+              ? ` · counts saved as traits for ${ingested} plots`
+              : " · saved counts were replaced or deleted"
             : ""}
         </CardDescription>
       </CardHeader>
@@ -110,6 +150,18 @@ function BatchInferenceSummary({
         >
           Download CSV
         </Button>
+        {savedLive && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-2"
+            onClick={deleteCounts}
+            data-testid="inference-delete-counts"
+          >
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            Delete saved counts
+          </Button>
+        )}
         <div className="max-h-64 overflow-auto rounded border text-xs">
           <table className="w-full">
             <thead className="bg-muted sticky top-0">
@@ -681,6 +733,7 @@ export function InferenceTool({
           <BatchInferenceSummary
             result={jobQuery.data.result}
             fileStem={`inference-${submittedJobId?.slice(0, 8) ?? "run"}`}
+            experiment={run.uploadScope?.experiment}
           />
         )}
 
