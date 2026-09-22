@@ -1,5 +1,6 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
+import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -165,12 +166,18 @@ export function MsgsSyncedUploadDialog({
   const [mapping, setMapping] = useState<Partial<Record<TargetKey, string>>>({})
   const { showErrorToast } = useCustomToast()
 
-  // When initialCsvText is provided (post-upload flow), jump straight to map step
+  const queryClient = useQueryClient()
+
+  // When initialCsvText is provided (post-upload flow), jump straight to
+  // the map step. Only on open / new text: loadCsvText is recreated each
+  // render, and listing it as a dependency re-parsed the file after every
+  // state change, resetting any mapping the user had picked.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (open && initialCsvText) {
       loadCsvText(initialCsvText)
     }
-  }, [open, initialCsvText, loadCsvText])
+  }, [open, initialCsvText])
 
   function loadCsvText(text: string) {
     const { headers: h, rows } = parseCSV(text)
@@ -198,24 +205,32 @@ export function MsgsSyncedUploadDialog({
     reader.readAsText(file)
   }
 
-  // Save posted to `/api/v1/files/msgs-synced` with the old backend's
-  // "access_token" key. GEMINIbase has neither the route nor that key, so
-  // every Save failed with a generic "Failed to save" toast after the user
-  // had done all the column-mapping work. Until the remapped CSV can be
-  // written back to MinIO (merge_plan.md Phase 3, item 3E), offer the
-  // mapped file as a download so the work isn't lost — and say plainly
-  // that it isn't being saved server-side.
+  // Where the mapped manifest goes: `msgs_synced.csv` beside the upload
+  // (Raw/…/Metadata/), the name the ground pipeline looks for. The user's
+  // original file stays alongside it. Without an upload path (standalone
+  // use) there is no scope to save into, so the file downloads instead.
+  const savePath = destPath
+    ? `${destPath.slice(0, destPath.lastIndexOf("/") + 1)}msgs_synced.csv`
+    : null
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const csvText = remapAndSerialize(parsedRows, mapping)
-      const name = (destPath?.split(/[\\/]/).pop() || "msgs_synced")
-        .replace(/\.csv$/i, "")
-        .concat("_remapped.csv")
+      if (savePath) {
+        const file = new File([csvText], "msgs_synced.csv", {
+          type: "text/csv",
+        })
+        await FilesService.apiFilesUploadUploadFile({
+          formData: { file, bucket_name: "gemini", object_name: savePath },
+        })
+        queryClient.invalidateQueries({ queryKey: ["files"] })
+        return { row_count: parsedRows.length }
+      }
       const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }))
       try {
         const a = document.createElement("a")
         a.href = url
-        a.download = name
+        a.download = "msgs_synced.csv"
         a.click()
       } finally {
         URL.revokeObjectURL(url)
@@ -226,7 +241,10 @@ export function MsgsSyncedUploadDialog({
       onSaved(data.row_count)
       handleClose()
     },
-    onError: () => showErrorToast("Could not build the remapped CSV"),
+    onError: (e) =>
+      showErrorToast(
+        e instanceof Error ? e.message : "Could not save the remapped CSV",
+      ),
   })
 
   const requiredMapped = TARGET_COLS.filter((t) => t.required).every(
@@ -352,12 +370,17 @@ export function MsgsSyncedUploadDialog({
 
         {step === "map" && (
           <p
-            className="text-amber-700 text-xs"
-            data-testid="msgs-synced-download-only"
+            className="text-muted-foreground text-xs"
+            data-testid="msgs-synced-save-target"
           >
-            This backend can't store a remapped msgs_synced.csv yet, so the
-            mapped file downloads to your computer instead. Upload it as "Synced
-            Metadata" to attach it to this scope.
+            {savePath ? (
+              <>
+                Saves as <code className="break-all">{savePath}</code>; your
+                original file is kept.
+              </>
+            ) : (
+              "No upload to attach this to, so the mapped file downloads instead."
+            )}
           </p>
         )}
         <DialogFooter>
@@ -374,7 +397,11 @@ export function MsgsSyncedUploadDialog({
               disabled={!requiredMapped || saveMutation.isPending}
               onClick={() => saveMutation.mutate()}
             >
-              {saveMutation.isPending ? "Preparing…" : "Download remapped CSV"}
+              {saveMutation.isPending
+                ? "Saving…"
+                : savePath
+                  ? "Save mapping"
+                  : "Download remapped CSV"}
             </Button>
           )}
         </DialogFooter>

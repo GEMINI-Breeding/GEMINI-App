@@ -24,6 +24,7 @@ import {
   Dna,
   Download,
   ExternalLink,
+  Eye,
   File,
   Trash2,
 } from "lucide-react"
@@ -45,6 +46,10 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { idAsString } from "@/features/admin/lib/ids"
 import useCustomToast from "@/hooks/useCustomToast"
+import {
+  isViewableCsv,
+  MetadataViewerDialog,
+} from "../components/MetadataViewerDialog"
 import { ReferenceDataSection } from "../components/ReferenceDataSection"
 import {
   DEFAULT_BUCKET,
@@ -299,6 +304,7 @@ function ExperimentRow({
     }
   }
 
+  const [viewing, setViewing] = useState<string | null>(null)
   const [zipping, setZipping] = useState(false)
   const handleDownloadAll = async () => {
     setZipping(true)
@@ -437,6 +443,11 @@ function ExperimentRow({
               loading={filesQuery.isLoading}
               error={filesQuery.isError ? filesQuery.error : null}
               onDownload={handleDownload}
+              onView={setViewing}
+            />
+            <MetadataViewerDialog
+              objectPath={viewing}
+              onClose={() => setViewing(null)}
             />
           </section>
         </div>
@@ -606,11 +617,13 @@ function FileList({
   loading,
   error,
   onDownload,
+  onView,
 }: {
   files: FileMetadata[]
   loading: boolean
   error: Error | null
   onDownload: (objectPath: string) => void
+  onView: (objectPath: string) => void
 }) {
   if (loading) {
     return <div className="text-muted-foreground text-sm">Loading files…</div>
@@ -645,6 +658,17 @@ function FileList({
               {f.content_type ? ` • ${f.content_type}` : ""}
             </div>
           </div>
+          {isViewableCsv(f.object_name) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onView(f.object_name)}
+              title="View"
+              data-testid={`view-${f.object_name}`}
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
