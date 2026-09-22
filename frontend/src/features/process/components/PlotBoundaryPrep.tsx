@@ -68,6 +68,7 @@ import {
   s3UrlForOrtho,
   tilejsonBoundsToLeaflet,
 } from "@/features/process/lib/activeOrtho"
+import { outerFromOrthoBounds } from "@/features/process/lib/autoBoundary"
 import {
   applyLabelsToFeatures,
   dimensionsFromDesign,
@@ -1441,11 +1442,28 @@ export function PlotBoundaryPrep({
 
               {features.length === 0 ? (
                 <p className="text-amber-700 dark:text-amber-400 text-xs">
-                  Draw an outer boundary on the map, then click{" "}
-                  <strong>Generate plot grid</strong>.
+                  Draw an outer boundary on the map
+                  {orthoBounds ? " (or use the ortho's extent)" : ""}, then
+                  click <strong>Generate plot grid</strong>.
                 </p>
               ) : null}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {orthoBounds && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-auto-from-ortho"
+                    title="Outer boundary = the orthomosaic's extent, inset 2.5% to trim its ragged edge"
+                    onClick={() =>
+                      setFeatures([
+                        ...stateRef.current.features,
+                        outerFromOrthoBounds(orthoBounds),
+                      ])
+                    }
+                  >
+                    Boundary from ortho extent
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

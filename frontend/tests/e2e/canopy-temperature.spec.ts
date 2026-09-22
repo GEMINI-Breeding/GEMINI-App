@@ -129,40 +129,10 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
       page.getByRole("heading", { name: /plot boundary prep/i }),
     ).toBeVisible()
     await tilejson
-    await page.waitForTimeout(1000)
-    await page.evaluate(() => {
-      const w = window as unknown as {
-        __leafletMap__?: {
-          getBounds(): {
-            getSouthWest(): { lat: number; lng: number }
-            getNorthEast(): { lat: number; lng: number }
-          }
-          fire(name: string, payload: unknown): void
-        }
-        L?: {
-          polygon(ring: [number, number][]): { addTo(map: unknown): unknown }
-        }
-      }
-      const map = w.__leafletMap__
-      if (!map || !w.L) throw new Error("leaflet map handle missing")
-      const b = map.getBounds()
-      const sw = b.getSouthWest()
-      const ne = b.getNorthEast()
-      const w2 = (ne.lng - sw.lng) * 0.4
-      const h2 = (ne.lat - sw.lat) * 0.4
-      const cx = (sw.lng + ne.lng) / 2
-      const cy = (sw.lat + ne.lat) / 2
-      const ring: [number, number][] = [
-        [cy - h2 / 2, cx - w2 / 2],
-        [cy - h2 / 2, cx + w2 / 2],
-        [cy + h2 / 2, cx + w2 / 2],
-        [cy + h2 / 2, cx - w2 / 2],
-        [cy - h2 / 2, cx - w2 / 2],
-      ]
-      const layer = w.L.polygon(ring)
-      layer.addTo(map)
-      map.fire("pm:create", { layer, shape: "Polygon" })
-    })
+    // Outer boundary straight from the ortho's extent (main's
+    // auto-boundary), no hand drawing.
+    await page.getByTestId("boundary-auto-from-ortho").click()
+    await expect(page.locator("text=/0 plots? across 1 block/i")).toBeVisible()
     await page.getByTestId("boundary-rows").fill("2")
     await page.keyboard.press("Tab")
     await page.getByTestId("boundary-cols").fill("3")
