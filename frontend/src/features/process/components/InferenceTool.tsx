@@ -1,11 +1,13 @@
 /**
  * InferenceTool — submit LOCATE_PLANTS on a single image and view results.
  *
- * R5c MVP. Differences vs main's 1,340-LOC version:
- *   - Single-image inference instead of "every plot image" fan-out. The
- *     GEMINIbase LOCATE_PLANTS worker is single-image; per-plot fan-out
- *     would need either a worker change or hundreds of jobs submitted in
- *     parallel from the client. Defer the fan-out to a later pass.
+ * Differences vs main's 1,340-LOC version:
+ *   - Per-plot fan-out is now supported ("Run on: every image at this
+ *     source"). LOCATE_PLANTS gained an `images_prefix` mode so the
+ *     worker loops server-side and returns counts keyed by plot number —
+ *     one job per field, as the old backend did. Submitting a job per
+ *     plot from the client would mean hundreds of jobs each paying
+ *     container + model startup.
  *   - Model list comes from the pipeline's saved Roboflow config (set in
  *     the R3 wizard's step 3). No extra fetch required.
  *   - Threshold slider does client-side NMS / filtering on the cached
@@ -168,6 +170,9 @@ export function InferenceTool({
   }, [scope, datasetShortIds])
   const [sourceIdx, setSourceIdx] = useState(0)
   const activePrefix = sources[sourceIdx].prefix
+  // "single" infers the previewed image; "all" hands the whole prefix to
+  // one job that loops server-side and keys results by plot number.
+  const [mode, setMode] = useState<"single" | "all">("single")
 
   const imagesQuery = useQuery<FileMetadata[], Error>({
     queryKey: ["files", "list", activePrefix, "inference"],
@@ -201,25 +206,29 @@ export function InferenceTool({
   const submit = useMutation({
     mutationFn: async () => {
       if (!activeModel) throw new Error("Pick a Roboflow model first")
-      if (!activeImage) throw new Error("Pick an image first")
+      if (mode === "single" && !activeImage) {
+        throw new Error("Pick an image first")
+      }
+      if (mode === "all" && images.length === 0) {
+        throw new Error("No images at this source to run inference on")
+      }
       const experimentId = run.uploadScope?.experimentId
       if (!experimentId) {
         throw new Error(
           "This run is missing its experiment binding. Re-create it from the workspace page.",
         )
       }
-      const imagePath = activeImage.object_name ?? ""
-      const outputPath = `${plotImagesPrefix(scope)}inference/${activeImageName.replace(
-        /\.[^.]+$/,
-        "",
-      )}-${activeModelIdx}-${Date.now()}.json`
+      const imagePath = activeImage?.object_name ?? ""
+      const stem =
+        mode === "all" ? "all-plots" : activeImageName.replace(/\.[^.]+$/, "")
+      const outputPath = `${plotImagesPrefix(scope)}inference/${stem}-${activeModelIdx}-${Date.now()}.json`
       const result = await executeStep({
         runId: run.id,
         stepKey: "inference",
         scope,
         experimentId,
         inference: {
-          imagePath,
+          ...(mode === "all" ? { imagesPrefix: activePrefix } : { imagePath }),
           apiKey: activeModel.roboflow_api_key,
           modelId: activeModel.roboflow_model_id,
           outputPredictionsPath: outputPath,
@@ -392,10 +401,40 @@ export function InferenceTool({
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label className="mb-1.5 text-xs" htmlFor="inference-mode">
+                Run on
+              </Label>
+              <Select
+                value={mode}
+                onValueChange={(v) => setMode(v as "single" | "all")}
+              >
+                <SelectTrigger id="inference-mode" data-testid="inference-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single">
+                    The previewed image only
+                  </SelectItem>
+                  <SelectItem value="all">
+                    Every image at this source
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
             {activePrefix}
           </code>
+          {mode === "all" && (
+            <p
+              className="text-muted-foreground text-xs"
+              data-testid="inference-mode-all-note"
+            >
+              {images.length} image{images.length === 1 ? "" : "s"} will be
+              inferred in a single job, with detections counted per plot.
+            </p>
+          )}
         </CardContent>
       </Card>
 

@@ -422,6 +422,82 @@ describe("executeStep", () => {
     })
   })
 
+  describe("inference", () => {
+    const base = (run: Run) => ({
+      ...baseInput(run, "inference"),
+    })
+
+    it("submits a single-image job with image_path", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-1" })
+      const res = await executeStep({
+        ...base(run),
+        inference: {
+          imagePath: "Processed/x/PlotImages/plot_1_accession_A.png",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      expect(res).toEqual({ jobId: "inf-1", done: false })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.image_path).toBe(
+        "Processed/x/PlotImages/plot_1_accession_A.png",
+      )
+      expect(params).not.toHaveProperty("images_prefix")
+    })
+
+    it("submits a batch job with images_prefix and no image_path", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-2" })
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagesPrefix: "Processed/x/PlotImages/",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.images_prefix).toBe("Processed/x/PlotImages/")
+      // Sending both would silently take the worker's single-image path.
+      expect(params).not.toHaveProperty("image_path")
+    })
+
+    it("rejects both sources at once", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...base(run),
+          inference: {
+            imagePath: "a.png",
+            imagesPrefix: "p/",
+            apiKey: "k",
+            modelId: "ws/m/1",
+            outputPredictionsPath: "out.json",
+          },
+        }),
+      ).rejects.toThrow(/exactly one of imagePath or imagesPrefix/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("rejects neither source", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...base(run),
+          inference: {
+            apiKey: "k",
+            modelId: "ws/m/1",
+            outputPredictionsPath: "out.json",
+          },
+        }),
+      ).rejects.toThrow(/exactly one of imagePath or imagesPrefix/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+  })
+
   describe("split_orthomosaic", () => {
     const FC = (n: number): GeoJSON.FeatureCollection => ({
       type: "FeatureCollection",

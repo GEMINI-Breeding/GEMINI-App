@@ -131,5 +131,29 @@ test.describe("R5c: InferenceTool MVP", () => {
     await expect(page.getByTestId("inference-submit")).toBeEnabled({
       timeout: 30_000,
     })
+
+    // ── Per-plot fan-out mode. ──────────────────────────────────────────
+    // Before this existed the tool could only ever infer ONE image, so a
+    // user with 200 plots had no way to run the model over their field.
+    const modeSelect = page.getByTestId("inference-mode")
+    await expect(modeSelect).toBeVisible()
+    // Defaults to single-image, so the existing behaviour is unchanged.
+    await expect(modeSelect).toContainText(/previewed image/i)
+
+    await modeSelect.click()
+    await page
+      .getByRole("option", { name: /every image at this source/i })
+      .click()
+    await expect(modeSelect).toContainText(/every image/i)
+
+    // The note states how many images the one job will cover — the point
+    // of the mode is that it's one job, not one per plot.
+    const note = page.getByTestId("inference-mode-all-note")
+    await expect(note).toBeVisible()
+    await expect(note).toContainText(/will be inferred in a single job/i)
+    await expect(note).toContainText(/per plot/i)
+
+    // Still submittable in this mode (not clicked — fake API key).
+    await expect(page.getByTestId("inference-submit")).toBeEnabled()
   })
 })

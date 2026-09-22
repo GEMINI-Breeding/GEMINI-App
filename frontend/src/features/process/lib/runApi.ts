@@ -49,8 +49,22 @@ export interface TraitExtractionParams {
 }
 
 export interface InferenceParams {
-  /** MinIO path to the input image (no bucket prefix). */
-  imagePath: string
+  /**
+   * MinIO path to a single input image (no bucket prefix).
+   *
+   * Mutually exclusive with `imagesPrefix`. Exactly one must be set: the
+   * worker branches on which it receives, and sending both would silently
+   * take the single-image path.
+   */
+  imagePath?: string
+  /**
+   * MinIO prefix to infer over — every image under it, in ONE job, with
+   * results keyed by plot number (no bucket prefix).
+   *
+   * The alternative is the client submitting a job per plot, which means
+   * hundreds of jobs for one field, each paying container + model startup.
+   */
+  imagesPrefix?: string
   /** Roboflow API key. */
   apiKey: string
   /** "workspace/model/version" or "workspace/model". */
@@ -368,11 +382,19 @@ export async function executeStep(
 
     case "inference": {
       if (!input.inference) {
-        throw new Error("inference requires image + model + api_key")
+        throw new Error("inference requires an image source + model + api_key")
       }
       const i = input.inference
+      if (!i.imagePath === !i.imagesPrefix) {
+        throw new Error(
+          "inference needs exactly one of imagePath or imagesPrefix",
+        )
+      }
       const params: Record<string, unknown> = {
-        image_path: i.imagePath,
+        // Exactly one of these is set (guarded above). The worker branches
+        // on which key it receives.
+        ...(i.imagePath ? { image_path: i.imagePath } : {}),
+        ...(i.imagesPrefix ? { images_prefix: i.imagesPrefix } : {}),
         api_key: i.apiKey,
         model_id: i.modelId,
         output_predictions_path: i.outputPredictionsPath,
