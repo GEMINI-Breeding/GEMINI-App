@@ -4,6 +4,7 @@ import type { TraitRecordOutput } from "@/client"
 import type { PlotPolygonFC } from "@/features/analyze/hooks/usePlotPolygons"
 
 import {
+  attachHoverValues,
   joinTraitToPolygons,
   plotKey,
   reduceTraitRecordsToMeanByPlot,
@@ -174,5 +175,36 @@ describe("joinTraitToPolygons", () => {
       (input.features[0].properties as Record<string, unknown>)
         .Vegetation_Fraction,
     ).toBeUndefined()
+  })
+})
+
+describe("attachHoverValues", () => {
+  it("puts every trait's value on the matching plot only", () => {
+    const out = attachHoverValues(
+      fc([
+        { plot_number: 1, plot_row_number: 1, plot_column_number: 1 },
+        { plot_number: 2, plot_row_number: 1, plot_column_number: 2 },
+      ]),
+      [
+        {
+          plot_number: 1,
+          plot_row_number: 1,
+          plot_column_number: 1,
+          values: { height: 10, LAI: 2.5 },
+        },
+      ],
+      "plotrc",
+    )
+    expect(out.features[0].properties._hover).toEqual({ height: 10, LAI: 2.5 })
+    expect(out.features[1].properties._hover).toBeUndefined()
+  })
+
+  it("keys by plot number alone in population mode", () => {
+    const out = attachHoverValues(
+      fc([{ plot_number: 7, plot_row_number: 9, plot_column_number: 9 }]),
+      [{ plot_number: 7, values: { height: 3 } }],
+      "plot",
+    )
+    expect(out.features[0].properties._hover).toEqual({ height: 3 })
   })
 })

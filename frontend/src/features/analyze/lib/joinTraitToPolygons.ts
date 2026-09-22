@@ -130,3 +130,45 @@ export function joinTraitToPolygons(
     }),
   }
 }
+
+/**
+ * Attach every trait's per-plot value under `_hover` for the map tooltip
+ * (the colour shows one trait; hovering a plot lists them all). Rows come
+ * from the matrix endpoint; plots with no row get no `_hover`.
+ */
+export function attachHoverValues(
+  fc: PlotPolygonFC,
+  rows: Array<{
+    plot_number?: number | null
+    plot_row_number?: number | null
+    plot_column_number?: number | null
+    values: Record<string, number | null>
+  }>,
+  keyMode: PlotKeyMode = "plotrc",
+): PlotPolygonFC {
+  const byKey = new Map<string, Record<string, number | null>>()
+  for (const r of rows) {
+    const key = plotKey(
+      r.plot_number ?? null,
+      r.plot_row_number ?? null,
+      r.plot_column_number ?? null,
+      keyMode,
+    )
+    if (key !== null) byKey.set(key, r.values)
+  }
+  if (byKey.size === 0) return fc
+  return {
+    type: "FeatureCollection",
+    features: fc.features.map((f) => {
+      const props = f.properties ?? {}
+      const key = plotKey(
+        props.plot_number ?? null,
+        props.plot_row_number ?? null,
+        props.plot_column_number ?? null,
+        keyMode,
+      )
+      const values = key !== null ? byKey.get(key) : undefined
+      return values ? { ...f, properties: { ...props, _hover: values } } : f
+    }),
+  }
+}

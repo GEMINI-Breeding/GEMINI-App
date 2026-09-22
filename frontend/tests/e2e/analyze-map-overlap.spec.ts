@@ -37,7 +37,7 @@ const DRONE_IMAGES = [
 test.describe("Analyze Map — zero-overlap diagnostic", () => {
   test.setTimeout(5 * 60_000)
 
-  test("records numbered 701.. vs boundaries 1.. → no-overlap banner", async ({
+  test("records numbered 701.. vs boundaries 1.. → no-overlap banner; hover lists matching traits", async ({
     page,
     runPrefix,
   }) => {
@@ -49,6 +49,10 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     const platform = "DJI"
     const sensor = "FC6310S"
     const trait = `${runPrefix}-StandCount`
+    // Numbered like the boundary grid (1..6), so they DO join — the hover
+    // tooltip must list them even while the coloured trait has no overlap.
+    const height = `${runPrefix}-Height`
+    const lai = `${runPrefix}-LAI`
     const workspaceName = `${runPrefix}-ovl-ws`
     const pipelineName = `${runPrefix}-ovl-pipe`
 
@@ -56,13 +60,19 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     //       scoped to the same experiment/season/site the boundaries will
     //       use. Done through the real import wizard. ───────────────────
     const csv = [
-      `plot_number,plot_row,plot_col,${trait}`,
-      `701,2,24,15`,
-      `702,2,25,10`,
-      `703,2,26,21`,
-      `704,3,24,26`,
-      `705,3,25,20`,
-      `706,3,26,28`,
+      `plot_number,plot_row,plot_col,${trait},${height},${lai}`,
+      `701,2,24,15,,`,
+      `702,2,25,10,,`,
+      `703,2,26,21,,`,
+      `704,3,24,26,,`,
+      `705,3,25,20,,`,
+      `706,3,26,28,,`,
+      `1,1,1,,11,1.5`,
+      `2,1,2,,12,2.5`,
+      `3,1,3,,13,3.5`,
+      `4,2,1,,14,4.5`,
+      `5,2,2,,15,5.5`,
+      `6,2,3,,16,6.5`,
     ].join("\n")
 
     await page.goto("/files")
@@ -89,6 +99,8 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     await page.getByTestId("plot-col-select").click()
     await page.getByRole("option", { name: "plot_col" }).click()
     await page.getByTestId(`trait-checkbox-${trait}`).click()
+    await page.getByTestId(`trait-checkbox-${height}`).click()
+    await page.getByTestId(`trait-checkbox-${lai}`).click()
     await page.getByTestId("collection-date-fixed").fill("2026-05-01")
     await page.getByTestId("season-fixed").fill(season)
     await page.getByTestId("site-fixed").fill(site)
@@ -282,6 +294,14 @@ test.describe("Analyze Map — zero-overlap diagnostic", () => {
     const cy = box.y + box.height / 2
     await page.mouse.move(cx, cy)
     await page.waitForTimeout(300)
+
+    // Hover: the colour is StandCount (no values here), but the tooltip
+    // lists every trait the plot has — both imported 1..6 traits.
+    const tooltip = page.locator(".deck-tooltip")
+    await expect(tooltip).toContainText(`${height}: `, { timeout: 10_000 })
+    await expect(tooltip).toContainText(`${lai}: `)
+    await expect(tooltip).toContainText(`${trait}: —`)
+
     await page.mouse.down()
     await page.waitForTimeout(60)
     await page.mouse.up()

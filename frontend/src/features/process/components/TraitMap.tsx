@@ -148,6 +148,26 @@ export type TraitMapProps = {
   orthoOpacity?: number
 }
 
+function fmtTip(v: unknown): string {
+  return typeof v === "number" ? v.toFixed(3) : String(v ?? "—")
+}
+
+/**
+ * Other traits' values for the hovered plot (`_hover`, attached by the
+ * caller), one per line after the coloured trait.
+ */
+function hoverLines(
+  props: Record<string, unknown>,
+  skip: string | null,
+): string {
+  const hover = props._hover as Record<string, unknown> | undefined
+  if (!hover) return ""
+  const lines = Object.entries(hover)
+    .filter(([k, v]) => k !== skip && v !== null && v !== undefined)
+    .map(([k, v]) => `${k}: ${fmtTip(v)}`)
+  return lines.length ? `\n${lines.join("\n")}` : ""
+}
+
 export function TraitMap({
   data,
   traitColumn,
@@ -267,14 +287,13 @@ export function TraitMap({
             return {
               text:
                 (plot != null ? `Plot ${String(plot)}` : "") +
-                (acc != null ? `\n${String(acc)}` : ""),
+                (acc != null ? `\n${String(acc)}` : "") +
+                hoverLines(props, null),
             }
           }
           const v = props[traitColumn]
           return {
-            text: `${plot != null ? `Plot ${String(plot)}\n` : ""}${traitColumn}: ${
-              typeof v === "number" ? v.toFixed(3) : String(v ?? "—")
-            }`,
+            text: `${plot != null ? `Plot ${String(plot)}\n` : ""}${traitColumn}: ${fmtTip(v)}${hoverLines(props, traitColumn)}`,
           }
         }}
       >

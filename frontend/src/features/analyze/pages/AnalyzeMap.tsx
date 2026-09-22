@@ -17,7 +17,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 
-import { type TraitOutput, TraitsService } from "@/client"
+import { ExperimentsService, type TraitOutput, TraitsService } from "@/client"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -38,7 +38,12 @@ import { PlotImageDialog } from "../components/PlotImageDialog"
 import { usePlotImages, usePopulationOrthos } from "../hooks/usePlotImages"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
 import { usePlotTraitValues } from "../hooks/usePlotTraitValues"
-import { joinTraitToPolygons, plotKey } from "../lib/joinTraitToPolygons"
+import {
+  attachHoverValues,
+  joinTraitToPolygons,
+  plotKey,
+} from "../lib/joinTraitToPolygons"
+import { fetchMatrix } from "../lib/multivariate"
 
 const STORAGE_KEY = "gemini.analyze.map.fields.v1"
 
@@ -58,6 +63,9 @@ function loadLocalFields(): LocalFields {
     return { traitId: "" }
   }
 }
+
+/** Most traits the map tooltip lists for a hovered plot. */
+const HOVER_TRAIT_LIMIT = 12
 
 export function AnalyzeMap() {
   const ctx = useAerialScopeContext()
@@ -152,20 +160,68 @@ export function AnalyzeMap() {
     props: Record<string, unknown>
   } | null>(null)
 
+  // Hover: every trait this experiment has, per plot, so the tooltip can
+  // list them all while the colour shows one. Capped so a wide experiment
+  // doesn't turn the tooltip into a wall.
+  const expTraitsQuery = useQuery({
+    queryKey: ["analyze", "map", "exp-traits", ctx.experimentId],
+    queryFn: () =>
+      ExperimentsService.apiExperimentsIdExperimentIdTraitsGetExperimentTraits({
+        experimentId: ctx.experimentId as string,
+      }),
+    enabled: Boolean(ctx.experimentId),
+  })
+  const hoverTraits = useMemo(
+    () =>
+      ((expTraitsQuery.data as TraitOutput[] | null) ?? [])
+        .map((t) => t.trait_name ?? "")
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .slice(0, HOVER_TRAIT_LIMIT),
+    [expTraitsQuery.data],
+  )
+  const hoverQuery = useQuery({
+    queryKey: [
+      "analyze",
+      "map",
+      "hover",
+      ctx.experimentName,
+      ctx.seasonName,
+      ctx.siteName,
+      ctx.populationName,
+      hoverTraits.join("\u0000"),
+    ],
+    queryFn: () =>
+      fetchMatrix({
+        trait_names: hoverTraits,
+        experiment_names: [ctx.experimentName as string],
+        season_names: [ctx.seasonName as string],
+        site_names: [ctx.siteName as string],
+        ...(ctx.populationName ? { populations: [ctx.populationName] } : {}),
+        aggregation: "mean",
+      }),
+    enabled:
+      hasPolygons &&
+      hoverTraits.length > 0 &&
+      Boolean(ctx.experimentName && ctx.seasonName && ctx.siteName),
+  })
+
   // Join the values onto the polygons. When no trait is chosen we just
   // pass the unjoined FC through (TraitMap will render outline-only).
   const joinedFc = useMemo(() => {
     if (!polygonsFc) return null
-    if (!selectedTrait || !traitValues || traitValues.size === 0) {
-      return polygonsFc
-    }
-    return joinTraitToPolygons(
-      polygonsFc,
-      traitValues,
-      selectedTrait.trait_name,
-      joinKeyMode,
-    )
-  }, [polygonsFc, selectedTrait, traitValues, joinKeyMode])
+    const base =
+      !selectedTrait || !traitValues || traitValues.size === 0
+        ? polygonsFc
+        : joinTraitToPolygons(
+            polygonsFc,
+            traitValues,
+            selectedTrait.trait_name,
+            joinKeyMode,
+          )
+    const rows = hoverQuery.data?.rows ?? []
+    return rows.length ? attachHoverValues(base, rows, joinKeyMode) : base
+  }, [polygonsFc, selectedTrait, traitValues, joinKeyMode, hoverQuery.data])
 
   // Zero-overlap diagnostic: a trait can have records in this scope yet
   // share no plot key with the displayed boundaries (e.g. the boundary
