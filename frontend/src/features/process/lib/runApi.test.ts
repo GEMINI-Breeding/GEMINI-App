@@ -241,9 +241,9 @@ describe("executeStep", () => {
       // The preflight throws a typed ThermalGpsRequiredError so the
       // RunDetail handler can route it to a modal dialog rather than
       // a toast.
-      await expect(
-        executeStep(baseInput(run, "orthomosaic")),
-      ).rejects.toThrow(/no per-image GPS/i)
+      await expect(executeStep(baseInput(run, "orthomosaic"))).rejects.toThrow(
+        /no per-image GPS/i,
+      )
       expect(submitMock).not.toHaveBeenCalled()
     })
 
@@ -331,9 +331,7 @@ describe("executeStep", () => {
       const call = submitMock.mock.calls[0][0] as {
         requestBody: { parameters: Record<string, unknown> }
       }
-      expect(call.requestBody.parameters.reconstruction_quality).toBe(
-        "Ultra",
-      )
+      expect(call.requestBody.parameters.reconstruction_quality).toBe("Ultra")
     })
   })
 
@@ -421,6 +419,84 @@ describe("executeStep", () => {
         config: { stitching_direction: "RIGHT" },
         cpu_count: 4,
       })
+    })
+  })
+
+  describe("split_orthomosaic", () => {
+    const FC = (n: number): GeoJSON.FeatureCollection => ({
+      type: "FeatureCollection",
+      features: Array.from({ length: n }, (_, i) => ({
+        type: "Feature" as const,
+        properties: { plot: i + 1, accession: `ACC-${i + 1}` },
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [
+            [
+              [0, 0],
+              [0, 1],
+              [1, 1],
+              [1, 0],
+              [0, 0],
+            ],
+          ],
+        },
+      })),
+    })
+
+    it("submits SPLIT_ORTHOMOSAIC with the scope path parts and the polygons", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "job-split-1" })
+      const result = await executeStep({
+        ...baseInput(run, "split_orthomosaic"),
+        splitOrthomosaic: { boundaries: FC(6) },
+      })
+      expect(result).toEqual({ jobId: "job-split-1", done: false })
+      const body = submitMock.mock.calls[0][0].requestBody
+      expect(body.job_type).toBe("SPLIT_ORTHOMOSAIC")
+      // The worker finds the newest ortho per folder itself, so it needs
+      // the path components but NOT platform/sensor or an ortho path.
+      expect(body.parameters).toMatchObject({
+        year: SCOPE.year,
+        experiment: SCOPE.experiment,
+        location: SCOPE.location,
+        population: SCOPE.population,
+        date: SCOPE.date,
+      })
+      expect(body.parameters.boundaries.features).toHaveLength(6)
+      expect(getRun(run.id)?.steps.split_orthomosaic?.jobIds).toEqual([
+        "job-split-1",
+      ])
+    })
+
+    it("refuses to submit without boundaries", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep(baseInput(run, "split_orthomosaic")),
+      ).rejects.toThrow(/requires plot boundaries/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("refuses an empty FeatureCollection rather than cutting nothing", async () => {
+      // The worker would return plots_processed: 0 and look like a success.
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...baseInput(run, "split_orthomosaic"),
+          splitOrthomosaic: { boundaries: FC(0) },
+        }),
+      ).rejects.toThrow(/at least one plot boundary/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("throws when the backend returns no job id", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({})
+      await expect(
+        executeStep({
+          ...baseInput(run, "split_orthomosaic"),
+          splitOrthomosaic: { boundaries: FC(2) },
+        }),
+      ).rejects.toThrow(/no job id/)
     })
   })
 

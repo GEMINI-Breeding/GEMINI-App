@@ -74,6 +74,19 @@ export interface StitchingParams {
   cpuCount?: number
 }
 
+export interface SplitOrthomosaicParams {
+  /**
+   * Plot polygons in WGS84. The worker treats EVERY feature as a plot, so
+   * the enclosing `role: "outer"` rectangle must already be stripped —
+   * `state_snapshot.boundaries` from a saved plot-geometry version is
+   * exactly that (PlotBoundaryPrep.saveCurrent filters it out).
+   *
+   * It reads `properties.plot` and `properties.accession` to name each
+   * output PNG, falling back to the feature index and "unknown".
+   */
+  boundaries: GeoJSON.FeatureCollection
+}
+
 export interface ExecuteStepInput {
   runId: Id
   stepKey: string
@@ -93,6 +106,7 @@ export interface ExecuteStepInput {
   traitExtraction?: TraitExtractionParams
   inference?: InferenceParams
   stitching?: StitchingParams
+  splitOrthomosaic?: SplitOrthomosaicParams
 }
 
 export interface ExecuteStepResult {
@@ -146,9 +160,11 @@ export async function executeStep(
       // skip the preflight: there's no canonical short-id to check
       // against and the wizard shows a separate "all datasets selected"
       // affordance for that case.
-      let preflight: Awaited<
-        ReturnType<typeof checkThermalGpsPreflight>
-      > = { kind: "ok", thermal: false, hasGps: false }
+      let preflight: Awaited<ReturnType<typeof checkThermalGpsPreflight>> = {
+        kind: "ok",
+        thermal: false,
+        hasGps: false,
+      }
       for (const shortId of datasetShortIds) {
         // eslint-disable-next-line no-await-in-loop
         const result = await checkThermalGpsPreflight(scope, shortId)
@@ -253,6 +269,50 @@ export async function executeStep(
         throw new Error("EXTRACT_TRAITS submitted but no job id returned")
       }
       appendStepJobId(runId, "trait_extraction", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "split_orthomosaic": {
+      // The geo worker has supported SPLIT_ORTHOMOSAIC all along and
+      // nothing ever submitted it, so per-plot images were never produced
+      // — which in turn broke plot-image viewing, per-plot inference,
+      // crop downloads and the Analyze click-through. It discovers the
+      // newest ortho per (platform, sensor) folder itself, so the only
+      // input it needs is the plot polygons.
+      if (!input.splitOrthomosaic) {
+        throw new Error("split_orthomosaic requires plot boundaries")
+      }
+      const featureCount =
+        input.splitOrthomosaic.boundaries?.features?.length ?? 0
+      if (featureCount === 0) {
+        throw new Error(
+          "split_orthomosaic needs at least one plot boundary — save and activate a plot-geometry version first",
+        )
+      }
+      const params: Record<string, unknown> = {
+        year: scope.year,
+        experiment: scope.experiment,
+        location: scope.location,
+        population: scope.population,
+        date: scope.date,
+        boundaries: input.splitOrthomosaic.boundaries,
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "SPLIT_ORTHOMOSAIC",
+          parameters: params,
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) {
+        throw new Error("SPLIT_ORTHOMOSAIC submitted but no job id returned")
+      }
+      appendStepJobId(runId, "split_orthomosaic", jobId)
       const r = getRun(runId)
       if (r && r.status === "draft") updateRun(runId, { status: "running" })
       return { jobId, done: false }

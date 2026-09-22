@@ -62,6 +62,7 @@ import {
 import { useProcess } from "@/contexts/ProcessContext"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
+import { PlotImageGrid } from "@/features/process/components/PlotImageGrid"
 import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import {
   type TraitDialogState,
@@ -223,6 +224,13 @@ const AERIAL_STEPS: StepDef[] = [
       "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
     kind: "interactive",
     wiredIn: "R5a",
+  },
+  {
+    key: "split_orthomosaic",
+    label: "Split Into Plot Images",
+    description:
+      "Cut the orthomosaic into one PNG per plot using the active boundaries. Plot images feed the plot viewer, per-plot inference and crop downloads.",
+    kind: "compute",
   },
   {
     key: "trait_extraction",
@@ -891,6 +899,10 @@ export function RunDetail() {
   // Preflight: warn before submitting a step the backend can't service
   // (no AgRowStitch in the stitch worker, no Docker for ODM). Both probes
   // have existed on the backend all along with no caller.
+  // Boundaries resolved just before submitting split_orthomosaic. A ref,
+  // not state: it's read once inside the same handler that sets it, and
+  // going through state would need an extra render before executeStep.
+  const splitBoundariesRef = useRef<GeoJSON.FeatureCollection | null>(null)
   const { data: capabilities } = useCapabilities()
   const { data: dockerStatus } = useDockerStatus()
 
@@ -1032,6 +1044,16 @@ export function RunDetail() {
       ...(uploadedOrthosQuery.data ?? []),
     ],
     [processedFilesQuery.data, uploadedOrthosQuery.data],
+  )
+
+  // Per-plot PNGs written by SPLIT_ORTHOMOSAIC, surfaced under that step
+  // so the user can see what the job produced without leaving the wizard.
+  const plotImageFiles = useMemo(
+    () =>
+      (processedFilesQuery.data ?? []).filter((f) =>
+        (f.object_name ?? "").includes("/PlotImages/"),
+      ),
+    [processedFilesQuery.data],
   )
 
   // Plot-geometry versions for the trait dialog's boundary picker.
@@ -1246,6 +1268,55 @@ export function RunDetail() {
         showErrorToast("Pick a flight date, platform, and sensor first.")
         return
       }
+      if (stepKey === "split_orthomosaic") {
+        // Load the active plot-geometry version and hand its polygons to
+        // the geo worker. The saved snapshot already excludes the
+        // role="outer" rectangle (PlotBoundaryPrep.saveCurrent strips it),
+        // and the worker treats every feature as a plot, so passing it
+        // straight through is correct.
+        if (!scope) {
+          showErrorToast("Pick a flight date, platform, and sensor first.")
+          return
+        }
+        const activeVersion =
+          boundaryVersions.find((b) => b.is_active)?.version ??
+          boundaryVersions[0]?.version ??
+          null
+        if (activeVersion == null) {
+          showErrorToast(
+            "Save and activate plot boundaries first — Split needs polygons to cut the ortho with.",
+          )
+          return
+        }
+        try {
+          const loaded =
+            await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+              requestBody: {
+                directory: processedPrefix(scope),
+                version: activeVersion,
+              },
+            })
+          const boundaries = (
+            loaded as unknown as {
+              state_snapshot?: { boundaries?: GeoJSON.FeatureCollection }
+            }
+          )?.state_snapshot?.boundaries
+          if (!boundaries?.features?.length) {
+            showErrorToast(
+              `Plot boundary version ${activeVersion} has no polygons saved.`,
+            )
+            return
+          }
+          splitBoundariesRef.current = boundaries
+        } catch (err) {
+          showErrorToast(
+            err instanceof Error
+              ? `Couldn't load plot boundaries: ${err.message}`
+              : "Couldn't load plot boundaries",
+          )
+          return
+        }
+      }
       if (stepKey === "trait_extraction") {
         // Open the trait dialog instead of submitting; submission happens
         // via TraitExtractionDialog → handleSubmitTraits.
@@ -1313,6 +1384,10 @@ export function RunDetail() {
           experimentId,
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
+          splitOrthomosaic:
+            stepKey === "split_orthomosaic" && splitBoundariesRef.current
+              ? { boundaries: splitBoundariesRef.current }
+              : undefined,
         })
         if (result.jobId) {
           // Register with the bottom ProcessPanel so it streams progress.
@@ -1722,6 +1797,11 @@ export function RunDetail() {
                             />
                           </div>
                         )
+                      ) : step.key === "split_orthomosaic" ? (
+                        <PlotImageGrid
+                          files={plotImageFiles}
+                          prefix={scope ? processedPrefix(scope) : ""}
+                        />
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />
                       ) : step.wiredIn && !isLive(step.wiredIn) ? (
