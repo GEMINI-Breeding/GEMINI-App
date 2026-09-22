@@ -116,30 +116,31 @@ test("Logged-out user cannot access protected routes", async ({ page }) => {
   await page.waitForURL("/login")
 })
 
-test.fixme(
-  "Redirects to /login when token is wrong",
+test(
+  "Redirects to /login when the stored token is rejected",
   async ({ page, consoleErrorGuard }) => {
-    // FIXME (tracked, in-session 2026-04-27): the 401 → logout → redirect
-    // chain has an SDK-vs-axios ambiguity that pre-dates today's work
-    // but became visible after the broader provider reshape. The lib/
-    // auth.ts interceptor is wired against the global axios, the SDK's
-    // request.ts uses `axios = axios` by default, but the redirect
-    // doesn't reliably propagate. useAuth now has a failsafe that fires
-    // `_logout()` on /me query error, but the navigate from _layout's
-    // onLogout listener still doesn't always commit before the test's
-    // waitForURL times out. Untangling the SDK response-interceptor
-    // contract + the navigate-from-effect race is its own focused
-    // commit. The user-visible behavior (a bad token doesn't grant
-    // access to data) IS still enforced by the backend (401 on every
-    // authenticated call); the UI just doesn't kick the user back to
-    // /login as quickly as this test expected.
-    consoleErrorGuard.expectError(/\/api\/users\/me/)
+    // Was test.fixme'd in April with a note blaming an "SDK-vs-axios
+    // ambiguity". Un-fixme'ing it showed the premise was wrong, not the
+    // plumbing: the old test planted a bad token and opened /settings, but
+    // that route renders a static panel and makes NO authenticated call, so
+    // nothing ever 401s and the interceptor never runs. `_layout`'s guard
+    // only checks that a token EXISTS, not that it's valid, so the user sat
+    // in the app shell — exactly what the test observed, for a reason that
+    // had nothing to do with axios.
+    //
+    // Drive a route that actually queries the backend. That's the real
+    // guarantee: a rejected token must not leave you inside the app.
+    consoleErrorGuard.expectError(/\/api\//)
     await page.goto("/login")
     await page.evaluate(() => {
       localStorage.setItem("gemini.auth.token", "invalid_token")
     })
-    await page.goto("/settings")
-    await page.waitForURL("/login", { timeout: 15_000 })
+    await page.goto("/genotyping")
+    await page.waitForURL("/login", { timeout: 20_000 })
     await expect(page).toHaveURL("/login")
+    // And the rejected token is cleared, so a reload doesn't re-enter.
+    expect(
+      await page.evaluate(() => localStorage.getItem("gemini.auth.token")),
+    ).toBeFalsy()
   },
 )

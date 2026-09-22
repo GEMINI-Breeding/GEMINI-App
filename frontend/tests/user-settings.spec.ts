@@ -61,11 +61,12 @@ test.describe("authenticated shell", () => {
     await page.waitForURL("/login")
   })
 
-  // The standalone sidebar "Experiment selector" UI from the Phase-5
-  // shell was replaced by per-page upload-scope dropdowns
-  // (`useUploadScope` + `EntitySelectField`). The `create-experiment-button`
-  // / `experiment-selector` test IDs no longer exist anywhere in the
-  // source tree. Re-add a coverage spec for the new pickers (e.g. the
-  // FilesPage upload form) instead of resurrecting this one.
-  test.skip("sidebar Experiment selector is populated and switches on choice", async () => {})
+  // The standalone sidebar "Experiment selector" from the Phase-5 shell was
+  // replaced by per-page upload-scope dropdowns (`useUploadScope` +
+  // `EntitySelectField`); its test IDs no longer exist in the source tree.
+  // This slot used to hold an empty `test.skip(...)` body, which reports as
+  // a skipped test forever and tells a reader nothing. The replacement
+  // pickers are exercised by 20 e2e specs via `entity-select-experiment` /
+  // `entity-create-experiment` (analyze-*, upload-create-or-pick, the
+  // process wizard specs), so the coverage is real — just elsewhere.
 })
