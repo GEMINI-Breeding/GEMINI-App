@@ -1,12 +1,16 @@
 /**
- * Phase 6 flagship flow: upload an Amiga `.bin` file through the real UI
- * and watch it drop onto MinIO + kick off an EXTRACT_BINARY job.
+ * Strict-E2E: an Amiga `.bin` that can't be extracted fails visibly.
  *
- * Strict-E2E rules (CLAUDE.md):
- *   - only drives the real UI (no API seeding)
- *   - listens for console errors via the fixture-attached guard
- *   - asserts user-visible outcomes: the file lands under Raw/ in Manage
- *     Data after the upload completes.
+ * The extractor only accepts farm-ng's `YYYY_MM_DD_HH_MM_SS_<micros>_<name>`
+ * log names. Uploading anything else used to end with an empty report and a
+ * green "Done" — the old test fixture (`test_amiga.0000.bin`) never had a
+ * single image extracted, and nothing said so. Now the EXTRACT_BINARY job
+ * fails and the process panel says why.
+ *
+ * The happy path — a real log cut that extracts 30 GPS-tagged frames — is
+ * amiga-extraction.spec.ts.
+ *
+ * Strict-E2E rules (CLAUDE.md): real UI only, console-error guard attached.
  */
 
 import { fixturePath } from "../helpers/fixturePath"
@@ -20,42 +24,32 @@ import {
 } from "../helpers/uploadHelpers"
 
 test.describe("Amiga .bin upload", () => {
-  test("upload a .bin, see it land under Raw/ in Manage Data", async ({
+  test("a .bin with an unusable log name fails and says why", async ({
     page,
     runPrefix,
   }) => {
     const experiment = `${runPrefix}-exp`
-    const location = `${runPrefix}-loc`
-    const population = `${runPrefix}-pop`
-    const date = "2026-04-24"
-
     await navigateToUpload(page)
     await selectDataType(page, "Farm-ng Binary File")
-    await fillUploadForm(page, { experiment, location, population, date })
-
-    const binPath = fixturePath("binary", "test_amiga.0000.bin")
-    await dropFiles(page, [binPath])
-
-    // Skip the terminal "Done" wait — that covers the EXTRACT_BINARY
-    // follow-up job, which is exercised separately in amiga-extraction.
-    // Here we only care that the upload itself reaches MinIO.
+    await fillUploadForm(page, {
+      experiment,
+      location: `${runPrefix}-loc`,
+      population: `${runPrefix}-pop`,
+      date: "2026-04-24",
+    })
+    await dropFiles(page, [fixturePath("binary", "test_amiga.0000.bin")])
+    // The upload itself succeeds; the follow-up extraction is what fails.
     await submitUploadAndWait(page, 1, { waitForDone: false })
 
-    // Manage tab now lists experiments; expand the row to see files.
-    await page.locator('[data-onboarding="files-tab-manage"]').click()
-    await page.locator('[data-testid="manage-data-filter"]').fill(experiment)
-    const expRow = page.locator(
-      `[data-testid="manage-data-experiment-${experiment}"]`,
+    await expect(page.getByText("Failed", { exact: true }).first()).toBeVisible(
+      { timeout: 120_000 },
     )
-    await expect(expRow).toBeVisible({ timeout: 30_000 })
-    await expRow.getByRole("button", { name: "Expand" }).click()
-
     await expect(
-      page
-        .locator('[data-testid="manage-data-list"]')
-        .locator(
-          `[data-testid^="download-"][data-testid*="${experiment}"][data-testid$="/test_amiga.0000.bin"]`,
-        ),
-    ).toBeVisible({ timeout: 60_000 })
+      page.getByText(/No images could be extracted/).first(),
+    ).toBeAttached()
+    await expect(
+      page.getByText(/File name is not compatible/).first(),
+    ).toBeAttached()
+    await expect(page.getByText(/^Done$/)).toHaveCount(0)
   })
 })

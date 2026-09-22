@@ -42,7 +42,7 @@ test.describe("Amiga .bin full extraction", () => {
     const location = `${runPrefix}-loc`
     const population = `${runPrefix}-pop`
     const date = "2026-04-24"
-    const binName = "test_amiga.0000.bin"
+    const binName = "2024_07_15_15_49_18_998387_track-fixture.0000.bin"
 
     await navigateToUpload(page)
     await selectDataType(page, "Farm-ng Binary File")
@@ -120,5 +120,26 @@ test.describe("Amiga .bin full extraction", () => {
     await expect(
       page.locator('[data-testid="manage-data-list"]').getByText(binName),
     ).toHaveCount(0)
+
+    // Real output, not just a report: the frames were extracted and every
+    // one got a GPS position. The fixture is a 12 s cut of a real pass
+    // (tests/fixtures/scripts/generate-amiga-track-fixture.py): 30 top
+    // camera frames bracketed by GPS fixes.
+    const list = page.locator('[data-testid="manage-data-list"]')
+    await expect(
+      list.locator(
+        `[data-testid^="download-"][data-testid*="${experiment}"][data-testid$=".jpg"]`,
+      ),
+    ).toHaveCount(30)
+    const viewCsv = list.locator(
+      `[data-testid^="view-"][data-testid*="${experiment}"][data-testid$="/msgs_synced.csv"]`,
+    )
+    await viewCsv.click()
+    const viewer = page.getByTestId("metadata-viewer")
+    await expect(viewer).toContainText(/\d+ columns · 30 rows/, {
+      timeout: 30_000,
+    })
+    await viewer.getByTestId("metadata-tab-latlon").click()
+    await expect(viewer).toContainText("30 points — X: lon, Y: lat")
   })
 })

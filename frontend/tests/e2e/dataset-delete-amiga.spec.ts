@@ -39,7 +39,7 @@ test.describe("Per-dataset delete — amiga .bin extraction", () => {
     const location = `${runPrefix}-loc`
     const population = `${runPrefix}-pop`
     const date = "2026-04-24"
-    const binName = "test_amiga.0000.bin"
+    const binName = "2024_07_15_15_49_18_998387_track-fixture.0000.bin"
 
     await navigateToUpload(page)
     await selectDataType(page, "Farm-ng Binary File")
