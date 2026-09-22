@@ -9,7 +9,8 @@
  * image, the same dialog the map uses.
  *
  * Data comes from /api/multivariate_analysis/matrix, which already pivots
- * trait_records long -> wide per plot.
+ * trait_records long -> wide per plot. Reference data (hand measurements)
+ * for the same experiment + site is joined on as extra, orange columns.
  */
 import { useQuery } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Download } from "lucide-react"
@@ -27,7 +28,9 @@ import {
 import { processedPopulationPrefix } from "@/features/process/lib/paths"
 import { PlotImageDialog } from "../components/PlotImageDialog"
 import { usePlotImages } from "../hooks/usePlotImages"
+import { useScopeReference } from "../hooks/useScopeReference"
 import { fetchMatrix, type MatrixRow } from "../lib/multivariate"
+import { attachReference, isRefColumn } from "../lib/referenceJoin"
 import {
   filterRows,
   type SortDir,
@@ -40,6 +43,9 @@ function sameKey(a: SortKey, b: SortKey): boolean {
   if (typeof a === "object" && typeof b === "object") return a.trait === b.trait
   return a === b
 }
+
+/** Reference (hand-measured) columns are orange, as they were on main. */
+const REF_TEXT = "text-orange-600 dark:text-orange-400"
 
 function fmt(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—"
@@ -100,12 +106,28 @@ export function AnalyzeTable() {
   const [query, setQuery] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("plot")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
-  const allRows: MatrixRow[] = matrixQuery.data?.rows ?? []
+  const refQuery = useScopeReference({
+    experiment: ctx.experimentName,
+    location: ctx.siteName,
+    population: ctx.populationName,
+  })
+  const refSources = refQuery.data ?? []
+  const [showRef, setShowRef] = useState(true)
+  const joined = useMemo(() => {
+    const base = matrixQuery.data?.rows ?? []
+    return showRef && refSources.length > 0
+      ? attachReference(base, refSources)
+      : { rows: base, columns: [] as string[] }
+  }, [matrixQuery.data, refSources, showRef])
+  const allRows: MatrixRow[] = joined.rows
   const shown = useMemo(
     () => sortRows(filterRows(allRows, query), sortKey, sortDir),
     [allRows, query, sortKey, sortDir],
   )
-  const columns = matrixQuery.data?.trait_names ?? selectedTraits
+  const columns = [
+    ...(matrixQuery.data?.trait_names ?? selectedTraits),
+    ...joined.columns,
+  ]
 
   const onSort = (k: SortKey) => {
     if (sameKey(k, sortKey)) setSortDir(sortDir === "asc" ? "desc" : "asc")
@@ -144,7 +166,12 @@ export function AnalyzeTable() {
   const header = (label: string, k: SortKey, testid: string) => {
     const active = sameKey(k, sortKey)
     return (
-      <th key={testid} className="px-2 py-1 text-left whitespace-nowrap">
+      <th
+        key={testid}
+        className={`px-2 py-1 text-left whitespace-nowrap ${
+          typeof k === "object" && isRefColumn(k.trait) ? REF_TEXT : ""
+        }`}
+      >
         <button
           type="button"
           className="inline-flex items-center gap-1 font-medium"
@@ -207,6 +234,21 @@ export function AnalyzeTable() {
                 </label>
               ))}
             </div>
+            {refSources.length > 0 && (
+              <label
+                htmlFor="analyze-table-show-ref-cb"
+                className={`flex cursor-pointer items-center gap-1.5 text-sm ${REF_TEXT}`}
+              >
+                <Checkbox
+                  id="analyze-table-show-ref-cb"
+                  checked={showRef}
+                  onCheckedChange={(c) => setShowRef(c === true)}
+                  data-testid="analyze-table-show-ref"
+                />
+                Reference data (
+                {refSources.map((r) => r.dataset.name).join(", ")})
+              </label>
+            )}
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -288,7 +330,12 @@ export function AnalyzeTable() {
                     <td className="px-2 py-1">{r.plot_column_number ?? "—"}</td>
                     <td className="px-2 py-1">{r.accession_name ?? "—"}</td>
                     {columns.map((t) => (
-                      <td key={t} className="px-2 py-1 text-right font-mono">
+                      <td
+                        key={t}
+                        className={`px-2 py-1 text-right font-mono ${
+                          isRefColumn(t) ? REF_TEXT : ""
+                        }`}
+                      >
                         {fmt(r.values[t])}
                       </td>
                     ))}

@@ -10,8 +10,8 @@
  * the column-mapping table.
  */
 
-import { useMutation } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useRef, useState } from "react"
 
 import { ReferenceDataService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -93,6 +93,8 @@ interface Props {
   onClose: () => void
   file: File
   formValues: Record<string, string>
+  /** MinIO object the Files page staged the original at. */
+  originalObject?: string | null
 }
 
 export function ReferenceDataUploadDialog({
@@ -100,17 +102,33 @@ export function ReferenceDataUploadDialog({
   onClose,
   file,
   formValues,
+  originalObject,
 }: Props) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const queryClient = useQueryClient()
 
   const [headers, setHeaders] = useState<string[]>([])
   const [mapping, setMapping] = useState<ColumnMapping>({})
   const [isParsing, setIsParsing] = useState(false)
 
+  // Latest callbacks without re-running the parse effect: they are new on
+  // every render, and re-running would re-parse the file and reset any
+  // mapping the user had already changed.
+  const onCloseRef = useRef(onClose)
+  const showErrorToastRef = useRef(showErrorToast)
+  onCloseRef.current = onClose
+  showErrorToastRef.current = showErrorToast
+
   // Parse headers when file changes. CSVs are parsed client-side for speed;
   // Excel files round-trip through the backend's parse-headers endpoint.
   useEffect(() => {
     if (!file) return
+    const initMapping = (hdrs: string[]) => {
+      setHeaders(hdrs)
+      const auto: ColumnMapping = {}
+      for (const h of hdrs) auto[h] = autoIdentify(h)
+      setMapping(auto)
+    }
     let cancelled = false
     setIsParsing(true)
     const lower = file.name.toLowerCase()
@@ -132,22 +150,15 @@ export function ReferenceDataUploadDialog({
         })
         .catch(() => {
           if (cancelled) return
-          showErrorToast("Could not read file headers")
+          showErrorToastRef.current("Could not read file headers")
           setIsParsing(false)
-          onClose()
+          onCloseRef.current()
         })
     }
     return () => {
       cancelled = true
     }
-  }, [file, initMapping, onClose, showErrorToast])
-
-  function initMapping(hdrs: string[]) {
-    setHeaders(hdrs)
-    const auto: ColumnMapping = {}
-    for (const h of hdrs) auto[h] = autoIdentify(h)
-    setMapping(auto)
-  }
+  }, [file])
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -159,11 +170,13 @@ export function ReferenceDataUploadDialog({
         population: formValues.population || undefined,
         date: formValues.date || undefined,
         columnMappingJson: JSON.stringify(mapping),
+        originalObject: originalObject ?? undefined,
         formData: { file },
       })
       return res as UploadResponse
     },
     onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["reference-data"] })
       const report = data.match_report
       const plots = report
         ? `${report.matched}/${report.total}`

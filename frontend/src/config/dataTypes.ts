@@ -202,7 +202,8 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   "Reference Data": {
     fields: ["name", "experiment", "season", "location", "population", "date"],
     fileType: ".csv,.xlsx,.xls",
-    directory: ["ReferenceData"],
+    // Scoped so two experiments' "lai.csv" don't overwrite each other.
+    directory: ["ReferenceData", "Experiment", "Location", "Population"],
   },
   "Trait Data": {
     // Only experiment lives at the page level — site, season, population,

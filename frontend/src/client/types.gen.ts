@@ -3201,6 +3201,7 @@ export type ApiReferenceDataUploadUploadData = {
     formData: ReferenceUploadRequest;
     location?: (string | null);
     name: string;
+    originalObject?: (string | null);
     population?: (string | null);
 };
 

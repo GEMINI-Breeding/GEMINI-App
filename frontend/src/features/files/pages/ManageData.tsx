@@ -38,7 +38,6 @@ import {
   FilesService,
   GenotypingStudiesService,
   type GenotypingStudyOutput,
-  OpenAPI,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/ui/confirm-dialog"
@@ -46,36 +45,14 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { idAsString } from "@/features/admin/lib/ids"
 import useCustomToast from "@/hooks/useCustomToast"
-import { getToken } from "@/lib/auth"
-
-const DEFAULT_BUCKET = "gemini"
-
-function apiUrl(path: string): string {
-  return `${(OpenAPI.BASE ?? "").replace(/\/$/, "")}${path}`
-}
+import { ReferenceDataSection } from "../components/ReferenceDataSection"
+import { DEFAULT_BUCKET, downloadViaBrowser } from "../lib/download"
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`
-}
-
-async function downloadViaBrowser(objectPath: string): Promise<void> {
-  const url = apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectPath}`)
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  })
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
-  const blob = await res.blob()
-  const objectUrl = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = objectUrl
-  a.download = objectPath.split("/").pop() ?? "download"
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(objectUrl)
 }
 
 export function ManageData() {
@@ -192,6 +169,8 @@ export function ManageData() {
           ))}
         </div>
       )}
+
+      <ReferenceDataSection />
     </div>
   )
 }

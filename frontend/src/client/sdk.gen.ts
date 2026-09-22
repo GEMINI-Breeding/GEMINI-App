@@ -4806,6 +4806,7 @@ export class ReferenceDataService {
      * @param data.location
      * @param data.population
      * @param data.date
+     * @param data.originalObject
      * @returns ReferenceDatasetOutput Document created, URL follows
      * @throws ApiError
      */
@@ -4819,7 +4820,8 @@ export class ReferenceDataService {
                 experiment: data.experiment,
                 location: data.location,
                 population: data.population,
-                date: data.date
+                date: data.date,
+                original_object: data.originalObject
             },
             formData: data.formData,
             mediaType: 'multipart/form-data',

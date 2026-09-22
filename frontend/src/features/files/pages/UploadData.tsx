@@ -72,6 +72,9 @@ export function UploadData() {
   const [syncedCsvPath, setSyncedCsvPath] = useState<string | null>(null)
   const [dockerErrorMsg, setDockerErrorMsg] = useState<string | null>(null)
   const [refDataFile, setRefDataFile] = useState<File | null>(null)
+  // Where the staging upload put the original; the reference dataset
+  // records it so Manage Data can offer the file back.
+  const [refDataPath, setRefDataPath] = useState<string | null>(null)
   const [wizardFiles, setWizardFiles] = useState<File[] | null>(null)
   const [wizardScopeError, setWizardScopeError] = useState<string | null>(null)
 
@@ -238,6 +241,7 @@ export function UploadData() {
         if (!content) return
         const fileName = filePath.split(/[\\/]/).pop() ?? "reference.csv"
         setRefDataFile(new File([content.blob], fileName))
+        setRefDataPath(filePath)
       }
     },
     [selectedFileType],
@@ -344,6 +348,7 @@ export function UploadData() {
         <ReferenceDataUploadDialog
           open
           file={refDataFile}
+          originalObject={refDataPath}
           formValues={formValues}
           onClose={() => setRefDataFile(null)}
         />
