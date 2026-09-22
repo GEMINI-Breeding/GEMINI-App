@@ -2198,6 +2198,14 @@ export type ApiFilesDeleteFilePathDeleteFileData = {
 
 export type ApiFilesDeleteFilePathDeleteFileResponse = (void);
 
+export type ApiFilesDeleteManyDeleteManyData = {
+    requestBody: {
+        [key: string]: unknown;
+    };
+};
+
+export type ApiFilesDeleteManyDeleteManyResponse = (unknown);
+
 export type ApiFilesDownloadFilePathDownloadFileData = {
     filePath: string;
 };

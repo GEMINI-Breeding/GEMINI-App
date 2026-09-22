@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChevronLeft,
   ChevronRight,
@@ -6,6 +6,7 @@ import {
   File as FileIcon,
   Flame,
   Image as ImageIcon,
+  Trash2,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
@@ -18,6 +19,8 @@ import {
 } from "@/client"
 import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -29,6 +32,7 @@ import {
 import { idAsString } from "@/features/admin/lib/ids"
 import { ThermalViewerDialog } from "@/features/files/components/ThermalViewerDialog"
 import { deriveImagePathAttrs } from "@/features/files/lib/imagePath"
+import useCustomToast from "@/hooks/useCustomToast"
 import { getToken } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"
@@ -121,6 +125,9 @@ function ThumbnailTile({
   isThermal,
   previewObjectName,
   onOpen,
+  selectable = false,
+  selected = false,
+  onToggle,
 }: {
   file: FileMetadata
   isThermal: boolean
@@ -131,6 +138,10 @@ function ThumbnailTile({
    *  name is still what shows under the tile. */
   previewObjectName?: string
   onOpen: ((file: FileMetadata) => void) | null
+  /** Select mode: the tile toggles selection instead of opening. */
+  selectable?: boolean
+  selected?: boolean
+  onToggle?: (file: FileMetadata) => void
 }) {
   const { url, loading } = useThumbnailUrl(
     file.bucket_name,
@@ -140,20 +151,26 @@ function ThumbnailTile({
   const name = fileNameOf(file.object_name)
   // Only thermal images are clickable in v1 — they're the only files
   // with a useful "open" action beyond the existing download button.
-  const clickable = isThermal && onOpen !== null
+  const clickable = selectable || (isThermal && onOpen !== null)
+  const activate = () => {
+    if (selectable) onToggle?.(file)
+    else onOpen?.(file)
+  }
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: role="button" + tabIndex are set whenever it is clickable
     <div
       className={`group relative rounded-lg border overflow-hidden hover:border-primary transition-colors ${
         clickable ? "cursor-pointer" : ""
-      }`}
+      } ${selected ? "border-primary ring-2 ring-primary" : ""}`}
       data-testid={isThermal ? "thermal-thumbnail" : "image-thumbnail"}
-      onClick={clickable ? () => onOpen!(file) : undefined}
+      data-selected={selectable ? String(selected) : undefined}
+      onClick={clickable ? activate : undefined}
       onKeyDown={
         clickable
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
-                onOpen!(file)
+                activate()
               }
             }
           : undefined
@@ -173,6 +190,14 @@ function ThumbnailTile({
           <ImageIcon className="text-muted-foreground h-6 w-6 animate-pulse" />
         ) : (
           <ImageIcon className="text-muted-foreground h-6 w-6" />
+        )}
+        {selectable && (
+          <Checkbox
+            checked={selected}
+            tabIndex={-1}
+            aria-label={`Select ${name}`}
+            className="absolute top-1 left-1 bg-background/90 pointer-events-none"
+          />
         )}
         {isThermal && (
           <span
@@ -247,6 +272,22 @@ export function ImageViewer() {
   // List each top-level prefix and filter client-side for objects whose
   // path contains the experiment name as a complete segment. Same
   // pattern as ManageData.tsx.
+  // Select mode for bulk delete. Selection is by object name and
+  // survives paging, so a user can pick across pages before deleting.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState(false)
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
+  const toggleSelected = (f: FileMetadata) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(f.object_name)) next.delete(f.object_name)
+      else next.add(f.object_name)
+      return next
+    })
+
   const filesQuery = useQuery({
     queryKey: ["view", "image-files", experimentName],
     queryFn: async () => {
@@ -330,7 +371,7 @@ export function ImageViewer() {
       // that never appears in a MinIO object name), so directories
       // with spaces (e.g. "Cowpea MAGIC") don't collide on a
       // naive split downstream.
-      const key = dir + "\n" + base
+      const key = `${dir}\n${base}`
       let group = groupsByDirAndBase.get(key)
       if (!group) {
         group = { dir, base }
@@ -497,6 +538,65 @@ export function ImageViewer() {
     filterDate.size > 0 ||
     filterPlatform.size > 0 ||
     filterSensor.size > 0
+
+  /** The object plus anything that only exists because of it: a thermal
+   *  TIFF's preview JPEG and RawThermal/ calibration sidecar. */
+  function withCompanions(objectName: string): string[] {
+    const out = [objectName]
+    const preview = previewJpegByOriginal.get(objectName)
+    if (preview) out.push(preview)
+    const slash = objectName.lastIndexOf("/")
+    const dir = objectName.slice(0, slash)
+    const base = objectName.slice(slash + 1).replace(/\.[^.]+$/, "")
+    const sidecar = `${dir.replace(/\/Images$/, "")}/RawThermal/${base}.json`
+    if (thermalSidecarKeys.has(sidecar)) out.push(sidecar)
+    return out
+  }
+
+  async function deleteSelected() {
+    const picked = [...selected]
+    if (picked.length === 0) return
+    const ok = await confirm({
+      title: `Delete ${picked.length} image${picked.length === 1 ? "" : "s"}?`,
+      description: (
+        <span>
+          Removes the selected files from storage and from their upload's file
+          count. Orthomosaics already built from them are not changed.{" "}
+          <strong>This cannot be undone.</strong>
+        </span>
+      ),
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      const res = (await FilesService.apiFilesDeleteManyDeleteMany({
+        requestBody: { objects: picked.flatMap(withCompanions) },
+      })) as { deleted: string[]; failed: { object: string; error: string }[] }
+      const gone = new Set(res.deleted)
+      setSelected(new Set(picked.filter((o) => !gone.has(o))))
+      queryClient.invalidateQueries({ queryKey: ["view", "image-files"] })
+      queryClient.invalidateQueries({ queryKey: ["files"] })
+      const deletedImages = picked.filter((o) => gone.has(o)).length
+      if (deletedImages > 0)
+        showSuccessToast(
+          `Deleted ${deletedImages} image${deletedImages === 1 ? "" : "s"}`,
+        )
+      if (res.failed.length > 0)
+        showErrorToastWithCopy(
+          `${res.failed.length} file(s) could not be deleted:\n${res.failed
+            .map((f) => `${f.object}: ${f.error}`)
+            .join("\n")}`,
+        )
+    } catch (err) {
+      showErrorToastWithCopy(
+        err instanceof Error ? err.message : "Delete failed",
+      )
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   function resetFilters() {
     setFilenameQuery("")
@@ -729,9 +829,60 @@ export function ImageViewer() {
 
           {imageFiles.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-sm font-medium">
-                Images ({imageFiles.length} on this page)
-              </h4>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-medium">
+                  Images ({imageFiles.length} on this page)
+                </h4>
+                <div className="flex items-center gap-2">
+                  {selectMode && (
+                    <>
+                      <span
+                        className="text-muted-foreground text-xs"
+                        data-testid="image-viewer-selected-count"
+                      >
+                        {selected.size} selected
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="image-viewer-select-page"
+                        onClick={() =>
+                          setSelected(
+                            (prev) =>
+                              new Set([
+                                ...prev,
+                                ...imageFiles.map((f) => f.object_name),
+                              ]),
+                          )
+                        }
+                      >
+                        Select page
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={selected.size === 0 || deleting}
+                        data-testid="image-viewer-delete-selected"
+                        onClick={deleteSelected}
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        {deleting ? "Deleting…" : "Delete selected"}
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    variant={selectMode ? "secondary" : "outline"}
+                    size="sm"
+                    data-testid="image-viewer-select-mode"
+                    onClick={() => {
+                      setSelectMode(!selectMode)
+                      setSelected(new Set())
+                    }}
+                  >
+                    {selectMode ? "Done" : "Select"}
+                  </Button>
+                </div>
+              </div>
               <div
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"
                 data-testid="image-gallery"
@@ -743,6 +894,9 @@ export function ImageViewer() {
                     isThermal={isThermalImage(f)}
                     previewObjectName={previewJpegByOriginal.get(f.object_name)}
                     onOpen={setThermalOpenFile}
+                    selectable={selectMode}
+                    selected={selected.has(f.object_name)}
+                    onToggle={toggleSelected}
                   />
                 ))}
               </div>

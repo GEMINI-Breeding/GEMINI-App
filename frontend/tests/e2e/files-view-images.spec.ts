@@ -111,5 +111,33 @@ test.describe("Files View tab — image gallery", () => {
     await expect(gallery.getByTestId("image-thumbnail")).toHaveCount(1, {
       timeout: 30_000,
     })
+
+    // ── Delete selected: back to A, select one image, delete it. ─────
+    await page.getByTestId("image-viewer-experiment").click()
+    await page.getByRole("option", { name: expA }).first().click()
+    const thumbs = gallery.getByTestId("image-thumbnail")
+    await expect(thumbs).toHaveCount(2, { timeout: 30_000 })
+    await page.getByTestId("image-viewer-select-mode").click()
+    const victim = thumbs.filter({ hasText: "test_image_001.jpg" })
+    await victim.click()
+    await expect(victim).toHaveAttribute("data-selected", "true")
+    await expect(page.getByTestId("image-viewer-selected-count")).toHaveText(
+      "1 selected",
+    )
+    await page.getByTestId("image-viewer-delete-selected").click()
+    await page.getByTestId("confirm-dialog-confirm").click()
+    await expect(thumbs).toHaveCount(1, { timeout: 30_000 })
+    await expect(thumbs.first()).toContainText("test_image_002.jpg")
+
+    // Really gone, not just hidden: a fresh page load agrees.
+    await page.goto("/files")
+    await page.locator('[data-onboarding="files-tab-view"]').first().click()
+    await page.getByTestId("view-tab-images").click()
+    await page.getByTestId("image-viewer-experiment").click()
+    await page.getByRole("option", { name: expA }).first().click()
+    await expect(gallery.getByTestId("image-thumbnail")).toHaveCount(1, {
+      timeout: 30_000,
+    })
+    await expect(gallery).not.toContainText("test_image_001.jpg")
   })
 })

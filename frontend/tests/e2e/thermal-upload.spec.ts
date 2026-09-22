@@ -243,7 +243,7 @@ test.describe("Thermal upload (Image Data path)", () => {
     const platform = `${runPrefix}-plat`
     const sensor = `${runPrefix}-sensor`
 
-    async function runOneUpload(): Promise<string> {
+    async function runOneUpload(repeat: boolean): Promise<string> {
       await navigateToUpload(page)
       await selectDataType(page, "Image Data")
       await fillUploadForm(page, {
@@ -271,6 +271,16 @@ test.describe("Thermal upload (Image Data path)", () => {
         60_000,
       )
       await page.getByTestId("upload-submit").click()
+      if (repeat) {
+        // Same files, same scope: the upload asks first. Uploading a
+        // second copy is exactly what this test sets out to do.
+        const dup = page.getByTestId("duplicate-dialog")
+        await expect(dup).toBeVisible({ timeout: 30_000 })
+        await expect(dup).toContainText(
+          `${FLIR_CASE.fixtures.length} of ${FLIR_CASE.fixtures.length} files already uploaded`,
+        )
+        await dup.getByTestId("duplicate-replace").click()
+      }
       await firstChunk
       const submitResp = await submitJobResp
       const submitted = (await submitResp.json()) as {
@@ -287,9 +297,9 @@ test.describe("Thermal upload (Image Data path)", () => {
       return prefix
     }
 
-    const firstPrefix = await runOneUpload()
+    const firstPrefix = await runOneUpload(false)
     expect(firstPrefix).toMatch(new RegExp(`/${sensor}/[0-9a-f]{8}/$`))
-    const secondPrefix = await runOneUpload()
+    const secondPrefix = await runOneUpload(true)
     expect(secondPrefix).toMatch(new RegExp(`/${sensor}/[0-9a-f]{8}/$`))
     // Distinct short-ids — the whole point of Option A.
     expect(secondPrefix).not.toBe(firstPrefix)

@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp, File, X } from "lucide-react"
 import { useMemo, useState } from "react"
 
-import { DatasetsService } from "@/client"
+import { DatasetsService, type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +28,7 @@ import {
   createOrGetDatasetForUpload,
   extractDatasetShortId,
 } from "@/features/files/lib/datasetForUpload"
+import { existingUploadNames } from "@/features/files/lib/duplicates"
 import {
   humanFieldLabel,
   missingFormFields,
@@ -174,6 +175,24 @@ export function UploadList({
   const [isUploading, setIsUploading] = useState(false)
   const [resolveStatus, setResolveStatus] = useState<string | null>(null)
   const [rejection, setRejection] = useState<RejectionDetails | null>(null)
+  // Same-named files already at the destination: ask before overwriting.
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{
+    names: string[]
+    total: number
+    dir: string
+    /** Per-batch image folders: a repeat is a second copy, not an overwrite. */
+    earlierBatch: boolean
+    resolve: (choice: "skip" | "replace" | "cancel") => void
+  } | null>(null)
+  const askAboutDuplicates = (
+    names: string[],
+    total: number,
+    dir: string,
+    earlierBatch: boolean,
+  ) =>
+    new Promise<"skip" | "replace" | "cancel">((resolve) =>
+      setDuplicatePrompt({ names, total, dir, earlierBatch, resolve }),
+    )
   // Thermal-detection state. `defaultMode` seeds the calibration
   // picker; `calibration` is what gets forwarded as the
   // postUploadJob's parameters. `hint` carries the probe's hint so
@@ -187,7 +206,7 @@ export function UploadList({
   const [thermalHint, setThermalHint] = useState<
     "flir_jpeg" | "boson_tiff" | null
   >(null)
-  const { showErrorToastWithCopy } = useCustomToast()
+  const { showErrorToastWithCopy, showSuccessToast } = useCustomToast()
   const { run } = useUploadQueue()
   const { resolveScope } = useResolveScope()
 
@@ -424,7 +443,53 @@ export function UploadList({
       }
 
       const followUpJob = followUpForDataType(dataType)
-      const tasks: UploadTask[] = selected.map((file) => ({
+      // Duplicate check (see lib/duplicates). Image batches get their own
+      // folder, so look for the same names in earlier batches at this
+      // scope; everything else writes into one folder and would overwrite.
+      // (Farm-ng .bin files are deleted after extraction, so never match.)
+      let toUpload = selected
+      const batchSuffix = datasetShortId ? `/${datasetShortId}/Images` : null
+      const batchRoot =
+        batchSuffix && targetRootDir.endsWith(batchSuffix)
+          ? targetRootDir.slice(0, -batchSuffix.length)
+          : undefined
+      const listed =
+        ((await FilesService.apiFilesListFilePathListFiles({
+          filePath: `gemini/${batchRoot ?? targetRootDir}/`,
+        })) as FileMetadata[] | null) ?? []
+      const existing = existingUploadNames(
+        selected.map((f) => f.name),
+        listed.map((f) => f.object_name),
+        targetRootDir,
+        batchRoot,
+      )
+      if (existing.length > 0) {
+        const choice = await askAboutDuplicates(
+          existing,
+          selected.length,
+          batchRoot ?? targetRootDir,
+          batchRoot !== undefined,
+        )
+        if (choice === "cancel") {
+          if (createdDatasetIdForCleanup) {
+            await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+              datasetId: createdDatasetIdForCleanup,
+            }).catch(() => {})
+          }
+          return
+        }
+        if (choice === "skip") {
+          const skip = new Set(existing)
+          toUpload = selected.filter((f) => !skip.has(f.name))
+          if (toUpload.length === 0) {
+            setSelected([])
+            showSuccessToast("Every file is already uploaded — nothing to do.")
+            return
+          }
+        }
+      }
+
+      const tasks: UploadTask[] = toUpload.map((file) => ({
         file,
         objectPath: `${targetRootDir}/${file.name}`,
         followUpJob,
@@ -441,7 +506,7 @@ export function UploadList({
       // are `Images/` and `RawThermal/`), not the `…/Images/`
       // directory the files themselves landed in. `buildTargetRootDir`
       // appends `Images` for the "Image Data" data type — strip it.
-      const datasetPrefix = targetRootDir.replace(/\/Images$/, "") + "/"
+      const datasetPrefix = `${targetRootDir.replace(/\/Images$/, "")}/`
       const postUploadJob: PostUploadJob | undefined = thermalCalibration
         ? {
             jobType: "THERMAL_EXTRACT",
@@ -455,10 +520,10 @@ export function UploadList({
       const result = await run(tasks, {
         title:
           followUpJob?.kind === "extract_binary"
-            ? `Processing ${selected.length} .bin file${selected.length === 1 ? "" : "s"}`
+            ? `Processing ${toUpload.length} .bin file${toUpload.length === 1 ? "" : "s"}`
             : thermalCalibration
-              ? `Uploading ${selected.length} thermal file${selected.length === 1 ? "" : "s"}`
-              : `Uploading ${selected.length} file${selected.length === 1 ? "" : "s"}`,
+              ? `Uploading ${toUpload.length} thermal file${toUpload.length === 1 ? "" : "s"}`
+              : `Uploading ${toUpload.length} file${toUpload.length === 1 ? "" : "s"}`,
         experimentId: resolved.experiment?.id,
         datasetId,
         postUploadJob,
@@ -679,6 +744,71 @@ export function UploadList({
           </div>
         </div>
       )}
+
+      <Dialog
+        open={duplicatePrompt !== null}
+        onOpenChange={(open) => {
+          if (!open && duplicatePrompt) {
+            duplicatePrompt.resolve("cancel")
+            setDuplicatePrompt(null)
+          }
+        }}
+      >
+        <DialogContent data-testid="duplicate-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {duplicatePrompt?.names.length} of {duplicatePrompt?.total} files
+              already uploaded
+            </DialogTitle>
+            <DialogDescription>
+              {duplicatePrompt?.earlierBatch
+                ? "An earlier upload for this scope already has these images. Uploading them again stores a second copy that the orthomosaic would use twice."
+                : "These names already exist in the destination folder. Uploading them again overwrites the stored copies."}{" "}
+              <code className="break-all text-xs">{duplicatePrompt?.dir}</code>
+            </DialogDescription>
+          </DialogHeader>
+          <ul
+            className="max-h-40 overflow-auto rounded border p-2 font-mono text-xs"
+            data-testid="duplicate-names"
+          >
+            {duplicatePrompt?.names.slice(0, 50).map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+            {(duplicatePrompt?.names.length ?? 0) > 50 && (
+              <li className="text-muted-foreground">
+                …and {(duplicatePrompt?.names.length ?? 0) - 50} more
+              </li>
+            )}
+          </ul>
+          <DialogFooter className="gap-2">
+            {(["cancel", "replace", "skip"] as const).map((choice) => (
+              <Button
+                key={choice}
+                variant={
+                  choice === "skip"
+                    ? "default"
+                    : choice === "replace"
+                      ? "destructive"
+                      : "outline"
+                }
+                data-testid={`duplicate-${choice}`}
+                onClick={() => {
+                  duplicatePrompt?.resolve(choice)
+                  setDuplicatePrompt(null)
+                }}
+              >
+                {choice === "skip"
+                  ? "Skip existing"
+                  : choice === "replace"
+                    ? duplicatePrompt?.earlierBatch
+                      ? "Upload again"
+                      : "Replace"
+                    : "Cancel"}
+              </Button>
+            ))}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={rejection !== null}
