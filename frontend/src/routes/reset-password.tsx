@@ -36,10 +36,16 @@ function ResetPassword() {
         </div>
 
         <div className="rounded-md border border-border bg-muted/40 p-4 text-sm leading-relaxed">
-          <p className="mb-2 font-medium">Not available in this deployment.</p>
+          <p className="mb-2 font-medium">Reset links aren't used here.</p>
           <p className="text-muted-foreground">
-            Password reset links are not supported on this server. Ask an
-            administrator to update your password from the Admin page.
+            GEMINI doesn't send reset links.{" "}
+            <RouterLink
+              to="/recover-password"
+              className="underline underline-offset-4"
+            >
+              Here's how to get back in
+            </RouterLink>
+            .
           </p>
         </div>
 
