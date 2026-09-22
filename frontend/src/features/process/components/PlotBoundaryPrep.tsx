@@ -20,7 +20,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { FilesService } from "@/client"
+import { type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -84,7 +84,10 @@ import {
   rotateFeatures,
 } from "@/features/process/lib/groupTransform"
 import type { AerialScope } from "@/features/process/lib/paths"
-import { processedPrefix } from "@/features/process/lib/paths"
+import {
+  processedPrefix,
+  uploadedOrthosPrefix,
+} from "@/features/process/lib/paths"
 import {
   type BlockParams,
   DEFAULT_BLOCK_PARAMS,
@@ -499,9 +502,27 @@ export function PlotBoundaryPrep({
         filePath: `${DEFAULT_BUCKET}/${directory}`,
       }),
   })
+  // Imported orthos stay in Raw/…/Orthomosaic/; without this listing
+  // buildOrthoVersions drops them (it keeps only versions whose file it
+  // can see), and a run on an imported ortho had nothing to draw over.
+  // Same key as RunDetail's query, so they share the cache.
+  const uploadedOrthosQuery = useQuery({
+    queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null],
+    queryFn: async () =>
+      scope
+        ? (((await FilesService.apiFilesListFilePathListFiles({
+            filePath: `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`,
+          })) as FileMetadata[] | null) ?? [])
+        : [],
+    enabled: Boolean(scope),
+  })
   const activeOrtho = useMemo(
-    () => resolveActiveOrtho(run, scope, filesQuery.data ?? []),
-    [run, scope, filesQuery.data],
+    () =>
+      resolveActiveOrtho(run, scope, [
+        ...((filesQuery.data as FileMetadata[] | null) ?? []),
+        ...(uploadedOrthosQuery.data ?? []),
+      ]),
+    [run, scope, filesQuery.data, uploadedOrthosQuery.data],
   )
   const s3Url = activeOrtho ? s3UrlForOrtho(activeOrtho) : null
 

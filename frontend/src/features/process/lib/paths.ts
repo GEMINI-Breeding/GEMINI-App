@@ -63,6 +63,16 @@ export function processedPopulationPrefix(scope: {
   return `Processed/${year}/${experiment}/${location}/${population}/`
 }
 
+/** Where Files → Orthomosaic puts an uploaded ortho for this scope. */
+export function uploadedOrthosPrefix(scope: AerialScope): string {
+  return `${rawScopePrefix(scope)}Orthomosaic/`
+}
+
+/** …and the DEM uploaded alongside it. */
+export function uploadedDemsPrefix(scope: AerialScope): string {
+  return `${rawScopePrefix(scope)}Orthomosaic-DEM/`
+}
+
 export function processedPrefix(scope: AerialScope): string {
   const { year, experiment, location, population, date, platform, sensor } =
     scope

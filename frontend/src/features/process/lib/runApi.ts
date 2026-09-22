@@ -40,8 +40,10 @@ export interface TraitExtractionParams {
   orthomosaicPath: string
   /** MinIO path to the active plot-boundary GeoJSON (no bucket prefix). */
   boundaryGeojsonPath: string
-  /** Optional MinIO path to a DEM TIF. */
+  /** Optional MinIO path to a DEM TIF (gives canopy height). */
   demPath?: string
+  /** Optional MinIO path to a thermal ortho in °C (gives canopy temperature). */
+  thermalPath?: string
   /** ExG vegetation threshold; defaults to 0.1 in the worker. */
   exgThreshold?: number
   /** MinIO path the worker should write the traits GeoJSON to (no bucket prefix). */
@@ -280,6 +282,7 @@ export async function executeStep(
         boundary_geojson_path: t.boundaryGeojsonPath,
         output_traits_geojson_path: t.outputTraitsGeojsonPath,
         ...(t.demPath ? { dem_path: t.demPath } : {}),
+        ...(t.thermalPath ? { thermal_path: t.thermalPath } : {}),
         ...(typeof t.exgThreshold === "number"
           ? { exg_threshold: t.exgThreshold }
           : {}),

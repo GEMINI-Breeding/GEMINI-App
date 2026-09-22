@@ -1,166 +1,108 @@
 /**
  * GeoTiffValidationCard
  *
- * Inline (non-modal) CRS validation shown directly below an Orthomosaic upload
- * field once the upload completes.  Persistent on the page so the user cannot
- * miss it by navigating away before a modal would open.
+ * Inline (non-modal) check shown directly below an Orthomosaic / DEM upload
+ * once it completes: is this a georeferenced raster the pipeline can place?
+ * Persistent on the page so the user can't miss it by navigating away.
+ *
+ * Asks TiTiler (`/titiler/cog/info`), which reads the file straight from
+ * MinIO. Main called `/api/v1/files/check-geotiff`, a route GEMINIbase
+ * doesn't have, and then auto-reprojected anything not in WGS84. Nothing
+ * here needs WGS84 — TiTiler tiles and the geo/ML workers reproject from
+ * any CRS — so reprojecting would only resample the data. What does break
+ * everything is a TIF with no coordinate system at all; that is what this
+ * reports.
  */
 
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
-import { useEffect, useState } from "react"
-import useCustomToast from "@/hooks/useCustomToast"
+import { useQuery } from "@tanstack/react-query"
+import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react"
 
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  return base ? `${base}${path}` : path
+interface CogInfo {
+  crs?: string | null
+  width?: number
+  height?: number
+  count?: number
 }
 
-function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  }
+/** `http://www.opengis.net/def/crs/EPSG/0/32610` → `EPSG:32610`. */
+export function crsLabel(crs: string | null | undefined): string | null {
+  if (!crs) return null
+  const m = crs.match(/EPSG\/\d+\/(\d+)$/) ?? crs.match(/EPSG:(\d+)/i)
+  return m ? `EPSG:${m[1]}` : crs
 }
-
-interface GeoTiffInfo {
-  path: string
-  filename: string
-  crs_epsg: number | null
-  crs_name: string | null
-  is_wgs84: boolean
-  width: number
-  height: number
-}
-
-type CheckState = "checking" | "ok" | "needs_conversion" | "error"
-type ConvertState = "idle" | "converting" | "done" | "failed"
 
 interface GeoTiffValidationCardProps {
-  /** Absolute dest path of the uploaded TIF file to validate */
+  /** MinIO object path of the uploaded TIF (no bucket prefix). */
   destPath: string
 }
 
 export function GeoTiffValidationCard({
   destPath,
 }: GeoTiffValidationCardProps) {
-  const { showErrorToast } = useCustomToast()
-  const [info, setInfo] = useState<GeoTiffInfo | null>(null)
-  const [checkState, setCheckState] = useState<CheckState>("checking")
-  const [convertState, setConvertState] = useState<ConvertState>("idle")
+  const info = useQuery({
+    queryKey: ["titiler", "info", destPath],
+    queryFn: async (): Promise<CogInfo> => {
+      const url = `s3://gemini/${destPath.replace(/^gemini\//, "")}`
+      const res = await fetch(
+        `/titiler/cog/info?url=${encodeURIComponent(url)}`,
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    },
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
 
-  useEffect(() => {
-    async function checkAndConvert() {
-      // 1. Check CRS
-      let result: GeoTiffInfo
-      try {
-        const res = await fetch(
-          apiUrl(
-            `/api/v1/files/check-geotiff?path=${encodeURIComponent(destPath)}`,
-          ),
-          { headers: authHeaders() },
-        )
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
-        result = {
-          path: destPath,
-          filename: destPath.split(/[\\/]/).pop() ?? destPath,
-          ...data,
-        }
-        setInfo(result)
-      } catch {
-        setCheckState("error")
-        return
-      }
-
-      if (result.is_wgs84) {
-        setCheckState("ok")
-        return
-      }
-
-      // 2. Not WGS84 — auto-reproject without asking
-      setConvertState("converting")
-      try {
-        const res = await fetch(apiUrl("/api/v1/files/convert-geotiff"), {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify({ file_path: result.path }),
-        })
-        if (!res.ok) {
-          const err = await res
-            .json()
-            .catch(() => ({ detail: "Conversion failed" }))
-          throw new Error(err.detail ?? "Conversion failed")
-        }
-        setConvertState("done")
-        setInfo((prev) =>
-          prev
-            ? { ...prev, is_wgs84: true, crs_epsg: 4326, crs_name: "WGS 84" }
-            : prev,
-        )
-        setCheckState("ok")
-      } catch (err) {
-        setConvertState("failed")
-        showErrorToast(
-          err instanceof Error ? err.message : "Auto-reprojection failed",
-        )
-      }
-    }
-    checkAndConvert()
-  }, [destPath, showErrorToast])
-
-  // Checking CRS / reprojecting in progress
-  if (checkState === "checking" || convertState === "converting") {
+  if (info.isLoading) {
     return (
-      <div className="flex items-center gap-2 text-muted-foreground text-xs mt-2">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        {convertState === "converting"
-          ? "Reprojecting to WGS84…"
-          : "Checking CRS…"}
+      <div className="mt-2 flex items-center gap-2 text-muted-foreground text-xs">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Checking georeferencing…
       </div>
     )
   }
 
-  // The CRS check couldn't run. Previously this returned null, so a
-  // non-WGS84 ortho was ingested with no indication that it had never been
-  // validated — indistinguishable from "checked and fine". GEMINIbase has
-  // no check-geotiff / convert-geotiff route yet (merge_plan.md Phase 3,
-  // item 3E), so say so rather than imply success.
-  if (checkState === "error" || !info) {
+  if (info.isError || !info.data) {
     return (
       <div
         className="mt-2 flex items-center gap-2 text-amber-700 text-xs"
-        data-testid="geotiff-check-unavailable"
+        data-testid="geotiff-check-failed"
       >
         <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
         <span>
-          CRS not checked — this backend can't validate GeoTIFF projections yet.
-          If this file isn't WGS84 (EPSG:4326), reproject it before processing.
+          Couldn't read this file as a GeoTIFF. Check it opens in a GIS before
+          processing.
         </span>
       </div>
     )
   }
 
-  if (checkState === "ok") {
+  const crs = crsLabel(info.data.crs)
+  if (!crs) {
     return (
-      <div className="flex items-center gap-2 text-green-700 text-xs mt-2">
-        <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+      <div
+        className="mt-2 flex items-center gap-2 text-red-600 text-xs"
+        data-testid="geotiff-check-no-crs"
+      >
+        <XCircle className="h-3.5 w-3.5 flex-shrink-0" />
         <span>
-          {convertState === "done"
-            ? `Reprojected to WGS84 — original backed up as ${info.filename.replace(/\.tif(f)?$/i, ".original.tif")}`
-            : "WGS84 (EPSG:4326) — ready to use"}
+          No coordinate system — this file can't be placed on the map or cut
+          into plots. Export it as a GeoTIFF with its CRS and upload it again.
         </span>
       </div>
     )
   }
 
-  // convert failed
+  const { width, height, count } = info.data
   return (
-    <div className="flex items-center gap-2 text-red-600 text-xs mt-2">
-      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+    <div
+      className="mt-2 flex items-center gap-2 text-green-700 text-xs"
+      data-testid="geotiff-check-ok"
+    >
+      <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
       <span>
-        Auto-reprojection failed — file is not in WGS84. Reproject it externally
-        and re-upload.
+        Georeferenced ({crs}){width && height ? ` · ${width}×${height} px` : ""}
+        {count ? ` · ${count} band${count === 1 ? "" : "s"}` : ""}
       </span>
     </div>
   )

@@ -25,6 +25,8 @@ const baseState: TraitDialogState = {
   orthoVersion: 1,
   boundaryVersion: null,
   exgThreshold: 0.1,
+  demPath: null,
+  thermalPath: null,
 }
 
 describe("TraitExtractionDialog", () => {
@@ -116,7 +118,13 @@ describe("TraitExtractionDialog", () => {
         open
         onClose={() => {}}
         orthoVersions={[makeOrtho(2, "Final")]}
-        state={{ orthoVersion: 2, boundaryVersion: 4, exgThreshold: 0.15 }}
+        state={{
+          orthoVersion: 2,
+          boundaryVersion: 4,
+          exgThreshold: 0.15,
+          demPath: null,
+          thermalPath: null,
+        }}
         onChange={() => {}}
         onSubmit={onSubmit}
       />,

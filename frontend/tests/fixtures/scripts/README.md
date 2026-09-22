@@ -33,3 +33,9 @@ extraction code without committing real flight logs.
 ```bash
 python generate-amiga-fixture.py --out ../binary/test_amiga.0000.bin
 ```
+
+## `generate_thermal_fixture.py`
+
+Writes `ortho/e2e_test_thermal.tif`: a constant 27.5 °C thermal orthomosaic
+over the same footprint as `ortho/e2e_test_orthophoto.tif`, for the
+canopy-temperature trait-extraction spec. Needs rasterio.

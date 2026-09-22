@@ -829,6 +829,9 @@ test.describe("R4a: aerial wizard happy path", () => {
     ).toBeVisible()
     await expect(page.getByTestId("trait-ortho-version")).toBeVisible()
     await expect(page.getByTestId("trait-boundary-version")).toBeVisible()
+    // ODM's surface model is kept beside the ortho and picked by default,
+    // so canopy height is computed rather than silently skipped.
+    await expect(page.getByTestId("trait-dem")).toContainText("odm_dsm")
     const submitTraitBtn = page.getByRole("button", {
       name: /^run trait extraction$/i,
     })
@@ -1067,6 +1070,19 @@ test.describe("R4a: aerial wizard happy path", () => {
       Number(hi),
       `legend range should be non-degenerate; got [${lo}, ${hi}]`,
     ).toBeGreaterThan(Number(lo))
+
+    // Canopy height came from the DSM: this scope has values for it too.
+    const heightResp = page.waitForResponse(
+      (r) => /\/api\/traits\/id\/[^/]+\/records/.test(r.url()) && r.ok(),
+      { timeout: 30_000 },
+    )
+    await traitSelect.click({ force: true })
+    await page.getByRole("option", { name: /Height_95p_meters/ }).click()
+    await heightResp
+    await expect(legend).toContainText("Height_95p_meters", {
+      timeout: 15_000,
+    })
+    expect(await legend.getAttribute("data-min")).not.toBeNull()
 
     // ── Ortho underlay + opacity controls ────────────────────────────
     await orthoTileRequest

@@ -45,23 +45,15 @@ import {
   readOrthoOutputs,
 } from "@/features/process/lib/orthoVersions"
 import type { AerialScope } from "@/features/process/lib/paths"
+import {
+  uploadedDemsPrefix,
+  uploadedOrthosPrefix,
+} from "@/features/process/lib/paths"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"
-
-function uploadedOrthosPrefix(scope: AerialScope): string {
-  const { year, experiment, location, population, date, platform, sensor } =
-    scope
-  return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/Orthomosaic/`
-}
-
-function uploadedDemsPrefix(scope: AerialScope): string {
-  const { year, experiment, location, population, date, platform, sensor } =
-    scope
-  return `Raw/${year}/${experiment}/${location}/${population}/${date}/${platform}/${sensor}/Orthomosaic-DEM/`
-}
 
 function tifFilesIn(
   files: FileMetadata[],
@@ -149,8 +141,21 @@ export function ImportOrthoDialog({
         ...(run.steps.orthomosaic?.outputs ?? {}),
         versions: meta,
         importedDem: selectedDem || undefined,
+        importedDemPath: selectedDem
+          ? `${uploadedDemsPrefix(scope)}${selectedDem}`
+          : undefined,
       },
     })
+    // Data Sync only checks the raw images ODM would consume. With an
+    // imported ortho there may be none, and a pending Data Sync kept every
+    // later step (Split, trait extraction) locked for good.
+    const sync = run.steps.data_sync?.status
+    if (sync !== "completed" && sync !== "skipped") {
+      setStepState(run.id, "data_sync", {
+        status: "skipped",
+        completedAt: new Date().toISOString(),
+      })
+    }
     showSuccessToast(`Imported ${selectedOrtho}`)
     setSelectedOrtho("")
     setSelectedDem("")

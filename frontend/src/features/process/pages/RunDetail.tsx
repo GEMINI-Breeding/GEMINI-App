@@ -87,6 +87,7 @@ import {
   plotBoundariesPath,
   processedPrefix,
   rawScopePrefix,
+  uploadedOrthosPrefix,
 } from "@/features/process/lib/paths"
 import {
   executeStep,
@@ -111,6 +112,11 @@ import {
   isThermalGpsRequiredError,
   type ThermalGpsRequiredError,
 } from "@/features/process/lib/thermalGpsPreflight"
+import {
+  demForOrtho,
+  demOptions,
+  thermalOptions,
+} from "@/features/process/lib/traitInputs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -1020,16 +1026,10 @@ export function RunDetail() {
   // Imported orthos live at Raw/{scope}/Orthomosaic/. Merge with the
   // Processed/ listing for buildOrthoVersions so the panel sees both.
   const uploadedOrthosQuery = useQuery<FileMetadata[], Error>({
-    queryKey: [
-      "files",
-      "list",
-      scope
-        ? `Raw/${scope.year}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/Orthomosaic/`
-        : null,
-    ],
+    queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null],
     queryFn: async () => {
       if (!scope) return []
-      const path = `${DEFAULT_BUCKET}/Raw/${scope.year}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/Orthomosaic/`
+      const path = `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`
       const res = await FilesService.apiFilesListFilePathListFiles({
         filePath: path,
       })
@@ -1070,7 +1070,49 @@ export function RunDetail() {
     orthoVersion: null,
     boundaryVersion: null,
     exgThreshold: 0.1,
+    demPath: null,
+    thermalPath: null,
   })
+
+  // Everything recorded for this flight date, across sensors: a thermal
+  // ortho is uploaded under its own sensor, so the RGB scope's listing
+  // never sees it. Only fetched while the trait dialog is open.
+  const flightFilesQuery = useQuery<FileMetadata[], Error>({
+    queryKey: [
+      "files",
+      "flight-date",
+      scope?.year,
+      scope?.experiment,
+      scope?.location,
+      scope?.population,
+      scope?.date,
+    ],
+    queryFn: async () => {
+      if (!scope) return []
+      const tail = `${scope.year}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/`
+      const lists = await Promise.all(
+        [`Raw/${tail}`, `Processed/${tail}`].map((p) =>
+          FilesService.apiFilesListFilePathListFiles({
+            filePath: `${DEFAULT_BUCKET}/${p}`,
+          }).then((r) => (r as FileMetadata[] | null) ?? []),
+        ),
+      )
+      return lists.flat()
+    },
+    enabled: isLoggedIn() && Boolean(scope) && traitDialogOpen,
+  })
+  const flightFiles = flightFilesQuery.data ?? []
+  const importedDemPath =
+    (
+      run?.steps.orthomosaic?.outputs as
+        | { importedDemPath?: string }
+        | undefined
+    )?.importedDemPath ?? null
+  const traitOrtho = scope
+    ? buildOrthoVersions(run, scope, orthoFiles).find(
+        (v) => v.version === traitDialogState.orthoVersion,
+      )
+    : undefined
 
   // Run-level WS subscription: any step that has a *running* job gets its
   // events fed into the per-runId buffer so the StepRow log + progress bar
@@ -1331,6 +1373,10 @@ export function RunDetail() {
           orthoVersion: versions[0]?.version ?? null,
           boundaryVersion: activeBv,
           exgThreshold: 0.1,
+          // Default to the chosen ortho's own DEM (its ODM DSM, or the DEM
+          // picked at import) so canopy height isn't silently skipped.
+          demPath: demForOrtho(versions[0], orthoFiles, importedDemPath),
+          thermalPath: null,
         })
         setTraitDialogOpen(true)
         return
@@ -1445,6 +1491,7 @@ export function RunDetail() {
       orthoFiles,
       boundaryVersions,
       imageFiles.map,
+      importedDemPath,
     ],
   )
 
@@ -1569,6 +1616,12 @@ export function RunDetail() {
           boundaryGeojsonPath: boundaryPath,
           outputTraitsGeojsonPath: outputPath,
           exgThreshold: traitDialogState.exgThreshold,
+          ...(traitDialogState.demPath
+            ? { demPath: traitDialogState.demPath }
+            : {}),
+          ...(traitDialogState.thermalPath
+            ? { thermalPath: traitDialogState.thermalPath }
+            : {}),
         },
       })
       if (result.jobId) {
@@ -1835,8 +1888,27 @@ export function RunDetail() {
         orthoVersions={buildOrthoVersions(run, scope, orthoFiles)}
         boundaryVersions={boundaryVersions}
         state={traitDialogState}
-        onChange={setTraitDialogState}
+        onChange={(next) =>
+          setTraitDialogState(
+            next.orthoVersion !== traitDialogState.orthoVersion
+              ? {
+                  ...next,
+                  demPath: demForOrtho(
+                    buildOrthoVersions(run, scope, orthoFiles).find(
+                      (v) => v.version === next.orthoVersion,
+                    ),
+                    orthoFiles,
+                    importedDemPath,
+                  ),
+                }
+              : next,
+          )
+        }
         onSubmit={handleSubmitTraits}
+        demOptions={demOptions([...orthoFiles, ...flightFiles]).filter(
+          (o, i, a) => a.findIndex((x) => x.path === o.path) === i,
+        )}
+        thermalOptions={thermalOptions(flightFiles, traitOrtho?.path ?? null)}
       />
 
       <ThermalGpsBlockedDialog

@@ -31,12 +31,19 @@ import {
 } from "@/components/ui/select"
 import type { PlotGeometryVersion } from "@/features/process/hooks/usePlotGeometry"
 import type { OrthoVersion } from "@/features/process/lib/orthoVersions"
+import type { RasterOption } from "@/features/process/lib/traitInputs"
+
+const NONE = "__none__"
 
 export interface TraitDialogState {
   orthoVersion: number | null
   /** Plot-geometry boundary version (PlotGeometryVersion.version). */
   boundaryVersion: number | null
   exgThreshold: number
+  /** DEM for canopy height (MinIO path, no bucket); null = skip height. */
+  demPath: string | null
+  /** Thermal ortho in °C for canopy temperature; null = skip temperature. */
+  thermalPath: string | null
 }
 
 export interface TraitDialogProps {
@@ -50,6 +57,8 @@ export interface TraitDialogProps {
   onSubmit: () => void
   /** True while EXTRACT_TRAITS submit is in flight. */
   submitting?: boolean
+  demOptions?: RasterOption[]
+  thermalOptions?: RasterOption[]
 }
 
 export function TraitExtractionDialog({
@@ -61,6 +70,8 @@ export function TraitExtractionDialog({
   onChange,
   onSubmit,
   submitting = false,
+  demOptions = [],
+  thermalOptions = [],
 }: TraitDialogProps) {
   const orthoOptions = orthoVersions.length > 0
   const boundaryOptions = boundaryVersions.length > 0
@@ -165,6 +176,25 @@ export function TraitExtractionDialog({
             </p>
           )}
 
+          <RasterPicker
+            id="trait-dem"
+            label="DEM (canopy height)"
+            none="No DEM — skip canopy height"
+            options={demOptions}
+            value={state.demPath}
+            onChange={(demPath) => onChange({ ...state, demPath })}
+          />
+
+          <RasterPicker
+            id="trait-thermal"
+            label="Thermal orthomosaic (canopy temperature)"
+            none="No thermal ortho — skip canopy temperature"
+            options={thermalOptions}
+            value={state.thermalPath}
+            onChange={(thermalPath) => onChange({ ...state, thermalPath })}
+            hint="Pixel values must be temperatures in °C. Orthos stitched from 8-bit palette previews are not."
+          />
+
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-sm" htmlFor="trait-exg">
@@ -215,5 +245,48 @@ export function TraitExtractionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function RasterPicker({
+  id,
+  label,
+  none,
+  options,
+  value,
+  onChange,
+  hint,
+}: {
+  id: string
+  label: string
+  none: string
+  options: RasterOption[]
+  value: string | null
+  onChange: (path: string | null) => void
+  hint?: string
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm" htmlFor={id}>
+        {label}
+      </Label>
+      <Select
+        value={value ?? NONE}
+        onValueChange={(v) => onChange(v === NONE ? null : v)}
+      >
+        <SelectTrigger id={id} data-testid={id} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>{none}</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o.path} value={o.path}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+    </div>
   )
 }
