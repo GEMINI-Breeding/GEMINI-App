@@ -27,3 +27,38 @@ export async function downloadViaBrowser(objectPath: string): Promise<void> {
   a.remove()
   URL.revokeObjectURL(objectUrl)
 }
+
+/**
+ * Download many MinIO objects as one ZIP (POST /api/files/download_zip).
+ * Entries keep their paths relative to the files' common folder.
+ */
+export async function downloadZip(opts: {
+  files?: string[]
+  prefix?: string
+  filename: string
+}): Promise<void> {
+  const res = await fetch(apiUrl("/api/files/download_zip"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...(opts.files ? { files: opts.files } : {}),
+      ...(opts.prefix ? { prefix: opts.prefix } : {}),
+      filename: opts.filename,
+    }),
+  })
+  if (!res.ok) throw new Error(`ZIP download failed: ${res.status}`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = objectUrl
+  a.download = opts.filename.endsWith(".zip")
+    ? opts.filename
+    : `${opts.filename}.zip`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}

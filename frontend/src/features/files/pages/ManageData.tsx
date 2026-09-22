@@ -46,7 +46,11 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { idAsString } from "@/features/admin/lib/ids"
 import useCustomToast from "@/hooks/useCustomToast"
 import { ReferenceDataSection } from "../components/ReferenceDataSection"
-import { DEFAULT_BUCKET, downloadViaBrowser } from "../lib/download"
+import {
+  DEFAULT_BUCKET,
+  downloadViaBrowser,
+  downloadZip,
+} from "../lib/download"
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -295,6 +299,23 @@ function ExperimentRow({
     }
   }
 
+  const [zipping, setZipping] = useState(false)
+  const handleDownloadAll = async () => {
+    setZipping(true)
+    try {
+      await downloadZip({
+        files: (filesQuery.data ?? []).map((f) => f.object_name),
+        filename: `${experiment.experiment_name}.zip`,
+      })
+    } catch (err) {
+      showErrorToastWithCopy(
+        err instanceof Error ? err.message : "Download failed",
+      )
+    } finally {
+      setZipping(false)
+    }
+  }
+
   return (
     <div data-testid={`manage-data-experiment-${experiment.experiment_name}`}>
       <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40">
@@ -394,8 +415,22 @@ function ExperimentRow({
           </section>
 
           <section>
-            <div className="text-muted-foreground mb-2 text-xs uppercase tracking-wide">
-              Files
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-muted-foreground text-xs uppercase tracking-wide">
+                Files
+              </div>
+              {(filesQuery.data?.length ?? 0) > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleDownloadAll}
+                  disabled={zipping}
+                  data-testid={`manage-data-zip-${experiment.experiment_name}`}
+                >
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  {zipping ? "Preparing…" : "Download all (.zip)"}
+                </Button>
+              )}
             </div>
             <FileList
               files={filesQuery.data ?? []}

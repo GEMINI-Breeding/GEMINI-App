@@ -116,6 +116,12 @@ export interface SplitOrthomosaicParams {
    * output PNG, falling back to the feature index and "unknown".
    */
   boundaries: GeoJSON.FeatureCollection
+  /**
+   * MinIO path (no bucket) of the ortho to cut — the run's active one.
+   * Needed for imported orthos under Raw/, which the worker's own
+   * discovery (Processed/…/odm_orthophoto*) never finds.
+   */
+  orthomosaicPath?: string
 }
 
 export interface ExecuteStepInput {
@@ -330,6 +336,9 @@ export async function executeStep(
         population: scope.population,
         date: scope.date,
         boundaries: input.splitOrthomosaic.boundaries,
+        ...(input.splitOrthomosaic.orthomosaicPath
+          ? { orthomosaic_path: input.splitOrthomosaic.orthomosaicPath }
+          : {}),
       }
       const job = (await JobsService.apiJobsSubmitSubmitJob({
         requestBody: {

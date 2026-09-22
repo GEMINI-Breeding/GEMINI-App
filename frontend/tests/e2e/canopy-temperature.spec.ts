@@ -15,6 +15,8 @@
  *
  * Console-error guard auto-attached via tests/helpers/fixtures.
  */
+import { readFileSync } from "node:fs"
+
 import type { Page } from "@playwright/test"
 
 import { fixturePath } from "../helpers/fixturePath"
@@ -25,6 +27,7 @@ import {
   selectDataType,
   submitUploadAndWait,
 } from "../helpers/uploadHelpers"
+import { zipEntryNames } from "../helpers/zip"
 
 async function uploadOrtho(
   page: Page,
@@ -175,6 +178,17 @@ test.describe("Canopy temperature from a thermal orthomosaic", () => {
     await expect(splitRow).toHaveAttribute("data-status", "completed", {
       timeout: 3 * 60_000,
     })
+
+    // All six plot images download as one ZIP.
+    const zipButton = splitRow.getByTestId("plot-images-zip")
+    await expect(zipButton).toBeVisible({ timeout: 30_000 })
+    const [zipDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      zipButton.click(),
+    ])
+    expect(zipDownload.suggestedFilename()).toMatch(/^plot-images-.*\.zip$/)
+    const entries = zipEntryNames(readFileSync(await zipDownload.path()))
+    expect(entries.filter((e) => /plot_\d+.*\.png$/.test(e))).toHaveLength(6)
 
     // ── 4. Trait extraction with the thermal ortho. ─────────────────────
     const traitRow = page.getByTestId("step-row-trait_extraction")

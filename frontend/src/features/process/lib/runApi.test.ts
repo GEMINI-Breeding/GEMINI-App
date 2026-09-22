@@ -589,8 +589,9 @@ describe("executeStep", () => {
       expect(result).toEqual({ jobId: "job-split-1", done: false })
       const body = submitMock.mock.calls[0][0].requestBody
       expect(body.job_type).toBe("SPLIT_ORTHOMOSAIC")
-      // The worker finds the newest ortho per folder itself, so it needs
-      // the path components but NOT platform/sensor or an ortho path.
+      // Without an explicit ortho the worker discovers the newest ODM
+      // ortho per folder itself from the path components.
+      expect(body.parameters.orthomosaic_path).toBeUndefined()
       expect(body.parameters).toMatchObject({
         year: SCOPE.year,
         experiment: SCOPE.experiment,
@@ -602,6 +603,20 @@ describe("executeStep", () => {
       expect(getRun(run.id)?.steps.split_orthomosaic?.jobIds).toEqual([
         "job-split-1",
       ])
+    })
+
+    it("passes the run's ortho so imported (Raw/) orthos get cut too", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "job-split-2" })
+      const path =
+        "Raw/2026/E/Davis/Cowpea/2026-04-28/DJI/RGB/Orthomosaic/o.tif"
+      await executeStep({
+        ...baseInput(run, "split_orthomosaic"),
+        splitOrthomosaic: { boundaries: FC(2), orthomosaicPath: path },
+      })
+      expect(
+        submitMock.mock.calls[0][0].requestBody.parameters.orthomosaic_path,
+      ).toBe(path)
     })
 
     it("refuses to submit without boundaries", async () => {

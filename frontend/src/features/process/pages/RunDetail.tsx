@@ -1434,7 +1434,17 @@ export function RunDetail() {
           stitching: stitchingParams,
           splitOrthomosaic:
             stepKey === "split_orthomosaic" && splitBoundariesRef.current
-              ? { boundaries: splitBoundariesRef.current }
+              ? {
+                  boundaries: splitBoundariesRef.current,
+                  // The same ortho the boundary tool drew over.
+                  orthomosaicPath: scope
+                    ? buildOrthoVersions(
+                        run,
+                        scope,
+                        orthoFiles,
+                      )[0]?.path.replace(/^gemini\//, "")
+                    : undefined,
+                }
               : undefined,
         })
         if (result.jobId) {

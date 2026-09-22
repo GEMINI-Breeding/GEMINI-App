@@ -12,6 +12,8 @@
  * would silently break everything except the Amiga flow otherwise.
  */
 
+import { readFileSync } from "node:fs"
+
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
@@ -21,6 +23,7 @@ import {
   selectDataType,
   submitUploadAndWait,
 } from "../helpers/uploadHelpers"
+import { zipEntryNames } from "../helpers/zip"
 
 test.describe("Image upload (non-bin path)", () => {
   // Default 30s is too tight: the helper waits up to ~120s for "Done"
@@ -80,5 +83,20 @@ test.describe("Image upload (non-bin path)", () => {
         `[data-testid^="download-"][data-testid*="${experiment}"][data-testid$="/test_image_002.jpg"]`,
       ),
     ).toBeVisible()
+
+    // "Download all (.zip)" returns both images in one archive, named
+    // after the experiment.
+    const [zip] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId(`manage-data-zip-${experiment}`).click(),
+    ])
+    expect(zip.suggestedFilename()).toBe(`${experiment}.zip`)
+    const names = zipEntryNames(readFileSync(await zip.path()))
+    expect(names.filter((n) => n.endsWith("test_image_001.jpg"))).toHaveLength(
+      1,
+    )
+    expect(names.filter((n) => n.endsWith("test_image_002.jpg"))).toHaveLength(
+      1,
+    )
   })
 })
