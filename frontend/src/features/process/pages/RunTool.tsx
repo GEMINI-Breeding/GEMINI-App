@@ -23,6 +23,7 @@ import {
 import {
   usePipeline,
   useRun,
+  useRunStoreReady,
   useWorkspace,
 } from "@/features/process/lib/runStore"
 
@@ -74,6 +75,7 @@ export function RunTool() {
   })
   const run = useRun(runId)
   const workspace = useWorkspace(workspaceId)
+  const storeReady = useRunStoreReady()
   const pipeline = usePipeline(run?.pipelineId)
 
   // The run's scope is locked to the uploaded dataset picked at
@@ -130,7 +132,9 @@ export function RunTool() {
         {!run ? (
           <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
             <p className="text-muted-foreground text-sm">
-              Run not found. It may have been deleted on this browser.
+              {storeReady
+                ? "Run not found. It may have been deleted."
+                : "Loading…"}
             </p>
           </div>
         ) : !scope ? (

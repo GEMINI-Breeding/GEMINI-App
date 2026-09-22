@@ -87,6 +87,7 @@ function WorkspaceCard({
   return (
     <div
       className="relative rounded-lg border bg-card cursor-pointer transition-all hover:border-primary/60 hover:shadow-md group overflow-hidden flex flex-col"
+      data-testid={`workspace-card-${workspace.name}`}
       onClick={() =>
         navigate({
           to: "/process/$workspaceId",
@@ -105,6 +106,7 @@ function WorkspaceCard({
               variant="ghost"
               size="icon"
               className="h-7 w-7 bg-black/30 hover:bg-black/50 text-white"
+              aria-label="Workspace actions"
             >
               <MoreVertical className="w-4 h-4" />
             </Button>

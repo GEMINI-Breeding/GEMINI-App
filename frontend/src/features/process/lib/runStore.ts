@@ -10,19 +10,27 @@
  *
  * Each Run.steps[k].jobIds holds the GEMINIbase Job UUIDs that step
  * spawned. ProcessContext subscribes those jobIds via wsManager and the
- * wizard reads job status back from useJob() — runStore itself does not
- * call the backend.
+ * wizard reads job status back from useJob().
  *
- * Implementation: module-level store + useSyncExternalStore (matches
- * processScope.ts). Storage layout:
- *   gemini.process.runStore.v1 → { workspaces, pipelines, runs }
- * Single key keeps reads atomic; the data is small (a few KB per
- * workspace) so no need to split into per-run keys until proven slow.
+ * Persistence (3F): the server is the source of truth
+ * (`/api/process_state`, one JSON document per workspace / pipeline /
+ * run), so runs survive clearing site data and are shared by every user
+ * and machine. The API here stays synchronous: an in-memory copy serves
+ * reads, and every mutation writes the entities it changed through an
+ * *outbox* kept in localStorage — so a write made just before a page
+ * reload or navigation is replayed on the next load rather than lost —
+ * and sent with `keepalive`. `hydrateRunStore()` (called once signed in)
+ * loads the server's state, lays any unsent outbox writes on top, and
+ * then polls so other users' changes appear. Browsers that used the old
+ * localStorage-only store upload it once; nothing local is deleted.
+ * The old `gemini.process.runStore.v1` key is still written as a cache.
  */
 import { useSyncExternalStore } from "react"
 
+import { OpenAPI } from "@/client"
 import type { AerialScopeFields } from "@/features/process/components/AerialScopePicker"
 import type { ProcessScope } from "@/features/process/lib/processScope"
+import { getToken } from "@/lib/auth"
 
 export type Id = string
 export type IsoDate = string
@@ -190,9 +198,237 @@ function emit() {
 }
 
 function setState(next: StoreState) {
+  const prev = current
   current = next
   writeStored(current)
+  enqueueChanges(prev, next)
   emit()
+}
+
+// ── Server sync ───────────────────────────────────────────────────────────
+
+type Kind = "workspace" | "pipeline" | "run"
+type Entity = Workspace | Pipeline | Run
+/** Pending write for one entity: its latest doc, or null for a delete. */
+type Op = { kind: Kind; id: Id; doc: Entity | null; seq: number }
+
+const OUTBOX_KEY = "gemini.process.outbox.v1"
+const MIGRATED_KEY = "gemini.process.migratedToServer.v1"
+const POLL_MS = 15_000
+
+const COLLECTIONS: Array<[Kind, keyof StoreState]> = [
+  ["workspace", "workspaces"],
+  ["pipeline", "pipelines"],
+  ["run", "runs"],
+]
+const KIND_ORDER: Record<Kind, number> = { workspace: 0, pipeline: 1, run: 2 }
+
+let seq = 0
+let outbox: Map<Id, Op> = readOutbox()
+let syncEnabled = false
+let flushing = false
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let ready = false
+const readyListeners = new Set<() => void>()
+
+function readOutbox(): Map<Id, Op> {
+  try {
+    const raw = localStorage.getItem(OUTBOX_KEY)
+    const ops = raw ? (JSON.parse(raw) as Op[]) : []
+    return new Map(ops.map((o) => [o.id, o]))
+  } catch {
+    return new Map()
+  }
+}
+
+function writeOutbox() {
+  try {
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify([...outbox.values()]))
+  } catch {
+    // Best-effort, like the cache.
+  }
+}
+
+function enqueue(kind: Kind, id: Id, doc: Entity | null) {
+  seq += 1
+  outbox.set(id, { kind, id, doc, seq })
+}
+
+/** Queue every entity that changed between two states (by identity). */
+function enqueueChanges(prev: StoreState, next: StoreState) {
+  let any = false
+  for (const [kind, key] of COLLECTIONS) {
+    const before = new Map((prev[key] as Entity[]).map((e) => [e.id, e]))
+    const after = new Map((next[key] as Entity[]).map((e) => [e.id, e]))
+    for (const [id, e] of after)
+      if (before.get(id) !== e) {
+        enqueue(kind, id, e)
+        any = true
+      }
+    for (const id of before.keys())
+      if (!after.has(id)) {
+        enqueue(kind, id, null)
+        any = true
+      }
+  }
+  if (any) {
+    writeOutbox()
+    void flush()
+  }
+}
+
+function apiUrl(path: string) {
+  return `${(OpenAPI.BASE ?? "").replace(/\/$/, "")}${path}`
+}
+
+/** Parents before children for writes; children before parents for deletes. */
+function flushOrder(a: Op, b: Op) {
+  const ad = a.doc === null
+  const bd = b.doc === null
+  if (ad !== bd) return ad ? 1 : -1
+  const k = KIND_ORDER[a.kind] - KIND_ORDER[b.kind]
+  return ad ? -k : k || a.seq - b.seq
+}
+
+async function flush(): Promise<void> {
+  if (!syncEnabled || flushing || outbox.size === 0) return
+  flushing = true
+  try {
+    for (const op of [...outbox.values()].sort(flushOrder)) {
+      const path = `/api/process_state/${op.kind}/${op.id}`
+      const body = op.doc ? JSON.stringify({ doc: op.doc }) : undefined
+      let res: Response
+      try {
+        res = await fetch(apiUrl(path), {
+          method: op.doc ? "PUT" : "DELETE",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+            ...(body ? { "Content-Type": "application/json" } : {}),
+          },
+          body,
+          // Survives a navigation / reload that starts mid-request
+          // (browsers cap keepalive bodies at 64 KB).
+          keepalive: (body?.length ?? 0) < 60_000,
+        })
+      } catch {
+        scheduleRetry()
+        return
+      }
+      // 409: the parent is gone (deleted elsewhere) — this write is moot.
+      if (res.ok || res.status === 409 || res.status === 400) {
+        // Only clear it if nothing newer was queued meanwhile.
+        if (outbox.get(op.id)?.seq === op.seq) outbox.delete(op.id)
+        writeOutbox()
+      } else {
+        scheduleRetry()
+        return
+      }
+    }
+  } finally {
+    flushing = false
+  }
+  if (outbox.size > 0) void flush()
+}
+
+function scheduleRetry() {
+  if (retryTimer) return
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    void flush()
+  }, 5_000)
+}
+
+/** Server state with the unsent local writes laid on top. */
+function overlayOutbox(server: StoreState): StoreState {
+  const out: StoreState = {
+    workspaces: [...server.workspaces],
+    pipelines: [...server.pipelines],
+    runs: [...server.runs],
+  }
+  for (const op of outbox.values()) {
+    const key = COLLECTIONS.find(([k]) => k === op.kind)?.[1]
+    if (!key) continue
+    const list = (out[key] as Entity[]).filter((e) => e.id !== op.id)
+    ;(out as unknown as Record<string, Entity[]>)[key] = op.doc
+      ? [...list, op.doc]
+      : list
+  }
+  return out
+}
+
+async function pull(): Promise<void> {
+  try {
+    const res = await fetch(apiUrl("/api/process_state"), {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!res.ok) return
+    const server = (await res.json()) as StoreState
+    current = overlayOutbox({
+      workspaces: server.workspaces ?? [],
+      pipelines: server.pipelines ?? [],
+      runs: server.runs ?? [],
+    })
+    writeStored(current)
+    emit()
+  } catch {
+    // Offline: keep showing the cache; the next poll retries.
+  } finally {
+    if (!ready) {
+      ready = true
+      for (const l of readyListeners) l()
+    }
+  }
+}
+
+/**
+ * Start server sync (idempotent). Call once the user is signed in. On a
+ * browser that used the old localStorage-only store, its contents are
+ * uploaded once (orphans whose parent is gone are skipped).
+ */
+export async function hydrateRunStore(): Promise<void> {
+  if (syncEnabled) return
+  syncEnabled = true
+  let migrated = false
+  try {
+    migrated = localStorage.getItem(MIGRATED_KEY) === "1"
+  } catch {}
+  if (!migrated) {
+    const local = readStored()
+    const ws = new Set(local.workspaces.map((w) => w.id))
+    const pl = new Set(
+      local.pipelines.filter((p) => ws.has(p.workspaceId)).map((p) => p.id),
+    )
+    for (const w of local.workspaces) enqueue("workspace", w.id, w)
+    for (const p of local.pipelines)
+      if (ws.has(p.workspaceId)) enqueue("pipeline", p.id, p)
+    for (const r of local.runs)
+      if (pl.has(r.pipelineId)) enqueue("run", r.id, r)
+    writeOutbox()
+    try {
+      localStorage.setItem(MIGRATED_KEY, "1")
+    } catch {}
+  }
+  await flush()
+  await pull()
+  if (!pollTimer && typeof window !== "undefined") {
+    pollTimer = setInterval(() => {
+      if (document.visibilityState === "visible") void pull()
+    }, POLL_MS)
+    window.addEventListener("focus", () => void pull())
+  }
+}
+
+/** True once the first server load finished (or failed). */
+export function useRunStoreReady(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      readyListeners.add(l)
+      return () => readyListeners.delete(l)
+    },
+    () => ready,
+    () => ready,
+  )
 }
 
 function subscribe(l: () => void) {
@@ -465,5 +701,6 @@ export function useRun(id: Id | undefined): Run | undefined {
 /** Test-only — wipe everything so specs don't bleed into each other. */
 export function __resetRunStoreForTests(): void {
   current = { workspaces: [], pipelines: [], runs: [] }
+  outbox = new Map()
   emit()
 }

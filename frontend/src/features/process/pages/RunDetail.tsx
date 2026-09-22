@@ -114,6 +114,7 @@ import {
   updateRun,
   usePipeline,
   useRun,
+  useRunStoreReady,
   useWorkspace,
 } from "@/features/process/lib/runStore"
 import {
@@ -907,6 +908,7 @@ export function RunDetail() {
   })
   const run = useRun(runId)
   const workspace = useWorkspace(workspaceId)
+  const storeReady = useRunStoreReady()
   const pipeline = usePipeline(run?.pipelineId)
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const { addProcess, updateProcess, processes } = useProcess()
@@ -1743,7 +1745,7 @@ export function RunDetail() {
     return (
       <div className="bg-background flex h-full min-h-[60vh] items-center justify-center">
         <div className="mx-auto max-w-5xl p-8 text-center text-muted-foreground">
-          Workspace not found.
+          {storeReady ? "Workspace not found." : "Loading…"}
         </div>
       </div>
     )
@@ -1752,7 +1754,7 @@ export function RunDetail() {
     return (
       <div className="bg-background flex h-full min-h-[60vh] items-center justify-center">
         <div className="mx-auto max-w-5xl p-8 text-center text-muted-foreground">
-          Run not found.
+          {storeReady ? "Run not found." : "Loading…"}
         </div>
       </div>
     )

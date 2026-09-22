@@ -50,6 +50,7 @@ import {
   type Pipeline,
   type Run,
   usePipelines,
+  useRunStoreReady,
   useRuns,
   useWorkspace,
 } from "@/features/process/lib/runStore"
@@ -294,6 +295,7 @@ export function WorkspaceDetail() {
   const { workspaceId } = useParams({ from: "/_layout/process/$workspaceId/" })
   const navigate = useNavigate()
   const workspace = useWorkspace(workspaceId)
+  const storeReady = useRunStoreReady()
   const pipelines = usePipelines(workspaceId)
 
   if (!workspace) {
@@ -302,7 +304,9 @@ export function WorkspaceDetail() {
         <div className="mx-auto max-w-5xl p-8 flex flex-col items-center justify-center py-24 text-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           <p className="text-muted-foreground text-sm">
-            Workspace not found. It may have been deleted on this browser.
+            {storeReady
+              ? "Workspace not found. It may have been deleted."
+              : "Loading…"}
           </p>
           <Button
             variant="outline"

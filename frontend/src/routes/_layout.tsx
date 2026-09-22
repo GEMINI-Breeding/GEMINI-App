@@ -19,6 +19,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { hydrateRunStore } from "@/features/process/lib/runStore"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { onLogout } from "@/lib/auth"
@@ -50,6 +51,12 @@ function Layout() {
   // Follow the 401 interceptor's logout event out of this layout. Without
   // this the user would remain on a data-dependent page after the token
   // was cleared, trying to re-render against stale React Query caches.
+  // Process workspaces / runs live on the server; load them (and start
+  // syncing) once we're inside the signed-in shell.
+  useEffect(() => {
+    void hydrateRunStore()
+  }, [])
+
   useEffect(() => {
     const off = onLogout(() => {
       navigate({ to: "/login" })
