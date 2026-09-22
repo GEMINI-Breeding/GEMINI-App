@@ -1,4 +1,4 @@
-import { Plus, Trash2, Crop } from "lucide-react"
+import { Crop, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
 
@@ -8,8 +8,8 @@ export type HeadingDirection = "north" | "south" | "east" | "west"
 
 export interface CropRule {
   id: string
-  filterMode?: CropFilterMode   // "plot" (default) or "heading"
-  directions: CropDirection[]   // used when filterMode === "plot"
+  filterMode?: CropFilterMode // "plot" (default) or "heading"
+  directions: CropDirection[] // used when filterMode === "plot"
   headings?: HeadingDirection[] // used when filterMode === "heading"
   mask_left: number
   mask_right: number
@@ -30,18 +30,22 @@ export function newCropRule(): CropRule {
   }
 }
 
-const PLOT_DIR_OPTIONS: { value: CropDirection; icon: string; label: string }[] = [
-  { value: "up",    icon: "↑", label: "Up"    },
-  { value: "down",  icon: "↓", label: "Down"  },
-  { value: "left",  icon: "←", label: "Left"  },
+const PLOT_DIR_OPTIONS: {
+  value: CropDirection
+  icon: string
+  label: string
+}[] = [
+  { value: "up", icon: "↑", label: "Up" },
+  { value: "down", icon: "↓", label: "Down" },
+  { value: "left", icon: "←", label: "Left" },
   { value: "right", icon: "→", label: "Right" },
 ]
 
 const HEADING_OPTIONS: { value: HeadingDirection; label: string }[] = [
   { value: "north", label: "N" },
   { value: "south", label: "S" },
-  { value: "east",  label: "E" },
-  { value: "west",  label: "W" },
+  { value: "east", label: "E" },
+  { value: "west", label: "W" },
 ]
 
 interface CropRuleListProps {
@@ -51,13 +55,22 @@ interface CropRuleListProps {
   hasMsgsData?: boolean
 }
 
-export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleListProps) {
+export function CropRuleList({
+  rules,
+  onChange,
+  onEdit,
+  hasMsgsData,
+}: CropRuleListProps) {
   // Global mode is derived from the first rule (all rules share the same mode)
   const globalMode: CropFilterMode = rules[0]?.filterMode ?? "heading"
 
   // All headings/directions already claimed by any rule
-  const usedHeadings = new Set<HeadingDirection>(rules.flatMap((r) => r.headings ?? []))
-  const usedDirections = new Set<CropDirection>(rules.flatMap((r) => r.directions))
+  const usedHeadings = new Set<HeadingDirection>(
+    rules.flatMap((r) => r.headings ?? []),
+  )
+  const usedDirections = new Set<CropDirection>(
+    rules.flatMap((r) => r.directions),
+  )
 
   function updateRule(id: string, patch: Partial<CropRule>) {
     onChange(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)))
@@ -80,7 +93,9 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
     // Prevent selecting a direction already used in another rule
     if (!has && usedDirections.has(dir)) return
     updateRule(ruleId, {
-      directions: has ? rule.directions.filter((d) => d !== dir) : [...rule.directions, dir],
+      directions: has
+        ? rule.directions.filter((d) => d !== dir)
+        : [...rule.directions, dir],
     })
   }
 
@@ -108,7 +123,9 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
     <div className="space-y-2">
       {/* Global mode toggle — applies to all rules */}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-muted-foreground font-medium">Filter by</span>
+        <span className="text-[10px] text-muted-foreground font-medium">
+          Filter by
+        </span>
         <div className="flex rounded border overflow-hidden text-[10px] font-medium">
           <button
             type="button"
@@ -142,7 +159,10 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
         {rules.map((rule) => {
           const activeDirections = rule.directions
           const activeHeadings = rule.headings ?? []
-          const hasFilter = globalMode === "plot" ? activeDirections.length > 0 : activeHeadings.length > 0
+          const hasFilter =
+            globalMode === "plot"
+              ? activeDirections.length > 0
+              : activeHeadings.length > 0
 
           return (
             <div
@@ -152,12 +172,15 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
               {/* Direction / heading chips */}
               <div className="flex items-center gap-0.5 shrink-0">
                 {!hasFilter && (
-                  <span className="text-[10px] text-muted-foreground leading-none mr-1">All</span>
+                  <span className="text-[10px] text-muted-foreground leading-none mr-1">
+                    All
+                  </span>
                 )}
                 {globalMode === "plot"
                   ? PLOT_DIR_OPTIONS.map(({ value, icon, label }) => {
                       const active = activeDirections.includes(value)
-                      const takenElsewhere = !active && usedDirections.has(value)
+                      const takenElsewhere =
+                        !active && usedDirections.has(value)
                       return (
                         <button
                           key={value}
@@ -166,8 +189,8 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
                             takenElsewhere
                               ? `${label} is already used in another rule`
                               : active
-                              ? `${label} — click to remove`
-                              : `Add ${label}`
+                                ? `${label} — click to remove`
+                                : `Add ${label}`
                           }
                           disabled={takenElsewhere}
                           onClick={() => toggleDirection(rule.id, value)}
@@ -175,8 +198,8 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
                             active
                               ? "bg-primary text-primary-foreground"
                               : takenElsewhere
-                              ? "border text-muted-foreground/40 cursor-not-allowed"
-                              : "border text-muted-foreground hover:text-foreground hover:bg-accent"
+                                ? "border text-muted-foreground/40 cursor-not-allowed"
+                                : "border text-muted-foreground hover:text-foreground hover:bg-accent"
                           }`}
                         >
                           {icon}
@@ -194,8 +217,8 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
                             takenElsewhere
                               ? `${label} is already used in another rule`
                               : active
-                              ? `${label} — click to remove`
-                              : `Add ${label}`
+                                ? `${label} — click to remove`
+                                : `Add ${label}`
                           }
                           disabled={takenElsewhere}
                           onClick={() => toggleHeading(rule.id, value)}
@@ -203,8 +226,8 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
                             active
                               ? "bg-primary text-primary-foreground"
                               : takenElsewhere
-                              ? "border text-muted-foreground/40 cursor-not-allowed"
-                              : "border text-muted-foreground hover:text-foreground hover:bg-accent"
+                                ? "border text-muted-foreground/40 cursor-not-allowed"
+                                : "border text-muted-foreground hover:text-foreground hover:bg-accent"
                           }`}
                         >
                           {label}
@@ -214,8 +237,13 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
               </div>
 
               {/* L / R / T / B inputs */}
-              {(["mask_left", "mask_right", "mask_top", "mask_bottom"] as const).map((side) => (
-                <div key={side} className="flex flex-col items-center gap-0.5 flex-1 min-w-0">
+              {(
+                ["mask_left", "mask_right", "mask_top", "mask_bottom"] as const
+              ).map((side) => (
+                <div
+                  key={side}
+                  className="flex flex-col items-center gap-0.5 flex-1 min-w-0"
+                >
                   <span className="text-[9px] text-muted-foreground uppercase leading-none">
                     {side.replace("mask_", "")[0]}
                   </span>
@@ -226,7 +254,9 @@ export function CropRuleList({ rules, onChange, onEdit, hasMsgsData }: CropRuleL
                     className="h-7 text-xs text-center px-1"
                     onChange={(e) => {
                       const v = parseInt(e.target.value, 10)
-                      updateRule(rule.id, { [side]: isNaN(v) ? 0 : Math.max(0, v) })
+                      updateRule(rule.id, {
+                        [side]: isNaN(v) ? 0 : Math.max(0, v),
+                      })
                     }}
                   />
                 </div>

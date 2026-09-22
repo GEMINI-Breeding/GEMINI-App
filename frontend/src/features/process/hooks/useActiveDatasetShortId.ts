@@ -20,7 +20,7 @@ import { useMemo } from "react"
 import { type FileMetadata, FilesService } from "@/client"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { rawScopePrefix } from "@/features/process/lib/paths"
-import { type Run } from "@/features/process/lib/runStore"
+import type { Run } from "@/features/process/lib/runStore"
 import { isLoggedIn } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"

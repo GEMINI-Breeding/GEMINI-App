@@ -1022,12 +1022,18 @@ export function ProcessingPipeline() {
                       <Label className="text-xs">Server URL</Label>
                       <Input
                         className="h-8 text-sm font-mono"
+                        data-testid="pipeline-local-server-url"
                         value={localServerUrl}
                         onChange={(e) => setLocalServerUrl(e.target.value)}
                         placeholder="http://localhost:9002"
                       />
+                      {/* Was "The server will be auto-started if not already
+                          running" — true of the old backend, which launched a
+                          Docker container for it; nothing starts it here. */}
                       <p className="text-xs text-muted-foreground">
-                        The server will be auto-started if not already running.
+                        Start a Roboflow inference server on this machine first.
+                        “localhost” is fine — the processing worker is routed to
+                        your machine automatically.
                       </p>
                     </div>
                   )}

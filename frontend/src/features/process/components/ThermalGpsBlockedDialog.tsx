@@ -35,9 +35,9 @@ export function ThermalGpsBlockedDialog({
         <DialogHeader>
           <DialogTitle>Orthomosaic blocked — no per-image GPS</DialogTitle>
           <DialogDescription>
-            ODM needs GPS in each image to align a flight mosaic. This
-            thermal dataset has none, so we stopped the submission
-            before the worker spent ~10 minutes failing.
+            ODM needs GPS in each image to align a flight mosaic. This thermal
+            dataset has none, so we stopped the submission before the worker
+            spent ~10 minutes failing.
           </DialogDescription>
         </DialogHeader>
 
@@ -59,13 +59,13 @@ export function ThermalGpsBlockedDialog({
           <p>To produce an orthomosaic for this scope, do one of:</p>
           <ul className="ml-5 list-disc space-y-1">
             <li>
-              Upload a co-captured RGB stream (e.g. drone imagery) and run
-              ODM against that sensor.
+              Upload a co-captured RGB stream (e.g. drone imagery) and run ODM
+              against that sensor.
             </li>
             <li>
-              Attach a per-image GPS log (CSV with frame timestamps)
-              alongside the thermal frames. (Not supported in v1 — see
-              the thermal-support plan, Phase D open questions.)
+              Attach a per-image GPS log (CSV with frame timestamps) alongside
+              the thermal frames. (Not supported in v1 — see the thermal-support
+              plan, Phase D open questions.)
             </li>
           </ul>
         </div>

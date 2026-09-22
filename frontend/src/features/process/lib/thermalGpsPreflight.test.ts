@@ -104,9 +104,7 @@ describe("checkThermalGpsPreflight", () => {
   })
 
   it("returns sidecar_unreadable on malformed JSON", async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(new Response("not json")),
-    )
+    const fetchMock = vi.fn(() => Promise.resolve(new Response("not json")))
     const result = await checkThermalGpsPreflight(SCOPE, SHORT_ID, fetchMock)
     expect(result.kind).toBe("sidecar_unreadable")
   })

@@ -74,6 +74,13 @@ test.describe("R5c: InferenceTool MVP", () => {
     await page.getByPlaceholder(/wheat detection/i).fill("Smoke detector")
     await page.getByPlaceholder(/rf_xxx/i).fill("rf_TEST_NO_REAL_CALL")
     await page.getByPlaceholder(/my-project\/3/i).fill("smoke/model/1")
+    // Choose a self-hosted inference server. The form collected this for
+    // the whole migration while nothing read it, so "local" silently still
+    // meant Roboflow cloud. The tool must now report the choice.
+    await page.getByRole("radio", { name: /local server/i }).check()
+    await page
+      .getByTestId("pipeline-local-server-url")
+      .fill("http://localhost:9002")
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
     // 4. Run from upload-driven NewRunDialog.
@@ -113,6 +120,10 @@ test.describe("R5c: InferenceTool MVP", () => {
     // surfaces the active value.
     await expect(page.getByTestId("inference-model")).toContainText(
       "Smoke detector",
+    )
+    // The pipeline's local-server choice reaches the tool.
+    await expect(page.getByTestId("inference-endpoint")).toContainText(
+      "local inference server at http://localhost:9002",
     )
     // Image source picker defaults to "Plot images (post-split)".
     await expect(page.getByTestId("inference-source")).toContainText(

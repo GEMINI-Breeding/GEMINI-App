@@ -465,6 +465,66 @@ describe("executeStep", () => {
       expect(params).not.toHaveProperty("image_path")
     })
 
+    it("forwards boundaries, count label and a local server URL in batch mode", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-3" })
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: { plot: 1, row: 1, col: 1 },
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [0, 0],
+                  [1, 0],
+                  [1, 1],
+                  [0, 0],
+                ],
+              ],
+            },
+          },
+        ],
+      }
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagesPrefix: "Processed/x/PlotImages/",
+          boundaries: fc,
+          countLabel: "Stand",
+          apiUrl: "http://localhost:9002",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.boundaries.features).toHaveLength(1)
+      expect(params.count_label).toBe("Stand")
+      expect(params.api_url).toBe("http://localhost:9002")
+    })
+
+    it("omits api_url for cloud and boundaries for single-image runs", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-4" })
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagePath: "a.png",
+          // Boundaries only mean something for a per-plot batch.
+          boundaries: { type: "FeatureCollection", features: [] },
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params).not.toHaveProperty("api_url")
+      expect(params).not.toHaveProperty("boundaries")
+    })
+
     it("rejects both sources at once", async () => {
       const run = seedRun()
       await expect(

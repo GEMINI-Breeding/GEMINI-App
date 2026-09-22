@@ -17,7 +17,7 @@
  */
 
 import L from "leaflet"
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 
 import {

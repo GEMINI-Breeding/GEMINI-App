@@ -705,7 +705,6 @@ function CsvUploadPanel({
   )
 }
 
-
 // ── Main picker ─────────────────────────────────────────────────────────────
 
 export function GcpPicker({
@@ -766,7 +765,9 @@ export function GcpPicker({
   const scopeListNames = scopeListingQuery.data ?? []
   const csvOnDisk = scopeListNames.includes(csvObjectName)
   const groupsOnDisk = scopeListNames.includes(groupsObjectName)
-  const filterOnDisk = scopeListNames.includes(`${scopePrefix}${IMAGE_FILTER_FILENAME}`)
+  const filterOnDisk = scopeListNames.includes(
+    `${scopePrefix}${IMAGE_FILTER_FILENAME}`,
+  )
 
   // ── Excluded images (image_review step) ───────────────────────────────────
   // The optional Image Exclusion step writes `image_filter.txt` at
@@ -775,7 +776,8 @@ export function GcpPicker({
   const filterObjectName = `${scopePrefix}${IMAGE_FILTER_FILENAME}`
   const filterQuery = useQuery<Set<string>, Error>({
     queryKey: ["gcp-image-filter", filterObjectName],
-    queryFn: async () => parseImageFilter(await fetchObjectAsText(filterObjectName)),
+    queryFn: async () =>
+      parseImageFilter(await fetchObjectAsText(filterObjectName)),
     enabled: Boolean(activeShortId) && filterOnDisk,
   })
   const excludedNames = filterQuery.data ?? new Set<string>()
@@ -1300,7 +1302,9 @@ export function GcpPicker({
         showErrorToast(
           `Excluded ${culledGcps.length} GCP(s) more than ${GCP_BBOX_CULL_BUFFER_M} m outside the image area: ${culledGcps
             .map((g) => g.label)
-            .join(", ")}. Fix their Lat/Lon in the catalog and re-save to include them.`,
+            .join(
+              ", ",
+            )}. Fix their Lat/Lon in the catalog and re-save to include them.`,
         )
       }
       // Always persist groups sidecar — Map-discovery may have already
@@ -1401,7 +1405,13 @@ export function GcpPicker({
       setCoordsLonS("")
       setCoordsAltS("")
     }
-  }, [activeGcp?.label, activeGcp?.lat, activeGcp?.lon, activeGcp?.alt, isAddingNew])
+  }, [
+    activeGcp?.label,
+    activeGcp?.lat,
+    activeGcp?.lon,
+    activeGcp?.alt,
+    isAddingNew,
+  ])
 
   /** Smallest unused "GCP{n}" so a new entry has a sensible default label. */
   function nextNewGcpLabel(): string {
@@ -1458,12 +1468,9 @@ export function GcpPicker({
   // Save button enables only when the inputs are valid AND differ from
   // what's already on disk. Numeric (not string) comparison so trailing
   // zeros in the input don't read as a change.
-  const parsedInputLat =
-    coordsLatS.trim() === "" ? null : Number(coordsLatS)
-  const parsedInputLon =
-    coordsLonS.trim() === "" ? null : Number(coordsLonS)
-  const parsedInputAlt =
-    coordsAltS.trim() === "" ? 0 : Number(coordsAltS)
+  const parsedInputLat = coordsLatS.trim() === "" ? null : Number(coordsLatS)
+  const parsedInputLon = coordsLonS.trim() === "" ? null : Number(coordsLonS)
+  const parsedInputAlt = coordsAltS.trim() === "" ? 0 : Number(coordsAltS)
   const inputsValid =
     parsedInputLat != null &&
     Number.isFinite(parsedInputLat) &&
@@ -1926,9 +1933,7 @@ export function GcpPicker({
                 <span>
                   GPS:{" "}
                   <span
-                    className={
-                      filteredGpsCount > 0 ? "" : "text-destructive"
-                    }
+                    className={filteredGpsCount > 0 ? "" : "text-destructive"}
                   >
                     {filteredGpsCount}/{imageNames.length} images
                   </span>

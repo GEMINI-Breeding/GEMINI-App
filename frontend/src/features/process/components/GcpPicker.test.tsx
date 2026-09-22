@@ -502,16 +502,14 @@ describe("validateGcpEntry", () => {
 
 describe("imageBboxFromGpsMap", () => {
   it("returns null when no images have GPS", () => {
-    expect(
-      imageBboxFromGpsMap({ "a.jpg": null, "b.jpg": null }),
-    ).toBeNull()
+    expect(imageBboxFromGpsMap({ "a.jpg": null, "b.jpg": null })).toBeNull()
     expect(imageBboxFromGpsMap({})).toBeNull()
   })
 
   it("computes the lat/lon extents across non-null entries", () => {
     expect(
       imageBboxFromGpsMap({
-        "a.jpg": { lat: 38.50, lon: -121.78, alt: 0 },
+        "a.jpg": { lat: 38.5, lon: -121.78, alt: 0 },
         "b.jpg": { lat: 38.55, lon: -121.74, alt: 0 },
         "c.jpg": null,
         "d.jpg": { lat: 38.52, lon: -121.76, alt: 0 },
@@ -532,9 +530,7 @@ describe("cullDistantGcps", () => {
   }
 
   it("keeps every GCP when no images have GPS", () => {
-    const cat: GcpCatalogEntry[] = [
-      { label: "G1", lat: 0, lon: 0, alt: 0 },
-    ]
+    const cat: GcpCatalogEntry[] = [{ label: "G1", lat: 0, lon: 0, alt: 0 }]
     expect(cullDistantGcps(cat, {})).toEqual({ kept: cat, culled: [] })
   })
 

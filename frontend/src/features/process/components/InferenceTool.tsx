@@ -25,6 +25,7 @@ import {
   FilesService,
   type JobOutput,
   JobsService,
+  PlotGeometryService,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -43,9 +44,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  type BatchInferenceResult,
+  isBatchInferenceResult,
+  summaryCsv,
+  summaryRows,
+} from "@/features/process/lib/inferenceSummary"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
   plotImagesPrefix,
+  processedPrefix,
   rawImagesPrefix,
   rawScopePrefix,
 } from "@/features/process/lib/paths"
@@ -55,6 +63,104 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"
+
+/** Per-plot counts from a batch run, with a CSV download. */
+function BatchInferenceSummary({
+  result,
+  fileStem,
+}: {
+  result: BatchInferenceResult
+  fileStem: string
+}) {
+  const rows = summaryRows(result)
+  const failed = rows.filter((r) => r.error).length
+  const ingested = Object.values(result.ingested ?? {})[0]
+  const download = () => {
+    const url = URL.createObjectURL(
+      new Blob([summaryCsv(result)], { type: "text/csv" }),
+    )
+    try {
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${fileStem}.csv`
+      a.click()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+  return (
+    <Card data-testid="inference-batch-summary">
+      <CardHeader>
+        <CardTitle className="text-base">Per-plot results</CardTitle>
+        <CardDescription>
+          {result.plots_processed ?? 0} of {result.images_found ?? rows.length}{" "}
+          images inferred · {result.total_detections ?? 0} detections
+          {failed > 0 ? ` · ${failed} failed` : ""}
+          {typeof ingested === "number"
+            ? ` · counts saved as traits for ${ingested} plots`
+            : ""}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={download}
+          data-testid="inference-batch-csv"
+        >
+          Download CSV
+        </Button>
+        <div className="max-h-64 overflow-auto rounded border text-xs">
+          <table className="w-full">
+            <thead className="bg-muted sticky top-0">
+              <tr>
+                <th className="px-2 py-1 text-left">Plot</th>
+                <th className="px-2 py-1 text-right">Detections</th>
+                <th className="px-2 py-1 text-left">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.plot} className="border-t">
+                  <td className="px-2 py-1">{r.plot}</td>
+                  <td className="px-2 py-1 text-right font-mono">
+                    {r.count ?? "—"}
+                  </td>
+                  <td className="px-2 py-1 text-red-700">{r.error ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Plot polygons of the active plot-geometry version at `directory`, or
+ * undefined when there is none. Absence isn't an error: inference still
+ * runs, it just can't attribute counts to plots.
+ */
+async function loadActiveBoundaries(
+  directory: string,
+): Promise<GeoJSON.FeatureCollection | undefined> {
+  const versions =
+    ((await PlotGeometryService.apiPlotGeometryVersionsListListVersions({
+      requestBody: { directory },
+    })) ?? []) as Array<{ version: number; is_active?: boolean }>
+  const active =
+    versions.find((v) => v.is_active)?.version ?? versions[0]?.version
+  if (active == null) return undefined
+  const loaded =
+    (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+      requestBody: { directory, version: active },
+    })) as unknown as {
+      state_snapshot?: { boundaries?: GeoJSON.FeatureCollection }
+    }
+  const fc = loaded?.state_snapshot?.boundaries
+  return fc?.features?.length ? fc : undefined
+}
 
 interface RoboflowModel {
   label: string
@@ -143,6 +249,12 @@ export function InferenceTool({
   const { showErrorToast, showSuccessToast } = useCustomToast()
 
   // Roboflow models from the pipeline config (R3 wizard step 3).
+  const localServerUrl =
+    pipeline.params.inference_mode === "local"
+      ? (
+          (pipeline.params.local_server_url as string | undefined) ?? ""
+        ).trim() || undefined
+      : undefined
   const models = useMemo<RoboflowModel[]>(() => {
     const arr = (pipeline.params.roboflow_models as RoboflowModel[]) ?? []
     return arr.filter((m) => m.roboflow_model_id?.trim())
@@ -222,6 +334,14 @@ export function InferenceTool({
       const stem =
         mode === "all" ? "all-plots" : activeImageName.replace(/\.[^.]+$/, "")
       const outputPath = `${plotImagesPrefix(scope)}inference/${stem}-${activeModelIdx}-${Date.now()}.json`
+      // Batch over plot images: send the active boundary version so the
+      // worker can write per-plot counts to trait_records. Those are the
+      // polygons the split used, so plot numbers line up with the PNGs.
+      // Raw drone frames have no plot identity, so nothing is ingested.
+      let boundaries: GeoJSON.FeatureCollection | undefined
+      if (mode === "all" && sourceIdx === 0) {
+        boundaries = await loadActiveBoundaries(processedPrefix(scope))
+      }
       const result = await executeStep({
         runId: run.id,
         stepKey: "inference",
@@ -229,6 +349,11 @@ export function InferenceTool({
         experimentId,
         inference: {
           ...(mode === "all" ? { imagesPrefix: activePrefix } : { imagePath }),
+          ...(boundaries ? { boundaries } : {}),
+          countLabel: activeModel.label || activeModel.roboflow_model_id,
+          // The pipeline form has always collected these; until now nothing
+          // read them, so choosing "local" silently still used the cloud.
+          ...(localServerUrl ? { apiUrl: localServerUrl } : {}),
           apiKey: activeModel.roboflow_api_key,
           modelId: activeModel.roboflow_model_id,
           outputPredictionsPath: outputPath,
@@ -426,6 +551,14 @@ export function InferenceTool({
           <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
             {activePrefix}
           </code>
+          <p
+            className="text-muted-foreground text-xs"
+            data-testid="inference-endpoint"
+          >
+            {localServerUrl
+              ? `Using the local inference server at ${localServerUrl}.`
+              : "Using Roboflow cloud inference."}
+          </p>
           {mode === "all" && (
             <p
               className="text-muted-foreground text-xs"
@@ -433,6 +566,9 @@ export function InferenceTool({
             >
               {images.length} image{images.length === 1 ? "" : "s"} will be
               inferred in a single job, with detections counted per plot.
+              {sourceIdx === 0
+                ? " Counts are saved as traits for this plot layout, so they appear in Analyze."
+                : " Raw frames have no plot identity, so counts aren't saved as traits."}
             </p>
           )}
         </CardContent>
@@ -526,6 +662,27 @@ export function InferenceTool({
           </div>
         </CardContent>
       </Card>
+
+      {jobQuery.data?.status === "FAILED" && (
+        <p
+          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800 text-sm"
+          data-testid="inference-job-failed"
+        >
+          Inference failed:{" "}
+          {String(
+            (jobQuery.data as { error_message?: string | null })
+              .error_message ?? "unknown error",
+          )}
+        </p>
+      )}
+
+      {jobQuery.data?.status === "COMPLETED" &&
+        isBatchInferenceResult(jobQuery.data.result) && (
+          <BatchInferenceSummary
+            result={jobQuery.data.result}
+            fileStem={`inference-${submittedJobId?.slice(0, 8) ?? "run"}`}
+          />
+        )}
 
       {predictions && (
         <Card>

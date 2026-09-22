@@ -65,6 +65,21 @@ export interface InferenceParams {
    * hundreds of jobs for one field, each paying container + model startup.
    */
   imagesPrefix?: string
+  /**
+   * Batch mode only: the plot boundaries the images were split with. When
+   * set, the worker writes per-plot detection counts to `trait_records` so
+   * they appear in Analyze. Boundaries supply the row/col each record needs
+   * to resolve to a plot; the PNG filename only carries the plot number.
+   */
+  boundaries?: GeoJSON.FeatureCollection
+  /** Names the count traits, e.g. "plant count (Stand counter)". */
+  countLabel?: string
+  /**
+   * Self-hosted Roboflow inference server. Omit for Roboflow cloud. The
+   * worker rewrites localhost to reach the user's machine from inside its
+   * container, so the form's `http://localhost:9002` default works as typed.
+   */
+  apiUrl?: string
   /** Roboflow API key. */
   apiKey: string
   /** "workspace/model/version" or "workspace/model". */
@@ -395,6 +410,11 @@ export async function executeStep(
         // on which key it receives.
         ...(i.imagePath ? { image_path: i.imagePath } : {}),
         ...(i.imagesPrefix ? { images_prefix: i.imagesPrefix } : {}),
+        ...(i.imagesPrefix && i.boundaries?.features?.length
+          ? { boundaries: i.boundaries }
+          : {}),
+        ...(i.countLabel ? { count_label: i.countLabel } : {}),
+        ...(i.apiUrl ? { api_url: i.apiUrl } : {}),
         api_key: i.apiKey,
         model_id: i.modelId,
         output_predictions_path: i.outputPredictionsPath,

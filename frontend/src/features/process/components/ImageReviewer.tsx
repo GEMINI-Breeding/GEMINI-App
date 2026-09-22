@@ -102,7 +102,8 @@ export function ImageReviewer({
     scopeListingQuery.data?.includes(filterObjectName) ?? false
   const filterQuery = useQuery<Set<string>, Error>({
     queryKey: ["image-filter", filterObjectName],
-    queryFn: async () => parseImageFilter(await fetchObjectAsText(filterObjectName)),
+    queryFn: async () =>
+      parseImageFilter(await fetchObjectAsText(filterObjectName)),
     enabled: Boolean(activeShortId) && filterOnDisk,
   })
 
