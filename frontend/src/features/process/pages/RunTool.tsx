@@ -8,7 +8,6 @@ import { ArrowLeft } from "lucide-react"
 import { useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
-import { EdgeCropTool } from "@/features/process/components/EdgeCropTool"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
 import { ImageReviewer } from "@/features/process/components/ImageReviewer"
 import { InferenceTool } from "@/features/process/components/InferenceTool"
@@ -30,7 +29,6 @@ const STEP_LABELS: Record<string, string> = {
   gcp_selection: "GCP Selection",
   image_review: "Image Exclusion",
   plot_boundary_prep: "Plot Boundary Prep",
-  edge_crop: "Edge Crop",
   inference: "Inference",
 }
 
@@ -43,8 +41,6 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
     "Open a satellite map of the raw images and exclude any you don't want fed to ODM.",
   plot_boundary_prep:
     "Draw the outer field boundary, configure plot grid dimensions, and save as a versioned plot-boundary record.",
-  edge_crop:
-    "Configure the per-side pixel margin AgRowStitch trims from each input image before matching features.",
   inference:
     "Run Roboflow detection or segmentation on plot images and view results.",
 }
@@ -171,13 +167,6 @@ export function RunTool() {
         ) : step === "inference" && workspace && pipeline ? (
           <InferenceTool
             pipeline={pipeline}
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : step === "edge_crop" ? (
-          <EdgeCropTool
             run={run}
             scope={scope}
             onSaved={goBack}

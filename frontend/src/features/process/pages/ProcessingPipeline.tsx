@@ -8,9 +8,9 @@
  * Other adjustments vs. main:
  *   - `UtilsService.capabilities()` (gone with the FastAPI backend) →
  *     `navigator.hardwareConcurrency` for the CPU-count hint.
- *   - The visual EdgeCrop tool button is hidden until Phase R6 restores
- *     EdgeCropTool. The four mask_left/right/top/bottom inputs still work
- *     (they're independent number fields).
+ *   - Edge crop is main's crop-rule list (PR #152) with the visual
+ *     EdgeCropTool; pipelines saved with the older flat mask_* fields are
+ *     migrated to a single catch-all rule on load, as main does.
  */
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import {
@@ -19,7 +19,7 @@ import {
   Check,
   ChevronRight,
   Info,
-  Map,
+  Map as MapIcon,
   Plus,
   Settings,
   X,
@@ -50,9 +50,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
+  type CropRule,
+  CropRuleList,
+  newCropRule,
+} from "@/features/process/components/CropRuleList"
+import { EdgeCropTool } from "@/features/process/components/EdgeCropTool"
+import {
   createPipeline,
   updatePipeline,
   usePipeline,
+  useRuns,
 } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -97,10 +104,7 @@ type GroundPlatform = "amiga" | "monopod" | "custom"
 interface AgrowstitchParams {
   forward_limit: number
   max_reprojection_error: number
-  mask_left: number
-  mask_right: number
-  mask_top: number
-  mask_bottom: number
+  crop_rules: CropRule[]
   batch_size: number
   min_inliers: number
 }
@@ -112,20 +116,14 @@ const PLATFORM_PRESETS: Record<
   amiga: {
     forward_limit: 4,
     max_reprojection_error: 1.0,
-    mask_left: 0,
-    mask_right: 0,
-    mask_top: 0,
-    mask_bottom: 0,
+    crop_rules: [],
     batch_size: 10,
     min_inliers: 20,
   },
   monopod: {
     forward_limit: 8,
     max_reprojection_error: 3.0,
-    mask_left: 0,
-    mask_right: 0,
-    mask_top: 0,
-    mask_bottom: 0,
+    crop_rules: [],
     batch_size: 10,
     min_inliers: 20,
   },
@@ -134,12 +132,35 @@ const PLATFORM_PRESETS: Record<
 const DEFAULT_AGROWSTITCH_PARAMS: AgrowstitchParams = {
   forward_limit: 8,
   max_reprojection_error: 1.0,
-  mask_left: 0,
-  mask_right: 0,
-  mask_top: 0,
-  mask_bottom: 0,
+  crop_rules: [],
   batch_size: 10,
   min_inliers: 20,
+}
+
+/**
+ * Crop rules from saved settings. Pipelines saved before crop rules had
+ * flat mask_left/right/top/bottom — those become one catch-all rule, as
+ * main migrates them; with neither there is one empty catch-all rule.
+ */
+export function migrateCropRules(
+  saved: Partial<AgrowstitchParams> & {
+    mask_left?: number
+    mask_right?: number
+    mask_top?: number
+    mask_bottom?: number
+  },
+): CropRule[] {
+  if (saved.crop_rules?.length) return saved.crop_rules
+  const rule = newCropRule()
+  return [
+    {
+      ...rule,
+      mask_left: saved.mask_left ?? 0,
+      mask_right: saved.mask_right ?? 0,
+      mask_top: saved.mask_top ?? 0,
+      mask_bottom: saved.mask_bottom ?? 0,
+    },
+  ]
 }
 
 const PARAM_RECS: Record<
@@ -208,7 +229,13 @@ export function ProcessingPipeline() {
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set())
 
   const [pipelineName, setPipelineName] = useState("")
-  const [groundConfig, setGroundConfig] = useState(GROUND_DEFAULT_CONFIG)
+  const [groundConfig, setGroundConfig] = useState(() => ({
+    ...GROUND_DEFAULT_CONFIG,
+    agrowstitch_params: {
+      ...DEFAULT_AGROWSTITCH_PARAMS,
+      crop_rules: [newCropRule()],
+    },
+  }))
   const [aerialConfig, setAerialConfig] = useState(AERIAL_DEFAULT_CONFIG)
   const [roboflowModels, setRoboflowModels] = useState<RoboflowModel[]>([
     EMPTY_MODEL(),
@@ -223,6 +250,12 @@ export function ProcessingPipeline() {
     typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 0 : 0
 
   const existingPipeline = usePipeline(editingPipelineId ?? undefined)
+  const pipelineRuns = useRuns(editingPipelineId ?? undefined)
+  const [cropToolRuleId, setCropToolRuleId] = useState<string | null>(null)
+  const activeCropRule =
+    groundConfig.agrowstitch_params.crop_rules.find(
+      (r) => r.id === cropToolRuleId,
+    ) ?? null
 
   useEffect(() => {
     if (!existingPipeline) return
@@ -235,7 +268,11 @@ export function ProcessingPipeline() {
         device: (cfg.device as "cpu" | "gpu" | "multiprocessing") ?? "cpu",
         num_cpu: (cfg.num_cpu as number) ?? 0,
         platform: (cfg.platform as GroundPlatform) ?? "custom",
-        agrowstitch_params: { ...DEFAULT_AGROWSTITCH_PARAMS, ...savedParams },
+        agrowstitch_params: {
+          ...DEFAULT_AGROWSTITCH_PARAMS,
+          ...savedParams,
+          crop_rules: migrateCropRules(savedParams),
+        },
         custom_agrowstitch_options:
           (cfg.custom_agrowstitch_options as string) ?? "",
       })
@@ -293,7 +330,7 @@ export function ProcessingPipeline() {
       number: 1,
       title: "Pipeline Setup",
       description: "Name and configure the pipeline",
-      icon: Map,
+      icon: MapIcon,
     },
     {
       number: 2,
@@ -553,9 +590,16 @@ export function ProcessingPipeline() {
                             key={p}
                             type="button"
                             onClick={() => {
+                              // A preset sets the stitching knobs; the
+                              // crop rules are the user's and stay.
                               const preset =
                                 p !== "custom"
-                                  ? PLATFORM_PRESETS[p]
+                                  ? {
+                                      ...PLATFORM_PRESETS[p],
+                                      crop_rules:
+                                        groundConfig.agrowstitch_params
+                                          .crop_rules,
+                                    }
                                   : groundConfig.agrowstitch_params
                               setGroundConfig({
                                 ...groundConfig,
@@ -727,45 +771,26 @@ export function ProcessingPipeline() {
                     )}
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Label>
-                        Edge Crop (pixels)
-                        <InfoTooltip text="Removes a fixed number of pixels from each image edge before stitching — useful for camera mounts, lens rigs, or static obstructions. Default is 0 for all platforms — only change if your camera has a fixed obstruction." />
-                      </Label>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 mt-1">
-                      {(
-                        [
-                          "mask_left",
-                          "mask_right",
-                          "mask_top",
-                          "mask_bottom",
-                        ] as const
-                      ).map((side) => (
-                        <div key={side} className="space-y-1">
-                          <p className="text-[11px] text-muted-foreground capitalize">
-                            {side.replace("mask_", "")}
-                          </p>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={groundConfig.agrowstitch_params[side]}
-                            onChange={(e) => {
-                              const v = parseInt(e.target.value, 10)
-                              setGroundConfig({
-                                ...groundConfig,
-                                platform: "custom",
-                                agrowstitch_params: {
-                                  ...groundConfig.agrowstitch_params,
-                                  [side]: Number.isNaN(v) ? 0 : Math.max(0, v),
-                                },
-                              })
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                  <div className="space-y-1.5" data-testid="crop-rules">
+                    <Label>
+                      Edge Crop (pixels)
+                      <InfoTooltip text="Removes pixels from each image edge before stitching. Add rules to crop differently by the rover's direction of travel — e.g. a shadow on a different side going up vs. down a row. A rule naming a direction wins over the one that names none." />
+                    </Label>
+                    <CropRuleList
+                      rules={groundConfig.agrowstitch_params.crop_rules}
+                      onChange={(rules) =>
+                        setGroundConfig({
+                          ...groundConfig,
+                          platform: "custom",
+                          agrowstitch_params: {
+                            ...groundConfig.agrowstitch_params,
+                            crop_rules: rules,
+                          },
+                        })
+                      }
+                      onEdit={setCropToolRuleId}
+                      hasMsgsData={pipelineRuns.length > 0}
+                    />
                   </div>
 
                   <details className="group">
@@ -1142,6 +1167,28 @@ export function ProcessingPipeline() {
           </Button>
         </div>
       </div>
+      {activeCropRule && (
+        <EdgeCropTool
+          runs={pipelineRuns}
+          initialMask={activeCropRule}
+          filterMode={activeCropRule.filterMode ?? "heading"}
+          directions={activeCropRule.directions}
+          headings={activeCropRule.headings ?? []}
+          onApply={(mask) =>
+            setGroundConfig({
+              ...groundConfig,
+              platform: "custom",
+              agrowstitch_params: {
+                ...groundConfig.agrowstitch_params,
+                crop_rules: groundConfig.agrowstitch_params.crop_rules.map(
+                  (r) => (r.id === activeCropRule.id ? { ...r, ...mask } : r),
+                ),
+              },
+            })
+          }
+          onClose={() => setCropToolRuleId(null)}
+        />
+      )}
     </div>
   )
 }

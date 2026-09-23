@@ -5,7 +5,8 @@
  *   fixtures/scripts/generate-amiga-track-fixture.py) → extraction →
  *   workspace + ground pipeline (Amiga preset) + run → Data Sync →
  *   Plot Marking: step through the frames, mark two plots, set their
- *   stitching direction, save → Stitching: RUN_STITCH runs AgRowStitch per
+ *   stitching direction, save → pipeline settings: set crop rules (drag in
+ *   the visual crop tool; a south-heading rule) → Stitching: RUN_STITCH runs AgRowStitch per
  *   plot and georeferences each → the stitched plot mosaics show on the
  *   run page → Plot Boundary Prep draws over the combined ground mosaic →
  *   reopening Plot Marking shows the saved markings.
@@ -76,11 +77,16 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     await page.getByRole("button", { name: /create ground pipeline/i }).click()
     await page.getByLabel(/pipeline name/i).fill(pipelineName)
     await page.getByRole("button", { name: /^next$/i }).click()
-    await page.getByRole("button", { name: /Amiga.*Farm-ng ground robot/ }).click()
+    await page
+      .getByRole("button", { name: /Amiga.*Farm-ng ground robot/ })
+      .click()
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
-    await page.getByRole("button", { name: /new run/i }).first().click()
+    await page
+      .getByRole("button", { name: /new run/i })
+      .first()
+      .click()
     const uploadRow = page
       .getByTestId("upload-row")
       .filter({ hasText: experiment })
@@ -110,7 +116,9 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     const frameImg = page.getByTestId("pm-frame")
     await expect(frameImg).toBeVisible({ timeout: 30_000 })
     await expect
-      .poll(() => frameImg.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+      .poll(() =>
+        frameImg.evaluate((el) => (el as HTMLImageElement).naturalWidth),
+      )
       .toBeGreaterThan(0)
     // The rover heads south on this pass (msgs_synced direction column).
     await expect(marker).toContainText("Heading South")
@@ -162,7 +170,10 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     await page.getByTestId("pm-gps-toggle").click()
     await expect(page.getByTestId("pm-gps-map")).toBeVisible()
     await expect(
-      page.getByTestId("pm-gps-map").locator("path.leaflet-interactive").first(),
+      page
+        .getByTestId("pm-gps-map")
+        .locator("path.leaflet-interactive")
+        .first(),
     ).toBeAttached()
 
     await page.getByTestId("pm-save").click()
@@ -170,6 +181,66 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     await page.getByRole("button", { name: /^back$/i }).click()
     await expect(page).toHaveURL(runUrl)
     await expect(markingRow).toHaveAttribute("data-status", "completed")
+
+    // ── Crop rules in the pipeline settings ──────────────────────────────
+    // The catch-all rule's left crop is set by dragging in the visual tool;
+    // a second rule for southbound travel crops the top. The rover heads
+    // south, so both plots must be stitched with the south rule.
+    await page.getByRole("link", { name: "Process" }).click()
+    await page.getByText(workspaceName, { exact: true }).click()
+    await page.getByRole("button", { name: /^settings$/i }).click()
+    await page.getByRole("button", { name: /^next$/i }).click()
+    const rules = page.getByTestId("crop-rules")
+    await expect(rules.getByTestId("crop-rule-0")).toBeVisible()
+
+    await rules
+      .getByTestId("crop-rule-0")
+      .getByRole("button", { name: "Open visual crop tool" })
+      .click()
+    const cropTool = page.getByTestId("edge-crop-tool")
+    const cropFrame = cropTool.getByTestId("edge-crop-frame")
+    await expect(cropFrame).toBeVisible({ timeout: 30_000 })
+    await expect
+      .poll(() =>
+        cropFrame.evaluate((el) => (el as HTMLImageElement).naturalWidth),
+      )
+      .toBeGreaterThan(0)
+    await expect(cropTool.getByTestId("edge-crop-count")).toHaveText("1 / 30")
+    const handle = cropTool.getByTestId("edge-crop-handle-left")
+    const box = await handle.boundingBox()
+    if (!box) throw new Error("no crop handle")
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 60, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
+    const leftText =
+      (await cropTool.getByTestId("edge-crop-left").textContent()) ?? ""
+    const leftPx = Number.parseInt(leftText, 10)
+    expect(leftPx).toBeGreaterThan(50)
+    await cropTool.getByTestId("edge-crop-apply").click()
+    await expect(cropTool).toHaveCount(0)
+    await expect(
+      rules.getByTestId("crop-rule-0").getByLabel("left crop (px)"),
+    ).toHaveValue(String(leftPx))
+
+    await rules.getByRole("button", { name: "Add rule" }).click()
+    const southRule = rules.getByTestId("crop-rule-1")
+    await southRule.getByTitle("Add S").click()
+    await expect(southRule.getByTitle("S — click to remove")).toBeVisible()
+    await southRule.getByLabel("top crop (px)").fill("40")
+    // The tool shows only frames taken heading south, with its badge.
+    await southRule
+      .getByRole("button", { name: "Open visual crop tool" })
+      .click()
+    await expect(cropTool).toContainText("S only")
+    await expect(cropTool.getByTestId("edge-crop-frame")).toBeVisible({
+      timeout: 30_000,
+    })
+    await cropTool.getByRole("button", { name: /cancel/i }).click()
+
+    await page.getByRole("button", { name: /^next$/i }).click()
+    await page.getByRole("button", { name: /save changes/i }).click()
+    await page.goto(runUrl)
 
     // ── Stitching ────────────────────────────────────────────────────────
     const stitchRow = page.getByTestId("step-row-stitching")
@@ -227,16 +298,27 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
       ]),
     )
     const manifestRes = await request.get(
-      new URL(`/api/files/download/gemini/${prefix}stitch_manifest.json`, baseURL).toString(),
+      new URL(
+        `/api/files/download/gemini/${prefix}stitch_manifest.json`,
+        baseURL,
+      ).toString(),
       { headers },
     )
     const manifest = (await manifestRes.json()) as {
       succeeded_plots: string[]
-      plots: Record<string, { frames: number; footprint: [number, number][] }>
+      plots: Record<
+        string,
+        { frames: number; mask: number[]; footprint: [number, number][] }
+      >
+      config: { mask: number[] }
     }
     expect(manifest.succeeded_plots).toEqual(["1", "2"])
+    // The catch-all rule is the pipeline-wide default…
+    expect(manifest.config.mask).toEqual([leftPx, 0, 0, 0])
     for (const id of ["1", "2"]) {
       expect(manifest.plots[id].frames).toBe(5)
+      // …but the south rule names these southbound plots, so it wins.
+      expect(manifest.plots[id].mask).toEqual([0, 0, 40, 0])
       for (const [lon, lat] of manifest.plots[id].footprint) {
         expect(lat).toBeCloseTo(38.5366, 3)
         expect(lon).toBeCloseTo(-121.7765, 3)

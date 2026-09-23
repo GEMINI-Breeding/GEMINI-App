@@ -156,7 +156,7 @@ export function CropRuleList({
 
       {/* Rules */}
       <div className="space-y-1.5">
-        {rules.map((rule) => {
+        {rules.map((rule, ruleIndex) => {
           const activeDirections = rule.directions
           const activeHeadings = rule.headings ?? []
           const hasFilter =
@@ -167,6 +167,7 @@ export function CropRuleList({
           return (
             <div
               key={rule.id}
+              data-testid={`crop-rule-${ruleIndex}`}
               className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-2"
             >
               {/* Direction / heading chips */}
@@ -251,11 +252,12 @@ export function CropRuleList({
                     type="number"
                     min={0}
                     value={rule[side]}
+                    aria-label={`${side.replace("mask_", "")} crop (px)`}
                     className="h-7 text-xs text-center px-1"
                     onChange={(e) => {
                       const v = parseInt(e.target.value, 10)
                       updateRule(rule.id, {
-                        [side]: isNaN(v) ? 0 : Math.max(0, v),
+                        [side]: Number.isNaN(v) ? 0 : Math.max(0, v),
                       })
                     }}
                   />
@@ -266,6 +268,7 @@ export function CropRuleList({
               <button
                 type="button"
                 title="Open visual crop tool"
+                aria-label="Open visual crop tool"
                 onClick={() => onEdit(rule.id)}
                 className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
               >

@@ -34,7 +34,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { type FileMetadata, FilesService, PlotGeometryService } from "@/client"
+import { PlotGeometryService } from "@/client"
 import { authHeaders } from "@/components/Common/PlotImage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -57,13 +57,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { apiUrl, DEFAULT_BUCKET } from "@/features/files/lib/download"
+import { useGroundTrack } from "@/features/process/hooks/useGroundTrack"
 import {
-  findGroundTracks,
-  type GroundTrack,
   isComplete,
   type PlotMarkingSnapshot,
   type PlotSelection,
-  parseTrack,
   plotMarkingsDirectory,
   type TrackPoint,
   translateMarkings,
@@ -268,54 +266,15 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   const queryClient = useQueryClient()
   const directory = scope ? plotMarkingsDirectory(scope) : ""
 
-  // The run's frames: every top-camera folder at its raw scope, narrowed to
-  // the datasets the run was created from.
-  const listing = useQuery<FileMetadata[]>({
-    queryKey: ["files", "list", scope ? rawScopePrefix(scope) : null],
-    queryFn: async () =>
-      ((await FilesService.apiFilesListFilePathListFiles({
-        filePath: `${DEFAULT_BUCKET}/${rawScopePrefix(scope as AerialScope)}`,
-      })) as FileMetadata[] | null) ?? [],
-    enabled: isLoggedIn() && Boolean(scope),
-  })
-  const tracks = useMemo<GroundTrack[]>(() => {
-    if (!scope) return []
-    const all = findGroundTracks(listing.data ?? [], rawScopePrefix(scope))
-    const wanted = run.uploadScope?.datasetShortIds ?? []
-    const mine = all.filter((t) => wanted.includes(t.dataset))
-    return mine.length ? mine : all
-  }, [listing.data, scope, run.uploadScope?.datasetShortIds])
-  const [trackKey, setTrackKey] = useState<string | null>(null)
-  const track =
-    tracks.find((t) => t.imagesPrefix === trackKey) ?? tracks[0] ?? null
-
-  const trackCsv = useQuery<TrackPoint[]>({
-    queryKey: ["ground-track", track?.msgsSyncedPath],
-    queryFn: async () => {
-      const res = await fetch(
-        apiUrl(
-          `/api/files/download/${DEFAULT_BUCKET}/${track?.msgsSyncedPath}`,
-        ),
-        { headers: authHeaders() },
-      )
-      if (!res.ok) throw new Error(`msgs_synced.csv: HTTP ${res.status}`)
-      return parseTrack(await res.text())
-    },
-    enabled: Boolean(track?.msgsSyncedPath),
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-  const points = trackCsv.data ?? []
-
-  // Frames in capture order: msgs_synced's order when it names them.
-  const images = useMemo(() => {
-    if (!track) return []
-    const present = new Set(track.images)
-    const ordered = points.map((p) => p.image).filter((n) => present.has(n))
-    const seen = new Set(ordered)
-    return ordered.length
-      ? [...ordered, ...track.images.filter((n) => !seen.has(n))]
-      : track.images
-  }, [track, points])
+  const {
+    tracks,
+    track,
+    setTrackKey,
+    points,
+    images,
+    isReady: trackReady,
+    isLoading: framesLoading,
+  } = useGroundTrack(scope, run.uploadScope?.datasetShortIds)
   const imageSet = useMemo(() => new Set(images), [images])
   const directionByImage = useMemo(
     () => new Map(points.map((p) => [p.image, p.direction])),
@@ -368,15 +327,14 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   // Start from the active version once the track (for GPS remapping) is in.
   useEffect(() => {
     if (loadedRef.current || !versions.isSuccess || images.length === 0) return
-    if (track?.msgsSyncedPath && !trackCsv.isFetched) return
+    if (!trackReady) return
     loadedRef.current = true
     if ((versions.data ?? []).length > 0) void loadVersion(undefined)
   }, [
     versions.isSuccess,
     versions.data,
     images.length,
-    track,
-    trackCsv.isFetched,
+    trackReady,
     loadVersion,
   ])
 
@@ -558,7 +516,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
         This run has no upload scope.
       </p>
     )
-  if (listing.isLoading)
+  if (framesLoading)
     return (
       <div className="text-muted-foreground flex h-64 items-center justify-center gap-2 text-sm">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading frames…
