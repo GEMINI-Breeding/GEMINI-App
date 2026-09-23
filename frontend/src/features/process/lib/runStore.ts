@@ -381,6 +381,8 @@ async function pull(): Promise<void> {
   }
 }
 
+const onFocus = () => void pull()
+
 /**
  * Start server sync (idempotent). Call once the user is signed in. On a
  * browser that used the old localStorage-only store, its contents are
@@ -415,7 +417,7 @@ export async function hydrateRunStore(): Promise<void> {
     pollTimer = setInterval(() => {
       if (document.visibilityState === "visible") void pull()
     }, POLL_MS)
-    window.addEventListener("focus", () => void pull())
+    window.addEventListener("focus", onFocus)
   }
 }
 
@@ -702,5 +704,15 @@ export function useRun(id: Id | undefined): Run | undefined {
 export function __resetRunStoreForTests(): void {
   current = { workspaces: [], pipelines: [], runs: [] }
   outbox = new Map()
+  seq = 0
+  syncEnabled = false
+  flushing = false
+  ready = false
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+  if (typeof window !== "undefined")
+    window.removeEventListener("focus", onFocus)
   emit()
 }
