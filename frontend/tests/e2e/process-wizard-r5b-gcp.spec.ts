@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url"
 import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
+import { runDataSync } from "../helpers/processHelpers"
 import {
   DEFAULT_E2E_SEASON,
   dropFiles,
@@ -185,12 +186,7 @@ async function createWorkspaceAndOpenRun(
     page.getByText(new RegExp(`${DRONE_IMAGES.length} images? found`)),
   ).toBeVisible({ timeout: 30_000 })
 
-  const dataSyncRow = page.getByTestId("step-row-data_sync")
-  await expect(dataSyncRow).toHaveAttribute("data-status", "ready")
-  await dataSyncRow.getByRole("button", { name: /run step/i }).click()
-  await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-    timeout: 10_000,
-  })
+  await runDataSync(page)
 
   return { experiment, location, population, date, platform, sensor }
 }
@@ -431,7 +427,8 @@ test.describe("R5b: GCP picker", () => {
       timeout: 15_000,
     })
 
-    // No GCP sidecars must exist for this run.
+    // No GCP sidecars must exist for this run. (geo.txt is Data Sync's
+    // now — it records every image's position whether or not GCPs exist.)
     const token = await getAuthToken(request, baseURL)
     const prefix = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/` // sidecars live at scope root post Option-A
     const listRes = await request.get(
@@ -443,7 +440,6 @@ test.describe("R5b: GCP picker", () => {
     for (const f of [
       "gcp_locations.csv",
       "gcp_list.txt",
-      "geo.txt",
       "gcp_image_groups.json",
     ]) {
       expect(

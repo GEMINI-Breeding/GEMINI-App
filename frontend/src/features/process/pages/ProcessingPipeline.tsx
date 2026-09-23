@@ -24,7 +24,7 @@ import {
   Settings,
   X,
 } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -257,8 +257,14 @@ export function ProcessingPipeline() {
       (r) => r.id === cropToolRuleId,
     ) ?? null
 
+  // Fill the form once per pipeline. The store is refreshed from the server
+  // every 15 s, which hands back a new pipeline object each time; re-filling
+  // on that wiped whatever the user was in the middle of editing.
+  const loadedPipelineRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!existingPipeline) return
+    if (!existingPipeline || loadedPipelineRef.current === existingPipeline.id)
+      return
+    loadedPipelineRef.current = existingPipeline.id
     const cfg = existingPipeline.params
     setPipelineName(existingPipeline.name)
     if (existingPipeline.type === "ground") {

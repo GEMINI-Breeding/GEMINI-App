@@ -25,6 +25,7 @@
 import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
+import { runDataSync } from "../helpers/processHelpers"
 import {
   dropFiles,
   fillUploadForm,
@@ -156,12 +157,7 @@ test.describe("R4a: aerial wizard happy path", () => {
     ).toBeVisible({ timeout: 30_000 })
 
     // ── 5. Run data_sync. Should flip to completed near-instantly. ───────
-    const dataSyncRow = page.getByTestId("step-row-data_sync")
-    await expect(dataSyncRow).toHaveAttribute("data-status", "ready")
-    await dataSyncRow.getByRole("button", { name: /run step/i }).click()
-    await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-      timeout: 5_000,
-    })
+    await runDataSync(page)
 
     // ── 6. Submit orthomosaic and wait through the wsManager terminal. ───
     const orthoRow = page.getByTestId("step-row-orthomosaic")

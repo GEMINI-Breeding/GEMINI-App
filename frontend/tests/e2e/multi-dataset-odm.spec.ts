@@ -14,6 +14,7 @@ import type { Page } from "@playwright/test"
 
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
+import { runDataSync } from "../helpers/processHelpers"
 import {
   dropFiles,
   fillUploadForm,
@@ -167,14 +168,7 @@ test.describe("Multi-dataset ODM (Option A)", () => {
 
     // Data Sync gates orthomosaic — flip it to completed (no-op
     // step that just confirms images exist at the scope).
-    const dataSyncRow = page.getByTestId("step-row-data_sync")
-    await expect(dataSyncRow).toHaveAttribute("data-status", "ready", {
-      timeout: 15_000,
-    })
-    await dataSyncRow.getByRole("button", { name: /run step/i }).click()
-    await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-      timeout: 10_000,
-    })
+    await runDataSync(page)
 
     // Trigger ODM. The submit fires immediately — we don't wait for
     // worker completion, just that the request body carries the

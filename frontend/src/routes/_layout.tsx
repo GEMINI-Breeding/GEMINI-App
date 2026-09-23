@@ -135,8 +135,10 @@ function Layout() {
             <Outlet />
           </main>
         ) : (
-          // All other pages: standard padded + centered layout
-          <main className="flex-1 p-6 md:p-8">
+          // All other pages: standard padded + centered layout. The extra
+          // bottom padding lets a page's last controls scroll clear of the
+          // fixed process panel / its pill in the bottom-right corner.
+          <main className="flex-1 p-6 pb-24 md:p-8 md:pb-24">
             <div className="mx-auto max-w-7xl">
               <Outlet />
             </div>

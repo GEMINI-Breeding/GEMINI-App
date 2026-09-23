@@ -224,6 +224,8 @@ const COLLECTIONS: Array<[Kind, keyof StoreState]> = [
 const KIND_ORDER: Record<Kind, number> = { workspace: 0, pipeline: 1, run: 2 }
 
 let seq = 0
+/** Bumped on every local write and every server ack; see pull(). */
+let writeGeneration = 0
 let outbox: Map<Id, Op> = readOutbox()
 let syncEnabled = false
 let flushing = false
@@ -252,6 +254,7 @@ function writeOutbox() {
 
 function enqueue(kind: Kind, id: Id, doc: Entity | null) {
   seq += 1
+  writeGeneration += 1
   outbox.set(id, { kind, id, doc, seq })
 }
 
@@ -319,6 +322,7 @@ async function flush(): Promise<void> {
       if (res.ok || res.status === 409 || res.status === 400) {
         // Only clear it if nothing newer was queued meanwhile.
         if (outbox.get(op.id)?.seq === op.seq) outbox.delete(op.id)
+        writeGeneration += 1
         writeOutbox()
       } else {
         scheduleRetry()
@@ -358,12 +362,18 @@ function overlayOutbox(server: StoreState): StoreState {
 }
 
 async function pull(): Promise<void> {
+  const generation = writeGeneration
   try {
     const res = await fetch(apiUrl("/api/process_state"), {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
     if (!res.ok) return
     const server = (await res.json()) as StoreState
+    // A local write queued or acknowledged while this was in flight means
+    // the snapshot may predate it — and once acknowledged the write is no
+    // longer in the outbox to lay on top. Drop it; the next poll is fresh.
+    // (Applying it reverted a just-saved step to its old status.)
+    if (writeGeneration !== generation) return
     current = overlayOutbox({
       workspaces: server.workspaces ?? [],
       pipelines: server.pipelines ?? [],
@@ -705,6 +715,7 @@ export function __resetRunStoreForTests(): void {
   current = { workspaces: [], pipelines: [], runs: [] }
   outbox = new Map()
   seq = 0
+  writeGeneration = 0
   syncEnabled = false
   flushing = false
   ready = false

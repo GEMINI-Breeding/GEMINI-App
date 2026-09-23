@@ -61,6 +61,11 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
+import {
+  type DataSyncChoice,
+  DataSyncDialog,
+} from "@/features/process/components/DataSyncDialog"
+import { DataSyncPanel } from "@/features/process/components/DataSyncPanel"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImageGrid } from "@/features/process/components/PlotImageGrid"
@@ -86,6 +91,7 @@ import {
 } from "@/features/process/hooks/usePlotGeometry"
 import { s3UrlForOrtho } from "@/features/process/lib/activeOrtho"
 import {
+  findGroundTracks,
   isComplete,
   nextStitchPrefix,
   type PlotMarkingSnapshot,
@@ -931,6 +937,8 @@ export function RunDetail() {
   // going through state would need an extra render before executeStep.
   const splitBoundariesRef = useRef<GeoJSON.FeatureCollection | null>(null)
   const boundaryVersionRef = useRef<number | null>(null)
+  const [dataSyncOpen, setDataSyncOpen] = useState(false)
+  const dataSyncChoiceRef = useRef<DataSyncChoice | null>(null)
   const { data: capabilities } = useCapabilities()
   const { data: dockerStatus } = useDockerStatus()
 
@@ -1079,9 +1087,10 @@ export function RunDetail() {
   )
 
   // Plot-geometry versions for the trait dialog's boundary picker.
-  const { data: boundaryVersions = [] } = usePlotGeometryVersions(
+  const boundaryVersionsQuery = usePlotGeometryVersions(
     scope ? processedPrefix(scope) : null,
   )
+  const boundaryVersions = boundaryVersionsQuery.data ?? []
 
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [traitDialogOpen, setTraitDialogOpen] = useState(false)
@@ -1398,6 +1407,33 @@ export function RunDetail() {
         showErrorToast("Pick a flight date, platform, and sensor first.")
         return
       }
+      // Data Sync asks how first (own metadata / another sensor); the
+      // dialog calls back into here with the choice.
+      let dataSync: Parameters<typeof executeStep>[0]["dataSync"] | undefined
+      if (stepKey === "data_sync" && scope) {
+        const choice = dataSyncChoiceRef.current
+        dataSyncChoiceRef.current = null
+        if (!choice) {
+          setDataSyncOpen(true)
+          return
+        }
+        const wanted = run.uploadScope?.datasetShortIds ?? []
+        const folders = findGroundTracks(
+          rawImagesQuery.data ?? [],
+          rawScopePrefix(scope),
+        )
+        const mine = folders.filter((t) => wanted.includes(t.dataset))
+        dataSync = {
+          scopePrefix: rawScopePrefix(scope),
+          imagesPrefixes: (mine.length ? mine : folders).map(
+            (t) => t.imagesPrefix,
+          ),
+          mode: choice.mode,
+          sourceTrackPath: choice.sourceTrackPath,
+          maxExtrapolationSec: choice.maxExtrapolationSec,
+          writeGeoTxt: pipeline?.type === "aerial",
+        }
+      }
       if (
         stepKey === "split_orthomosaic" ||
         stepKey === "associate_boundaries"
@@ -1411,9 +1447,14 @@ export function RunDetail() {
           showErrorToast("Pick a flight date, platform, and sensor first.")
           return
         }
+        // A click right after the page loads can beat the versions query:
+        // fetch it then rather than reading "not loaded" as "none saved".
+        const versions = boundaryVersionsQuery.isSuccess
+          ? boundaryVersions
+          : ((await boundaryVersionsQuery.refetch()).data ?? [])
         const activeVersion =
-          boundaryVersions.find((b) => b.is_active)?.version ??
-          boundaryVersions[0]?.version ??
+          versions.find((b) => b.is_active)?.version ??
+          versions[0]?.version ??
           null
         if (activeVersion == null) {
           showErrorToast(
@@ -1516,9 +1557,13 @@ export function RunDetail() {
             end_image: s.end_image as string,
             direction: s.direction || "down",
           })),
+          // Fresh listing: an unloaded one would reuse (overwrite) v1.
           outputPrefix: nextStitchPrefix(
             scope,
-            stitchVersions(processedFilesQuery.data ?? [], scope),
+            stitchVersions(
+              (await processedFilesQuery.refetch()).data ?? [],
+              scope,
+            ),
           ),
           settings: (p.agrowstitch_params ?? {}) as Record<string, unknown>,
           customOptions: (p.custom_agrowstitch_options as string) ?? "",
@@ -1538,10 +1583,12 @@ export function RunDetail() {
           | Parameters<typeof executeStep>[0]["associateBoundaries"]
           | undefined
         if (stepKey === "associate_boundaries" && scope) {
-          const stitched = stitchVersions(
-            processedFilesQuery.data ?? [],
-            scope,
-          ).find((v) => v.combinedMosaic)
+          const processed = processedFilesQuery.isSuccess
+            ? (processedFilesQuery.data ?? [])
+            : ((await processedFilesQuery.refetch()).data ?? [])
+          const stitched = stitchVersions(processed, scope).find(
+            (v) => v.combinedMosaic,
+          )
           if (!stitched) {
             showErrorToast(
               "Run Stitching first — there are no georeferenced plots to associate.",
@@ -1564,6 +1611,7 @@ export function RunDetail() {
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
           associateBoundaries,
+          dataSync,
           splitOrthomosaic:
             stepKey === "split_orthomosaic" && splitBoundariesRef.current
               ? {
@@ -1633,6 +1681,12 @@ export function RunDetail() {
       orthoFiles,
       boundaryVersions,
       processedFilesQuery.data,
+      processedFilesQuery.isSuccess,
+      processedFilesQuery.refetch,
+      boundaryVersionsQuery.isSuccess,
+      boundaryVersionsQuery.refetch,
+      rawImagesQuery.data,
+      pipeline?.type,
       importedDemPath,
     ],
   )
@@ -2001,6 +2055,11 @@ export function RunDetail() {
                         />
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />
+                      ) : step.key === "data_sync" ? (
+                        <DataSyncPanel
+                          jobId={run.steps.data_sync?.jobIds?.at(-1)}
+                          status={status}
+                        />
                       ) : step.key === "associate_boundaries" ? (
                         <AssociationPanel
                           files={processedFilesQuery.data ?? []}
@@ -2026,6 +2085,18 @@ export function RunDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <DataSyncDialog
+        open={dataSyncOpen}
+        scope={scope}
+        busy={false}
+        onClose={() => setDataSyncOpen(false)}
+        onStart={(choice) => {
+          dataSyncChoiceRef.current = choice
+          setDataSyncOpen(false)
+          void handleRunStep("data_sync")
+        }}
+      />
 
       <ImportOrthoDialog
         open={importDialogOpen}

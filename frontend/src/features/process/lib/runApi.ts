@@ -157,6 +157,20 @@ export interface ExecuteStepInput {
   stitching?: StitchingParams
   splitOrthomosaic?: SplitOrthomosaicParams
   associateBoundaries?: AssociateBoundariesParams
+  dataSync?: DataSyncParams
+}
+
+export interface DataSyncParams {
+  /** The run's raw scope (`Raw/…/{sensor}/`): platform logs, geo.txt. */
+  scopePrefix: string
+  /** The run's image folders. */
+  imagesPrefixes: string[]
+  mode: "own_metadata" | "cross_sensor"
+  /** cross_sensor: the other sensor's synced track. */
+  sourceTrackPath?: string
+  maxExtrapolationSec?: number
+  /** Aerial: write geo.txt for ODM. */
+  writeGeoTxt: boolean
 }
 
 export interface AssociateBoundariesParams {
@@ -188,14 +202,41 @@ export async function executeStep(
 
   switch (stepKey) {
     case "data_sync": {
-      // GEMINIbase has no separate sync step — uploads already populate the
-      // raw image prefix when files land. Mark complete immediately; the
-      // RunDetail UI will re-poll the file listing to confirm images exist.
-      setStepState(runId, "data_sync", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-      })
-      return { jobId: null, done: true }
+      // Every image gets a capture time and position: its own EXIF refined
+      // by uploaded ArduPilot logs, or interpolated from another sensor's
+      // track (main's Data Sync). Runs in the geo worker.
+      const d = input.dataSync
+      if (!d) throw new Error("data_sync requires the run's image folders")
+      if (d.imagesPrefixes.length === 0)
+        throw new Error("No images found at this run's scope to sync")
+      if (d.mode === "cross_sensor" && !d.sourceTrackPath)
+        throw new Error("Pick the sensor to sync from")
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "DATA_SYNC",
+          parameters: {
+            scope_prefix: d.scopePrefix,
+            images_prefixes: d.imagesPrefixes,
+            mode: d.mode,
+            write_geo_txt: d.writeGeoTxt,
+            ...(d.mode === "cross_sensor"
+              ? {
+                  source_track_path: d.sourceTrackPath,
+                  max_extrapolation_sec: d.maxExtrapolationSec ?? 30,
+                }
+              : {}),
+          },
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) throw new Error("DATA_SYNC submitted but no job id returned")
+      appendStepJobId(runId, "data_sync", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
     }
 
     case "gcp_selection": {

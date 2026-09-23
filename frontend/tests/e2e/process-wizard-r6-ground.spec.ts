@@ -27,6 +27,7 @@ import type { Page } from "@playwright/test"
 
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
+import { runDataSync } from "../helpers/processHelpers"
 import {
   dropFiles,
   fillUploadForm,
@@ -111,11 +112,11 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     await page.getByRole("button", { name: /create run/i }).click()
     const runUrl = page.url()
 
-    const dataSyncRow = page.getByTestId("step-row-data_sync")
-    await dataSyncRow.getByRole("button", { name: /run step/i }).click()
-    await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-      timeout: 15_000,
-    })
+    // The rover log carries its own track: Data Sync keeps it.
+    const dataSyncRow = await runDataSync(page)
+    await expect(dataSyncRow.getByTestId("data-sync-summary")).toHaveText(
+      "30 of 30 images have a position",
+    )
 
     // ── Plot Marking ─────────────────────────────────────────────────────
     const markingRow = page.getByTestId("step-row-plot_marking")

@@ -121,6 +121,7 @@ function ProcessItem({
         </span>
         {process.link && (
           <button
+            type="button"
             className="text-muted-foreground hover:text-foreground shrink-0"
             title="Go to page"
             onClick={() => navigate({ to: process.link! as any })}
@@ -131,6 +132,7 @@ function ProcessItem({
         <span className={`shrink-0 text-xs ${statusColor}`}>{statusLabel}</span>
         {process.cancel && !isDone && (
           <button
+            type="button"
             className="shrink-0 text-muted-foreground hover:text-destructive"
             title="Cancel"
             onClick={onCancel}
@@ -139,6 +141,7 @@ function ProcessItem({
           </button>
         )}
         <button
+          type="button"
           className={`shrink-0 text-muted-foreground hover:text-foreground ${isDone ? "" : "invisible pointer-events-none"}`}
           title="Dismiss"
           onClick={onDismiss}
@@ -163,6 +166,8 @@ function ProcessItem({
   )
 }
 
+export const AUTO_DISMISS_MS = 10_000
+
 export function ProcessPanel() {
   const {
     processes,
@@ -177,11 +182,28 @@ export function ProcessPanel() {
     if (processes.length > 0) setIsOpen(true)
   }, [processes.length])
 
-  if (!hasBeenActive || processes.length === 0) return null
-
   const runningCount = processes.filter(
     (p) => p.status === "running" || p.status === "pending",
   ).length
+
+  // A job that finished successfully leaves the panel after a while: the
+  // open panel (or its pill) sits over the bottom-right of every page — it
+  // covered Plot Marking's and the GCP picker's Save buttons — and the
+  // result is on the page it belongs to. Failures stay until dismissed.
+  const doneIds = processes
+    .filter((p) => p.status === "completed")
+    .map((p) => p.id)
+    .join(",")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: doneIds stands in for the finished set
+  useEffect(() => {
+    if (!doneIds) return
+    const t = setTimeout(() => {
+      for (const id of doneIds.split(",")) removeProcess(id)
+    }, AUTO_DISMISS_MS)
+    return () => clearTimeout(t)
+  }, [doneIds])
+
+  if (!hasBeenActive || processes.length === 0) return null
 
   if (!isOpen) {
     return (

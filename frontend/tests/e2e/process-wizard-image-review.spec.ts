@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url"
 import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
+import { runDataSync } from "../helpers/processHelpers"
 import {
   DEFAULT_E2E_SEASON,
   dropFiles,
@@ -146,12 +147,7 @@ async function createWorkspaceAndOpenRun(
   ).toBeVisible({ timeout: 30_000 })
 
   // Run data_sync to unlock the optional Image Review step.
-  const dataSyncRow = page.getByTestId("step-row-data_sync")
-  await expect(dataSyncRow).toHaveAttribute("data-status", "ready")
-  await dataSyncRow.getByRole("button", { name: /run step/i }).click()
-  await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-    timeout: 10_000,
-  })
+  await runDataSync(page)
 
   return { experiment, location, population, date, platform, sensor }
 }

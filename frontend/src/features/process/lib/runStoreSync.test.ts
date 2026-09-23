@@ -240,6 +240,43 @@ describe("runStore server sync", () => {
     ).toEqual([])
   })
 
+  it("ignores a pull that was in flight while a local write landed", async () => {
+    await hydrateRunStore()
+    const ws = createWorkspace({ name: "W", defaultScope: scope })
+    const pl = createPipeline({
+      workspaceId: ws.id,
+      name: "P",
+      type: "ground",
+      params: {},
+    })
+    const run = createRun({ pipelineId: pl.id, scope })
+    await settle()
+    await settle()
+    // A poll starts, the server answers with the pre-save state…
+    let answer: (r: Response) => void = () => {}
+    const stale = JSON.stringify({
+      workspaces: [...server.docs.workspace.values()],
+      pipelines: [...server.docs.pipeline.values()],
+      runs: [...server.docs.run.values()],
+    })
+    server.fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((res) => {
+          answer = res
+        }),
+    )
+    window.dispatchEvent(new Event("focus"))
+    // …while the user saves and the save is acknowledged…
+    updateRun(run.id, { status: "completed" })
+    await settle()
+    await settle()
+    // …and only then does the stale answer arrive.
+    answer(new Response(stale, { status: 200 }))
+    await settle()
+    await settle()
+    expect(getRun(run.id)?.status).toBe("completed")
+  })
+
   it("counts as ready once the first load finishes, even offline", async () => {
     server.setOffline(true)
     await hydrateRunStore()

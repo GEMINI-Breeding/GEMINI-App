@@ -113,12 +113,75 @@ beforeEach(() => {
 
 describe("executeStep", () => {
   describe("data_sync", () => {
-    it("flips the step to completed without submitting a job", async () => {
+    const dataSync = {
+      scopePrefix: "Raw/S/E/L/P/D/Amiga/Phone/",
+      imagesPrefixes: ["Raw/S/E/L/P/D/Amiga/Phone/cccc3333/Images/"],
+      mode: "own_metadata" as const,
+      writeGeoTxt: true,
+    }
+
+    it("submits DATA_SYNC for the run's image folders", async () => {
       const run = seedRun()
-      const result = await executeStep(baseInput(run, "data_sync"))
-      expect(result).toEqual({ jobId: null, done: true })
+      submitMock.mockResolvedValue({ id: "sync-1" } as unknown as JobOutput)
+      const result = await executeStep({
+        ...baseInput(run, "data_sync"),
+        dataSync,
+      })
+      expect(result).toEqual({ jobId: "sync-1", done: false })
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { job_type: string; parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.job_type).toBe("DATA_SYNC")
+      expect(call.requestBody.parameters).toEqual({
+        scope_prefix: dataSync.scopePrefix,
+        images_prefixes: dataSync.imagesPrefixes,
+        mode: "own_metadata",
+        write_geo_txt: true,
+      })
+      expect(getRun(run.id)?.steps.data_sync?.jobIds).toEqual(["sync-1"])
+    })
+
+    it("sends the source track for a cross-sensor sync", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "sync-2" } as unknown as JobOutput)
+      await executeStep({
+        ...baseInput(run, "data_sync"),
+        dataSync: {
+          ...dataSync,
+          mode: "cross_sensor",
+          sourceTrackPath:
+            "Raw/S/E/L/P/D/Amiga/RGB/aaaa1111/RGB/Metadata/msgs_synced.csv",
+          maxExtrapolationSec: 5,
+          writeGeoTxt: false,
+        },
+      })
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.parameters).toMatchObject({
+        mode: "cross_sensor",
+        source_track_path:
+          "Raw/S/E/L/P/D/Amiga/RGB/aaaa1111/RGB/Metadata/msgs_synced.csv",
+        max_extrapolation_sec: 5,
+        write_geo_txt: false,
+      })
+    })
+
+    it("refuses without images or a source", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...baseInput(run, "data_sync"),
+          dataSync: { ...dataSync, imagesPrefixes: [] },
+        }),
+      ).rejects.toThrow(/No images/)
+      await expect(
+        executeStep({
+          ...baseInput(run, "data_sync"),
+          dataSync: { ...dataSync, mode: "cross_sensor" },
+        }),
+      ).rejects.toThrow(/Pick the sensor/)
       expect(submitMock).not.toHaveBeenCalled()
-      expect(getRun(run.id)?.steps.data_sync?.status).toBe("completed")
     })
   })
 
