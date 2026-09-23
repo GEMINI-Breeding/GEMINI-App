@@ -175,13 +175,13 @@ jobs:
 
       - name: Sign gemi.exe (Windows)
         if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@v2
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: https://wus2.codesigning.azure.net/
-          trusted-signing-account-name: GitHubPackageSigning
+          signing-account-name: GitHubPackageSigning
           certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
           files-folder: frontend/src-tauri/target/release
           files-folder-filter: exe
@@ -199,13 +199,13 @@ jobs:
 
       - name: Sign installer (Windows)
         if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@v2
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: https://wus2.codesigning.azure.net/
-          trusted-signing-account-name: GitHubPackageSigning
+          signing-account-name: GitHubPackageSigning
           certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
           files-folder: frontend/src-tauri/target/release/bundle/inno
           files-folder-filter: exe
