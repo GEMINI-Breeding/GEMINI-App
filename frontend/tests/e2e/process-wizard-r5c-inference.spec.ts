@@ -125,7 +125,7 @@ test.describe("R5c: InferenceTool MVP", () => {
     await expect(page.getByTestId("inference-endpoint")).toContainText(
       "local inference server at http://localhost:9002",
     )
-    // Image source picker defaults to "Plot images (post-split)".
+    // Image source picker defaults to "Plot images (split or associated)".
     await expect(page.getByTestId("inference-source")).toContainText(
       /Plot images/i,
     )

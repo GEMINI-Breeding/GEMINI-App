@@ -328,7 +328,7 @@ export function InferenceTool({
         ? rawImagesPrefix(scope, datasetShortIds[0])
         : rawScopePrefix(scope)
     return [
-      { label: "Plot images (post-split)", prefix: plotImagesPrefix(scope) },
+      { label: "Plot images (split or associated)", prefix: plotImagesPrefix(scope) },
       { label: "Raw drone images", prefix: rawPrefix },
     ]
   }, [scope, datasetShortIds])

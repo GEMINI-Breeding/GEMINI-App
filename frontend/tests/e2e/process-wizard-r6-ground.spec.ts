@@ -8,7 +8,9 @@
  *   stitching direction, save → pipeline settings: set crop rules (drag in
  *   the visual crop tool; a south-heading rule) → Stitching: RUN_STITCH runs AgRowStitch per
  *   plot and georeferences each → the stitched plot mosaics show on the
- *   run page → Plot Boundary Prep draws over the combined ground mosaic →
+ *   run page → Plot Boundary Prep draws over the combined ground mosaic;
+ *   outline it and grid it into two plots → Associate Boundaries matches
+ *   each stitched plot to a polygon and writes PlotImages/ →
  *   reopening Plot Marking shows the saved markings.
  *
  * Load-bearing checks: the marker must actually show the extracted frames
@@ -21,6 +23,8 @@
  * Strict-E2E rules (CLAUDE.md): everything is created through the UI; the
  * only API calls are reads that confirm what the UI did.
  */
+import type { Page } from "@playwright/test"
+
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
@@ -30,6 +34,15 @@ import {
   selectDataType,
   submitUploadAndWait,
 } from "../helpers/uploadHelpers"
+
+async function authHeadersFor(page: Page) {
+  const auth = await page.context().storageState()
+  const token =
+    auth.origins
+      .flatMap((o) => o.localStorage)
+      .find((e) => e.name === "gemini.auth.token")?.value ?? ""
+  return { Authorization: `Bearer ${token}` }
+}
 
 const BIN = "2024_07_15_15_49_18_998387_track-fixture.0000.bin"
 const EXTRACTION_TIMEOUT_MS = 5 * 60_000
@@ -271,12 +284,7 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
     }
 
     // Read-only check of what the worker stored.
-    const auth = await page.context().storageState()
-    const token =
-      auth.origins
-        .flatMap((o) => o.localStorage)
-        .find((e) => e.name === "gemini.auth.token")?.value ?? ""
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = await authHeadersFor(page)
     const prefix = `Processed/${season}/${experiment}/${location}/${population}/${date}/Amiga/RGB/AgRowStitch_v1/`
     const listed = await request.get(
       new URL(`/api/files/list/gemini/${prefix}`, baseURL).toString(),
@@ -350,7 +358,60 @@ test.describe("R6: ground pipeline — plot marking → stitching", () => {
         { timeout: 30_000 },
       )
       .toBe(true)
+
+    // Outline the mosaic and split it into two plots, north and south.
+    await page.getByTestId("boundary-auto-from-ortho").click()
+    await page.getByTestId("boundary-rows").fill("2")
+    await page.keyboard.press("Tab")
+    await page.getByTestId("boundary-cols").fill("1")
+    await page.keyboard.press("Tab")
+    await page.getByRole("button", { name: /generate plot grid/i }).click()
+    await expect(page.locator("text=/2 plots? across 1 block/i")).toBeVisible()
+    await page.getByTestId("boundary-save-and-complete").click()
+    await expect(page.getByText(/saved \+ activated/i).first()).toBeVisible({
+      timeout: 30_000,
+    })
     await page.goto(runUrl)
+
+    // ── Associate Boundaries ─────────────────────────────────────────────
+    // Each stitched plot's centre falls in one of the two polygons: plot 1
+    // (marked first on the southbound pass) in the north one.
+    const assocRow = page.getByTestId("step-row-associate_boundaries")
+    await expect(assocRow).toHaveAttribute("data-status", "ready", {
+      timeout: 30_000,
+    })
+    await assocRow.getByRole("button", { name: /run step/i }).click()
+    await expect(assocRow).toHaveAttribute("data-status", "completed", {
+      timeout: 5 * 60_000,
+    })
+    const assoc = assocRow.getByTestId("association-results")
+    await expect(assoc.getByTestId("association-summary")).toHaveText(
+      "2 of 2 stitched plots matched a boundary (stitch v1)",
+      { timeout: 30_000 },
+    )
+    const cells = await assoc
+      .getByTestId("association-table")
+      .locator("tbody tr")
+      .evaluateAll((trs) =>
+        trs.map((tr) =>
+          Array.from(tr.querySelectorAll("td")).map((td) => td.textContent),
+        ),
+      )
+    expect(cells.map((c) => c[0])).toEqual(["1", "2"])
+    const boundaryPlots = cells.map((c) => c[1])
+    expect(new Set(boundaryPlots).size).toBe(2)
+    expect(boundaryPlots.every((p) => p === "1" || p === "2")).toBe(true)
+    // The matched plots' images are where Analyze and inference look.
+    const plotImagesPrefix = `Processed/${season}/${experiment}/${location}/${population}/${date}/Amiga/RGB/PlotImages/`
+    const plotImages = await request.get(
+      new URL(`/api/files/list/gemini/${plotImagesPrefix}`, baseURL).toString(),
+      { headers: await authHeadersFor(page) },
+    )
+    expect(
+      ((await plotImages.json()) as { object_name: string }[])
+        .map((f) => f.object_name.slice(plotImagesPrefix.length))
+        .sort(),
+    ).toEqual(["plot_1_accession_unknown.png", "plot_2_accession_unknown.png"])
 
     // ── The markings persisted ───────────────────────────────────────────
     await markingRow.getByRole("button", { name: /re-open tool/i }).click()

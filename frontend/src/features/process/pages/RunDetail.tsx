@@ -60,6 +60,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
+import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImageGrid } from "@/features/process/components/PlotImageGrid"
@@ -101,6 +102,7 @@ import {
   type AerialScope,
   isAerialScopeComplete,
   plotBoundariesPath,
+  plotImagesPrefix,
   processedPrefix,
   rawScopePrefix,
   uploadedOrthosPrefix,
@@ -928,6 +930,7 @@ export function RunDetail() {
   // not state: it's read once inside the same handler that sets it, and
   // going through state would need an extra render before executeStep.
   const splitBoundariesRef = useRef<GeoJSON.FeatureCollection | null>(null)
+  const boundaryVersionRef = useRef<number | null>(null)
   const { data: capabilities } = useCapabilities()
   const { data: dockerStatus } = useDockerStatus()
 
@@ -1395,7 +1398,10 @@ export function RunDetail() {
         showErrorToast("Pick a flight date, platform, and sensor first.")
         return
       }
-      if (stepKey === "split_orthomosaic") {
+      if (
+        stepKey === "split_orthomosaic" ||
+        stepKey === "associate_boundaries"
+      ) {
         // Load the active plot-geometry version and hand its polygons to
         // the geo worker. The saved snapshot already excludes the
         // role="outer" rectangle (PlotBoundaryPrep.saveCurrent strips it),
@@ -1411,7 +1417,9 @@ export function RunDetail() {
           null
         if (activeVersion == null) {
           showErrorToast(
-            "Save and activate plot boundaries first — Split needs polygons to cut the ortho with.",
+            stepKey === "split_orthomosaic"
+              ? "Save and activate plot boundaries first — Split needs polygons to cut the ortho with."
+              : "Save and activate plot boundaries first — each stitched plot is matched to one of them.",
           )
           return
         }
@@ -1435,6 +1443,7 @@ export function RunDetail() {
             return
           }
           splitBoundariesRef.current = boundaries
+          boundaryVersionRef.current = activeVersion
         } catch (err) {
           showErrorToast(
             err instanceof Error
@@ -1525,6 +1534,27 @@ export function RunDetail() {
         return
       }
       try {
+        let associateBoundaries:
+          | Parameters<typeof executeStep>[0]["associateBoundaries"]
+          | undefined
+        if (stepKey === "associate_boundaries" && scope) {
+          const stitched = stitchVersions(
+            processedFilesQuery.data ?? [],
+            scope,
+          ).find((v) => v.combinedMosaic)
+          if (!stitched) {
+            showErrorToast(
+              "Run Stitching first — there are no georeferenced plots to associate.",
+            )
+            return
+          }
+          associateBoundaries = {
+            stitchPrefix: stitched.prefix,
+            boundaries: splitBoundariesRef.current as GeoJSON.FeatureCollection,
+            boundaryVersion: boundaryVersionRef.current ?? 0,
+            plotImagesPrefix: plotImagesPrefix(scope),
+          }
+        }
         const result = await executeStep({
           runId: run.id,
           stepKey,
@@ -1533,6 +1563,7 @@ export function RunDetail() {
           experimentId,
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
+          associateBoundaries,
           splitOrthomosaic:
             stepKey === "split_orthomosaic" && splitBoundariesRef.current
               ? {
@@ -1970,6 +2001,11 @@ export function RunDetail() {
                         />
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />
+                      ) : step.key === "associate_boundaries" ? (
+                        <AssociationPanel
+                          files={processedFilesQuery.data ?? []}
+                          scope={scope}
+                        />
                       ) : step.key === "stitching" ? (
                         <StitchResultsPanel
                           files={processedFilesQuery.data ?? []}

@@ -685,22 +685,274 @@ describe("executeStep", () => {
     })
   })
 
-  describe("associate_boundaries (not implemented in this backend)", () => {
-    // This test used to assert `status: "completed"` with `synthetic: true`
-    // in the outputs — i.e. it encoded the bug as the contract. A step that
-    // performs no work must not report success: the UI drew a green tick
-    // for an association that never happened, and `synthetic` was buried
-    // where no user would see it.
-    it("reports unavailable, not completed, and submits no job", async () => {
+  describe("associate_boundaries", () => {
+    it("requires a stitch version and boundaries", async () => {
       const run = seedRun()
-      const result = await executeStep(baseInput(run, "associate_boundaries"))
+      await expect(
+        executeStep(baseInput(run, "associate_boundaries")),
+      ).rejects.toThrow(/requires a stitch version/)
       expect(submitMock).not.toHaveBeenCalled()
-      const ab = getRun(run.id)?.steps.associate_boundaries
-      expect(ab?.status).toBe("unavailable")
-      expect(ab?.status).not.toBe("completed")
-      // `done: false` keeps callers from advancing the wizard past it.
-      expect(result).toEqual({ jobId: null, done: false })
-      expect(ab?.completedAt).toBeUndefined()
+    })
+
+    it("submits ASSOCIATE_BOUNDARIES and tracks the job", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "assoc-1" } as unknown as JobOutput)
+      const boundaries: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: [],
+      }
+      const res = await executeStep({
+        ...baseInput(run, "associate_boundaries"),
+        associateBoundaries: {
+          stitchPrefix: "Processed/S/E/L/P/D/Amiga/RGB/AgRowStitch_v2/",
+          boundaries,
+          boundaryVersion: 3,
+          plotImagesPrefix: "Processed/S/E/L/P/D/Amiga/RGB/PlotImages/",
+        },
+      })
+      expect(res).toEqual({ jobId: "assoc-1", done: false })
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { job_type: string; parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.job_type).toBe("ASSOCIATE_BOUNDARIES")
+      expect(call.requestBody.parameters).toEqual({
+        stitch_prefix: "Processed/S/E/L/P/D/Amiga/RGB/AgRowStitch_v2/",
+        boundaries,
+        boundary_version: 3,
+        plot_images_prefix: "Processed/S/E/L/P/D/Amiga/RGB/PlotImages/",
+      })
+      expect(getRun(run.id)?.steps.associate_boundaries?.jobIds).toEqual([
+        "assoc-1",
+      ])
+    })
+  })
+
+  describe("inference", () => {
+    const base = (run: Run) => ({
+      ...baseInput(run, "inference"),
+    })
+
+    it("submits a single-image job with image_path", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-1" })
+      const res = await executeStep({
+        ...base(run),
+        inference: {
+          imagePath: "Processed/x/PlotImages/plot_1_accession_A.png",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      expect(res).toEqual({ jobId: "inf-1", done: false })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.image_path).toBe(
+        "Processed/x/PlotImages/plot_1_accession_A.png",
+      )
+      expect(params).not.toHaveProperty("images_prefix")
+    })
+
+    it("submits a batch job with images_prefix and no image_path", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-2" })
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagesPrefix: "Processed/x/PlotImages/",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.images_prefix).toBe("Processed/x/PlotImages/")
+      // Sending both would silently take the worker's single-image path.
+      expect(params).not.toHaveProperty("image_path")
+    })
+
+    it("forwards boundaries, count label and a local server URL in batch mode", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-3" })
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: { plot: 1, row: 1, col: 1 },
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [0, 0],
+                  [1, 0],
+                  [1, 1],
+                  [0, 0],
+                ],
+              ],
+            },
+          },
+        ],
+      }
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagesPrefix: "Processed/x/PlotImages/",
+          boundaries: fc,
+          countLabel: "Stand",
+          apiUrl: "http://localhost:9002",
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params.boundaries.features).toHaveLength(1)
+      expect(params.count_label).toBe("Stand")
+      expect(params.api_url).toBe("http://localhost:9002")
+    })
+
+    it("omits api_url for cloud and boundaries for single-image runs", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "inf-4" })
+      await executeStep({
+        ...base(run),
+        inference: {
+          imagePath: "a.png",
+          // Boundaries only mean something for a per-plot batch.
+          boundaries: { type: "FeatureCollection", features: [] },
+          apiKey: "k",
+          modelId: "ws/m/1",
+          outputPredictionsPath: "out.json",
+        },
+      })
+      const params = submitMock.mock.calls[0][0].requestBody.parameters
+      expect(params).not.toHaveProperty("api_url")
+      expect(params).not.toHaveProperty("boundaries")
+    })
+
+    it("rejects both sources at once", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...base(run),
+          inference: {
+            imagePath: "a.png",
+            imagesPrefix: "p/",
+            apiKey: "k",
+            modelId: "ws/m/1",
+            outputPredictionsPath: "out.json",
+          },
+        }),
+      ).rejects.toThrow(/exactly one of imagePath or imagesPrefix/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("rejects neither source", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...base(run),
+          inference: {
+            apiKey: "k",
+            modelId: "ws/m/1",
+            outputPredictionsPath: "out.json",
+          },
+        }),
+      ).rejects.toThrow(/exactly one of imagePath or imagesPrefix/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("split_orthomosaic", () => {
+    const FC = (n: number): GeoJSON.FeatureCollection => ({
+      type: "FeatureCollection",
+      features: Array.from({ length: n }, (_, i) => ({
+        type: "Feature" as const,
+        properties: { plot: i + 1, accession: `ACC-${i + 1}` },
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [
+            [
+              [0, 0],
+              [0, 1],
+              [1, 1],
+              [1, 0],
+              [0, 0],
+            ],
+          ],
+        },
+      })),
+    })
+
+    it("submits SPLIT_ORTHOMOSAIC with the scope path parts and the polygons", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "job-split-1" })
+      const result = await executeStep({
+        ...baseInput(run, "split_orthomosaic"),
+        splitOrthomosaic: { boundaries: FC(6) },
+      })
+      expect(result).toEqual({ jobId: "job-split-1", done: false })
+      const body = submitMock.mock.calls[0][0].requestBody
+      expect(body.job_type).toBe("SPLIT_ORTHOMOSAIC")
+      // Without an explicit ortho the worker discovers the newest ODM
+      // ortho per folder itself from the path components.
+      expect(body.parameters.orthomosaic_path).toBeUndefined()
+      expect(body.parameters).toMatchObject({
+        year: SCOPE.year,
+        experiment: SCOPE.experiment,
+        location: SCOPE.location,
+        population: SCOPE.population,
+        date: SCOPE.date,
+      })
+      expect(body.parameters.boundaries.features).toHaveLength(6)
+      expect(getRun(run.id)?.steps.split_orthomosaic?.jobIds).toEqual([
+        "job-split-1",
+      ])
+    })
+
+    it("passes the run's ortho so imported (Raw/) orthos get cut too", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({ id: "job-split-2" })
+      const path =
+        "Raw/2026/E/Davis/Cowpea/2026-04-28/DJI/RGB/Orthomosaic/o.tif"
+      await executeStep({
+        ...baseInput(run, "split_orthomosaic"),
+        splitOrthomosaic: { boundaries: FC(2), orthomosaicPath: path },
+      })
+      expect(
+        submitMock.mock.calls[0][0].requestBody.parameters.orthomosaic_path,
+      ).toBe(path)
+    })
+
+    it("refuses to submit without boundaries", async () => {
+      const run = seedRun()
+      await expect(
+        executeStep(baseInput(run, "split_orthomosaic")),
+      ).rejects.toThrow(/requires plot boundaries/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("refuses an empty FeatureCollection rather than cutting nothing", async () => {
+      // The worker would return plots_processed: 0 and look like a success.
+      const run = seedRun()
+      await expect(
+        executeStep({
+          ...baseInput(run, "split_orthomosaic"),
+          splitOrthomosaic: { boundaries: FC(0) },
+        }),
+      ).rejects.toThrow(/at least one plot boundary/)
+      expect(submitMock).not.toHaveBeenCalled()
+    })
+
+    it("throws when the backend returns no job id", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({})
+      await expect(
+        executeStep({
+          ...baseInput(run, "split_orthomosaic"),
+          splitOrthomosaic: { boundaries: FC(2) },
+        }),
+      ).rejects.toThrow(/no job id/)
     })
   })
 

@@ -156,6 +156,17 @@ export interface ExecuteStepInput {
   inference?: InferenceParams
   stitching?: StitchingParams
   splitOrthomosaic?: SplitOrthomosaicParams
+  associateBoundaries?: AssociateBoundariesParams
+}
+
+export interface AssociateBoundariesParams {
+  /** The stitch version to associate (`…/AgRowStitch_v{N}/`). */
+  stitchPrefix: string
+  /** The active plot-boundary version's polygons. */
+  boundaries: GeoJSON.FeatureCollection
+  boundaryVersion: number
+  /** Where matched plots' images go (`…/PlotImages/`). */
+  plotImagesPrefix: string
 }
 
 export interface ExecuteStepResult {
@@ -407,20 +418,33 @@ export async function executeStep(
     }
 
     case "associate_boundaries": {
-      // GEMINIbase has no ASSOCIATE_BOUNDARIES worker yet. This used to
-      // mark the step `completed` with `synthetic: true` buried in its
-      // outputs, so the UI showed a green tick for an association that
-      // never happened. Report it as unavailable instead — no plot is
-      // matched to a polygon until the JobType + geo-worker handler land
-      // (merge_plan.md Phase 3, item 3A.7).
-      setStepState(runId, "associate_boundaries", {
-        status: "unavailable",
-        outputs: {
-          ...(getRun(runId)?.steps.associate_boundaries?.outputs ?? {}),
-          note: "Requires the ASSOCIATE_BOUNDARIES job type and a geo-worker handler, which this backend does not have yet.",
-        },
-      })
-      return { jobId: null, done: false }
+      // Stitched plot → boundary polygon by centre-in-polygon (main's
+      // run_associate_boundaries), in the stitch worker.
+      const a = input.associateBoundaries
+      if (!a) {
+        throw new Error(
+          "associate_boundaries requires a stitch version and plot boundaries",
+        )
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "ASSOCIATE_BOUNDARIES",
+          parameters: {
+            stitch_prefix: a.stitchPrefix,
+            boundaries: a.boundaries,
+            boundary_version: a.boundaryVersion,
+            plot_images_prefix: a.plotImagesPrefix,
+          },
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId)
+        throw new Error("ASSOCIATE_BOUNDARIES submitted but no job id returned")
+      appendStepJobId(runId, "associate_boundaries", jobId)
+      return { jobId, done: false }
     }
 
     case "inference": {
