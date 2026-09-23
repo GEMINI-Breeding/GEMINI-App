@@ -3,6 +3,7 @@
  */
 
 import { useQueries, useQuery } from "@tanstack/react-query"
+import { getToken } from "@/lib/auth"
 
 function apiUrl(path: string): string {
   const base =
@@ -11,7 +12,7 @@ function apiUrl(path: string): string {
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
+  const token = getToken()
   return { Authorization: `Bearer ${token}` }
 }
 

@@ -61,6 +61,7 @@ import {
 import type { AerialScope } from "@/features/process/lib/paths"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
+import { titilerBase } from "@/lib/stack"
 
 const COG_SUFFIX = "-Pyramid.tif"
 const DEFAULT_BUCKET = "gemini"
@@ -109,7 +110,7 @@ function OrthoViewerDialog({
     queryKey: ["titiler", "tilejson", s3Url],
     queryFn: async () => {
       const res = await fetch(
-        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
+        `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
       )
       if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
       return res.json() as Promise<{

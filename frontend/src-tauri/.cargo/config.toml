@@ -1,0 +1,5 @@
+# Link the C runtime statically on Windows, so the app doesn't need the
+# Visual C++ Redistributable (the installer no longer ships it: that was for
+# the old Python backend's torch DLLs).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

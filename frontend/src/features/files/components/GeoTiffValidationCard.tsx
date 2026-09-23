@@ -16,6 +16,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { titilerBase } from "@/lib/stack"
 
 interface CogInfo {
   crs?: string | null
@@ -44,7 +45,7 @@ export function GeoTiffValidationCard({
     queryFn: async (): Promise<CogInfo> => {
       const url = `s3://gemini/${destPath.replace(/^gemini\//, "")}`
       const res = await fetch(
-        `/titiler/cog/info?url=${encodeURIComponent(url)}`,
+        `${titilerBase()}/cog/info?url=${encodeURIComponent(url)}`,
       )
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.json()

@@ -1,11 +1,13 @@
 /**
  * Backend capability preflight.
  *
- * GEMINIbase exposes `/api/utils/capabilities` and `/api/utils/docker-check`,
- * and both have been live this whole time with no UI caller — so a user could
- * submit a stitch job on a stack with no AgRowStitch, or an ODM job with no
- * Docker, and only find out when the job failed minutes later. Main warned
- * about this before running a step; this restores that.
+ * `/api/utils/capabilities` says which job types have a live worker (the API
+ * notes when each type was last polled for) and whether NodeODM answers, so
+ * a step whose worker isn't running warns before its job sits in the queue.
+ * Main warned about missing capabilities before running a step; this is the
+ * compose-stack equivalent. (It used to look for AgRowStitch inside the API
+ * container and for a Docker socket — neither is there in this stack, so it
+ * warned on every stitch.)
  *
  * Failure here is never fatal: if the probe itself fails we return no warning
  * rather than blocking a step that might well work.
@@ -16,15 +18,12 @@ import { UtilsService } from "@/client"
 
 export interface Capabilities {
   agrowstitch: { available: boolean; path: string | null }
+  /** Absent from older backends — then no ODM warning. */
+  odm: { worker: boolean; nodeodm: boolean } | null
   torch_version: string | null
   cuda_available: boolean
   mps_available: boolean
   cpu_count: number | null
-}
-
-export interface DockerStatus {
-  available: boolean
-  reason?: string | null
 }
 
 /**
@@ -38,24 +37,23 @@ function asCapabilities(raw: Record<string, unknown>): Capabilities | null {
   const ag = raw.agrowstitch
   if (typeof ag !== "object" || ag === null) return null
   const agRec = ag as Record<string, unknown>
+  const odm =
+    typeof raw.odm === "object" && raw.odm !== null
+      ? (raw.odm as Record<string, unknown>)
+      : null
   return {
     agrowstitch: {
       available: agRec.available === true,
       path: typeof agRec.path === "string" ? agRec.path : null,
     },
+    odm: odm
+      ? { worker: odm.worker === true, nodeodm: odm.nodeodm === true }
+      : null,
     torch_version:
       typeof raw.torch_version === "string" ? raw.torch_version : null,
     cuda_available: raw.cuda_available === true,
     mps_available: raw.mps_available === true,
     cpu_count: typeof raw.cpu_count === "number" ? raw.cpu_count : null,
-  }
-}
-
-function asDockerStatus(raw: Record<string, unknown>): DockerStatus | null {
-  if (typeof raw.available !== "boolean") return null
-  return {
-    available: raw.available,
-    reason: typeof raw.reason === "string" ? raw.reason : null,
   }
 }
 
@@ -69,16 +67,6 @@ export function useCapabilities() {
   })
 }
 
-export function useDockerStatus() {
-  return useQuery<DockerStatus | null>({
-    queryKey: ["utils", "docker-check"],
-    queryFn: async () =>
-      asDockerStatus(await UtilsService.apiUtilsDockerCheckDockerCheck()),
-    staleTime: 60_000,
-    retry: false,
-  })
-}
-
 /**
  * Warning text for a step, or undefined when there's nothing to say.
  *
@@ -88,13 +76,15 @@ export function useDockerStatus() {
 export function capabilityWarningForStep(
   stepKey: string,
   caps: Capabilities | null | undefined,
-  docker: DockerStatus | null | undefined,
 ): string | undefined {
   if (stepKey === "stitching" && caps && caps.agrowstitch.available === false) {
-    return "AgRowStitch isn't installed in the stitch worker, so this job will fail. See the stitch worker setup in merge_plan.md Phase 3."
+    return "No stitch worker is running, so this job would wait in the queue. Start the stack's stitch service (geminibase-worker-stitch)."
   }
-  if (stepKey === "orthomosaic" && docker && docker.available === false) {
-    return `Docker isn't reachable from the backend (${docker.reason ?? "unknown"}), so orthomosaic generation can't start.`
+  if (stepKey === "orthomosaic" && caps?.odm) {
+    if (!caps.odm.worker)
+      return "No ODM worker is running, so this job would wait in the queue. Start the stack's ODM service (geminibase-worker-odm)."
+    if (!caps.odm.nodeodm)
+      return "NodeODM isn't answering, so orthomosaic generation can't start. Start the stack's geminibase-nodeodm service."
   }
   return undefined
 }

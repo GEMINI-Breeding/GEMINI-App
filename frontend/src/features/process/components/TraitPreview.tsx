@@ -24,6 +24,7 @@ import {
   tintVegetation,
   vegetationFraction,
 } from "@/features/process/lib/exgPreview"
+import { titilerBase } from "@/lib/stack"
 
 export interface PreviewPlot {
   label: string
@@ -53,7 +54,7 @@ export function featureBbox(
 }
 
 async function loadCrop(s3Url: string, bbox: PreviewPlot["bbox"]) {
-  const url = `/titiler/cog/bbox/${bbox.join(",")}.png?url=${encodeURIComponent(s3Url)}&coord_crs=epsg:4326&max_size=1024`
+  const url = `${titilerBase()}/cog/bbox/${bbox.join(",")}.png?url=${encodeURIComponent(s3Url)}&coord_crs=epsg:4326&max_size=1024`
   const res = await fetch(url)
   if (!res.ok)
     throw new Error(`Couldn't read the plot from the ortho (${res.status})`)

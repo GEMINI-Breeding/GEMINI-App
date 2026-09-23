@@ -14,6 +14,7 @@ import {
 } from "@/features/process/lib/orthoVersions"
 import type { AerialScope } from "@/features/process/lib/paths"
 import type { Run } from "@/features/process/lib/runStore"
+import { titilerBase } from "@/lib/stack"
 
 export function resolveActiveOrtho(
   run: Run | undefined,
@@ -44,7 +45,7 @@ export function s3UrlForOrtho(v: OrthoVersion): string {
  * `encodeURIComponent` always uses `%20`, which S3 decodes correctly.
  */
 export function buildTitilerTileUrl(s3Url: string): string {
-  return `/titiler/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url=${encodeURIComponent(s3Url)}&tilesize=256`
+  return `${titilerBase()}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?url=${encodeURIComponent(s3Url)}&tilesize=256`
 }
 
 /**

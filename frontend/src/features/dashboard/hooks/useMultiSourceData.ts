@@ -17,6 +17,7 @@
 
 import { useQueries } from "@tanstack/react-query"
 import { useMemo } from "react"
+import { getToken } from "@/lib/auth"
 import type { DataSource } from "../types"
 import { sourceKey } from "../types"
 import {
@@ -128,9 +129,8 @@ function groupByValues(
     buckets.get(gv)!.push(val)
   })
   const result = new Map<string, number | null>()
-  buckets.forEach((vals, k) =>
-    result.set(k, vals.length ? aggregate(vals, agg) : null),
-  )
+  for (const [k, vals] of buckets)
+    result.set(k, vals.length ? aggregate(vals, agg) : null)
   return result
 }
 
@@ -143,7 +143,7 @@ function apiUrl(path: string): string {
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
+  const token = getToken()
   return { Authorization: `Bearer ${token}` }
 }
 
@@ -177,9 +177,7 @@ export function useMultiSourceData(
   const avgRecordIds = useMemo(() => {
     const ids = new Set<string>()
     pipelineAvgPipelineIds.forEach((pid) => {
-      allRecords
-        .filter((r) => r.pipeline_id === pid)
-        .forEach((r) => ids.add(r.id))
+      for (const r of allRecords) if (r.pipeline_id === pid) ids.add(r.id)
     })
     return [...ids]
   }, [pipelineAvgPipelineIds, allRecords])
@@ -531,12 +529,8 @@ export function useMultiSourceData(
           buckets.get(gv)!.push(val)
         })
         const groupMap = new Map<string, number | null>()
-        buckets.forEach((vals, k) =>
-          groupMap.set(
-            k,
-            vals.length ? aggregate(vals, src.aggregation) : null,
-          ),
-        )
+        for (const [k, vals] of buckets)
+          groupMap.set(k, vals.length ? aggregate(vals, src.aggregation) : null)
         result.set(key, groupMap)
       }
     })
@@ -556,7 +550,8 @@ export function useMultiSourceData(
       const nonBaseline = series.filter((s) => !s.isBaseline)
       const allCats = new Set<string>()
       nonBaseline.forEach((s) => {
-        categoricalBySource.get(s.key)?.forEach((_, k) => allCats.add(k))
+        for (const k of categoricalBySource.get(s.key)?.keys() ?? [])
+          allCats.add(k)
       })
       if (allCats.size === 0) return []
 

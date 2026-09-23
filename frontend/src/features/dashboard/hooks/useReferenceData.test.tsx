@@ -59,7 +59,7 @@ describe("useReferenceDatasets", () => {
   })
 
   it("passes the Authorization header from localStorage", async () => {
-    localStorage.setItem("access_token", "tok-xyz")
+    localStorage.setItem("gemini.auth.token", "tok-xyz")
     fetchMock.mockReturnValueOnce(okJson([]))
     const { result } = renderHook(
       () => useReferenceDatasets({ enabled: true }),

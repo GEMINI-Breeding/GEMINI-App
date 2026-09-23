@@ -3,6 +3,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
 import { OpenAPI } from "./client"
+import { StackGate } from "./components/Stack/StackGate"
 import { ThemeProvider } from "./components/theme-provider"
 import { ConfirmDialogProvider } from "./components/ui/confirm-dialog"
 import { Toaster } from "./components/ui/sonner"
@@ -11,10 +12,10 @@ import { installAuthInterceptors } from "./lib/auth"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
-// In production Tauri builds the sidecar injects __GEMI_BACKEND_URL__ before
-// the app loads. In dev mode we use "" so all requests use relative URLs and
-// go through the Vite proxy (/api → http://127.0.0.1:7777), which avoids
-// WebKit cross-origin issues with localhost:PORT requests.
+// In the browser and dev builds requests are relative and go through the
+// Vite proxy (/api → http://127.0.0.1:7777), which avoids WebKit
+// cross-origin issues with localhost:PORT requests. The desktop app's
+// StackGate points OpenAPI.BASE at its local stack once that is up.
 OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
 
 // Wire the JWT bearer-token resolver and the 401 interceptor. After this call,
@@ -52,14 +53,18 @@ declare module "@tanstack/react-router" {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <QueryClientProvider client={queryClient}>
-        <ProcessProvider>
-          <ConfirmDialogProvider>
-            <RouterProvider router={router} />
-            <Toaster richColors closeButton />
-          </ConfirmDialogProvider>
-        </ProcessProvider>
-      </QueryClientProvider>
+      {/* Desktop app: nothing below talks to the API before the local
+          stack is up and signed in. A no-op in the browser. */}
+      <StackGate>
+        <QueryClientProvider client={queryClient}>
+          <ProcessProvider>
+            <ConfirmDialogProvider>
+              <RouterProvider router={router} />
+              <Toaster richColors closeButton />
+            </ConfirmDialogProvider>
+          </ProcessProvider>
+        </QueryClientProvider>
+      </StackGate>
     </ThemeProvider>
   </StrictMode>,
 )

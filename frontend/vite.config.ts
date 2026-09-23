@@ -20,6 +20,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    // The Rust shell's build output (src-tauri/target) is thousands of
+    // files that change on every cargo build; none are app sources.
+    watch: { ignored: ["**/src-tauri/**"] },
     fs: {
       // Allow serving from anywhere the workspace can resolve files
       // from. In the worktree dev setup, frontend/node_modules is a

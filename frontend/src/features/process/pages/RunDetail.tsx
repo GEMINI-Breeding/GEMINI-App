@@ -83,7 +83,6 @@ import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPan
 import {
   capabilityWarningForStep,
   useCapabilities,
-  useDockerStatus,
 } from "@/features/process/hooks/useCapabilities"
 import {
   useLoadPlotGeometryVersion,
@@ -940,7 +939,6 @@ export function RunDetail() {
   const [dataSyncOpen, setDataSyncOpen] = useState(false)
   const dataSyncChoiceRef = useRef<DataSyncChoice | null>(null)
   const { data: capabilities } = useCapabilities()
-  const { data: dockerStatus } = useDockerStatus()
 
   // Per-step ortho options. Seeded from the pipeline's default once the
   // pipeline record loads (it's a hook, so it can be undefined on first
@@ -2002,11 +2000,7 @@ export function RunDetail() {
                     lastProgress={lastProgress}
                     isExecuting={isAnyExecuting}
                     errorMessage={run?.steps[step.key]?.error}
-                    warning={capabilityWarningForStep(
-                      step.key,
-                      capabilities,
-                      dockerStatus,
-                    )}
+                    warning={capabilityWarningForStep(step.key, capabilities)}
                     onRunStep={() => handleRunStep(step.key)}
                     onOpenTool={() => handleOpenTool(step.key)}
                     onStopStep={() => handleStopStep(step.key)}

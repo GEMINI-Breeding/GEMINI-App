@@ -1,9 +1,7 @@
-// Prevents additional console window on Windows in release
-#[cfg(not(debug_assertions))]
-mod sidecar_manager;
+mod stack;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Build a native Edit menu with custom Undo / Redo items. The items
 /// deliberately don't register keyboard accelerators — `Cmd/Ctrl+Z`
@@ -52,22 +50,6 @@ async fn download_to_file(url: String, dest: String, method: Option<String>) -> 
     Ok(())
 }
 
-#[cfg(not(debug_assertions))]
-/// Read the sidecar startup log (captured before the HTTP server is ready).
-/// Returns raw text so the Console tab can show it even when the backend is down.
-#[tauri::command]
-fn read_sidecar_log(
-    state: tauri::State<std::sync::Arc<sidecar_manager::SidecarManager>>,
-) -> String {
-    let path_guard = state.log_path.lock().unwrap();
-    match path_guard.as_ref() {
-        Some(p) => std::fs::read_to_string(p)
-            .unwrap_or_else(|e| format!("(cannot read log: {})", e)),
-        None => "(sidecar not started yet)".into(),
-    }
-}
-
-#[cfg(debug_assertions)]
 #[tauri::command]
 fn open_devtools(window: tauri::WebviewWindow) {
     window.open_devtools();
@@ -95,130 +77,164 @@ const ZOOM_SCRIPT: &str = r#"
 })();
 "#;
 
+// ── Local stack commands (see stack.rs) ─────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct StackStatus {
+    /// True in release builds: the app runs the stack itself. Development
+    /// builds use the stack from `npm run dev:backend` through Vite's proxy.
+    managed: bool,
+    version: String,
+    docker: stack::DockerStatus,
+    config: Option<stack::StackConfig>,
+    api_url: Option<String>,
+    titiler_url: Option<String>,
+    healthy: bool,
+    default_data_dir: Option<String>,
+    /// v0.0.5's database, if that app was installed here (read-only; D1).
+    legacy_install: Option<String>,
+}
+
+fn paths(app: &AppHandle) -> Result<stack::Paths, String> {
+    stack::Paths::from_app(app)
+}
+
+#[tauri::command]
+async fn stack_status(app: AppHandle) -> Result<StackStatus, String> {
+    let paths = paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = stack::load_config(&paths);
+        let healthy = config.as_ref().is_some_and(stack::api_healthy);
+        StackStatus {
+            managed: cfg!(not(debug_assertions)),
+            version: stack::STACK_VERSION.trim().to_string(),
+            docker: stack::docker_status(),
+            api_url: config.as_ref().map(|c| c.api_url()),
+            titiler_url: config.as_ref().map(|c| c.titiler_url()),
+            config,
+            healthy,
+            default_data_dir: stack::default_data_dir().map(|p| p.to_string_lossy().into()),
+            legacy_install: stack::legacy_install().map(|p| p.to_string_lossy().into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn stack_configure(app: AppHandle, data_dir: String) -> Result<stack::StackConfig, String> {
+    stack::configure(&paths(&app)?, data_dir.into())
+}
+
+#[tauri::command]
+async fn stack_start(app: AppHandle) -> Result<(), String> {
+    let paths = paths(&app)?;
+    let config = stack::load_config(&paths).ok_or("Choose a data folder first.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let lock = app.state::<stack::StackLock>();
+        let _guard = lock.0.lock().map_err(|e| e.to_string())?;
+        stack::start(&app, &paths, &config).inspect_err(|e| {
+            let _ = app.emit(
+                "stack:progress",
+                stack::Progress { phase: "error", message: e.clone() },
+            );
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn stack_stop(app: AppHandle) -> Result<(), String> {
+    let paths = paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || stack::stop(&paths))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn stack_logs(app: AppHandle, tail: Option<u32>) -> Result<String, String> {
+    let paths = paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || stack::logs(&paths, tail.unwrap_or(300)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Serialize)]
+struct Credentials {
+    email: String,
+    password: String,
+}
+
+/// The install's own account, so the app signs in without a login screen.
+#[tauri::command]
+fn stack_credentials(app: AppHandle) -> Result<Credentials, String> {
+    let (email, password) = stack::credentials(&paths(&app)?)?;
+    Ok(Credentials { email, password })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let mut init = String::from(ZOOM_SCRIPT);
     #[cfg(debug_assertions)]
-    {
-        // DEVELOPMENT MODE — backend started separately via npm run dev:backend.
-        use tauri::{WebviewUrl, WebviewWindowBuilder};
-
-        tauri::Builder::default()
-            .plugin(tauri_plugin_shell::init())
-            .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![download_to_file, open_devtools])
-            .setup(|app| {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-
-                install_app_menu(app.handle())?;
-
-                const DEVTOOLS_SCRIPT: &str = r#"
-                    document.addEventListener('keydown', function(e) {
-                        if (e.metaKey && e.altKey && e.key === 'i') {
-                            window.__TAURI_INTERNALS__.invoke('open_devtools');
-                        }
-                    });
-                "#;
-                let init = format!("{}\n{}", ZOOM_SCRIPT, DEVTOOLS_SCRIPT);
-
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                    .title("GEMI")
-                    .inner_size(1200.0, 800.0)
-                    .min_inner_size(800.0, 600.0)
-                    .center()
-                    .maximized(true)
-                    .initialization_script(&init)
-                    .build()?;
-
-                Ok(())
-            })
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
-    }
-
+    init.push_str(
+        r#"
+        document.addEventListener('keydown', function(e) {
+            if (e.metaKey && e.altKey && e.key === 'i') {
+                window.__TAURI_INTERNALS__.invoke('open_devtools');
+            }
+        });
+        "#,
+    );
+    // Release builds run the stack themselves; the frontend's StackGate
+    // sets the API/TiTiler URLs once the stack is up.
     #[cfg(not(debug_assertions))]
-    {
-        // PRODUCTION MODE — start the backend sidecar, then create the window
-        // with an initialization_script so __GEMI_BACKEND_URL__ is available
-        // before any JavaScript runs (avoids the race where main.tsx reads the
-        // variable before window.eval() injects it).
-        use sidecar_manager::SidecarManager;
-        use std::sync::Arc;
-        use std::thread;
-        use tauri::{WebviewUrl, WebviewWindowBuilder};
+    init.push_str("\nwindow.__GEMI_MANAGED_STACK__ = true;\n");
 
-        let sidecar = Arc::new(SidecarManager::new());
-        let sidecar_for_exit = Arc::clone(&sidecar);
-        let sidecar_for_state = Arc::clone(&sidecar);
-
-        tauri::Builder::default()
-            .plugin(tauri_plugin_shell::init())
-            .plugin(tauri_plugin_dialog::init())
-            .manage(sidecar_for_state)
-            .invoke_handler(tauri::generate_handler![download_to_file, read_sidecar_log])
-            .setup(move |app| {
-                let app_handle = app.handle().clone();
-
-                install_app_menu(&app_handle)?;
-
-                // Spawn the sidecar — returns the port immediately after the
-                // process starts (does NOT wait for the HTTP server to be ready).
-                let port = match sidecar.start(&app_handle) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        eprintln!("Failed to start backend: {}", e);
-                        0
-                    }
-                };
-
-                let backend_url = if port > 0 {
-                    format!("http://127.0.0.1:{}", port)
-                } else {
-                    String::new()
-                };
-
-                // Inject the URL *before* JS runs so OpenAPI.BASE is correct
-                // from the very first line of main.tsx.  Also inject zoom handler.
-                let init_script = format!(
-                    "window.__GEMI_BACKEND_URL__ = '{}';\n{}",
-                    backend_url, ZOOM_SCRIPT
-                );
-
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                    .title("GEMI")
-                    .inner_size(1200.0, 800.0)
-                    .min_inner_size(800.0, 600.0)
-                    .center()
-                    .maximized(true)
-                    .initialization_script(&init_script)
-                    .build()?;
-
-                // Health check runs in the background — it only logs; the
-                // frontend's own polling handles "backend not ready yet" state.
-                if port > 0 {
-                    let sidecar_clone = Arc::clone(&sidecar);
-                    thread::spawn(move || {
-                        if let Err(e) = sidecar_clone.wait_for_health(60) {
-                            eprintln!("Backend health check failed: {}", e);
-                        } else {
-                            println!("Backend ready on port {}", port);
-                        }
-                    });
-                }
-
-                Ok(())
-            })
-            .on_window_event(move |_window, event| {
-                if let tauri::WindowEvent::Destroyed = event {
-                    if let Err(e) = sidecar_for_exit.stop() {
-                        eprintln!("Failed to stop backend: {}", e);
-                    }
-                }
-            })
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
-    }
+    tauri::Builder::default()
+        // Before other plugins: a second launch focuses the running window
+        // instead of starting a second copy (two copies would race on the
+        // same stack).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(stack::StackLock(std::sync::Mutex::new(())))
+        .invoke_handler(tauri::generate_handler![
+            download_to_file,
+            open_devtools,
+            stack_status,
+            stack_configure,
+            stack_start,
+            stack_stop,
+            stack_logs,
+            stack_credentials,
+        ])
+        .setup(move |app| {
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
+            install_app_menu(app.handle())?;
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title("GEMI")
+                .inner_size(1200.0, 800.0)
+                .min_inner_size(800.0, 600.0)
+                .center()
+                .maximized(true)
+                .initialization_script(&init)
+                .build()?;
+            // Quitting leaves the stack running: jobs in progress keep going
+            // and the next launch is instant. Settings can stop it.
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

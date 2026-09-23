@@ -100,7 +100,7 @@ jobs:
 
       - name: Wait for /healthz
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://localhost:7777/healthz > /dev/null; then
               echo "rest-api healthy"; exit 0
             fi
@@ -175,22 +175,12 @@ jobs:
 
       - name: Wait for /healthz
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://localhost:7777/healthz > /dev/null; then exit 0; fi
             sleep 3
           done
           docker compose -f docker-compose.yaml logs rest-api
           exit 1
-
-      - name: Bootstrap initial superuser
-        run: |
-          # The e2e suite logs in as GEMINI_FIRST_SUPERUSER on every test.
-          # The compose stack does NOT auto-bootstrap that user; we have to
-          # call `geminibase bootstrap-superuser` ourselves once the API
-          # is healthy. The CLI is installed inside the Poetry-managed venv,
-          # so go through `poetry run`.
-          docker compose -f docker-compose.yaml exec -T rest-api \
-            poetry run geminibase bootstrap-superuser
 
       - name: Assert every worker is actually running
         run: |

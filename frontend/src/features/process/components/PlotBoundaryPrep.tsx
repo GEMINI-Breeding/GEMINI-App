@@ -98,6 +98,7 @@ import {
 } from "@/features/process/lib/plotBoundaryEditorState"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
+import { titilerBase } from "@/lib/stack"
 
 const DEFAULT_BUCKET = "gemini"
 
@@ -556,7 +557,7 @@ export function PlotBoundaryPrep({
     queryKey: ["titiler", "tilejson", s3Url],
     queryFn: async () => {
       const res = await fetch(
-        `/titiler/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
+        `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
       )
       if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
       return res.json() as Promise<{

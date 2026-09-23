@@ -1,7 +1,45 @@
 name: Build Desktop App
 
+# The desktop app is a Tauri shell that runs the GEMINIbase stack in Docker
+# (src-tauri/src/stack.rs); there is no bundled backend any more.
+#
+# Platforms (D6): Windows x64, macOS Apple silicon, Linux x64 + arm64 (built
+# on ubuntu-22.04 — the oldest supported glibc — so the .deb runs on 22.04,
+# 24.04 and 26.04).
+#
+# Signing (D10, same accounts as Phytograph). Every signing step is skipped
+# when its secrets are absent (forks, PRs, before setup), and a verify step
+# fails the job if a build that should be signed isn't.
+#   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+#            APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific),
+#            APPLE_TEAM_ID — Tauri's bundler signs, notarizes and staples.
+#   Windows: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (secrets)
+#            and AZURE_CERTIFICATE_PROFILE (repo variable: this app's
+#            certificate profile in the GitHubPackageSigning account).
+#
+# Tags v* also create a draft GitHub release with the installers and
+# SHA256SUMS; publish it by hand after checking it.
+
 on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "backend"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "frontend/src-tauri/**"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
@@ -10,248 +48,55 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            target-triple: x86_64-unknown-linux-gnu
-            artifact-glob: "frontend/src-tauri/target/release/bundle/deb/*.deb"
-            artifact-name: gemi-linux-x86_64
+            name: linux-x86_64
+            artifacts: frontend/src-tauri/target/release/bundle/deb/*.deb
+          - os: ubuntu-22.04-arm
+            name: linux-arm64
+            artifacts: frontend/src-tauri/target/release/bundle/deb/*.deb
           - os: macos-14
-            target-triple: aarch64-apple-darwin
-            artifact-glob: "frontend/src-tauri/target/release/bundle/dmg/*.dmg"
-            artifact-name: gemi-macos-arm64
-          - os: windows-latest
-            target-triple: x86_64-pc-windows-msvc
-            artifact-glob: "frontend/src-tauri/target/release/bundle/inno/*.exe"
-            artifact-name: gemi-windows-x86_64
+            name: macos-arm64
+            artifacts: frontend/src-tauri/target/release/bundle/dmg/*.dmg
+          - os: windows-2022
+            name: windows-x86_64
+            artifacts: frontend/src-tauri/target/release/bundle/inno/*.exe
 
     runs-on: ${{ matrix.os }}
-    name: Build (${{ matrix.target-triple }})
+    name: Build (${{ matrix.name }})
+    timeout-minutes: 150 # headroom for Apple's notary queue
+    env:
+      # Secrets can't be tested in `if:` directly.
+      HAS_APPLE: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
 
     steps:
-      # ── Free disk space (Linux runners ship with ~14 GB free; PyTorch + Rust
-      #    build artifacts + PyInstaller output can exceed that) ─────────────────
-      - name: Free disk space (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/lib/jvm
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/lib/mono
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /home/linuxbrew/.linuxbrew
-          sudo rm -rf /opt/az
-          sudo rm -rf /usr/local/aws-cli
-          sudo rm -rf /usr/local/aws-sam-cli
-          sudo rm -rf /usr/share/miniconda
-          sudo docker image prune --all --force || true
-          df -h
-
-      - name: Free disk space (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Remove large pre-installed toolchains and SDKs not needed for this build
-          Remove-Item -Recurse -Force "C:\Program Files\dotnet"               -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files (x86)\Microsoft SDKs" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Microsoft SDKs"       -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Android"              -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\CodeQL"     -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\go"         -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Ruby"       -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Miniconda"                          -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\ProgramData\Miniconda3"             -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\ProgramData\chocolatey"             -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\PostgreSQL"           -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\MySQL"                -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\MongoDB"              -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files (x86)\GitHub CLI"     -ErrorAction SilentlyContinue
-          # Delete uv and pip caches by path — uv isn't installed yet at this point
-          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\uv\cache"            -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\pip\Cache"           -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$env:TEMP\torch_extensions"            -ErrorAction SilentlyContinue
-          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
-
-      # ── Checkout ─────────────────────────────────────────────────────────────
-      - name: Checkout (with submodules)
+      - name: Checkout (with the GEMINIbase submodule — its compose file ships)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
 
-      # ── Vendor submodule patches ──────────────────────────────────────────────
-      - name: Apply vendor submodule patches
+      - name: Version
+        id: version
         shell: bash
         run: |
-          # patches/AgRowStitch.py: fixes OpenCV 4.13 SIGSEGV (match.H = None → np.zeros)
-          if [ -f backend/patches/AgRowStitch.py ] && [ -d backend/vendor/AgRowStitch ]; then
-            echo "[build] Applying patch: AgRowStitch.py (OpenCV 4.13 MatchesInfo fix)"
-            cp backend/patches/AgRowStitch.py backend/vendor/AgRowStitch/AgRowStitch.py
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF#refs/tags/v}"
+          else
+            v="$(jq -r .version frontend/src-tauri/tauri.conf.json)"
           fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          tmp=$(mktemp)
+          jq --arg v "$v" '.version = $v' frontend/src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" frontend/src-tauri/tauri.conf.json
 
-      # ── System dependencies ───────────────────────────────────────────────────
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            pkg-config
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libssl-dev pkg-config
 
-      # ── Python + uv ───────────────────────────────────────────────────────────
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: "backend/pyproject.toml"
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # PyInstaller on macOS needs a framework Python to bundle _internal/Python.
-      # setup-python and uv's managed Python are non-framework builds — only
-      # Homebrew's Python is a framework build on macOS ARM runners.
-      # We store the path as a step output (not GITHUB_ENV) so it only applies
-      # to steps that explicitly reference it, avoiding "externally managed"
-      # errors when uv pip install tries to target Homebrew Python directly.
-      - name: Locate Homebrew framework Python (macOS)
-        id: brew-python
-        if: runner.os == 'macOS'
-        run: |
-          brew install python@3.12 2>/dev/null || true
-          BREW_PY="$(brew --prefix python@3.12)/bin/python3.12"
-          echo "path=$BREW_PY" >> "$GITHUB_OUTPUT"
-          echo "Using Python: $BREW_PY ($($BREW_PY --version))"
-
-      # Cache the full venv — keyed on pyproject.toml, uv.lock, AND submodule
-      # commit hashes so any vendor update (AgRowStitch, LightGlue, bin_to_images)
-      # properly invalidates the cache.
-      - name: Get submodule hashes for cache key
-        id: submodule-hashes
-        shell: bash
-        run: |
-          HASHES=$(git submodule foreach --quiet --recursive 'git rev-parse HEAD' | tr '\n' ':')
-          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Python venv
-        uses: actions/cache@v4
-        with:
-          path: backend/.venv
-          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock', '.github/workflows/build.yml') }}-${{ steps.submodule-hashes.outputs.hashes }}
-
-      - name: Install Python dependencies
-        working-directory: backend
-        shell: bash
-        run: uv sync
-        env:
-          # macOS only: use the Homebrew framework Python so the venv's Python
-          # is a framework build (required for PyInstaller to bundle _internal/Python).
-          UV_PYTHON: ${{ steps.brew-python.outputs.path }}
-
-      # ── farm-ng-core: macOS ARM has no pre-built wheels, build from source ────
-      # Linux has manylinux wheels on PyPI. macOS ARM does not — clone v2.3.0,
-      # patch out -Werror, build from source (matches the previous app's approach).
-      # Windows: also attempt a source build; continue-on-error so failures don't
-      # block the rest of the Windows build.
-      - name: Build farm-ng-core from source (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git /tmp/farm-ng-core
-          cd /tmp/farm-ng-core
-          git submodule update --init --recursive
-          sed -i '' 's/"-Werror",//g' setup.py
-          cd $GITHUB_WORKSPACE/backend
-          uv pip install --python .venv setuptools farm-ng-package pybind11 cmake ninja scikit-build
-          uv pip install --python .venv --no-build-isolation /tmp/farm-ng-core
-
-      # farm-ng-core: Windows — MSVC cannot build it (uses cxxabi.h, GCC/Clang only).
-      # MinGW also fails because Visual Studio's environment overrides CC/CXX before uv runs.
-      # On Windows, .bin extraction runs via Docker at runtime instead (see bin_to_images).
-
-      # ── Vendor packages ───────────────────────────────────────────────────────
-      # Always run so submodule commit changes are picked up even on a cache hit.
-      # uv pip install skips packages that are already up-to-date.
-      - name: Install vendor packages (Linux)
-        if: runner.os == 'Linux'
-        working-directory: backend
-        shell: bash
-        run: |
-          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
-          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          uv pip install farm-ng-amiga
-          # kornia + kornia_rs: dependencies of backend/bin_to_images for Amiga .bin extraction
-          uv pip install kornia kornia_rs
-
-      - name: Install vendor packages (macOS)
-        if: runner.os == 'macOS'
-        working-directory: backend
-        shell: bash
-        run: |
-          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
-          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          uv pip install --no-build-isolation farm-ng-amiga
-          # kornia + kornia_rs: dependencies of backend/bin_to_images for Amiga .bin extraction
-          uv pip install kornia kornia_rs
-
-      - name: Install vendor packages (Windows)
-        if: runner.os == 'Windows'
-        working-directory: backend
-        shell: bash
-        run: |
-          # Install PyTorch with CUDA support — Windows default wheel is CPU-only.
-          #
-          # --reinstall is REQUIRED, not cosmetic. The venv is restored from cache,
-          # then `uv sync` reinstalls the CPU torch pinned in uv.lock — which
-          # overwrites torch_cpu.dll / c10.dll / torch_python.dll but leaves the
-          # CUDA DLLs from the previous run's cu128 install behind (they aren't in
-          # the CPU wheel's RECORD). Without --reinstall, the unpinned `torch`
-          # requirement is then considered already satisfied and nothing is
-          # installed, shipping CUDA DLLs from one torch build alongside CPU DLLs
-          # from another. torch_cuda.dll links against torch_cpu.dll and c10.dll,
-          # so the mismatch surfaces at import as:
-          #   OSError: [WinError 127] ... Error loading "torch_cuda.dll"
-          uv pip install --reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
-          [ -d vendor/AgRowStitch ]  && uv pip install -e vendor/AgRowStitch --no-build-isolation
-          [ -d vendor/LightGlue ]    && uv pip install vendor/LightGlue
-          # farm-ng-amiga: no Windows wheels and farm-ng-core can't build on MSVC; non-fatal
-          uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
-
-      # Fail fast if the venv ended up with CPU torch (or a CPU/CUDA mix).
-      # A mix still imports on the runner — torch tolerates ERROR_MOD_NOT_FOUND
-      # (126) for the absent GPU driver — but raises ERROR_PROC_NOT_FOUND (127)
-      # on a user's machine when torch_cuda.dll binds against mismatched
-      # torch_cpu.dll / c10.dll. Catch it here, not in a shipped installer.
-      - name: Verify PyTorch is a CUDA build (Windows)
-        if: runner.os == 'Windows'
-        working-directory: backend
-        shell: bash
-        run: |
-          uv run --no-sync python -c "import torch,sys; print('torch',torch.__version__,'| cuda build:',torch.version.cuda); sys.exit(0 if (torch.version.cuda and '+cu' in torch.__version__) else 'FATAL: torch is not a consistent CUDA build - the cu128 install did not take')"
-
-      # Drop the uv download cache — the venv is already built and cached separately.
-      # On Linux this can be 1-3 GB of wheel/sdist downloads we no longer need.
-      - name: Clean uv cache (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: uv cache clean || true
-
-      - name: Clean uv cache (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          uv cache clean | Out-Null
-          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
-
-      # ── Node.js ───────────────────────────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
@@ -261,119 +106,147 @@ jobs:
         working-directory: frontend
         run: npm ci --legacy-peer-deps
 
-      # ── Rust ──────────────────────────────────────────────────────────────────
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo build artifacts
-        uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@v2
         with:
           workspaces: frontend/src-tauri
-          prefix-key: "v2"
+          prefix-key: "v3"
 
-      # ── Build PyInstaller backend sidecar ─────────────────────────────────────
-      # Cache keyed on Python deps + spec + app source + submodule hashes.
-      # On a cache hit the entire PyInstaller build is skipped (~1-2 h saved).
-      - name: Cache PyInstaller bundle
-        id: cache-bundle
-        uses: actions/cache@v4
-        with:
-          path: frontend/src-tauri/binaries/gemi-backend
-          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**', '.github/workflows/build.yml') }}-${{ steps.submodule-hashes.outputs.hashes }}
+      - name: Rust unit tests (stack manager)
+        working-directory: frontend/src-tauri
+        run: cargo test --locked
 
-      - name: Build backend sidecar (Unix)
-        if: runner.os != 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
-        working-directory: backend
-        shell: bash
-        run: |
-          # --no-sync is REQUIRED: plain `uv run` re-syncs the venv to uv.lock
-          # first, which uninstalls everything added by `uv pip install` after
-          # `uv sync` — the cu128 torch on Windows, and the vendored
-          # AgRowStitch / LightGlue / farm-ng-amiga on every platform.
-          uv run --no-sync pyinstaller --clean gemi-backend.spec
-          echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
-          mkdir -p ../frontend/src-tauri/binaries/gemi-backend
-          cp -r dist/gemi-backend/. ../frontend/src-tauri/binaries/gemi-backend/
-          # Free space before the Rust build — dist/ and venv are no longer needed
-          rm -rf dist build .venv
-          df -h
-
-      - name: Build backend sidecar (Windows)
-        if: runner.os == 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
-        working-directory: backend
-        shell: pwsh
-        run: |
-          # --no-sync is REQUIRED — see the Unix step above. Without it the venv
-          # is reverted to uv.lock's CPU torch here, leaving 2.11.0+cu128 CUDA
-          # DLLs beside 2.12.1+cpu CPU DLLs for PyInstaller to bundle. That mix
-          # is what raises [WinError 127] loading torch_cuda.dll on user machines.
-          uv run --no-sync pyinstaller --clean gemi-backend.spec
-          New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries/gemi-backend | Out-Null
-          Copy-Item -Path dist/gemi-backend/* -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse -Force
-          $size = (Get-ChildItem -Path dist/gemi-backend -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
-          # Free space before the Rust build
-          Remove-Item -Recurse -Force dist, build, .venv -ErrorAction SilentlyContinue
-          # Also nuke npm cache — not needed after frontend deps are installed
-          npm cache clean --force 2>$null
-          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
-
-      # ── macOS DMG tooling ─────────────────────────────────────────────────────
-      # Tauri's bundle_dmg.sh requires `create-dmg` which is not pre-installed
-      # on GitHub Actions macOS runners.
+      # ── macOS ────────────────────────────────────────────────────────────
       - name: Install create-dmg (macOS)
         if: runner.os == 'macOS'
         run: brew install create-dmg
 
-      # ── Build Tauri app ───────────────────────────────────────────────────────
-      # Windows uses --no-bundle to skip NSIS (which has a ~2 GB data-block
-      # mmap limit that CUDA torch DLLs exceed). Inno Setup runs next instead.
-      - name: Build Tauri app (Unix)
-        if: runner.os != 'Windows'
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         working-directory: frontend
-        run: npx tauri build
+        env:
+          # Empty secrets → ad-hoc signature ("-"): runs after right-click →
+          # Open, instead of the "app is damaged" Gatekeeper error.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx tauri build --ci
+
+      - name: Verify signature and notarization (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          app=$(ls -d frontend/src-tauri/target/release/bundle/macos/*.app)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          if [ "$HAS_APPLE" != "true" ]; then
+            echo "::warning::Not signed: APPLE_* secrets are not set (ad-hoc build)."
+            exit 0
+          fi
+          codesign -dvv "$app" 2>&1 | tee /dev/stderr | grep -q "Authority=Developer ID Application"
+          spctl --assess --type execute --verbose=4 "$app" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"
+          xcrun stapler validate "$app"
+
+      # ── Linux ────────────────────────────────────────────────────────────
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        working-directory: frontend
         env:
           NO_AT_BRIDGE: "1"
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C debuginfo=0"
-          # Ad-hoc signing prevents macOS "app is damaged" Gatekeeper error
-          # for builds without an Apple Developer certificate.
-          # Users will see "unidentified developer" instead; right-click → Open bypasses it.
-          APPLE_SIGNING_IDENTITY: "-"
+        run: npx tauri build --ci --bundles deb
 
-      - name: Build Tauri app (Windows — no bundle)
+      # ── Windows ──────────────────────────────────────────────────────────
+      # Tauri builds the exe; Inno Setup makes the installer (same AppId as
+      # v0.0.5, so it upgrades that install in place — D1).
+      - name: Build (Windows)
         if: runner.os == 'Windows'
         working-directory: frontend
-        run: npx tauri build --no-bundle
-        env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C debuginfo=0"
+        run: npx tauri build --ci --no-bundle
 
-      - name: Download VC++ Redistributable (Windows)
+      - name: Sign app.exe (Windows)
+        if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://wus2.codesigning.azure.net/
+          trusted-signing-account-name: GitHubPackageSigning
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: frontend/src-tauri/target/release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Create installer (Windows — Inno Setup)
         if: runner.os == 'Windows'
         working-directory: frontend/src-tauri
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
-            -OutFile "vc_redist.x64.exe" -UseBasicParsing
-          Write-Host "VC++ Redist size: $([math]::Round((Get-Item vc_redist.x64.exe).Length / 1MB, 1)) MB"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" inno-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Create installer (Windows — Inno Setup)
+      - name: Sign installer (Windows)
+        if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://wus2.codesigning.azure.net/
+          trusted-signing-account-name: GitHubPackageSigning
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: frontend/src-tauri/target/release/bundle/inno
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify signatures (Windows)
         if: runner.os == 'Windows'
-        working-directory: frontend
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path src-tauri\target\release\bundle\inno | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" src-tauri\inno-setup.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $size = (Get-Item src-tauri\target\release\bundle\inno\*.exe).Length / 1MB
-          Write-Host "Installer size: $([math]::Round($size, 1)) MB"
+          if ($env:HAS_AZURE -ne "true") {
+            Write-Output "::warning::Not signed: AZURE_* secrets are not set."
+            exit 0
+          }
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          $files = @("frontend\src-tauri\target\release\app.exe") +
+            (Get-ChildItem frontend\src-tauri\target\release\bundle\inno\*.exe).FullName
+          foreach ($f in $files) {
+            # /tw: a missing timestamp is fatal — the certificate lives 72 h.
+            & $signtool.FullName verify /pa /all /tw $f
+            if ($LASTEXITCODE -ne 0) { throw "signature check failed: $f" }
+          }
 
-      # ── Upload installer artifact ─────────────────────────────────────────────
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-glob }}
+          name: gemi-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*

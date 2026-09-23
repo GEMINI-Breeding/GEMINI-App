@@ -14,14 +14,20 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     },
     "withGlobalTauri": true
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "dmg", "nsis"],
+    "targets": [
+      "deb",
+      "dmg",
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -30,7 +36,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "binaries/gemi-backend": "gemi-backend"
+      "../../backend/gemini/pipeline/docker-compose.prod.yaml": "stack/docker-compose.yaml"
     },
     "linux": {
       "deb": {

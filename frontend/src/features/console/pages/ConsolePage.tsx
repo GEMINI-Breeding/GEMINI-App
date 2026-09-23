@@ -1,9 +1,9 @@
-import { invoke } from "@tauri-apps/api/core"
 import { Check, Copy } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import { Button } from "@/components/ui/button"
 import { getToken } from "@/lib/auth"
+import { isManagedStack, stackLogs } from "@/lib/stack"
 
 interface LogLine {
   level: string
@@ -23,7 +23,7 @@ const LEVEL_COLOR: Record<string, string> = {
 
 export function ConsolePage() {
   const [lines, setLines] = useState<LogLine[]>([])
-  const [sidecarLog, setSidecarLog] = useState<string>("")
+  const [stackLog, setStackLog] = useState<string>("")
   const [autoScroll, setAutoScroll] = useState(true)
   const [filter, setFilter] = useState("")
   const [source, setSource] = useState("")
@@ -56,25 +56,28 @@ export function ConsolePage() {
           const data: LogLine[] = await res.json()
           setLines(data)
           setStatus("ok")
-          setSidecarLog("") // clear fallback log once connected
+          setStackLog("") // clear fallback log once connected
         } else {
           setStatus("error")
-          fetchSidecarLog()
+          fetchStackLog()
         }
       } catch {
         if (active) {
           setStatus("error")
-          fetchSidecarLog()
+          fetchStackLog()
         }
       }
     }
 
-    const fetchSidecarLog = async () => {
+    // The API is down, so its log stream is too: in the desktop app, show
+    // the services' own logs from Docker instead.
+    const fetchStackLog = async () => {
+      if (!isManagedStack()) return
       try {
-        const text = await invoke<string>("read_sidecar_log")
-        if (active) setSidecarLog(text)
+        const text = await stackLogs(200)
+        if (active) setStackLog(text)
       } catch {
-        // not in a Tauri production build — ignore
+        // Docker itself unreachable — the stack gate explains that.
       }
     }
 
@@ -210,13 +213,13 @@ export function ConsolePage() {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto rounded-lg border border-border bg-zinc-950 p-3 font-mono text-xs"
       >
-        {status === "error" && sidecarLog ? (
+        {status === "error" && stackLog ? (
           <div>
             <p className="text-yellow-500 italic mb-2">
-              Backend unreachable — showing sidecar startup log:
+              GEMINI API unreachable — showing the services' logs:
             </p>
             <pre className="text-zinc-300 whitespace-pre-wrap break-all">
-              {sidecarLog}
+              {stackLog}
             </pre>
           </div>
         ) : filtered.length === 0 ? (
