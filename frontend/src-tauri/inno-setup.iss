@@ -21,7 +21,7 @@
   #define AppVersion "0.0.5"
 #endif
 #define AppPublisher "GEMI"
-#define AppExeName   "app.exe"
+#define AppExeName   "gemi.exe"
 #define AppId        "com.gemi.app"
 
 [Setup]
@@ -64,8 +64,10 @@ Source: "..\..\backend\gemini\pipeline\docker-compose.prod.yaml"; \
   Flags: ignoreversion
 
 [InstallDelete]
-; v0.0.5's bundled Python backend (~4 GB of program files, not user data).
+; v0.0.5's program files (not user data): its bundled Python backend
+; (~4 GB) and its executable, which had the generic name app.exe.
 Type: filesandordirs; Name: "{app}\gemi-backend"
+Type: files; Name: "{app}\app.exe"
 
 [Icons]
 Name: "{group}\{#AppName}";    Filename: "{app}\{#AppExeName}"

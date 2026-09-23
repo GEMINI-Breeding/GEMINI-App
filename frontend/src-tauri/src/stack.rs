@@ -446,6 +446,105 @@ pub fn logs(paths: &Paths, tail: u32) -> Result<String, String> {
     ))
 }
 
+// ── Moving the data folder (Settings, D5) ──────────────────────────────────
+
+/// The pinned db image: Debian with coreutils, already pulled. File work on
+/// the data folder runs in it as root, because on Linux the Postgres files
+/// belong to the container's postgres user and the desktop user can't read
+/// them. (Docker Desktop on macOS/Windows hides ownership; this works there
+/// too.)
+fn tools_image() -> String {
+    format!("ghcr.io/gemini-breeding/geminibase-db:{}", STACK_VERSION.trim())
+}
+
+fn in_container(mounts: &[(&Path, &str)], script: &str) -> Result<String, String> {
+    let mut cmd = docker().map_err(|_| "Docker isn't installed.".to_string())?;
+    cmd.args(["run", "--rm", "--user", "0", "--entrypoint", "sh"]);
+    for (host, inside) in mounts {
+        cmd.arg("-v").arg(format!("{}:{inside}", host.display()));
+    }
+    let out = cmd.arg(tools_image()).arg("-c").arg(script).output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// (files, KiB) under a folder, counted inside a container.
+fn tally(dir: &Path) -> Result<(u64, u64), String> {
+    let out = in_container(&[(dir, "/d")], "cd /d && find . | wc -l && du -sk . | cut -f1")?;
+    let mut nums = out.split_whitespace().map(|n| n.parse::<u64>().unwrap_or(0));
+    Ok((nums.next().unwrap_or(0), nums.next().unwrap_or(0)))
+}
+
+/// Size of the current data folder in bytes (Settings shows it).
+pub fn data_size(config: &StackConfig) -> Result<u64, String> {
+    tally(&config.data_dir).map(|(_, kib)| kib * 1024)
+}
+
+/// Why `to` can't receive the data, if it can't.
+pub fn check_move_target(from: &Path, to: &Path) -> Result<(), String> {
+    if !to.is_absolute() {
+        return Err("Choose a full folder path.".into());
+    }
+    if to.starts_with(from) || from.starts_with(to) {
+        return Err("The new folder can't be inside the current one, or contain it.".into());
+    }
+    if to.exists() {
+        let mut entries = std::fs::read_dir(to).map_err(|e| e.to_string())?;
+        // Finder/Explorer droppings don't count.
+        if entries.any(|e| {
+            e.map(|e| !matches!(e.file_name().to_str(), Some(".DS_Store" | "desktop.ini")))
+                .unwrap_or(true)
+        }) {
+            return Err("Choose an empty folder: GEMINI won't mix its data with other files.".into());
+        }
+    }
+    Ok(())
+}
+
+/// Copy the stack's data to `to`, verify the copy, switch to it and start
+/// again. The old folder is left exactly as it was — the user deletes it
+/// once they're satisfied (nothing is ever deleted for them, D1).
+pub fn move_data(app: &AppHandle, paths: &Paths, to: PathBuf) -> Result<StackConfig, String> {
+    let config = load_config(paths).ok_or("GEMINI isn't set up yet.")?;
+    let from = config.data_dir.clone();
+    check_move_target(&from, &to)?;
+    std::fs::create_dir_all(&to).map_err(|e| format!("Can't create {}: {e}", to.display()))?;
+
+    emit(app, "start", "Measuring the data…");
+    let (files, kib) = tally(&from)?;
+    let free = fs2::available_space(&to).map_err(|e| e.to_string())?;
+    if free < kib * 1024 + (1 << 30) {
+        return Err(format!(
+            "Not enough space: the data is {:.1} GB, and {} has {:.1} GB free.",
+            (kib * 1024) as f64 / 1e9,
+            to.display(),
+            free as f64 / 1e9
+        ));
+    }
+
+    emit(app, "start", "Stopping GEMINI services…");
+    stop(paths)?;
+    emit(app, "start", format!("Copying {files} files ({:.1} GB)…", (kib * 1024) as f64 / 1e9));
+    in_container(&[(&from, "/from:ro"), (&to, "/to")], "cp -a /from/. /to/")?;
+    let copied = tally(&to)?;
+    // du can differ by a few blocks across filesystems; the file count can't.
+    if copied.0 != files || copied.1 + 1024 < kib {
+        // Keep using the old folder; the partial copy is the user's to remove.
+        let _ = start(app, paths, &config);
+        return Err(format!(
+            "The copy doesn't match ({} of {files} files). GEMINI is still using {}.",
+            copied.0,
+            from.display()
+        ));
+    }
+    let moved = configure(paths, to)?;
+    start(app, paths, &moved)?;
+    Ok(moved)
+}
+
 /// The install's own account, for signing in without a login screen.
 pub fn credentials(paths: &Paths) -> Result<(String, String), String> {
     let env = parse_env(&std::fs::read_to_string(paths.env_file()).map_err(|e| e.to_string())?);
@@ -570,6 +669,24 @@ mod tests {
     fn configure_rejects_relative_paths() {
         let paths = Paths { config_dir: "/nonexistent".into(), compose_file: "/x".into() };
         assert!(configure(&paths, "relative/dir".into()).is_err());
+    }
+
+    #[test]
+    fn move_target_rules() {
+        let tmp = std::env::temp_dir().join(format!("gemini-move-test-{}", random_secret()));
+        let from = tmp.join("data");
+        std::fs::create_dir_all(&from).unwrap();
+        assert!(check_move_target(&from, Path::new("relative")).is_err());
+        assert!(check_move_target(&from, &from.join("inner")).is_err());
+        assert!(check_move_target(&from, &tmp).is_err());
+        assert!(check_move_target(&from, &tmp.join("new")).is_ok()); // doesn't exist yet
+        let empty = tmp.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::write(empty.join(".DS_Store"), "").unwrap();
+        assert!(check_move_target(&from, &empty).is_ok());
+        std::fs::write(empty.join("thesis.docx"), "").unwrap();
+        assert!(check_move_target(&from, &empty).is_err());
+        std::fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

@@ -7,6 +7,8 @@
  * development builds none of this applies: requests go through Vite's
  * proxy to the stack from `npm run dev:backend`.
  */
+import { invoke as tauriInvoke } from "@tauri-apps/api/core"
+
 import { OpenAPI } from "@/client/core/OpenAPI"
 
 export type DockerStatus =
@@ -50,10 +52,9 @@ export function isManagedStack(): boolean {
   return typeof window !== "undefined" && w().__GEMI_MANAGED_STACK__ === true
 }
 
-async function invoke<T>(cmd: string, args?: Record<string, unknown>) {
-  const { invoke } = await import("@tauri-apps/api/core")
-  return invoke<T>(cmd, args)
-}
+// Safe to import in the browser: it only touches Tauri when called.
+const invoke = <T>(cmd: string, args?: Record<string, unknown>) =>
+  tauriInvoke<T>(cmd, args)
 
 export const stackStatus = () => invoke<StackStatus>("stack_status")
 export const configureStack = (dataDir: string) =>
@@ -62,6 +63,12 @@ export const startStack = () => invoke<void>("stack_start")
 export const stopStack = () => invoke<void>("stack_stop")
 export const stackLogs = (tail?: number) =>
   invoke<string>("stack_logs", { tail })
+export const restartStack = () => invoke<void>("stack_restart")
+export const stopStackAndQuit = () => invoke<void>("stack_stop_and_quit")
+export const stackDataSize = () => invoke<number>("stack_data_size")
+/** Copy the data to `to`, verify, switch and restart; the old folder is kept. */
+export const moveStackData = (to: string) =>
+  invoke<StackConfig>("stack_move_data", { to })
 export const stackCredentials = () =>
   invoke<{ email: string; password: string }>("stack_credentials")
 

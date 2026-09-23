@@ -173,7 +173,7 @@ jobs:
         working-directory: frontend
         run: npx tauri build --ci --no-bundle
 
-      - name: Sign app.exe (Windows)
+      - name: Sign gemi.exe (Windows)
         if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
         uses: azure/trusted-signing-action@v0
         with:
@@ -223,7 +223,7 @@ jobs:
           }
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1
-          $files = @("frontend\src-tauri\target\release\app.exe") +
+          $files = @("frontend\src-tauri\target\release\gemi.exe") +
             (Get-ChildItem frontend\src-tauri\target\release\bundle\inno\*.exe).FullName
           foreach ($f in $files) {
             # /tw: a missing timestamp is fatal — the certificate lives 72 h.
@@ -238,6 +238,82 @@ jobs:
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
           retention-days: 30
+
+  smoke-linux:
+    # The installed .deb, driven through its real UI (tauri-driver +
+    # WebKitWebDriver under xvfb) against the real published stack:
+    # frontend/tests/desktop/smoke.mjs. GitHub's macOS runners have no
+    # Docker and its Windows runners only run Windows containers, so this
+    # is Linux-only; macOS/Windows get a manual release check.
+    name: Packaged app (${{ matrix.os }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Can an install pull the pinned images?
+        id: images
+        run: |
+          tag=$(tr -d '[:space:]' < frontend/src-tauri/stack-version)
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:gemini-breeding/geminibase-db:pull" | jq -r .token)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "https://ghcr.io/v2/gemini-breeding/geminibase-db/manifests/$tag")
+          if [ "$code" = 200 ]; then
+            echo "public=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping the packaged-app smoke: ghcr.io/gemini-breeding images at $tag aren't publicly pullable (HTTP $code). Set the packages to Public."
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.images.outputs.public == 'true'
+        with:
+          name: gemi-linux-x86_64
+          path: dist
+
+      - name: Install the app, WebKitWebDriver and xvfb
+        if: steps.images.outputs.public == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/*.deb webkit2gtk-driver xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.images.outputs.public == 'true'
+
+      - name: Install tauri-driver
+        if: steps.images.outputs.public == 'true'
+        run: cargo install tauri-driver --locked
+
+      - uses: actions/setup-node@v4
+        if: steps.images.outputs.public == 'true'
+        with:
+          node-version: "22"
+
+      - name: Smoke test
+        if: steps.images.outputs.public == 'true'
+        env:
+          GEMINI_APP: /usr/bin/gemi
+          GEMINI_TEST_DATA_DIR: ${{ runner.temp }}/gemini-data
+        run: |
+          set -euo pipefail
+          wd="$RUNNER_TEMP/wd"
+          mkdir -p "$wd"
+          npm install --prefix "$wd" --no-save --silent webdriverio@9
+          cp frontend/tests/desktop/smoke.mjs "$wd/"
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1000x24 &
+          tauri-driver --port 4444 &
+          sleep 2
+          node "$wd/smoke.mjs"
+
+      - name: Stack logs
+        if: failure()
+        run: docker compose -p gemini logs --no-color --tail 200 || true
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

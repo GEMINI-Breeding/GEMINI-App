@@ -160,6 +160,54 @@ async fn stack_logs(app: AppHandle, tail: Option<u32>) -> Result<String, String>
         .map_err(|e| e.to_string())?
 }
 
+/// Stop then start the services (Settings → Restart).
+#[tauri::command]
+async fn stack_restart(app: AppHandle) -> Result<(), String> {
+    let paths = paths(&app)?;
+    let config = stack::load_config(&paths).ok_or("GEMINI isn't set up yet.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let lock = app.state::<stack::StackLock>();
+        let _guard = lock.0.lock().map_err(|e| e.to_string())?;
+        stack::stop(&paths)?;
+        stack::start(&app, &paths, &config)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stop the services and quit (Settings). The next launch starts them.
+#[tauri::command]
+async fn stack_stop_and_quit(app: AppHandle) -> Result<(), String> {
+    let paths = paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || stack::stop(&paths))
+        .await
+        .map_err(|e| e.to_string())??;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+async fn stack_data_size(app: AppHandle) -> Result<u64, String> {
+    let paths = paths(&app)?;
+    let config = stack::load_config(&paths).ok_or("GEMINI isn't set up yet.")?;
+    tauri::async_runtime::spawn_blocking(move || stack::data_size(&config))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Move the data folder (Settings, D5). The old folder is kept.
+#[tauri::command]
+async fn stack_move_data(app: AppHandle, to: String) -> Result<stack::StackConfig, String> {
+    let paths = paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let lock = app.state::<stack::StackLock>();
+        let _guard = lock.0.lock().map_err(|e| e.to_string())?;
+        stack::move_data(&app, &paths, to.into())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(serde::Serialize)]
 struct Credentials {
     email: String,
@@ -215,6 +263,10 @@ pub fn run() {
             stack_stop,
             stack_logs,
             stack_credentials,
+            stack_restart,
+            stack_stop_and_quit,
+            stack_data_size,
+            stack_move_data,
         ])
         .setup(move |app| {
             app.handle().plugin(

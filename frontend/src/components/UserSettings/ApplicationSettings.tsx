@@ -1,39 +1,16 @@
 import {
   AlertCircle,
   CheckCircle,
+  HardDrive,
   Info,
   RefreshCw,
-  Server,
-  Settings,
 } from "lucide-react"
 import { useCallback, useState } from "react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
 import { Button } from "@/components/ui/button"
 import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
-
-// Phase 12 will rewire data-root + Docker resource limits onto the GEMINIbase
-// `/api/utils/...` surface. Until then the legacy `/api/v1/settings/*` endpoints
-// don't exist on the new backend, so the General + Docker tabs render a notice
-// instead of issuing dead fetches that explode the page.
-
-function PendingPanel({ title }: { title: string }) {
-  return (
-    <div className="max-w-xl flex flex-col gap-3">
-      <h2 className="text-lg font-medium">{title}</h2>
-      <p className="text-sm text-muted-foreground">
-        Application-level settings move to the GEMINIbase backend in a later
-        migration phase. For now, configure data root and Docker resource limits
-        via environment variables in
-        <code className="mx-1 px-1 rounded bg-muted">
-          backend/gemini/pipeline/.env
-        </code>
-        and the root{" "}
-        <code className="mx-1 px-1 rounded bg-muted">docker-compose.yaml</code>.
-      </p>
-    </div>
-  )
-}
+import { StackSettings } from "./StackSettings"
 
 type UpdateStatus =
   | { kind: "idle" }
@@ -118,17 +95,16 @@ function AboutSettings() {
 const SETTINGS_NAV_GROUPS = [
   {
     items: [
-      { id: "general", label: "General", icon: Settings },
-      { id: "docker", label: "Docker", icon: Server },
+      { id: "data", label: "Data & services", icon: HardDrive },
       { id: "about", label: "About", icon: Info },
     ],
   },
 ] as const
 
-type SettingsSection = "general" | "docker" | "about"
+type SettingsSection = "data" | "about"
 
 const ApplicationSettings = () => {
-  const [active, setActive] = useState<SettingsSection>("general")
+  const [active, setActive] = useState<SettingsSection>("data")
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -138,8 +114,7 @@ const ApplicationSettings = () => {
         onSelect={(id) => setActive(id as SettingsSection)}
       />
       <div className="flex-1 overflow-auto px-6 py-6">
-        {active === "general" && <PendingPanel title="General" />}
-        {active === "docker" && <PendingPanel title="Docker" />}
+        {active === "data" && <StackSettings />}
         {active === "about" && <AboutSettings />}
       </div>
     </div>
