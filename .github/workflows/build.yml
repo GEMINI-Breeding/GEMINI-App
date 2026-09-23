@@ -140,7 +140,8 @@ jobs:
           for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             [ -n "${!v}" ] || unset "$v"
           done
-          npx tauri build --ci
+          # app + dmg: with dmg alone Tauri deletes the .app the verify step checks.
+          npx tauri build --ci --bundles app,dmg
 
       - name: Verify signature and notarization (macOS)
         if: runner.os == 'macOS'
