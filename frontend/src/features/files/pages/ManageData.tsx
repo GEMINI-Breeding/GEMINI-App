@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Eye,
   File,
+  Pencil,
   Trash2,
 } from "lucide-react"
 import { useState } from "react"
@@ -46,6 +47,7 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { idAsString } from "@/features/admin/lib/ids"
 import useCustomToast from "@/hooks/useCustomToast"
+import { EditUploadDialog } from "../components/EditUploadDialog"
 import {
   isViewableCsv,
   MetadataViewerDialog,
@@ -485,6 +487,7 @@ function DatasetRow({
   const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
   const datasetId = idAsString(dataset.id)
   const datasetName = dataset.dataset_name ?? "(unnamed)"
+  const [editing, setEditing] = useState(false)
 
   // `data_type_label` is written by `createOrGetDatasetForUpload`
   // when the dataset is created (since migration 0007). Older
@@ -597,6 +600,24 @@ function DatasetRow({
         </span>
       )}
       <span className="flex-1" />
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => setEditing(true)}
+        title="Edit upload (season, site, population, date, platform, sensor)"
+        aria-label="Edit upload"
+        data-testid={`manage-data-edit-dataset-${dataset.dataset_name ?? ""}`}
+        className="h-6 w-6 p-0"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      <EditUploadDialog
+        datasetId={datasetId}
+        datasetName={datasetName}
+        experimentId={experimentId}
+        open={editing}
+        onClose={() => setEditing(false)}
+      />
       <LoadingButton
         size="sm"
         variant="ghost"

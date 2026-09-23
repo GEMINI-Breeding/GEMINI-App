@@ -213,6 +213,19 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
             if (p.status === "completed" || p.status === "error") return p
 
             if (evt.terminal) {
+              if (evt.status === "COMPLETED" && p.nextRunIds?.length) {
+                // More jobs to wait for: follow the next one (the
+                // subscription effect picks up the new runId).
+                const [next, ...rest] = p.nextRunIds
+                const total = p.items.length || rest.length + 2
+                return {
+                  ...p,
+                  runId: next,
+                  nextRunIds: rest,
+                  status: "running",
+                  message: `Extracting file ${total - rest.length} of ${total}`,
+                }
+              }
               if (evt.status === "COMPLETED") {
                 return {
                   ...p,

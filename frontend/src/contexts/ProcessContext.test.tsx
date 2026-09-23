@@ -309,6 +309,44 @@ describe("ProcessContext wsManager bridge", () => {
     expect(p.message).toBe("stage 2")
   })
 
+  it("waits for every job of a multi-job process before Done", () => {
+    const { listeners } = setupCapture()
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    act(() => {
+      result.current.addProcess({
+        type: "file_upload",
+        status: "running",
+        title: "Processing 2 .bin files",
+        items: [],
+        runId: "job-1",
+        nextRunIds: ["job-2"],
+      })
+    })
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    let p = result.current.processes[0]
+    expect(p.status).toBe("running")
+    expect(p.runId).toBe("job-2")
+    expect(p.message).toBe("Extracting file 2 of 2")
+    // The effect subscribes to the next job; its (possibly already
+    // final) status finishes the process.
+    act(() =>
+      listeners.get("job-2")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    p = result.current.processes[0]
+    expect(p.status).toBe("completed")
+    expect(p.message).toBe("Done")
+  })
+
   it("terminal COMPLETED marks the process as completed at 100%", () => {
     const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })

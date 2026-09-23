@@ -209,6 +209,8 @@ export function useUploadQueue() {
             status: "running",
             message: `Queued for extraction (${jobIds.length} file${jobIds.length === 1 ? "" : "s"})`,
             runId: jobIds[0],
+            // One extraction job per .bin: "Done" only after the last.
+            nextRunIds: jobIds.slice(1),
             progress: UPLOAD_PHASE_END,
           })
         }

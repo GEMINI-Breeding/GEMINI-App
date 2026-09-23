@@ -1418,10 +1418,12 @@ export function RunDetail() {
           return
         }
         const wanted = run.uploadScope?.datasetShortIds ?? []
-        const folders = findGroundTracks(
-          rawImagesQuery.data ?? [],
-          rawScopePrefix(scope),
-        )
+        // A big track's listing takes a while; don't read "not loaded yet"
+        // as "no images" (the full Amiga logs hit this).
+        const listing = rawImagesQuery.isSuccess
+          ? (rawImagesQuery.data ?? [])
+          : ((await rawImagesQuery.refetch()).data ?? [])
+        const folders = findGroundTracks(listing, rawScopePrefix(scope))
         const mine = folders.filter((t) => wanted.includes(t.dataset))
         dataSync = {
           scopePrefix: rawScopePrefix(scope),
@@ -1686,6 +1688,8 @@ export function RunDetail() {
       boundaryVersionsQuery.isSuccess,
       boundaryVersionsQuery.refetch,
       rawImagesQuery.data,
+      rawImagesQuery.isSuccess,
+      rawImagesQuery.refetch,
       pipeline?.type,
       importedDemPath,
     ],
