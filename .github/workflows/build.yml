@@ -126,7 +126,7 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: frontend
         env:
-          # Empty secrets → ad-hoc signature ("-"): runs after right-click →
+          # No secrets → ad-hoc signature ("-"): runs after right-click →
           # Open, instead of the "app is damaged" Gatekeeper error.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -134,7 +134,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx tauri build --ci
+        run: |
+          # An empty secret still sets the variable, and Tauri then tries to
+          # import an empty certificate; pass only the ones that are set.
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || unset "$v"
+          done
+          npx tauri build --ci
 
       - name: Verify signature and notarization (macOS)
         if: runner.os == 'macOS'
