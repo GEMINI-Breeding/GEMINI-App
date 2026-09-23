@@ -171,7 +171,7 @@ jobs:
             rest-api db storage storage-init logger titiler \
             geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga \
             geminibase-worker-gwas geminibase-worker-thermal \
-            geminibase-worker-odm geminibase-nodeodm
+            geminibase-worker-stitch geminibase-worker-odm geminibase-nodeodm
 
       - name: Wait for /healthz
         run: |
@@ -201,7 +201,8 @@ jobs:
           missing=0
           for s in geminibase-worker-ml geminibase-worker-geo \
                    geminibase-worker-amiga geminibase-worker-gwas \
-                   geminibase-worker-thermal geminibase-worker-odm; do
+                   geminibase-worker-thermal geminibase-worker-stitch \
+                   geminibase-worker-odm; do
             state=$(docker inspect -f '{{.State.Running}}' "$s" 2>/dev/null || echo "absent")
             if [ "$state" != "true" ]; then
               echo "::error::worker $s is not running (state: $state)"

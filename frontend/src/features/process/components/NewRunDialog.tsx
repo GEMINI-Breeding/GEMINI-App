@@ -13,7 +13,7 @@
  * submissions don't re-resolve it.
  */
 import { useNavigate } from "@tanstack/react-router"
-import { ImageIcon, Layers } from "lucide-react"
+import { ImageIcon, Layers, Truck } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -267,6 +267,11 @@ export function NewRunDialog({
                               <span className="inline-flex items-center gap-1 text-muted-foreground">
                                 <Layers className="h-3 w-3" />
                                 Ortho
+                              </span>
+                            ) : u.dataType === "Farm-ng Binary File" ? (
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                <Truck className="h-3 w-3" />
+                                Rover log
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-muted-foreground">

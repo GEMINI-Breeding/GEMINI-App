@@ -1,9 +1,7 @@
 /**
  * RunTool — full-page interactive tool wrapper.
  *
- * Dispatches on `?step=` to the matching interactive component. R5a wires
- * plot_boundary_prep; gcp_selection (R5b), inference (R5c), and
- * plot_marking (R6) are still placeholders until their phases land.
+ * Dispatches on `?step=` to the matching interactive component.
  */
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
@@ -186,7 +184,12 @@ export function RunTool() {
             onCancel={goBack}
           />
         ) : step === "plot_marking" ? (
-          <PlotMarker onCancel={goBack} />
+          <PlotMarker
+            run={run}
+            scope={scope}
+            onSaved={goBack}
+            onCancel={goBack}
+          />
         ) : (
           <ToolPlaceholder step={step} runId={runId} />
         )}

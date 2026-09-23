@@ -1,19 +1,25 @@
 /**
- * Phase R6 smoke: ground pipeline wires through what's possible.
+ * Ground (Amiga) pipeline, end to end through the UI:
  *
- * Verifies:
- *   - Ground pipeline shows up in the workspace + creates a run
- *   - plot_marking opens the dependency-stub component (NOT a crash)
- *   - edge_crop saves a stitch mask via PlotGeometryService
- *   - stitching submits a RUN_STITCH job and the StepRow flips to
- *     "failed" with the AgRowStitch-missing message inline (proves
- *     the friendly-error path lights up, not a stack trace)
+ *   upload an Amiga .bin (a 30-frame cut of a real pass; see
+ *   fixtures/scripts/generate-amiga-track-fixture.py) → extraction →
+ *   workspace + ground pipeline (Amiga preset) + run → Data Sync →
+ *   Plot Marking: step through the frames, mark two plots, set their
+ *   stitching direction, save → Stitching: RUN_STITCH runs AgRowStitch per
+ *   plot and georeferences each → the stitched plot mosaics show on the
+ *   run page → Plot Boundary Prep draws over the combined ground mosaic →
+ *   reopening Plot Marking shows the saved markings.
  *
- * Doesn't drive the full plot_boundary_prep + inference flow on the
- * ground pipeline; those share the same components as the aerial side
- * and have their own R5a / R5c specs.
+ * Load-bearing checks: the marker must actually show the extracted frames
+ * (a broken track lookup shows "No extracted rover frames"); the stitch
+ * must produce an image per marked plot that the browser can decode; and
+ * the backend must hold a georeferenced combined mosaic whose footprints
+ * sit on the fixture's GPS track (Davis, 38.5366 N) — a stitch that ignored
+ * the markings or skipped georeferencing fails here.
+ *
+ * Strict-E2E rules (CLAUDE.md): everything is created through the UI; the
+ * only API calls are reads that confirm what the UI did.
  */
-import { firstSuperuser, firstSuperuserPassword } from "../config"
 import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import {
@@ -24,159 +30,254 @@ import {
   submitUploadAndWait,
 } from "../helpers/uploadHelpers"
 
-const DRONE_IMAGES = [
-  "2022-06-27_100MEDIA_DJI_0876.JPG",
-  "2022-06-27_100MEDIA_DJI_0877.JPG",
-]
+const BIN = "2024_07_15_15_49_18_998387_track-fixture.0000.bin"
+const EXTRACTION_TIMEOUT_MS = 5 * 60_000
+// Two plots of 5 frames each: ~30–90 s of CPU stitching per plot.
+const STITCH_TIMEOUT_MS = 10 * 60_000
 
-test.describe("R6: ground pipeline wiring (what's possible)", () => {
-  test.setTimeout(5 * 60_000)
+test.describe("R6: ground pipeline — plot marking → stitching", () => {
+  test.setTimeout(EXTRACTION_TIMEOUT_MS + STITCH_TIMEOUT_MS + 3 * 60_000)
 
-  test("workspace → ground pipeline → run → plot_marking stub + edge_crop save + stitching gated error", async ({
+  test("mark two plots on a real Amiga track and stitch them", async ({
     page,
     request,
     baseURL,
     runPrefix,
   }) => {
     if (!baseURL) throw new Error("baseURL not configured")
-
     const experiment = `${runPrefix}-r6-exp`
-    const workspaceName = `${runPrefix}-r6-workspace`
-    const pipelineName = `${runPrefix}-r6-pipeline`
     const location = "Davis"
     const population = "Cowpea"
-    const date = "2022-06-27"
-    const platform = "DJI"
-    const sensor = "FC6310S"
+    const date = "2024-07-15"
+    const season = "2024"
+    const workspaceName = `${runPrefix}-r6-workspace`
+    const pipelineName = `${runPrefix}-r6-pipeline`
 
-    // Upload ≥ 2 images so the stitching step can submit (worker
-    // requires at least 2 in image_paths).
+    // ── Upload the rover log and let it extract ──────────────────────────
     await navigateToUpload(page)
-    await selectDataType(page, "Image Data")
+    await selectDataType(page, "Farm-ng Binary File")
     await fillUploadForm(page, {
       experiment,
+      season,
       location,
       population,
       date,
-      platform,
-      sensor,
     })
-    await dropFiles(
-      page,
-      DRONE_IMAGES.map((n) => fixturePath("images", "drone", n)),
-    )
-    await submitUploadAndWait(page, DRONE_IMAGES.length)
+    await dropFiles(page, [fixturePath("binary", BIN)])
+    await submitUploadAndWait(page, 1, { timeoutMs: EXTRACTION_TIMEOUT_MS })
 
-    // Workspace.
+    // ── Workspace → ground pipeline (Amiga preset) → run ─────────────────
     await page.goto("/process")
     await page.locator('[data-onboarding="process-new-workspace"]').click()
     await page.getByLabel(/workspace name/i).fill(workspaceName)
     await page.getByRole("button", { name: /create workspace/i }).click()
     await page.getByText(workspaceName, { exact: true }).click()
 
-    // Ground pipeline + walk wizard with all defaults.
     await page.getByRole("button", { name: /create ground pipeline/i }).click()
     await page.getByLabel(/pipeline name/i).fill(pipelineName)
     await page.getByRole("button", { name: /^next$/i }).click()
+    await page.getByRole("button", { name: /Amiga.*Farm-ng ground robot/ }).click()
     await page.getByRole("button", { name: /^next$/i }).click()
     await page.getByRole("button", { name: /create pipeline/i }).click()
 
-    // Create run by picking the uploaded dataset row.
-    await page
-      .getByRole("button", { name: /new run/i })
-      .first()
-      .click()
+    await page.getByRole("button", { name: /new run/i }).first().click()
     const uploadRow = page
       .getByTestId("upload-row")
       .filter({ hasText: experiment })
       .filter({ hasText: date })
-      .filter({ hasText: platform })
-      .filter({ hasText: sensor })
+      .filter({ hasText: "Amiga" })
       .first()
     await expect(uploadRow).toBeVisible({ timeout: 30_000 })
     await uploadRow.click()
     await page.getByRole("button", { name: /create run/i }).click()
+    const runUrl = page.url()
 
-    // Ground steps: data_sync → plot_marking → stitching → plot_boundary_prep
-    // → associate_boundaries → inference. Run data_sync first.
     const dataSyncRow = page.getByTestId("step-row-data_sync")
     await dataSyncRow.getByRole("button", { name: /run step/i }).click()
     await expect(dataSyncRow).toHaveAttribute("data-status", "completed", {
-      timeout: 5_000,
+      timeout: 15_000,
     })
 
-    // plot_marking: open the stub.
+    // ── Plot Marking ─────────────────────────────────────────────────────
     const markingRow = page.getByTestId("step-row-plot_marking")
-    await expect(markingRow).toHaveAttribute("data-status", "ready", {
-      timeout: 5_000,
-    })
+    await expect(markingRow).toHaveAttribute("data-status", "ready")
     await markingRow.getByRole("button", { name: /open tool/i }).click()
+
+    const marker = page.getByTestId("plot-marker")
+    await expect(marker).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId("pm-frame-count")).toHaveText("/ 30")
+    // The frame itself decodes (not a broken image or a spinner).
+    const frameImg = page.getByTestId("pm-frame")
+    await expect(frameImg).toBeVisible({ timeout: 30_000 })
+    await expect
+      .poll(() => frameImg.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0)
+    // The rover heads south on this pass (msgs_synced direction column).
+    await expect(marker).toContainText("Heading South")
+
+    const frameName = page.getByTestId("pm-frame-name")
+    const frameIndex = page.getByTestId("pm-frame-index")
+    const goTo = async (n: number) => {
+      await frameIndex.fill(String(n))
+      await expect(frameIndex).toHaveValue(String(n))
+    }
+    const setDirection = async (label: string) => {
+      await page.getByTestId("pm-direction").click()
+      await page.getByRole("option", { name: label, exact: true }).click()
+      await expect(page.getByTestId("pm-direction")).toContainText(label)
+    }
+
+    // Plot 1: frames 1–5 (buttons), stitched left-to-right on this camera.
+    await goTo(1)
+    const plot1Start = (await frameName.textContent()) ?? ""
+    await page.getByTestId("pm-mark-start").click()
+    await goTo(5)
+    const plot1End = (await frameName.textContent()) ?? ""
+    await page.getByTestId("pm-mark-end").click()
+    await setDirection("Right")
+    await expect(page.getByTestId("pm-start")).toHaveText(plot1Start)
+    await expect(page.getByTestId("pm-end")).toHaveText(plot1End)
+    await expect(page.getByTestId("pm-done-count")).toHaveText("1/1 done")
+
+    // Plot 2: frames 6–10 with the keyboard (N, →, S, E), inheriting
+    // plot 1's direction.
+    await page.getByTestId("pm-plot-label").click() // move focus off the input
+    await page.keyboard.press("n")
+    await expect(page.getByTestId("pm-plot-label")).toHaveText("Plot 2")
+    await goTo(5)
+    await page.getByTestId("pm-plot-label").click()
+    await page.keyboard.press("ArrowRight")
+    await expect(frameIndex).toHaveValue("6")
+    const plot2Start = (await frameName.textContent()) ?? ""
+    await page.keyboard.press("s")
+    await goTo(10)
+    const plot2End = (await frameName.textContent()) ?? ""
+    await page.getByTestId("pm-plot-label").click()
+    await page.keyboard.press("e")
+    await expect(page.getByTestId("pm-direction")).toContainText("Right")
+    await expect(page.getByTestId("pm-done-count")).toHaveText("2/2 done")
+    expect(new Set([plot1Start, plot1End, plot2Start, plot2End]).size).toBe(4)
+
+    // The GPS map draws the track.
+    await page.getByTestId("pm-gps-toggle").click()
+    await expect(page.getByTestId("pm-gps-map")).toBeVisible()
     await expect(
-      page.getByText(/depends on backend endpoints not yet shipped/i),
-    ).toBeVisible()
-    await page.getByRole("button", { name: /^close$/i }).click()
+      page.getByTestId("pm-gps-map").locator("path.leaflet-interactive").first(),
+    ).toBeAttached()
 
-    // Mark plot_marking as skipped through runStore directly so we can
-    // test the stitching gating downstream. The wizard treats
-    // non-completed non-optional steps as locking; without skip path
-    // we'd need the real plot_marking flow which depends on the
-    // missing backend endpoints. The wizard has no Skip button on
-    // plot_marking (it's not flagged optional in main), so navigate
-    // straight to the stitching tool URL using the URL-driven fallback.
-    // Actually — plot_marking's "next step" gating means stitching
-    // stays locked. For this MVP smoke we'll just verify edge_crop's
-    // save flow and the stitching submission path via direct URLs.
+    await page.getByTestId("pm-save").click()
+    await expect(page.getByText("Saved 2 plot markings")).toBeVisible()
+    await page.getByRole("button", { name: /^back$/i }).click()
+    await expect(page).toHaveURL(runUrl)
+    await expect(markingRow).toHaveAttribute("data-status", "completed")
 
-    // edge_crop is reachable via direct tool URL (it's a side helper,
-    // not a primary step in main's GROUND_STEPS).
-    const url = page.url()
-    const wsId = url.split("/process/")[1].split("/")[0]
-    const runId = url.split("/run/")[1]
-    await page.goto(`/process/${wsId}/tool?runId=${runId}&step=edge_crop`)
-    await expect(
-      page.getByRole("heading", { name: /edge crop/i }),
-    ).toBeVisible()
-    await expect(page.getByTestId("mask-left")).toBeVisible()
-    await page.getByTestId("mask-left").fill("12")
-    await page.getByTestId("mask-right").fill("8")
-    await page.getByTestId("mask-save-and-complete").click()
+    // ── Stitching ────────────────────────────────────────────────────────
+    const stitchRow = page.getByTestId("step-row-stitching")
+    await expect(stitchRow).toHaveAttribute("data-status", "ready")
+    await stitchRow.getByRole("button", { name: /run step/i }).click()
+    await expect(stitchRow).toHaveAttribute("data-status", "completed", {
+      timeout: STITCH_TIMEOUT_MS,
+    })
 
-    // The save lands either as a SaveStitchMask request or surfaces an
-    // error. Either way the request should fire.
-    // (We don't assert the toast text because save success vs the
-    // not-yet-supported edge-crop endpoint vary by stack state; the
-    // backend assertion below is the durable check.)
-
-    // Verify the stitch mask landed in plot_geometry by querying the
-    // backend directly. Stack tolerates "no mask" returning {} — so
-    // the assertion is "request succeeds".
-    const tokenRes = await request.post(
-      new URL("/api/users/login/access-token", baseURL).toString(),
-      {
-        data: { email: firstSuperuser, password: firstSuperuserPassword },
-        headers: { "Content-Type": "application/json" },
-      },
+    const results = stitchRow.getByTestId("stitch-results")
+    await expect(results).toBeVisible({ timeout: 30_000 })
+    await expect(results.getByTestId("stitch-summary")).toHaveText(
+      "2 plot mosaics of 2 marked · georeferenced",
     )
-    expect(tokenRes.ok()).toBe(true)
-    const { access_token } = (await tokenRes.json()) as { access_token: string }
-    const checkRes = await request.post(
-      new URL("/api/plot_geometry/stitch_mask/check", baseURL).toString(),
-      {
-        data: {
-          year: "2022",
-          experiment,
-          location,
-          population,
-          date,
-          platform,
-          sensor,
-        },
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          "Content-Type": "application/json",
-        },
-      },
+    await expect(results.getByTestId("stitch-failed")).toHaveCount(0)
+    const mosaics = results.getByTestId("stitch-plot")
+    await expect(mosaics).toHaveCount(2)
+    for (const i of [0, 1]) {
+      const img = mosaics.nth(i).locator("img")
+      await expect(img).toBeVisible({ timeout: 30_000 })
+      // A stitched strip is wider than one frame is tall — a real mosaic.
+      const [w, h] = await img.evaluate((el) => [
+        (el as HTMLImageElement).naturalWidth,
+        (el as HTMLImageElement).naturalHeight,
+      ])
+      expect(w).toBeGreaterThan(h)
+      await expect(mosaics.nth(i)).toContainText(`Plot ${i + 1}`)
+    }
+
+    // Read-only check of what the worker stored.
+    const auth = await page.context().storageState()
+    const token =
+      auth.origins
+        .flatMap((o) => o.localStorage)
+        .find((e) => e.name === "gemini.auth.token")?.value ?? ""
+    const headers = { Authorization: `Bearer ${token}` }
+    const prefix = `Processed/${season}/${experiment}/${location}/${population}/${date}/Amiga/RGB/AgRowStitch_v1/`
+    const listed = await request.get(
+      new URL(`/api/files/list/gemini/${prefix}`, baseURL).toString(),
+      { headers },
     )
-    expect(checkRes.ok()).toBe(true)
+    expect(listed.ok()).toBe(true)
+    const names = ((await listed.json()) as { object_name: string }[]).map(
+      (f) => f.object_name.slice(prefix.length),
+    )
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "full_res_mosaic_temp_plot_1.png",
+        "full_res_mosaic_temp_plot_2.png",
+        "georeferenced_plot_1_utm.tif",
+        "georeferenced_plot_2_utm.tif",
+        "combined_mosaic.tif",
+        "plot_borders.csv",
+        "stitch_manifest.json",
+      ]),
+    )
+    const manifestRes = await request.get(
+      new URL(`/api/files/download/gemini/${prefix}stitch_manifest.json`, baseURL).toString(),
+      { headers },
+    )
+    const manifest = (await manifestRes.json()) as {
+      succeeded_plots: string[]
+      plots: Record<string, { frames: number; footprint: [number, number][] }>
+    }
+    expect(manifest.succeeded_plots).toEqual(["1", "2"])
+    for (const id of ["1", "2"]) {
+      expect(manifest.plots[id].frames).toBe(5)
+      for (const [lon, lat] of manifest.plots[id].footprint) {
+        expect(lat).toBeCloseTo(38.5366, 3)
+        expect(lon).toBeCloseTo(-121.7765, 3)
+      }
+    }
+    // Plot 2 was marked further along the southbound pass: it lies south.
+    const meanLat = (id: string) => {
+      const ring = manifest.plots[id].footprint
+      return ring.reduce((s, [, lat]) => s + lat, 0) / ring.length
+    }
+    expect(meanLat("2")).toBeLessThan(meanLat("1"))
+
+    // ── Plot Boundary Prep draws over the ground mosaic ─────────────────
+    // Ground runs have no ortho; the georeferenced combined mosaic is the
+    // underlay. At least one of its TiTiler tiles must actually decode.
+    const boundaryRow = page.getByTestId("step-row-plot_boundary_prep")
+    await expect(boundaryRow).toHaveAttribute("data-status", "ready")
+    await boundaryRow.getByRole("button", { name: /open tool/i }).click()
+    const mosaicTiles = page.locator(
+      'img.leaflet-tile[src*="/titiler/cog/tiles/"][src*="combined_mosaic.tif"]',
+    )
+    await expect(mosaicTiles.first()).toBeAttached({ timeout: 60_000 })
+    await expect
+      .poll(
+        () =>
+          mosaicTiles.evaluateAll((imgs) =>
+            imgs.some((el) => (el as HTMLImageElement).naturalWidth > 0),
+          ),
+        { timeout: 30_000 },
+      )
+      .toBe(true)
+    await page.goto(runUrl)
+
+    // ── The markings persisted ───────────────────────────────────────────
+    await markingRow.getByRole("button", { name: /re-open tool/i }).click()
+    await expect(page.getByTestId("pm-done-count")).toHaveText("2/2 done", {
+      timeout: 30_000,
+    })
+    await expect(page.getByTestId("pm-plot-label")).toHaveText("Plot 1")
+    await expect(page.getByTestId("pm-start")).toHaveText(plot1Start)
+    await expect(page.getByTestId("pm-end")).toHaveText(plot1End)
+    await expect(page.getByTestId("pm-version-select")).toHaveValue("1")
   })
 })

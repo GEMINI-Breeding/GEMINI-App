@@ -6,7 +6,7 @@
 #
 # Per-image effective watch paths (matter for accuracy — false alarms train
 # developers to ignore the warning):
-#   workers (geo, amiga, ml, odm) : COPY gemini/workers/  -> watch
+#   workers (geo, amiga, ml, odm, thermal, stitch) : COPY gemini/workers/  -> watch
 #                                   backend/gemini/workers/
 #   gwas                          : COPY gemini/          -> watch all of
 #                                   backend/gemini/
@@ -38,6 +38,8 @@ SERVICES=(
   "geminibase-worker-amiga|$GEMINI_DIR/workers|"
   "geminibase-worker-ml|$GEMINI_DIR/workers|"
   "geminibase-worker-odm|$GEMINI_DIR/workers|"
+  "geminibase-worker-thermal|$GEMINI_DIR/workers|"
+  "geminibase-worker-stitch|$GEMINI_DIR/workers|"
 )
 
 YELLOW=$'\033[33m'

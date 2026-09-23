@@ -6,7 +6,7 @@
   "scripts": {
     "predev": "../scripts/check-worker-staleness.sh",
     "dev": "vite",
-    "dev:backend": "docker compose -f ../docker-compose.yaml up -d rest-api db storage storage-init logger titiler geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga geminibase-worker-gwas geminibase-worker-thermal geminibase-worker-odm geminibase-nodeodm",
+    "dev:backend": "docker compose -f ../docker-compose.yaml up -d rest-api db storage storage-init logger titiler geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga geminibase-worker-gwas geminibase-worker-thermal geminibase-worker-stitch geminibase-worker-odm geminibase-nodeodm",
     "dev:full": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev\"",
     "build": "tsc -p tsconfig.build.json && vite build",
     "lint": "biome check --write --unsafe --no-errors-on-unmatched --files-ignore-unknown=true ./",

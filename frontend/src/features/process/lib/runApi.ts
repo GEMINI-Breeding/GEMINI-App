@@ -95,14 +95,26 @@ export interface InferenceParams {
 }
 
 export interface StitchingParams {
-  /** MinIO object paths in stitch order (no bucket prefix). */
-  imagePaths: string[]
-  /** MinIO path to write the resulting mosaic (no bucket prefix). */
-  outputMosaicPath: string
-  /** AgRowStitch YAML knobs from the pipeline params. */
-  config?: Record<string, unknown>
-  /** AgRowStitch treats 0 as "auto"; defaults to (cores - 1) in the worker. */
-  cpuCount?: number
+  /** The track's top-camera frames (`…/RGB/Images/top/`). */
+  imagesPrefix: string
+  /** The track's msgs_synced.csv (frame order, GPS, direction). */
+  msgsSyncedPath: string
+  /** The saved Plot Marking version's plots. */
+  plots: {
+    plot_id: number
+    start_image: string
+    end_image: string
+    direction: string
+  }[]
+  /** Where this stitch version goes (`…/AgRowStitch_v{N}/`). */
+  outputPrefix: string
+  /** Pipeline knobs: forward_limit, max_reprojection_error, masks, crop_rules… */
+  settings?: Record<string, unknown>
+  /** The pipeline's free-form AgRowStitch options (YAML text). */
+  customOptions?: string
+  device?: string
+  /** 0 = all cores but one. */
+  numCpu?: number
 }
 
 export interface SplitOrthomosaicParams {
@@ -361,17 +373,21 @@ export async function executeStep(
 
     case "stitching": {
       if (!input.stitching) {
-        throw new Error("stitching requires image paths + output path")
+        throw new Error("stitching requires the marked plots and their track")
       }
       const s = input.stitching
-      if (s.imagePaths.length < 2) {
-        throw new Error("stitching requires at least 2 images")
+      if (s.plots.length === 0) {
+        throw new Error("Mark at least one plot before stitching")
       }
       const params: Record<string, unknown> = {
-        image_paths: s.imagePaths,
-        output_mosaic_path: s.outputMosaicPath,
-        ...(s.config ? { config: s.config } : {}),
-        ...(typeof s.cpuCount === "number" ? { cpu_count: s.cpuCount } : {}),
+        images_prefix: s.imagesPrefix,
+        msgs_synced_path: s.msgsSyncedPath,
+        plots: s.plots,
+        output_prefix: s.outputPrefix,
+        settings: s.settings ?? {},
+        ...(s.customOptions?.trim() ? { custom_options: s.customOptions } : {}),
+        ...(s.device ? { device: s.device } : {}),
+        ...(typeof s.numCpu === "number" ? { num_cpu: s.numCpu } : {}),
       }
       const job = (await JobsService.apiJobsSubmitSubmitJob({
         requestBody: {

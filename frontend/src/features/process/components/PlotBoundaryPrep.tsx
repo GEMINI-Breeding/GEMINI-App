@@ -80,6 +80,7 @@ import {
   type FillPattern,
   generateGridFeatures,
 } from "@/features/process/lib/grid"
+import { stitchVersions } from "@/features/process/lib/groundTrack"
 import {
   mirrorFeatures,
   rotateFeatures,
@@ -525,7 +526,21 @@ export function PlotBoundaryPrep({
       ]),
     [run, scope, filesQuery.data, uploadedOrthosQuery.data],
   )
-  const s3Url = activeOrtho ? s3UrlForOrtho(activeOrtho) : null
+  // Ground runs have no ortho; draw over the newest stitch version's
+  // georeferenced combined mosaic instead (main's ground underlay).
+  const groundMosaic = useMemo(
+    () =>
+      stitchVersions(
+        (filesQuery.data as FileMetadata[] | null) ?? [],
+        scope,
+      ).find((v) => v.combinedMosaic)?.combinedMosaic ?? null,
+    [filesQuery.data, scope],
+  )
+  const s3Url = activeOrtho
+    ? s3UrlForOrtho(activeOrtho)
+    : groundMosaic
+      ? `s3://${DEFAULT_BUCKET}/${groundMosaic}`
+      : null
 
   // TiTiler 2.0.1 exposes tilejson under /cog/{TMS}/tilejson.json. Asking for
   // WebMercatorQuad gives us a WGS84 `bounds` array (west, south, east, north)
@@ -1107,7 +1122,7 @@ export function PlotBoundaryPrep({
                 across {Object.keys(blocks).length} block
                 {Object.keys(blocks).length === 1 ? "" : "s"}
               </p>
-              {activeOrtho && tilejsonQuery.isError && (
+              {s3Url && tilejsonQuery.isError && (
                 <p className="text-muted-foreground italic">
                   Couldn't read ortho metadata — drawing on basemap.
                 </p>

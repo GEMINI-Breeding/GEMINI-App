@@ -63,6 +63,7 @@ import { useProcess } from "@/contexts/ProcessContext"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImageGrid } from "@/features/process/components/PlotImageGrid"
+import { StitchResultsPanel } from "@/features/process/components/StitchResultsPanel"
 import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import {
   type TraitDialogState,
@@ -83,6 +84,13 @@ import {
   usePlotGeometryVersions,
 } from "@/features/process/hooks/usePlotGeometry"
 import { s3UrlForOrtho } from "@/features/process/lib/activeOrtho"
+import {
+  isComplete,
+  nextStitchPrefix,
+  type PlotMarkingSnapshot,
+  plotMarkingsDirectory,
+  stitchVersions,
+} from "@/features/process/lib/groundTrack"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import {
   buildOrthoVersions,
@@ -1456,9 +1464,8 @@ export function RunDetail() {
         setTraitDialogOpen(true)
         return
       }
-      // Ground stitching: fan-in all raw images. Per-plot fan-out is
-      // tracked by PlotMarker (R6 deferred); for MVP we pass every image
-      // as one stitch sequence.
+      // Ground stitching: one AgRowStitch run per marked plot, on the track
+      // the active Plot Marking version was made on.
       let stitchingParams:
         | Parameters<typeof executeStep>[0]["stitching"]
         | undefined
@@ -1467,28 +1474,47 @@ export function RunDetail() {
           showErrorToast("Pick a flight date, platform, and sensor first.")
           return
         }
-        if (imageFiles.length < 2) {
+        let marking: PlotMarkingSnapshot | null = null
+        try {
+          const res =
+            (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+              requestBody: { directory: plotMarkingsDirectory(scope) },
+            })) as { state_snapshot?: PlotMarkingSnapshot }
+          marking = res.state_snapshot ?? null
+        } catch {
+          marking = null
+        }
+        const plots = (marking?.selections ?? []).filter(isComplete)
+        if (!marking || plots.length === 0) {
           showErrorToast(
-            "RUN_STITCH needs at least 2 images at the configured scope.",
+            "No saved plot markings for this population. Mark plots in the Plot Marking step first.",
           )
           return
         }
-        const imagePaths = imageFiles
-          .map((f) => f.object_name ?? "")
-          .filter(Boolean)
-        const cfg = (pipeline?.params.agrowstitch_params ?? {}) as Record<
-          string,
-          unknown
-        >
-        const cpuCount = pipeline?.params.num_cpu as number | undefined
+        if (!marking.track.msgsSyncedPath) {
+          showErrorToast(
+            "The marked track has no msgs_synced.csv, so plots can't be located. Re-extract the .bin upload.",
+          )
+          return
+        }
+        const p = pipeline?.params ?? {}
         stitchingParams = {
-          imagePaths,
-          outputMosaicPath: `${processedPrefix(scope)}stitched/mosaic.tif`,
-          config: {
-            ...cfg,
-            stitching_direction: "RIGHT",
-          },
-          cpuCount,
+          imagesPrefix: marking.track.imagesPrefix,
+          msgsSyncedPath: marking.track.msgsSyncedPath,
+          plots: plots.map((s) => ({
+            plot_id: s.plot_id,
+            start_image: s.start_image as string,
+            end_image: s.end_image as string,
+            direction: s.direction || "down",
+          })),
+          outputPrefix: nextStitchPrefix(
+            scope,
+            stitchVersions(processedFilesQuery.data ?? [], scope),
+          ),
+          settings: (p.agrowstitch_params ?? {}) as Record<string, unknown>,
+          customOptions: (p.custom_agrowstitch_options as string) ?? "",
+          device: (p.device as string) ?? "cpu",
+          numCpu: (p.num_cpu as number) ?? 0,
         }
       }
       const experimentId = run.uploadScope?.experimentId
@@ -1575,7 +1601,7 @@ export function RunDetail() {
       pipeline?.params,
       orthoFiles,
       boundaryVersions,
-      imageFiles.map,
+      processedFilesQuery.data,
       importedDemPath,
     ],
   )
@@ -1944,6 +1970,11 @@ export function RunDetail() {
                         />
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />
+                      ) : step.key === "stitching" ? (
+                        <StitchResultsPanel
+                          files={processedFilesQuery.data ?? []}
+                          scope={scope}
+                        />
                       ) : step.wiredIn && !isLive(step.wiredIn) ? (
                         <p className="text-muted-foreground rounded border bg-muted/30 p-2 text-xs">
                           This step's panels and dialogs are restored in{" "}

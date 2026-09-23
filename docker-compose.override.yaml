@@ -116,6 +116,20 @@ services:
         - action: rebuild
           path: ./backend/poetry.lock
 
+  geminibase-worker-stitch:
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/Dockerfile
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/requirements.txt
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/agrowstitch-opencv413.patch
+
   geminibase-worker-thermal:
     restart: unless-stopped
     develop:

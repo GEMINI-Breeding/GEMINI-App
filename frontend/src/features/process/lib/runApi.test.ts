@@ -376,17 +376,29 @@ describe("executeStep", () => {
   })
 
   describe("stitching", () => {
-    it("rejects fewer than 2 images", async () => {
+    const TRACK = "Raw/S/E/L/P/2024-07-15/Amiga/RGB/aaaa1111/RGB/"
+    const stitching = {
+      imagesPrefix: `${TRACK}Images/top/`,
+      msgsSyncedPath: `${TRACK}Metadata/msgs_synced.csv`,
+      plots: [
+        {
+          plot_id: 1,
+          start_image: "rgb-1.jpg",
+          end_image: "rgb-7.jpg",
+          direction: "right",
+        },
+      ],
+      outputPrefix: "Processed/S/E/L/P/2024-07-15/Amiga/RGB/AgRowStitch_v1/",
+    }
+
+    it("rejects an empty marking", async () => {
       const run = seedRun()
       await expect(
         executeStep({
           ...baseInput(run, "stitching"),
-          stitching: {
-            imagePaths: ["only-one.jpg"],
-            outputMosaicPath: "Processed/mosaic.tif",
-          },
+          stitching: { ...stitching, plots: [] },
         }),
-      ).rejects.toThrow(/at least 2 images/i)
+      ).rejects.toThrow(/Mark at least one plot/)
     })
 
     it("requires the stitching params shape", async () => {
@@ -396,7 +408,7 @@ describe("executeStep", () => {
       )
     })
 
-    it("submits RUN_STITCH with config + cpu_count when supplied", async () => {
+    it("submits RUN_STITCH with the track, plots and settings", async () => {
       const run = seedRun()
       submitMock.mockResolvedValue({
         id: "stitch-job-1",
@@ -404,21 +416,43 @@ describe("executeStep", () => {
       await executeStep({
         ...baseInput(run, "stitching"),
         stitching: {
-          imagePaths: ["a.jpg", "b.jpg", "c.jpg"],
-          outputMosaicPath: "Processed/mosaic.tif",
-          config: { stitching_direction: "RIGHT" },
-          cpuCount: 4,
+          ...stitching,
+          settings: { forward_limit: 4 },
+          customOptions: "min_inliers: 30\n",
+          device: "multiprocessing",
+          numCpu: 4,
         },
+      })
+      const call = submitMock.mock.calls[0][0] as {
+        requestBody: { job_type: string; parameters: Record<string, unknown> }
+      }
+      expect(call.requestBody.job_type).toBe("RUN_STITCH")
+      expect(call.requestBody.parameters).toEqual({
+        images_prefix: stitching.imagesPrefix,
+        msgs_synced_path: stitching.msgsSyncedPath,
+        plots: stitching.plots,
+        output_prefix: stitching.outputPrefix,
+        settings: { forward_limit: 4 },
+        custom_options: "min_inliers: 30\n",
+        device: "multiprocessing",
+        num_cpu: 4,
+      })
+      expect(getRun(run.id)?.steps.stitching?.jobIds).toEqual(["stitch-job-1"])
+    })
+
+    it("leaves blank custom options out", async () => {
+      const run = seedRun()
+      submitMock.mockResolvedValue({
+        id: "stitch-job-2",
+      } as unknown as JobOutput)
+      await executeStep({
+        ...baseInput(run, "stitching"),
+        stitching: { ...stitching, customOptions: "  " },
       })
       const call = submitMock.mock.calls[0][0] as {
         requestBody: { parameters: Record<string, unknown> }
       }
-      expect(call.requestBody.parameters).toMatchObject({
-        image_paths: ["a.jpg", "b.jpg", "c.jpg"],
-        output_mosaic_path: "Processed/mosaic.tif",
-        config: { stitching_direction: "RIGHT" },
-        cpu_count: 4,
-      })
+      expect(call.requestBody.parameters).not.toHaveProperty("custom_options")
     })
   })
 
