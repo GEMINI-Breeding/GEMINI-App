@@ -282,7 +282,9 @@ jobs:
           sudo apt-get update
           # The WebDriver package was renamed in Ubuntu 26.04.
           driver=webkit2gtk-driver
-          apt-cache show "$driver" >/dev/null 2>&1 || driver=webkitgtk-webdriver
+          # (apt-cache show succeeds for a merely referenced package; ask
+          # whether there's anything to install.)
+          apt-cache policy "$driver" | grep -q 'Candidate: [0-9]' || driver=webkitgtk-webdriver
           sudo apt-get install -y ./dist/*.deb "$driver" xvfb
 
       - uses: dtolnay/rust-toolchain@stable
