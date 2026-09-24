@@ -95,11 +95,32 @@ let panel = await openStackSettings(b)
 const text = await panel.getText()
 if (!text.includes(DATA_DIR))
   throw new Error(`Settings doesn't show ${DATA_DIR}:\n${text}`)
-for (const sub of ["minio", "postgres"]) {
-  const p = `${DATA_DIR}/${sub}`
-  if (!existsSync(p) || readdirSync(p).length === 0)
-    throw new Error(`${p} is empty: the stack isn't using the chosen folder`)
+// The running containers mount the chosen folder (asking Docker, because on
+// Linux the postgres folder belongs to the container's user and can't be
+// listed by the test)…
+for (const [service, sub] of [
+  ["geminibase-db", "postgres"],
+  ["geminibase-storage", "minio"],
+]) {
+  const mounts = execFileSync(
+    "docker",
+    [
+      "inspect",
+      `gemini-${service}-1`,
+      "--format",
+      "{{range .Mounts}}{{.Source}} {{end}}",
+    ],
+    { encoding: "utf8" },
+  )
+  if (!mounts.split(" ").includes(`${DATA_DIR}/${sub}`))
+    throw new Error(`${service} doesn't use ${DATA_DIR}/${sub}: ${mounts}`)
 }
+// …and the storage really wrote there (its buckets).
+if (
+  !existsSync(`${DATA_DIR}/minio`) ||
+  readdirSync(`${DATA_DIR}/minio`).length === 0
+)
+  throw new Error(`${DATA_DIR}/minio is empty`)
 log("data folder in use")
 await b.deleteSession()
 
