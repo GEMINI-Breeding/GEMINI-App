@@ -1,7 +1,7 @@
 /**
  * DataSyncPanel — what the last Data Sync did: per image folder, how many
  * images got a position and from where (EXIF, a platform log, the other
- * sensor's track…).
+ * sensor's track…), and whether any altitudes had to be estimated.
  */
 import { useQuery } from "@tanstack/react-query"
 
@@ -23,6 +23,9 @@ interface SyncResult {
   located?: number
   platform_log_fixes?: number
   datasets?: Record<string, Record<string, number>>
+  /** Located images whose altitude was estimated from the nearest image in
+   * time, or that no image could supply (see sync.fill_missing_altitude). */
+  altitude?: { estimated: number; missing: number }
 }
 
 export function DataSyncPanel({
@@ -49,6 +52,18 @@ export function DataSyncPanel({
           ? ` · ${result.platform_log_fixes} ArduPilot log fixes`
           : ""}
       </p>
+      {result.altitude && result.altitude.missing > 0 ? (
+        <p className="text-amber-600" data-testid="data-sync-altitude">
+          No image has an altitude, so the orthomosaic places every camera at 0
+          m: consistent, but its heights are relative, not above sea level.
+        </p>
+      ) : result.altitude && result.altitude.estimated > 0 ? (
+        <p className="text-amber-600" data-testid="data-sync-altitude">
+          {result.altitude.estimated} image
+          {result.altitude.estimated === 1 ? " had" : "s had"} no altitude —
+          estimated from the nearest image in time.
+        </p>
+      ) : null}
       {Object.entries(result.datasets).map(([prefix, counts]) => (
         <p key={prefix} className="text-muted-foreground">
           <span className="font-mono">

@@ -16,6 +16,7 @@ import { fixturePath } from "../helpers/fixturePath"
 import { expect, test } from "../helpers/fixtures"
 import { runDataSync } from "../helpers/processHelpers"
 import {
+  DEFAULT_E2E_SEASON,
   dropFiles,
   fillUploadForm,
   navigateToUpload,
@@ -65,9 +66,12 @@ test.describe("Multi-dataset ODM (Option A)", () => {
 
   test("multi-select shows both datasets, deselecting one narrows RUN_ODM", async ({
     page,
+    request,
+    baseURL,
     runPrefix,
     consoleErrorGuard,
   }) => {
+    if (!baseURL) throw new Error("baseURL not configured")
     // The RGB datasets have no RawThermal/thermal_dataset.json — the
     // thermal-GPS preflight will fetch and 404, which the preflight
     // tolerates but Chromium logs as a console error. Whitelist that
@@ -166,9 +170,48 @@ test.describe("Multi-dataset ODM (Option A)", () => {
       timeout: 5_000,
     })
 
-    // Data Sync gates orthomosaic — flip it to completed (no-op
-    // step that just confirms images exist at the scope).
-    await runDataSync(page)
+    // Data Sync gives every image a position and writes geo.txt for ODM.
+    const syncRow = await runDataSync(page)
+    // Only the selected dataset (2 images). These DJI images carry their
+    // own EXIF altitude: nothing estimated.
+    await expect(syncRow.getByTestId("data-sync-summary")).toHaveText(
+      "2 of 2 images have a position",
+    )
+    await expect(syncRow.getByTestId("data-sync-altitude")).toHaveCount(0)
+
+    // geo.txt (read-only check): `image lon lat alt`, one vertical scale,
+    // nothing after the altitude — ODM would read extra columns as camera
+    // yaw/pitch/roll, and zeros there overrode the images' own orientation.
+    const auth = await page.context().storageState()
+    const headers = {
+      Authorization: `Bearer ${
+        auth.origins
+          .flatMap((o) => o.localStorage)
+          .find((e) => e.name === "gemini.auth.token")?.value ?? ""
+      }`,
+    }
+    const scopeRoot = `Raw/${DEFAULT_E2E_SEASON}/${scope.experiment}/${scope.location}/${scope.population}/${scope.date}/${scope.platform}/${scope.sensor}/`
+    const geo = await (
+      await request.get(
+        new URL(
+          `/api/files/download/gemini/${scopeRoot}geo.txt`,
+          baseURL,
+        ).toString(),
+        { headers },
+      )
+    ).text()
+    const [crs, ...entries] = geo.trim().split("\n")
+    expect(crs).toBe("EPSG:4326")
+    expect(entries).toHaveLength(2)
+    const alts = entries.map((line) => {
+      const parts = line.split(" ")
+      expect(parts, line).toHaveLength(4)
+      return Number(parts[3])
+    })
+    // Real EXIF altitudes (m above sea level), all on the same scale — no
+    // camera pinned at 0 m.
+    for (const a of alts) expect(a).toBeGreaterThan(1)
+    expect(Math.max(...alts) - Math.min(...alts)).toBeLessThan(50)
 
     // Trigger ODM. The submit fires immediately — we don't wait for
     // worker completion, just that the request body carries the
