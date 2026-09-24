@@ -35,6 +35,7 @@ const status = (over: Partial<StackStatus> = {}): StackStatus => ({
   api_url: "http://127.0.0.1:17777",
   titiler_url: "http://127.0.0.1:18091",
   healthy: true,
+  free_bytes: null,
   default_data_dir: "/home/u/GEMINI-Stack",
   legacy_install: null,
   ...over,

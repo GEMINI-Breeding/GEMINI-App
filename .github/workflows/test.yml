@@ -158,6 +158,12 @@ jobs:
           echo "GEMINI_E2E_CLEANUP_ENABLED=1" >> backend/gemini/pipeline/.env
 
       - name: Bring up the full stack
+        env:
+          # The fixture "previous GEMI install" for legacy-import.spec,
+          # mounted read-only into rest-api and the geo worker (locally the
+          # dev override mounts it; CI doesn't use the override).
+          GEMINI_LEGACY_APP_HOST_DIR: ${{ github.workspace }}/frontend/tests/fixtures/legacy/app
+          GEMINI_LEGACY_DATA_HOST_DIR: ${{ github.workspace }}/frontend/tests/fixtures/legacy/data
         run: |
           # Every worker whose job type a spec can submit must be up, or
           # that job sits in PENDING until the spec times out. thermal was

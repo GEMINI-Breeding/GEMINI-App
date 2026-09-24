@@ -42,6 +42,11 @@
 services:
   rest-api:
     restart: unless-stopped
+    # Dev/E2E: a small fixture "previous GEMI install" (tests/fixtures/
+    # legacy); point GEMINI_LEGACY_*_HOST_DIR at a real one to try that.
+    volumes:
+      - ${GEMINI_LEGACY_APP_HOST_DIR:-./frontend/tests/fixtures/legacy/app}:/legacy/app:ro
+      - ${GEMINI_LEGACY_DATA_HOST_DIR:-./frontend/tests/fixtures/legacy/data}:/legacy/data:ro
     develop:
       watch:
         # rest-api Python source is already bind-mounted at
@@ -72,6 +77,11 @@ services:
 
   geminibase-worker-geo:
     restart: unless-stopped
+    # Dev/E2E: a small fixture "previous GEMI install" (tests/fixtures/
+    # legacy); point GEMINI_LEGACY_*_HOST_DIR at a real one to try that.
+    volumes:
+      - ${GEMINI_LEGACY_APP_HOST_DIR:-./frontend/tests/fixtures/legacy/app}:/legacy/app:ro
+      - ${GEMINI_LEGACY_DATA_HOST_DIR:-./frontend/tests/fixtures/legacy/data}:/legacy/data:ro
     develop:
       watch:
         - action: sync+restart

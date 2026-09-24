@@ -9,6 +9,14 @@ import { makePrefix } from "./uniquePrefix"
 type Fixtures = {
   consoleErrorGuard: ConsoleErrorGuardHandle
   runPrefix: string
+  /**
+   * Name prefixes of entities a spec creates with FIXED names it doesn't
+   * choose (e.g. the legacy-import fixture's "E2E-legacy-fixture"
+   * experiment). Swept before the test (leftovers of a failed run) and
+   * after it. Set with `test.use({ fixedNamePrefixes: [...] })`.
+   */
+  fixedNamePrefixes: string[]
+  fixedNameCleanup: void
 }
 
 // `??` would treat VITE_API_URL="" as "set", so fall through with `||`
@@ -75,6 +83,23 @@ async function cleanupByPrefix(prefix: string): Promise<void> {
 // and trip the guard during teardown. Declare runPrefix FIRST so its
 // teardown is LAST.
 export const test = base.extend<Fixtures>({
+  fixedNamePrefixes: [[], { option: true }],
+  // Declared first so its teardown runs last (see the note above).
+  fixedNameCleanup: [
+    async ({ fixedNamePrefixes }, use) => {
+      for (const p of fixedNamePrefixes) await cleanupByPrefix(p)
+      await use()
+      if (process.env.KEEP_E2E_DATA === "1") return
+      for (const p of fixedNamePrefixes) {
+        try {
+          await cleanupByPrefix(p)
+        } catch (err) {
+          console.warn(`[fixtures] cleanup failed for ${p}:`, err)
+        }
+      }
+    },
+    { auto: true },
+  ],
   runPrefix: [
     // biome-ignore lint/correctness/noEmptyPattern: Playwright fixture API requires an object destructure even when no fixtures are injected
     async ({}, use, info) => {

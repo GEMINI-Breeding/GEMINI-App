@@ -28,5 +28,7 @@ tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", features = ["blocking"] }
 getrandom = "0.2"
 fs2 = "0.4"
+# Reads the previous GEMI app's gemi.db (read-only) to find its data folder.
+rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-single-instance = "2"
 

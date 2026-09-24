@@ -90,6 +90,8 @@ struct StackStatus {
     api_url: Option<String>,
     titiler_url: Option<String>,
     healthy: bool,
+    /// Free space on the data folder's drive (bytes).
+    free_bytes: Option<u64>,
     default_data_dir: Option<String>,
     /// v0.0.5's database, if that app was installed here (read-only; D1).
     legacy_install: Option<String>,
@@ -105,6 +107,7 @@ async fn stack_status(app: AppHandle) -> Result<StackStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let config = stack::load_config(&paths);
         let healthy = config.as_ref().is_some_and(stack::api_healthy);
+        let free_bytes = config.as_ref().and_then(|c| fs2::available_space(&c.data_dir).ok());
         StackStatus {
             managed: cfg!(not(debug_assertions)),
             version: stack::STACK_VERSION.trim().to_string(),
@@ -113,6 +116,7 @@ async fn stack_status(app: AppHandle) -> Result<StackStatus, String> {
             titiler_url: config.as_ref().map(|c| c.titiler_url()),
             config,
             healthy,
+            free_bytes,
             default_data_dir: stack::default_data_dir().map(|p| p.to_string_lossy().into()),
             legacy_install: stack::legacy_install().map(|p| p.to_string_lossy().into()),
         }

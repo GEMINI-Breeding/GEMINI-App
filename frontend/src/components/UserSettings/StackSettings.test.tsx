@@ -26,6 +26,7 @@ const status: StackStatus = {
   api_url: "http://127.0.0.1:7777",
   titiler_url: "http://127.0.0.1:8091",
   healthy: true,
+  free_bytes: null,
   default_data_dir: null,
   legacy_install: null,
 }

@@ -31,6 +31,8 @@ export interface StackStatus {
   api_url: string | null
   titiler_url: string | null
   healthy: boolean
+  /** Free space on the data folder's drive, in bytes. */
+  free_bytes: number | null
   default_data_dir: string | null
   legacy_install: string | null
 }

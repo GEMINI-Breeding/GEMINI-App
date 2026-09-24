@@ -10,6 +10,7 @@ import { NavSidebar } from "@/components/Common/NavSidebar"
 import { Button } from "@/components/ui/button"
 import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
+import { LegacyImport } from "./LegacyImport"
 import { StackSettings } from "./StackSettings"
 
 type UpdateStatus =
@@ -114,7 +115,12 @@ const ApplicationSettings = () => {
         onSelect={(id) => setActive(id as SettingsSection)}
       />
       <div className="flex-1 overflow-auto px-6 py-6">
-        {active === "data" && <StackSettings />}
+        {active === "data" && (
+          <>
+            <StackSettings />
+            <LegacyImport />
+          </>
+        )}
         {active === "about" && <AboutSettings />}
       </div>
     </div>

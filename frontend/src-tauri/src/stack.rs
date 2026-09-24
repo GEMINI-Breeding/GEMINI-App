@@ -107,6 +107,7 @@ pub fn render_env(
     config: &StackConfig,
     env_file: &Path,
     existing: &BTreeMap<String, String>,
+    legacy: Option<&LegacyMounts>,
 ) -> String {
     let secret = |key: &str| {
         existing
@@ -130,6 +131,14 @@ pub fn render_env(
     // The bulk of the data (MinIO) is still in the user's folder.
     if cfg!(windows) {
         line("GEMINI_DB_MOUNT", "gemini_db");
+    }
+    // The previous GEMI app, mounted read-only for the import (compose
+    // falls back to an empty volume when these are absent).
+    if let Some(l) = legacy {
+        line("GEMINI_LEGACY_APP_HOST_DIR", &l.app_dir.to_string_lossy());
+        if let Some(d) = &l.data_dir {
+            line("GEMINI_LEGACY_DATA_HOST_DIR", &d.to_string_lossy());
+        }
     }
     line("GEMINI_REST_API_HOST_PORT", &config.api_port.to_string());
     line("GEMINI_TITILER_HOST_PORT", &config.titiler_port.to_string());
@@ -204,7 +213,10 @@ pub fn configure(paths: &Paths, data_dir: PathBuf) -> Result<StackConfig, String
     let existing = std::fs::read_to_string(paths.env_file())
         .map(|t| parse_env(&t))
         .unwrap_or_default();
-    write_private(&paths.env_file(), &render_env(&config, &paths.env_file(), &existing))?;
+    write_private(
+        &paths.env_file(),
+        &render_env(&config, &paths.env_file(), &existing, legacy_mounts().as_ref()),
+    )?;
     std::fs::write(
         paths.config_file(),
         serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?,
@@ -231,7 +243,10 @@ fn refresh_env(paths: &Paths, config: &StackConfig) -> Result<(), String> {
     let existing = std::fs::read_to_string(paths.env_file())
         .map(|t| parse_env(&t))
         .unwrap_or_default();
-    write_private(&paths.env_file(), &render_env(config, &paths.env_file(), &existing))
+    write_private(
+        &paths.env_file(),
+        &render_env(config, &paths.env_file(), &existing, legacy_mounts().as_ref()),
+    )
 }
 
 // ── Docker ──────────────────────────────────────────────────────────────────
@@ -573,6 +588,47 @@ pub fn legacy_install() -> Option<PathBuf> {
     db.is_file().then_some(db)
 }
 
+/// The previous app's folders, to mount read-only for the import.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyMounts {
+    /// The folder holding gemi.db.
+    pub app_dir: PathBuf,
+    /// Its data folder, if it still exists.
+    pub data_dir: Option<PathBuf>,
+}
+
+pub fn legacy_mounts() -> Option<LegacyMounts> {
+    let db = legacy_install()?;
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    Some(legacy_mounts_for(&db, home.as_deref()))
+}
+
+/// Where the old data folder is: the database's `data_root` setting if it
+/// exists on this machine, else ~/GEMI-Data (the old default).
+pub fn legacy_mounts_for(db: &Path, home: Option<&Path>) -> LegacyMounts {
+    let configured = legacy_data_root(db).map(PathBuf::from).filter(|p| p.is_dir());
+    let default = home.map(|h| h.join("GEMI-Data")).filter(|p| p.is_dir());
+    LegacyMounts {
+        app_dir: db.parent().map(Path::to_path_buf).unwrap_or_default(),
+        data_dir: configured.or(default),
+    }
+}
+
+/// `appsetting.data_root` from the old database, opened read-only.
+fn legacy_data_root(db: &Path) -> Option<String> {
+    use rusqlite::{Connection, OpenFlags};
+    let conn = Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    conn.query_row("SELECT value FROM appsetting WHERE key = 'data_root'", [], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .filter(|v| !v.trim().is_empty())
+}
+
 pub fn default_data_dir() -> Option<PathBuf> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
     // A name no earlier version used: v0.0.5 keeps ~/GEMI-Data (never
@@ -590,7 +646,7 @@ mod tests {
 
     #[test]
     fn env_has_every_key_compose_requires() {
-        let text = render_env(&cfg("/data/gemini"), Path::new("/cfg/gemini.env"), &BTreeMap::new());
+        let text = render_env(&cfg("/data/gemini"), Path::new("/cfg/gemini.env"), &BTreeMap::new(), None);
         let env = parse_env(&text);
         for k in [
             "GEMINI_VERSION",
@@ -614,8 +670,8 @@ mod tests {
 
     #[test]
     fn secrets_are_unique_per_install() {
-        let a = parse_env(&render_env(&cfg("/d"), Path::new("/e"), &BTreeMap::new()));
-        let b = parse_env(&render_env(&cfg("/d"), Path::new("/e"), &BTreeMap::new()));
+        let a = parse_env(&render_env(&cfg("/d"), Path::new("/e"), &BTreeMap::new(), None));
+        let b = parse_env(&render_env(&cfg("/d"), Path::new("/e"), &BTreeMap::new(), None));
         for k in SECRET_KEYS {
             assert_ne!(a[*k], b[*k]);
         }
@@ -625,10 +681,10 @@ mod tests {
 
     #[test]
     fn rewrite_keeps_secrets_and_updates_paths() {
-        let first = parse_env(&render_env(&cfg("/old"), Path::new("/e"), &BTreeMap::new()));
+        let first = parse_env(&render_env(&cfg("/old"), Path::new("/e"), &BTreeMap::new(), None));
         let mut moved = cfg("/new");
         moved.api_port = 7780;
-        let second = parse_env(&render_env(&moved, Path::new("/e"), &first));
+        let second = parse_env(&render_env(&moved, Path::new("/e"), &first, None));
         for k in SECRET_KEYS {
             assert_eq!(first[*k], second[*k], "{k} changed on rewrite");
         }
@@ -669,6 +725,47 @@ mod tests {
     fn configure_rejects_relative_paths() {
         let paths = Paths { config_dir: "/nonexistent".into(), compose_file: "/x".into() };
         assert!(configure(&paths, "relative/dir".into()).is_err());
+    }
+
+    #[test]
+    fn legacy_data_folder_comes_from_the_old_setting_else_the_default() {
+        let tmp = std::env::temp_dir().join(format!("gemini-legacy-test-{}", random_secret()));
+        let app = tmp.join("GEMI");
+        let custom = tmp.join("Big Drive/GEMI-Data");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::create_dir_all(&custom).unwrap();
+        std::fs::create_dir_all(tmp.join("GEMI-Data")).unwrap();
+        let db = app.join("gemi.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE appsetting (key VARCHAR(255) PRIMARY KEY, value VARCHAR(4096));",
+        )
+        .unwrap();
+        // No setting → the old default under home.
+        let m = legacy_mounts_for(&db, Some(&tmp));
+        assert_eq!(m.app_dir, app);
+        assert_eq!(m.data_dir, Some(tmp.join("GEMI-Data")));
+        // The user had moved it.
+        conn.execute(
+            "INSERT INTO appsetting VALUES ('data_root', ?1)",
+            [custom.to_string_lossy()],
+        )
+        .unwrap();
+        assert_eq!(legacy_mounts_for(&db, Some(&tmp)).data_dir, Some(custom.clone()));
+        // A setting from another machine that doesn't exist here → default.
+        conn.execute("UPDATE appsetting SET value = 'D:\\\\gone'", []).unwrap();
+        assert_eq!(legacy_mounts_for(&db, Some(&tmp)).data_dir, Some(tmp.join("GEMI-Data")));
+        drop(conn);
+        // Written into the env file for compose to mount.
+        let env = parse_env(&render_env(
+            &cfg("/d"),
+            Path::new("/e"),
+            &BTreeMap::new(),
+            Some(&legacy_mounts_for(&db, Some(&tmp))),
+        ));
+        assert_eq!(env["GEMINI_LEGACY_APP_HOST_DIR"], app.to_string_lossy());
+        assert_eq!(env["GEMINI_LEGACY_DATA_HOST_DIR"], tmp.join("GEMI-Data").to_string_lossy());
+        std::fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

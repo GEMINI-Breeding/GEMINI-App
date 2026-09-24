@@ -245,7 +245,8 @@ function FirstRun({
       {status.legacy_install && (
         <p className="text-muted-foreground text-sm">
           Your data from the previous GEMI version is kept exactly where it is
-          and is never modified or deleted.
+          and is never modified or deleted. Once GEMINI is running you can
+          import it from Settings → Data & services.
         </p>
       )}
       <Button
