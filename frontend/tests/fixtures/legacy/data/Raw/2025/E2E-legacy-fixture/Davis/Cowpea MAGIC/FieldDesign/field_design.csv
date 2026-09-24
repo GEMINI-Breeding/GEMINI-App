@@ -1,3 +1,5 @@
 row,col,plot,accession
-1,1,101,IT97K-499-35
-1,2,102,CB27
+1,1,1,ACC-A
+1,2,2,ACC-B
+2,1,3,ACC-C
+2,2,4,ACC-D

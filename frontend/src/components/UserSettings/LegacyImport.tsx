@@ -27,8 +27,52 @@ interface Skipped {
   reason: string
 }
 
+/** Tiers 2–3: the old app's workspaces, runs and results. */
+interface Processing {
+  workspaces: number
+  pipelines: number
+  runs: number
+  ortho_versions: number
+  boundary_versions: number
+  trait_records?: number
+  trait_datasets?: number
+  plot_markings: number
+  stitches: number
+  reference_datasets: number
+  archive_files: number
+  archive_bytes?: number
+  notes?: string[]
+}
+
+const PLURAL: Record<string, string> = {
+  "set of plot traits": "sets of plot traits",
+}
+
+/** "2 runs · 1 orthomosaic version · …", leaving out zeros. */
+function describeProcessing(p: Processing): string {
+  const parts: [number | undefined, string][] = [
+    [p.workspaces, "workspace"],
+    [p.pipelines, "pipeline"],
+    [p.runs, "run"],
+    [p.ortho_versions, "orthomosaic version"],
+    [p.boundary_versions, "plot boundary version"],
+    [p.trait_records ?? p.trait_datasets, "set of plot traits"],
+    [p.plot_markings, "plot marking version"],
+    [p.stitches, "stitch"],
+    [p.reference_datasets, "reference dataset"],
+  ]
+  return parts
+    .filter(([n]) => (n ?? 0) > 0)
+    .map(
+      ([n, what]) =>
+        `${n} ${n === 1 ? what : (PLURAL[what] ?? `${what}${what.endsWith("h") ? "es" : "s"}`)}`,
+    )
+    .join(" · ")
+}
+
 interface LegacyPlan {
   available: boolean
+  processing?: Processing
   uploads?: number
   files?: number
   bytes?: number
@@ -39,6 +83,7 @@ interface LegacyPlan {
 }
 
 interface ImportResult {
+  processing?: Processing
   imported: { path: string; copied: number; already_there: number }[]
   failed: { path: string; error: string }[]
   skipped: Skipped[]
@@ -123,8 +168,10 @@ function LegacyImportForSuperuser() {
 
   const p = plan.data
   if (!p?.available) return null
-  const bytes = p.bytes ?? 0
-  const tooBig = freeBytes != null && bytes > freeBytes
+  // Uploads, plus the old Processed/ and Intermediate/ files: those are
+  // copied twice (converted into runs, and kept as they were in the archive).
+  const needed = (p.bytes ?? 0) + 2 * (p.processing?.archive_bytes ?? 0)
+  const tooBig = freeBytes != null && needed > freeBytes
   const running = Boolean(jobId) && !finished
   const all = (p.uploads ?? 0) > 0 && p.already_imported === p.uploads
 
@@ -159,7 +206,7 @@ function LegacyImportForSuperuser() {
       >
         <dt className="text-muted-foreground">Uploads</dt>
         <dd>
-          {p.uploads} ({p.files} files, {gb(bytes)})
+          {p.uploads} ({p.files} files, {gb(p.bytes ?? 0)})
           {p.already_imported
             ? ` · ${p.already_imported} already imported`
             : ""}
@@ -168,7 +215,28 @@ function LegacyImportForSuperuser() {
         <dd>{p.experiments?.join(", ") || "—"}</dd>
         <dt className="text-muted-foreground">Seasons</dt>
         <dd>{p.seasons?.join(", ") || "—"}</dd>
+        {p.processing && describeProcessing(p.processing) && (
+          <>
+            <dt className="text-muted-foreground">Processing</dt>
+            <dd>{describeProcessing(p.processing)}</dd>
+          </>
+        )}
+        {(p.processing?.archive_files ?? 0) > 0 && (
+          <>
+            <dt className="text-muted-foreground">Other files</dt>
+            <dd>
+              {p.processing?.archive_files} (
+              {gb(p.processing?.archive_bytes ?? 0)}), kept as they were under
+              Imported/GEMI
+            </dd>
+          </>
+        )}
       </dl>
+      {p.processing?.notes?.map((n) => (
+        <p key={n} className="text-muted-foreground text-xs">
+          {n}
+        </p>
+      ))}
 
       {(p.skipped?.length ?? 0) > 0 && (
         <div className="text-sm" data-testid="legacy-import-skipped">
@@ -188,7 +256,7 @@ function LegacyImportForSuperuser() {
 
       {tooBig && (
         <p className="text-destructive text-sm">
-          Not enough free space: this needs {gb(bytes)} and the data folder's
+          Not enough free space: this needs {gb(needed)} and the data folder's
           drive has {gb(freeBytes ?? 0)}. Move GEMI's data to a larger drive
           (above) first.
         </p>
@@ -256,6 +324,12 @@ function ImportOutcome({
         {r.cancelled ? " before it was cancelled" : ""}. Find them under Files →
         Manage Data.
       </p>
+      {r.processing && describeProcessing(r.processing) && (
+        <p data-testid="legacy-import-processing">
+          Also imported: {describeProcessing(r.processing)}. The workspaces and
+          runs are under Process.
+        </p>
+      )}
       {r.failed.length > 0 && (
         <div>
           <p className="text-destructive">Couldn't import:</p>

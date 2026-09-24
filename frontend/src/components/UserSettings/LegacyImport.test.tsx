@@ -21,7 +21,9 @@ const PLAN = {
   available: true,
   uploads: 2,
   files: 3,
-  bytes: 5e9,
+  bytes: 3e9,
+  // 1 GB of old processing files: counted twice (converted + archived).
+  processing: { archive_files: 10, archive_bytes: 1e9 },
   experiments: ["Trial"],
   seasons: ["2025"],
   skipped: [],

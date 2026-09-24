@@ -3,8 +3,11 @@
  *
  * The dev stack mounts a fixture "previous install" read-only
  * (tests/fixtures/legacy, built by make_fixture.py from GEMI v0.0.5's own
- * schema): an Image Data upload (2 drone images), a Field Design, and an
- * upload the old app had marked missing.
+ * schema): uploads (drone images, a field design, an Amiga log the old app
+ * had extracted, one it had marked missing), a workspace with an aerial
+ * and a ground pipeline and a run of each (orthomosaic, two boundary
+ * versions, per-plot traits, plot images; plot marking, a stitch), and a
+ * reference dataset.
  *
  * Through the UI: Settings shows what would be imported and what can't be
  * (and why) → Import → progress → result → the uploads are in Files →
@@ -61,9 +64,13 @@ test.describe("Import from the previous GEMI app", () => {
     const section = page.getByTestId("legacy-import")
     await expect(section).toBeVisible({ timeout: 30_000 })
     const plan = section.getByTestId("legacy-import-plan")
-    await expect(plan).toContainText("2 (3 files")
+    await expect(plan).toContainText("3 (12 files")
     await expect(plan).toContainText(EXPERIMENT)
     await expect(plan).toContainText("2025")
+    await expect(plan).toContainText(
+      "1 workspace · 2 pipelines · 2 runs · 1 orthomosaic version · 2 plot boundary versions · 1 set of plot traits · 1 plot marking version · 1 stitch · 1 reference dataset",
+    )
+    await expect(plan).toContainText("kept as they were under Imported/GEMI")
     await expect(section.getByTestId("legacy-import-skipped")).toContainText(
       "2025-06-20/Drone/RGB/Images: the old app had already marked its folder missing",
     )
@@ -71,12 +78,15 @@ test.describe("Import from the previous GEMI app", () => {
     // ── Import ───────────────────────────────────────────────────────────
     await section.getByTestId("legacy-import-start").click()
     const result = section.getByTestId("legacy-import-result")
-    await expect(result).toContainText("Imported 2 uploads (3 files copied)", {
+    await expect(result).toContainText("Imported 3 uploads (12 files copied)", {
       timeout: 120_000,
     })
+    await expect(section.getByTestId("legacy-import-processing")).toContainText(
+      "2 runs · 1 orthomosaic version · 2 plot boundary versions · 1 set of plot traits",
+    )
     await result.getByRole("button", { name: "OK" }).click()
     // The dry run now knows it's done.
-    await expect(plan).toContainText("2 already imported")
+    await expect(plan).toContainText("3 already imported")
     await expect(section.getByTestId("legacy-import-start")).toHaveText(
       "Everything is imported",
     )
@@ -102,6 +112,47 @@ test.describe("Import from the previous GEMI app", () => {
       .filter({ has: page.locator(`text=${EXPERIMENT}__FieldDesign__`) })
     await expect(design).toContainText("1 file")
 
+    const traits = page
+      .locator('[data-testid^="manage-data-dataset-"]')
+      .filter({ has: page.locator("text=Traits from GEMI") })
+    await expect(traits).toHaveCount(1)
+    // The reference dataset, with its plots.
+    await expect(
+      page.getByTestId("reference-data-row-LAI survey"),
+    ).toBeVisible()
+    await expect(
+      page.getByTestId("reference-data-plots-LAI survey"),
+    ).toContainText("4")
+
+    // ── Process: the old workspace, its pipelines and runs ──────────────
+    await page.locator('[data-onboarding="nav-process"]').click()
+    await page.getByTestId("workspace-card-E2E-legacy-fixture WS").click()
+    await expect(page.getByText("Drone pipe")).toBeVisible()
+    await expect(page.getByText("Amiga pipe")).toBeVisible()
+    await page.getByText("2025-06-10 Drone/RGB").click()
+    await expect(page.getByTestId("step-row-orthomosaic")).toHaveAttribute(
+      "data-status",
+      "completed",
+      { timeout: 30_000 },
+    )
+    await expect(page.getByTestId("ortho-version-row-1")).toContainText(
+      "First ODM",
+    )
+    await expect(
+      page.getByTestId("step-row-plot_boundary_prep"),
+    ).toHaveAttribute("data-status", "completed")
+    await page.goBack()
+    await page.getByText("2025-07-15 Amiga/RGB").click()
+    await expect(page.getByTestId("step-row-plot_marking")).toHaveAttribute(
+      "data-status",
+      "completed",
+      { timeout: 30_000 },
+    )
+    await expect(page.getByTestId("step-row-stitching")).toHaveAttribute(
+      "data-status",
+      "completed",
+    )
+
     // ── Storage keys (read-only check): the new layout ──────────────────
     const auth = await page.context().storageState()
     const token =
@@ -119,13 +170,26 @@ test.describe("Import from the previous GEMI app", () => {
     ).json()) as { object_name: string }[]
     const keys = listing.map((f) => f.object_name).sort()
     const base = `Raw/2025/${EXPERIMENT}/Davis/Cowpea MAGIC`
-    expect(keys).toHaveLength(3)
+    expect(keys).toHaveLength(12)
     expect(keys[0]).toMatch(
       new RegExp(
         `^${base}/2025-06-10/Drone/RGB/[0-9a-f]{8}/Images/test_image_001\\.jpg$`,
       ),
     )
-    expect(keys[2]).toBe(`${base}/FieldDesign/field_design.csv`)
+    expect(keys).toContain(`${base}/FieldDesign/field_design.csv`)
+    // The old Amiga extraction, laid out like the new extractor's.
+    expect(
+      keys.some((k) =>
+        /\/2025-07-15\/Amiga\/RGB\/[0-9a-f]{8}\/RGB\/Images\/top\/rgb-\d+\.jpg$/.test(
+          k,
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      keys.some((k) =>
+        /\/Amiga\/RGB\/[0-9a-f]{8}\/RGB\/Metadata\/msgs_synced\.csv$/.test(k),
+      ),
+    ).toBe(true)
 
     // ── The previous install is exactly as it was ───────────────────────
     expect(fingerprint(FIXTURE)).toBe(before)
