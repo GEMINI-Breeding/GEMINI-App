@@ -17,6 +17,18 @@ function mockFetchResponse(body: unknown, ok = true, status = 200) {
 }
 
 describe("checkForUpdates", () => {
+  it("CURRENT_VERSION is the app's version from tauri.conf.json", async () => {
+    const { readFileSync } = await import("node:fs")
+    const conf = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"))
+    expect(CURRENT_VERSION).toBe(conf.version)
+  })
+
+  it("an older release is never offered as an update", async () => {
+    fetchMock.mockReturnValueOnce(mockFetchResponse({ tag_name: "v0.0.1" }))
+    const res = await checkForUpdates()
+    expect(res.status).toBe("up_to_date")
+  })
+
   const fetchMock = vi.fn()
 
   beforeEach(() => {
@@ -61,8 +73,11 @@ describe("checkForUpdates", () => {
   })
 
   it("uses major > minor > patch precedence", async () => {
-    fetchMock.mockReturnValueOnce(mockFetchResponse({ tag_name: "v0.1.0" }))
-    // CURRENT_VERSION is 0.0.4 → 0.1.0 is newer (minor bump beats patch)
+    const [maj, min] = CURRENT_VERSION.split(".").map(Number)
+    // A minor bump beats any patch number.
+    fetchMock.mockReturnValueOnce(
+      mockFetchResponse({ tag_name: `v${maj}.${min + 1}.0` }),
+    )
     const res = await checkForUpdates()
     expect(res.status).toBe("update_available")
   })

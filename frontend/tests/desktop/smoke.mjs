@@ -89,8 +89,7 @@ async function click(b, selector) {
 }
 
 async function openStackSettings(b) {
-  await click(b, '[data-testid="user-menu"]')
-  await click(b, "*=User Settings")
+  await click(b, '[data-onboarding="nav-settings"]')
   await click(b, '[data-testid="settings-tab-application"]')
   await click(b, '[data-onboarding="files-tab-data"]')
   const panel = await b.$('[data-testid="stack-settings"]')

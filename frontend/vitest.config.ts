@@ -1,8 +1,17 @@
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import react from "@vitejs/plugin-react-swc"
 import { defineConfig } from "vitest/config"
 
+// The app's version has one source: src-tauri/tauri.conf.json (CI sets it
+// from the release tag before building). The update check compares it
+// against the latest GitHub release.
+const APP_VERSION: string = JSON.parse(
+  readFileSync(path.resolve(__dirname, "src-tauri/tauri.conf.json"), "utf8"),
+).version
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [react()],
   resolve: {
     alias: {

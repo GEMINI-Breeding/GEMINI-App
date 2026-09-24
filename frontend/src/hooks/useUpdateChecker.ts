@@ -10,13 +10,16 @@
  *
  * Configuration:
  *   Set VITE_UPDATE_CHECK_URL in your .env to the GitHub releases API endpoint.
- *   Default: https://api.github.com/repos/eranario/GEMINI-App/releases/latest
+ *   Default: https://api.github.com/repos/GEMINI-Breeding/GEMINI-App/releases/latest
  *   The JSON response must have { tag_name: string, html_url: string }.
  */
 
 import { useEffect } from "react"
 
-export const CURRENT_VERSION = "0.0.4"
+/** This build's version, from src-tauri/tauri.conf.json (see vite.config.ts).
+ * It was a hand-edited constant that fell behind: the new app then told
+ * users an older release was "available". */
+export const CURRENT_VERSION: string = __APP_VERSION__
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const LS_KEY = "gemi_last_update_check"
 const LS_DISMISSED_KEY = "gemi_dismissed_version"
