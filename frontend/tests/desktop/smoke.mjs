@@ -28,12 +28,17 @@ const START_MS = 5 * 60_000
 const log = (m) => console.log(`[smoke] ${m}`)
 
 async function launch() {
-  return remote({
+  const b = await remote({
     hostname: "127.0.0.1",
     port: 4444,
     logLevel: "warn",
     capabilities: { "tauri:options": { application: APP } },
   })
+  // xvfb has no window manager, so the app's "maximized" never applies and
+  // the window stays at its minimum size, where the sidebar (and the user
+  // menu) collapse. Give it a desktop-sized window like a real session.
+  await b.setWindowSize(1600, 1000)
+  return b
 }
 
 async function waitForShell(b, timeout) {
