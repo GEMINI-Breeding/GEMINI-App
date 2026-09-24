@@ -24,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
 
 const formSchema = z
@@ -61,6 +62,7 @@ export const Route = createFileRoute("/signup")({
 
 function SignUp() {
   const navigate = useNavigate()
+  const capabilities = useCapabilities()
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -83,7 +85,10 @@ function SignUp() {
         },
       }),
     onSuccess: () => {
-      toast.success("Account created. Please log in.")
+      // New accounts start inactive until a superuser approves them.
+      toast.success(
+        "Account created. An administrator must approve it before you can log in.",
+      )
       navigate({ to: "/login" })
     },
     onError: (err: unknown) => {
@@ -100,6 +105,9 @@ function SignUp() {
       }
       if (status === 400) {
         message = detail ?? "That email is already registered."
+      } else if (status === 403) {
+        message =
+          "Sign-up is turned off on this server. Ask an administrator for an account."
       } else if (status === 503) {
         message =
           "Auth is disabled on the backend (GEMINI_JWT_SECRET unset); signup is unavailable."
@@ -110,6 +118,28 @@ function SignUp() {
 
   const isPending = signupMutation.isPending
   const onSubmit = (data: FormData) => signupMutation.mutate(data)
+
+  if (capabilities.data && !capabilities.data.signup_enabled)
+    return (
+      <AuthLayout>
+        <div
+          className="flex flex-col gap-4 text-center"
+          data-testid="signup-disabled"
+        >
+          <h1 className="text-2xl font-bold">Sign-up is turned off</h1>
+          <p className="text-muted-foreground text-sm">
+            Accounts on this server are created by an administrator (Admin →
+            Users → Add User). Ask one for an account.
+          </p>
+          <RouterLink
+            to="/login"
+            className="text-sm underline underline-offset-4"
+          >
+            Back to log in
+          </RouterLink>
+        </div>
+      </AuthLayout>
+    )
 
   return (
     <AuthLayout>

@@ -7,9 +7,11 @@
  * is also `python -m gemini.rest_api.reset_password`, shown on the "Forgot
  * password" page; that one runs on the host, so it isn't driven here.)
  *
- * Signs up a throwaway user through the UI, changes its password, proves
- * the old one no longer works and the new one does, then deletes the user
- * from the Admin page as the seeded superuser.
+ * Self-registration is off by default (GEMINI_SIGNUP_ENABLED), so: the login
+ * page offers no sign-up and /signup says it's off; the seeded superuser
+ * creates a throwaway user in Admin → Users → Add User; that user changes
+ * its password, the old one stops working and the new one works; the
+ * superuser deletes it again.
  */
 import type { Page } from "@playwright/test"
 
@@ -59,18 +61,35 @@ test.describe("Account — change password", () => {
       "python -m gemini.rest_api.reset_password",
     )
 
-    // ── 1. Sign up and sign in as a fresh user. ─────────────────────────
+    // ── 1. No self-registration: no link, and /signup explains. ─────────
+    await page.goto("/login")
+    await expect(page.getByTestId("email-input")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Sign up" })).toHaveCount(0)
     await page.goto("/signup")
-    await page.getByTestId("full-name-input").fill("Password Changer")
-    await page.getByTestId("email-input").fill(email)
-    await page.getByTestId("password-input").fill(oldPassword)
-    await page.getByTestId("confirm-password-input").fill(oldPassword)
-    await page.getByRole("button", { name: "Sign Up" }).click()
-    await page.waitForURL("/login")
+    await expect(page.getByTestId("signup-disabled")).toContainText(
+      "Sign-up is turned off",
+    )
+
+    // ── 2. An administrator creates the account. ─────────────────────────
+    await logIn(page, firstSuperuser, firstSuperuserPassword)
+    await page.waitForURL("/")
+    await page.goto("/admin")
+    await page.getByRole("button", { name: "Add User" }).click()
+    const add = page.getByRole("dialog")
+    await add.getByPlaceholder("Email").fill(email)
+    await add.getByPlaceholder("Full name").fill("Password Changer")
+    await add.getByPlaceholder("Password").first().fill(oldPassword)
+    await add.getByPlaceholder("Password").nth(1).fill(oldPassword)
+    await add.getByLabel("Is active?").check()
+    await add.getByRole("button", { name: "Save" }).click()
+    await expect(add).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByRole("row").filter({ hasText: email })).toBeVisible()
+    await logOut(page)
+
     await logIn(page, email, oldPassword)
     await page.waitForURL("/")
 
-    // ── 2. Settings → Account → change it. ──────────────────────────────
+    // ── 3. Settings → Account → change it. ──────────────────────────────
     await page.goto("/settings")
     await page.getByTestId("settings-tab-account").click()
     await page.getByTestId("current-password-input").fill(oldPassword)
@@ -81,7 +100,7 @@ test.describe("Account — change password", () => {
       timeout: 15_000,
     })
 
-    // ── 3. Old password refused, new one accepted. ──────────────────────
+    // ── 4. Old password refused, new one accepted. ──────────────────────
     await logOut(page)
     const refused = page.waitForResponse(
       (r) => r.url().includes("/login/access-token") && r.status() === 400,
@@ -93,7 +112,7 @@ test.describe("Account — change password", () => {
     await page.waitForURL("/")
     await expect(page.getByTestId("user-menu")).toBeVisible()
 
-    // ── 4. Cleanup through the Admin page as the seeded superuser. ─────
+    // ── 5. Cleanup through the Admin page as the seeded superuser. ─────
     await logOut(page)
     await logIn(page, firstSuperuser, firstSuperuserPassword)
     await page.waitForURL("/")

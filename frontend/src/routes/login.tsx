@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { login } from "@/lib/auth"
 
@@ -100,6 +101,7 @@ function describeLoginError(err: unknown): LoginError {
 function Login() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const capabilities = useCapabilities()
   const [loginError, setLoginError] = useState<LoginError | null>(null)
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -211,12 +213,15 @@ function Login() {
             </LoadingButton>
           </div>
 
-          <div className="text-center text-sm">
-            Don't have an account yet?{" "}
-            <RouterLink to="/signup" className="underline underline-offset-4">
-              Sign up
-            </RouterLink>
-          </div>
+          {/* Self-registration is off unless the server enables it. */}
+          {capabilities.data?.signup_enabled && (
+            <div className="text-center text-sm">
+              Don't have an account yet?{" "}
+              <RouterLink to="/signup" className="underline underline-offset-4">
+                Sign up
+              </RouterLink>
+            </div>
+          )}
         </form>
       </Form>
     </AuthLayout>

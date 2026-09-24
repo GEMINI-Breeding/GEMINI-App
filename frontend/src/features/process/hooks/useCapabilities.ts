@@ -24,6 +24,8 @@ export interface Capabilities {
   cuda_available: boolean
   mps_available: boolean
   cpu_count: number | null
+  /** Self-registration is allowed (GEMINI_SIGNUP_ENABLED); off when absent. */
+  signup_enabled: boolean
 }
 
 /**
@@ -54,6 +56,7 @@ function asCapabilities(raw: Record<string, unknown>): Capabilities | null {
     cuda_available: raw.cuda_available === true,
     mps_available: raw.mps_available === true,
     cpu_count: typeof raw.cpu_count === "number" ? raw.cpu_count : null,
+    signup_enabled: raw.signup_enabled === true,
   }
 }
 

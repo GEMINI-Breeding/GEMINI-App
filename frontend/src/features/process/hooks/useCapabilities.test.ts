@@ -9,6 +9,7 @@ const CAPS = (over: Partial<Capabilities> = {}): Capabilities => ({
   cuda_available: false,
   mps_available: false,
   cpu_count: 12,
+  signup_enabled: false,
   ...over,
 })
 

@@ -4,8 +4,15 @@ import type { Page } from "@playwright/test"
 // console-error guard required by CLAUDE.md's strict-E2E rule.
 import { expect, test } from "./helpers/fixtures"
 import { randomEmail, randomPassword } from "./utils/random"
+import { SIGNUP_OFF, signupEnabled } from "./utils/signup"
 
 test.use({ storageState: { cookies: [], origins: [] } })
+
+// The sign-up form only exists when the server allows self-registration.
+// (With it off, account-password.spec checks the page says so.)
+test.beforeEach(async ({ request }) => {
+  test.skip(!(await signupEnabled(request)), SIGNUP_OFF)
+})
 
 const fillForm = async (
   page: Page,
@@ -61,7 +68,8 @@ test("Sign up with valid name, email, and password", async ({ page }) => {
   // If signup silently 500'd, the page would stay on /signup and this would
   // time out — which is the correct failure.
   await page.waitForURL("/login")
-  await expect(page.getByText(/account created/i)).toBeVisible()
+  // New self-registered accounts wait for an administrator's approval.
+  await expect(page.getByText(/must approve it/i)).toBeVisible()
 })
 
 test("Sign up with invalid email", async ({ page }) => {
