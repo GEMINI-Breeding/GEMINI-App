@@ -299,10 +299,11 @@ jobs:
         env:
           GEMINI_APP: /usr/bin/gemi
           GEMINI_TEST_DATA_DIR: ${{ runner.temp }}/gemini-data
+          GEMINI_SMOKE_OUT: ${{ runner.temp }}/smoke-out
         run: |
           set -euo pipefail
           wd="$RUNNER_TEMP/wd"
-          mkdir -p "$wd"
+          mkdir -p "$wd" "$GEMINI_SMOKE_OUT"
           npm install --prefix "$wd" --no-save --silent webdriverio@9
           cp frontend/tests/desktop/smoke.mjs "$wd/"
           export DISPLAY=:99
@@ -314,6 +315,14 @@ jobs:
       - name: Stack logs
         if: failure()
         run: docker compose -p gemini logs --no-color --tail 200 || true
+
+      - name: Screenshots and page source
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/smoke-out
+          if-no-files-found: ignore
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

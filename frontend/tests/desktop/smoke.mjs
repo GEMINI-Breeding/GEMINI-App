@@ -15,7 +15,7 @@
  * Requires tauri-driver on :4444, a display (xvfb) and Docker.
  */
 import { execFileSync } from "node:child_process"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { remote } from "webdriverio"
 
 const APP = process.env.GEMINI_APP ?? "/usr/bin/gemi"
@@ -26,6 +26,23 @@ const FIRST_START_MS = 25 * 60_000 // pulls a few GB of images
 const START_MS = 5 * 60_000
 
 const log = (m) => console.log(`[smoke] ${m}`)
+const OUT = process.env.GEMINI_SMOKE_OUT ?? "."
+
+/** On failure: screenshot, page HTML and window/element state. */
+async function diagnose(b, label) {
+  try {
+    await b.saveScreenshot(`${OUT}/${label}.png`)
+    writeFileSync(`${OUT}/${label}.html`, await b.getPageSource())
+    log(`window ${JSON.stringify(await b.getWindowSize())}`)
+    const menu = await b.$('[data-testid="user-menu"]')
+    if (await menu.isExisting())
+      log(
+        `user-menu displayed=${await menu.isDisplayed()} size=${JSON.stringify(await menu.getSize())} location=${JSON.stringify(await menu.getLocation())}`,
+      )
+  } catch (e) {
+    log(`diagnose failed: ${e}`)
+  }
+}
 
 async function launch() {
   const b = await remote({
@@ -58,11 +75,24 @@ async function waitForShell(b, timeout) {
   )
 }
 
+/** Click once it's actually visible, saying which step failed. */
+async function click(b, selector) {
+  const el = await b.$(selector)
+  try {
+    await el.waitForDisplayed({ timeout: 20_000 })
+    await el.scrollIntoView()
+    await el.click()
+  } catch (e) {
+    await diagnose(b, `click-${selector.replace(/[^a-z0-9]+/gi, "_")}`)
+    throw new Error(`clicking ${selector}: ${e.message}`)
+  }
+}
+
 async function openStackSettings(b) {
-  await b.$('[data-testid="user-menu"]').click()
-  await b.$("*=User Settings").click()
-  await b.$('[data-testid="settings-tab-application"]').click()
-  await b.$('[data-onboarding="files-tab-data"]').click()
+  await click(b, '[data-testid="user-menu"]')
+  await click(b, "*=User Settings")
+  await click(b, '[data-testid="settings-tab-application"]')
+  await click(b, '[data-onboarding="files-tab-data"]')
   const panel = await b.$('[data-testid="stack-settings"]')
   await panel.waitForDisplayed({ timeout: 30_000 })
   return panel
@@ -85,7 +115,7 @@ await firstRun.waitForDisplayed({ timeout: 60_000 })
 const folder = await b.$('input[aria-label="Data folder"]')
 await folder.clearValue()
 await folder.setValue(DATA_DIR)
-await b.$("button=Continue").click()
+await click(b, "button=Continue")
 log("waiting for the stack to download and start")
 await waitForShell(b, FIRST_START_MS)
 log("signed in")
@@ -133,7 +163,7 @@ log("relaunch went straight to the app")
 
 // ── 4. Stop services and quit ──────────────────────────────────────────
 panel = await openStackSettings(b)
-await b.$("button=Stop services and quit").click()
+await click(b, "button=Stop services and quit")
 const deadline = Date.now() + 120_000
 while (geminiContainersRunning() > 0) {
   if (Date.now() > deadline) throw new Error("services still running")
