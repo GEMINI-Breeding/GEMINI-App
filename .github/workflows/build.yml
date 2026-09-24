@@ -280,7 +280,10 @@ jobs:
         if: steps.images.outputs.public == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ./dist/*.deb webkit2gtk-driver xvfb
+          # The WebDriver package was renamed in Ubuntu 26.04.
+          driver=webkit2gtk-driver
+          apt-cache show "$driver" >/dev/null 2>&1 || driver=webkitgtk-webdriver
+          sudo apt-get install -y ./dist/*.deb "$driver" xvfb
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.images.outputs.public == 'true'
