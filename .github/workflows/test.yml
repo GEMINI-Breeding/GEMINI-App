@@ -36,7 +36,8 @@ jobs:
         with:
           name: frontend-coverage
           path: frontend/coverage
-          retention-days: 14
+          # Short: artifacts count toward the org's pooled storage.
+          retention-days: 3
 
   backend-unit:
     name: Backend unit (pytest)
@@ -230,7 +231,7 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
-          retention-days: 14
+          retention-days: 5
 
       - name: Dump stack logs on failure
         if: failure()

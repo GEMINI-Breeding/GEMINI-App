@@ -237,7 +237,9 @@ jobs:
           name: gemi-${{ matrix.name }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
-          retention-days: 30
+          # Test builds only need to live long enough to try them; release
+          # installers are kept on the GitHub release.
+          retention-days: 7
 
   smoke-linux:
     # The installed .deb, driven through its real UI (tauri-driver +
