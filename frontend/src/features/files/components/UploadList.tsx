@@ -554,8 +554,9 @@ export function UploadList({
         description: resolveStatus
           ? `The upload was blocked because the entity creation step failed. ` +
             `The error from the backend is shown below.`
-          : `The upload was interrupted by an error. The first failing chunk's response is below; ` +
-            `the partial upload is preserved on the server, so retrying the same files will resume from the failed chunk.`,
+          : `The upload was interrupted by an error. The first failing chunk's response is below ` +
+            `(each chunk was retried a few times before giving up). Files that finished are kept; ` +
+            `the unfinished ones need to be uploaded again.`,
         rejectedNames: [message],
         remediation: resolveStatus
           ? "Try a different name (the entity may already exist with conflicting attributes), or check that the parent entity (experiment) is the one you intended."

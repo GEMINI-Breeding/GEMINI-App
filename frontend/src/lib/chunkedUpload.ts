@@ -9,9 +9,12 @@
  *   POST /api/files/upload_chunk           — multipart: file_chunk, chunk_index,
  *                                            total_chunks, file_identifier,
  *                                            object_name, bucket_name?
- *   POST /api/files/check_uploaded_chunks  — JSON {file_identifier, total_chunks};
- *                                            returns uploaded_part_numbers (1-indexed)
- *                                            so the client can resume out-of-order.
+ *   POST /api/files/check_uploaded_chunks  — JSON {file_identifier, total_chunks,
+ *                                            object_name, bucket_name?}; returns
+ *                                            uploaded_part_numbers (1-indexed) so the
+ *                                            client can resume out-of-order. Parts are
+ *                                            only reported for a session writing to
+ *                                            the same object.
  *   POST /api/files/abort_upload           — JSON {file_identifier}; aborts the
  *                                            in-progress S3 multipart upload.
  *
@@ -19,12 +22,18 @@
  * parts are independent. Resume is random-access: the client diffs the
  * server's reported part numbers against {1..totalChunks} and re-sends the
  * missing ones.
+ *
+ * A chunk that fails with a network error, 408/429 or 5xx is retried with
+ * backoff before the file is given up on: one blip used to throw away every
+ * part of a multi-GB upload.
  */
 import { OpenAPI } from "@/client/core/OpenAPI"
 import { getToken } from "@/lib/auth"
 
 const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024 // 8 MiB (>= S3 5 MiB minimum)
 const DEFAULT_PARALLEL_PARTS = 4
+/** Delays before each retry of a failed chunk. */
+const CHUNK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000]
 
 export type ChunkedUploadProgress = {
   /** Bytes uploaded so far across all chunks (including already-resumed ones). */
@@ -77,6 +86,8 @@ export type ChunkedUploadOptions = {
   onProgress?: (p: ChunkedUploadProgress) => void
   /** Abort signal — chunks stop being posted once this is aborted. */
   signal?: AbortSignal
+  /** Delays before each retry of a failed chunk (tests shorten these). */
+  retryDelaysMs?: readonly number[]
 }
 
 export type ChunkedUploadResult = {
@@ -94,6 +105,8 @@ function resolveApiUrl(path: string): string {
 async function checkUploadedPartNumbers(
   fileIdentifier: string,
   totalChunks: number,
+  objectName: string,
+  bucketName?: string,
 ): Promise<Set<number>> {
   const url = resolveApiUrl("/api/files/check_uploaded_chunks")
   const token = getToken()
@@ -106,6 +119,8 @@ async function checkUploadedPartNumbers(
     body: JSON.stringify({
       file_identifier: fileIdentifier,
       total_chunks: totalChunks,
+      object_name: objectName,
+      ...(bucketName ? { bucket_name: bucketName } : {}),
     }),
   })
   if (!resp.ok) return new Set()
@@ -177,9 +192,59 @@ async function uploadOneChunk({
   })
   if (!resp.ok) {
     const text = await resp.text().catch(() => "")
-    throw new Error(
+    throw new ChunkError(
       `Chunk ${chunkIndex + 1}/${totalChunks} failed: ${resp.status} ${text.slice(0, 200)}`,
+      resp.status === 408 || resp.status === 429 || resp.status >= 500,
     )
+  }
+}
+
+class ChunkError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message)
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
+/**
+ * `uploadOneChunk` with retries. Network errors (fetch throws a TypeError)
+ * and retryable statuses are retried; 4xx and aborts are not. The server
+ * keeps the upload's other parts across a failed chunk, and re-sending a
+ * part is idempotent.
+ */
+async function uploadChunkWithRetry(
+  args: Parameters<typeof uploadOneChunk>[0],
+  delaysMs: readonly number[],
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await uploadOneChunk(args)
+      return
+    } catch (err) {
+      const retryable =
+        err instanceof ChunkError ? err.retryable : err instanceof TypeError
+      if (!retryable || attempt >= delaysMs.length || args.signal?.aborted) {
+        throw err
+      }
+      await sleep(delaysMs[attempt], args.signal)
+      if (args.signal?.aborted) throw err
+    }
   }
 }
 
@@ -204,6 +269,7 @@ export async function uploadFileChunked(
     parallelParts = DEFAULT_PARALLEL_PARTS,
     onProgress,
     signal,
+    retryDelaysMs = CHUNK_RETRY_DELAYS_MS,
   } = opts
 
   const total = file.size
@@ -211,6 +277,8 @@ export async function uploadFileChunked(
   const alreadyUploaded = await checkUploadedPartNumbers(
     fileIdentifier,
     totalChunks,
+    objectName,
+    bucketName,
   )
 
   let uploaded = 0
@@ -241,17 +309,20 @@ export async function uploadFileChunked(
       const end = Math.min(start + chunkSize, total)
       const chunk = file.slice(start, end)
       try {
-        await uploadOneChunk({
-          chunk,
-          chunkIndex,
-          totalChunks,
-          fileIdentifier,
-          objectName,
-          bucketName,
-          experimentId,
-          datasetId,
-          signal,
-        })
+        await uploadChunkWithRetry(
+          {
+            chunk,
+            chunkIndex,
+            totalChunks,
+            fileIdentifier,
+            objectName,
+            bucketName,
+            experimentId,
+            datasetId,
+            signal,
+          },
+          retryDelaysMs,
+        )
       } catch (err) {
         if (!firstError) firstError = err
         return

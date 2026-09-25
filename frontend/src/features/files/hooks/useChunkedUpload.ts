@@ -6,9 +6,9 @@
  * path so callers can chain follow-up work (e.g. submitting
  * EXTRACT_BINARY jobs on .bin uploads).
  *
- * A single `fileIdentifier` is computed from {name, size, lastModified}
- * so retries of the same File resume instead of re-uploading chunks the
- * server already has.
+ * A single `fileIdentifier` is computed from {objectPath, size,
+ * lastModified} so retries of the same File to the same destination
+ * resume instead of re-uploading chunks the server already has.
  */
 import { useCallback } from "react"
 import { useProcess } from "@/contexts/ProcessContext"
@@ -49,15 +49,17 @@ export type ChunkedUploadOpts = {
 }
 
 /**
- * A stable-but-quick file identifier. Using a full SHA-256 would be the
+ * A stable-but-quick upload identifier. Using a full SHA-256 would be the
  * most robust thing, but it doubles the upload wall-clock for large files
- * because it has to read the whole blob twice (hash + slice). The
- * name+size+mtime triple collides only if the user edits a file without
- * touching its modification time *and* the filename — rare enough that
- * we accept the risk and get instant identifiers in return.
+ * because it has to read the whole blob twice (hash + slice).
+ *
+ * The destination path is part of the key: with name+size+mtime alone, a
+ * session left over from an interrupted upload of the same file to another
+ * experiment was resumed, and the file was assembled at the *old* path.
+ * (objectPath ends with the file name, so the name is still covered.)
  */
-function computeFileIdentifier(file: File): string {
-  return [file.name, file.size, file.lastModified].join(":")
+function computeFileIdentifier(file: File, objectPath: string): string {
+  return [objectPath, file.size, file.lastModified].join(":")
 }
 
 export function useChunkedUpload() {
@@ -70,7 +72,7 @@ export function useChunkedUpload() {
     ): Promise<ChunkedUploadItemResult> => {
       const { objectPath, processId, itemId, experimentId, datasetId, signal } =
         opts
-      const fileIdentifier = computeFileIdentifier(file)
+      const fileIdentifier = computeFileIdentifier(file, objectPath)
 
       updateProcessItem(processId, itemId, {
         status: "running",

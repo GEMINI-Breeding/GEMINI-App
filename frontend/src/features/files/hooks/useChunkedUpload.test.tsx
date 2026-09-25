@@ -80,8 +80,9 @@ describe("useChunkedUpload", () => {
     const call = mockedUpload.mock.calls[0][0]
     expect(call.file).toBe(file)
     expect(call.objectName).toBe("bucket/Raw/foo.bin")
-    // computeFileIdentifier must use name+size+mtime so the server can resume.
-    expect(call.fileIdentifier).toBe("foo.bin:100:42")
+    // Keyed on destination+size+mtime: resumes the same upload, never one
+    // bound for another path.
+    expect(call.fileIdentifier).toBe("bucket/Raw/foo.bin:100:42")
   })
 
   it("marks the item completed and returns the object path on success", async () => {

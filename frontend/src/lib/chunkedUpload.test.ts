@@ -188,9 +188,9 @@ describe("uploadFileChunked", () => {
     expect(calls.some((c) => c.url.includes("abort_upload"))).toBe(true)
   })
 
-  it("rethrows the chunk-server error when a chunk POST fails", async () => {
+  it("rethrows the chunk-server error once retries run out", async () => {
     const file = makeFile(1000)
-    mockFetch((c) => {
+    const calls = mockFetch((c) => {
       if (c.url.includes("check_uploaded_chunks")) {
         return new Response(
           JSON.stringify({ uploaded_part_numbers: [], total_chunks: 1 }),
@@ -209,7 +209,83 @@ describe("uploadFileChunked", () => {
         objectName: "bucket/x",
         chunkSize: 1000,
         parallelParts: 1,
+        retryDelaysMs: [0, 0],
       }),
     ).rejects.toThrowError(/500/)
+    // First try + two retries.
+    expect(calls.filter((c) => c.url.includes("upload_chunk"))).toHaveLength(3)
+  })
+
+  it("retries a transient chunk failure and completes the upload", async () => {
+    const file = makeFile(2000)
+    let failures = 1
+    const calls = mockFetch((c) => {
+      if (c.url.includes("check_uploaded_chunks")) {
+        return new Response(
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 2 }),
+          { status: 200 },
+        )
+      }
+      if (c.url.includes("upload_chunk") && failures-- > 0) {
+        return new Response("bad gateway", { status: 502 })
+      }
+      return new Response("{}", { status: 200 })
+    })
+    const result = await uploadFileChunked({
+      file,
+      fileIdentifier: "fid-5",
+      objectName: "bucket/x",
+      chunkSize: 1000,
+      parallelParts: 1,
+      retryDelaysMs: [0],
+    })
+    expect(result.chunkCount).toBe(2)
+    expect(calls.filter((c) => c.url.includes("upload_chunk"))).toHaveLength(3)
+    expect(calls.some((c) => c.url.includes("abort_upload"))).toBe(false)
+  })
+
+  it("does not retry a 4xx chunk response", async () => {
+    const file = makeFile(1000)
+    const calls = mockFetch((c) => {
+      if (c.url.includes("check_uploaded_chunks")) {
+        return new Response(
+          JSON.stringify({ uploaded_part_numbers: [], total_chunks: 1 }),
+          { status: 200 },
+        )
+      }
+      if (c.url.includes("abort_upload")) {
+        return new Response("{}", { status: 200 })
+      }
+      return new Response("nope", { status: 403 })
+    })
+    await expect(
+      uploadFileChunked({
+        file,
+        fileIdentifier: "fid-6",
+        objectName: "bucket/x",
+        chunkSize: 1000,
+        parallelParts: 1,
+        retryDelaysMs: [0, 0],
+      }),
+    ).rejects.toThrowError(/403/)
+    expect(calls.filter((c) => c.url.includes("upload_chunk"))).toHaveLength(1)
+  })
+
+  it("sends the destination with the resume check", async () => {
+    const file = makeFile(1000)
+    const calls = mockFetch(() => new Response("{}", { status: 200 }))
+    await uploadFileChunked({
+      file,
+      fileIdentifier: "fid-7",
+      objectName: "Raw/ExpB/a.bin",
+      bucketName: "gemini",
+      chunkSize: 1000,
+    })
+    const check = calls.find((c) => c.url.includes("check_uploaded_chunks"))
+    expect(JSON.parse(check?.body as string)).toMatchObject({
+      file_identifier: "fid-7",
+      object_name: "Raw/ExpB/a.bin",
+      bucket_name: "gemini",
+    })
   })
 })
