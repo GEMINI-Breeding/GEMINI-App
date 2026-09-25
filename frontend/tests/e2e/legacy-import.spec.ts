@@ -6,13 +6,15 @@
  * schema): uploads (drone images, a field design, an Amiga log the old app
  * had extracted, one it had marked missing), a workspace with an aerial
  * and a ground pipeline and a run of each (orthomosaic, two boundary
- * versions, per-plot traits, plot images; plot marking, a stitch), and a
- * reference dataset.
+ * versions, per-plot traits — one on a plot id that isn't a number —,
+ * plot images; plot marking, a stitch), and two reference datasets with
+ * the same name.
  *
  * Through the UI: Settings shows what would be imported and what can't be
  * (and why) → Import → progress → result → the uploads are in Files →
  * Manage Data, at the new layout (per-dataset folder for images) → the
- * page then says everything is imported. Read-only checks confirm the
+ * page then says everything is imported, and importing again adds
+ * nothing. Read-only checks confirm the
  * storage keys; the fixture's files are unchanged (it's mounted
  * read-only, so the import couldn't have touched them).
  *
@@ -68,7 +70,7 @@ test.describe("Import from the previous GEMI app", () => {
     await expect(plan).toContainText(EXPERIMENT)
     await expect(plan).toContainText("2025")
     await expect(plan).toContainText(
-      "1 workspace · 2 pipelines · 2 runs · 1 orthomosaic version · 2 plot boundary versions · 1 set of plot traits · 1 plot marking version · 1 stitch · 1 reference dataset",
+      "1 workspace · 2 pipelines · 2 runs · 1 orthomosaic version · 2 plot boundary versions · 1 set of plot traits · 1 plot marking version · 1 stitch · 2 reference datasets",
     )
     await expect(plan).toContainText("kept as they were under Imported/GEMI")
     await expect(section.getByTestId("legacy-import-skipped")).toContainText(
@@ -84,13 +86,28 @@ test.describe("Import from the previous GEMI app", () => {
     await expect(section.getByTestId("legacy-import-processing")).toContainText(
       "2 runs · 1 orthomosaic version · 2 plot boundary versions · 1 set of plot traits",
     )
+    await expect(section.getByTestId("legacy-import-processing")).toContainText(
+      "2 reference datasets",
+    )
+    // Plot "5A" can't be a plot number: its values are kept, and said so.
+    await expect(section.getByTestId("legacy-import-notes")).toContainText(
+      "kept without a plot link",
+    )
+    await expect(section.getByTestId("legacy-import-failed")).toHaveCount(0)
     await result.getByRole("button", { name: "OK" }).click()
     // The dry run now knows it's done.
     await expect(plan).toContainText("3 already imported")
+    await expect(section.getByTestId("legacy-import-all-done")).toBeVisible()
     await expect(section.getByTestId("legacy-import-start")).toHaveText(
-      "Everything is imported",
+      "Import again",
     )
-    await expect(section.getByTestId("legacy-import-start")).toBeDisabled()
+    // Importing again copies nothing and duplicates nothing (checked below).
+    await section.getByTestId("legacy-import-start").click()
+    await expect(result).toContainText("(0 files copied)", {
+      timeout: 120_000,
+    })
+    await expect(section.getByTestId("legacy-import-notes")).toHaveCount(0)
+    await result.getByRole("button", { name: "OK" }).click()
 
     // ── Files → Manage Data: the uploads are there ──────────────────────
     await page.locator('[data-onboarding="nav-files"]').click()
@@ -116,13 +133,15 @@ test.describe("Import from the previous GEMI app", () => {
       .locator('[data-testid^="manage-data-dataset-"]')
       .filter({ has: page.locator("text=Traits from GEMI") })
     await expect(traits).toHaveCount(1)
-    // The reference dataset, with its plots.
-    await expect(
-      page.getByTestId("reference-data-row-LAI survey"),
-    ).toBeVisible()
-    await expect(
-      page.getByTestId("reference-data-plots-LAI survey"),
-    ).toContainText("4")
+    // Both reference datasets (same name, different data), each once.
+    await expect(page.getByTestId("reference-data-row-LAI survey")).toHaveCount(
+      2,
+    )
+    const refPlots = page.getByTestId("reference-data-plots-LAI survey")
+    await expect(refPlots).toHaveCount(2)
+    expect(
+      (await refPlots.allInnerTexts()).map((t) => t.trim()).sort(),
+    ).toEqual(["2", "4"])
 
     // ── Process: the old workspace, its pipelines and runs ──────────────
     await page.locator('[data-onboarding="nav-process"]').click()

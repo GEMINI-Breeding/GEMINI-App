@@ -5,8 +5,8 @@
  * Every worker ships its log lines to Redis at startup and while it runs
  * (gemini/workers/log_shipping.py); GET /api/utils/logs merges them. Before,
  * a failed ODM or ML job left nothing a user could read without `docker
- * logs`. The workers' own startup lines ("Worker … starting") are enough to
- * prove the path end to end.
+ * logs`. Any line the worker's own code logged (gemini.workers.*) proves
+ * the path end to end.
  *
  * Console-error guard auto-attached via tests/helpers/fixtures.
  */
@@ -39,6 +39,11 @@ test.describe("Console — worker logs", () => {
       els.map((e) => e.getAttribute("data-source")),
     )
     expect(new Set(sources)).toEqual(new Set(["odm"]))
-    await expect(lines.filter({ hasText: "OdmWorker" }).first()).toBeVisible()
+    // Real lines from the worker's own code (not just any text). Not
+    // its startup line specifically: the list keeps the newest 1000, and
+    // a restarted Redis has only what came after.
+    await expect(
+      lines.filter({ hasText: "gemini.workers." }).first(),
+    ).toBeVisible()
   })
 })

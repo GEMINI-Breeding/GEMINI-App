@@ -265,16 +265,25 @@ function LegacyImportForSuperuser() {
       {!running && (
         <Button
           className="w-fit"
-          disabled={tooBig || all}
+          disabled={tooBig}
           onClick={() => void start()}
           data-testid="legacy-import-start"
         >
           {all
-            ? "Everything is imported"
+            ? "Import again"
             : p.already_imported
               ? "Import the rest"
               : "Import"}
         </Button>
+      )}
+      {all && !running && (
+        <p
+          className="text-muted-foreground text-xs"
+          data-testid="legacy-import-all-done"
+        >
+          All uploads are imported. Importing again only adds what's missing —
+          e.g. anything listed under "Couldn't import" last time.
+        </p>
       )}
       {startError && <p className="text-destructive text-sm">{startError}</p>}
 
@@ -331,7 +340,7 @@ function ImportOutcome({
         </p>
       )}
       {r.failed.length > 0 && (
-        <div>
+        <div data-testid="legacy-import-failed">
           <p className="text-destructive">Couldn't import:</p>
           <ul className="ml-4 list-disc">
             {r.failed.map((f) => (
@@ -344,6 +353,16 @@ function ImportOutcome({
             Importing again retries these and skips what's already here.
           </p>
         </div>
+      )}
+      {(r.processing?.notes?.length ?? 0) > 0 && (
+        <ul
+          className="text-muted-foreground ml-4 list-disc"
+          data-testid="legacy-import-notes"
+        >
+          {r.processing?.notes?.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
       )}
       {r.thermal_uploads.length > 0 && (
         <p className="text-muted-foreground">

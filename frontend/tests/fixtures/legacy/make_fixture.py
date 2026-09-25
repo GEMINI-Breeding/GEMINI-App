@@ -21,7 +21,10 @@ Contents (experiment E2E-legacy-fixture, site Davis, population Cowpea MAGIC):
   keys, active), trait record v1 with per-plot traits, cropped plot
   images, a Roboflow predictions CSV, Traits-WGS84.geojson
 - ground run: plot marking v1, AgRowStitch_v1, association v1, plot images
-- reference dataset "LAI survey" with its original CSV
+- reference datasets: "LAI survey" with its original CSV, and a second,
+  unrelated "LAI survey" (old names weren't unique; both must import)
+- a plot record whose plot id isn't a whole number ("5A"): its values
+  must be kept (unlinked), not dropped
 """
 import json
 import shutil
@@ -54,7 +57,7 @@ U_IMG, U_DESIGN, U_MISSING, U_AMIGA = uid(1), uid(2), uid(3), uid(4)
 WS_ID, P_AERIAL, P_GROUND = uid(0x10), uid(0x11), uid(0x12)
 R_AERIAL, R_GROUND = uid(0x20), uid(0x21)
 T_AERIAL = uid(0x30)
-REF = uid(0x40)
+REF, REF2 = uid(0x40), uid(0x41)
 
 PLOTS = [  # plot, row, col, accession, Vegetation_Fraction, Height_95p_meters
     (1, 1, 1, "ACC-A", 0.41, 0.52),
@@ -233,6 +236,15 @@ def main() -> None:
            str(WS_ID), WS, AERIAL_DATE, E, L, P, "Drone", "RGB", 1, str(plot), acc, f"{col}.0", str(row),
            None, json.dumps({"Vegetation_Fraction": vf, "Height_95p_meters": h}), "{}",
            "2025-06-12T13:00:00+00:00"))
+    # A plot id that isn't a whole number: kept, unlinked, never dropped.
+    x("INSERT INTO plotrecord (id, trait_record_id, run_id, pipeline_id, pipeline_type, pipeline_name, "
+      "workspace_id, workspace_name, date, experiment, location, population, platform, sensor, "
+      "trait_record_version, plot_id, accession, col, row, geometry_wkt, traits, extra_properties, "
+      "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      (uid(0x1FF).hex, T_AERIAL.hex, R_AERIAL.hex, str(P_AERIAL), "aerial", "Drone pipe",
+       str(WS_ID), WS, AERIAL_DATE, E, L, P, "Drone", "RGB", 1, "5A", "ACC-E", "1", "3",
+       None, json.dumps({"Vegetation_Fraction": 0.33, "Height_95p_meters": 0.4}), "{}",
+       "2025-06-12T13:00:00+00:00"))
     x("INSERT INTO referencedataset (id, name, experiment, location, population, date, column_mapping, "
       "plot_count, trait_columns, original_filename, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       (REF.hex, "LAI survey", E, L, P, "2025-06-15",
@@ -243,6 +255,15 @@ def main() -> None:
         x("INSERT INTO referenceplot (id, dataset_id, plot_id, col, row, accession, traits) "
           "VALUES (?,?,?,?,?,?,?)",
           (uid(0x200 + n).hex, REF.hex, str(plot), str(col), str(row), acc, json.dumps({"LAI": lai[plot]})))
+    # A second, unrelated dataset with the same name (another date).
+    x("INSERT INTO referencedataset (id, name, experiment, location, population, date, column_mapping, "
+      "plot_count, trait_columns, original_filename, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      (REF2.hex, "LAI survey", E, L, P, "2025-08-01", json.dumps({"Plot": "plot_id", "LAI": "LAI"}),
+       2, json.dumps(["LAI"]), None, "2025-08-02T00:00:00"))
+    for n, plot in enumerate((1, 2)):
+        x("INSERT INTO referenceplot (id, dataset_id, plot_id, col, row, accession, traits) "
+          "VALUES (?,?,?,?,?,?,?)",
+          (uid(0x300 + n).hex, REF2.hex, str(plot), None, None, None, json.dumps({"LAI": 3.0 + plot})))
     x("INSERT INTO workspacereferencedataset (workspace_id, dataset_id, created_at) VALUES (?,?,?)",
       (WS_ID.hex, REF.hex, "2025-06-16T00:00:00"))
     conn.commit()
