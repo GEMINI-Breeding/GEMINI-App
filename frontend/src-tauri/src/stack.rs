@@ -68,7 +68,16 @@ impl Paths {
     pub fn env_file(&self) -> PathBuf {
         self.config_dir.join("gemini.env")
     }
+    fn env_backup(&self) -> PathBuf {
+        self.config_dir.join("gemini.env.bak")
+    }
 }
+
+/// A copy of the secrets kept beside the data, so reinstalling the app (which
+/// can clear its config folder) and pointing it at the same data folder
+/// reuses them. Postgres only takes its password when it creates the
+/// database, so a regenerated one locks the app out of its own data.
+const DATA_SECRETS_FILE: &str = ".gemini-secrets.env";
 
 pub fn load_config(paths: &Paths) -> Option<StackConfig> {
     let text = std::fs::read_to_string(paths.config_file()).ok()?;
@@ -94,6 +103,56 @@ pub fn parse_env(text: &str) -> BTreeMap<String, String> {
         .filter_map(|l| l.split_once('='))
         .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
         .collect()
+}
+
+fn secret_missing(env: &BTreeMap<String, String>, key: &str) -> bool {
+    env.get(key).map_or(true, |v| v.is_empty())
+}
+
+/// The env this install already has: `gemini.env`, with any missing secret
+/// filled from its backups (a crash mid-write, an unreadable file, a
+/// reinstall). Refuses when the database password is gone but the data
+/// folder already holds a database: generating a new one would leave the
+/// stack unable to connect, with no way back.
+fn existing_env(paths: &Paths, data_dir: &Path) -> Result<BTreeMap<String, String>, String> {
+    let read = |p: &Path| {
+        std::fs::read_to_string(p)
+            .map(|t| parse_env(&t))
+            .unwrap_or_default()
+    };
+    let mut env = read(&paths.env_file());
+    for backup in [paths.env_backup(), data_dir.join(DATA_SECRETS_FILE)] {
+        let saved = read(&backup);
+        for k in SECRET_KEYS {
+            if secret_missing(&env, k) && !secret_missing(&saved, k) {
+                env.insert(k.to_string(), saved[*k].clone());
+            }
+        }
+    }
+    if secret_missing(&env, "GEMINI_DB_PASSWORD") && data_dir.join("postgres/PG_VERSION").exists() {
+        return Err(format!(
+            "GEMINI's saved passwords are missing ({}), but {} already holds a \
+             database that needs them. Restore that file from a backup, or \
+             choose a new, empty data folder.",
+            paths.env_file().display(),
+            data_dir.display()
+        ));
+    }
+    Ok(env)
+}
+
+/// Write the env file, then its two backups (see `DATA_SECRETS_FILE`).
+fn write_env(paths: &Paths, config: &StackConfig) -> Result<(), String> {
+    let existing = existing_env(paths, &config.data_dir)?;
+    let text = render_env(config, &paths.env_file(), &existing, legacy_mounts().as_ref());
+    write_private(&paths.env_file(), &text)?;
+    write_private(&paths.env_backup(), &text)?;
+    let secrets = parse_env(&text);
+    let mut saved = String::from("# GEMINI secrets for this data folder. Do not share it.\n");
+    for k in SECRET_KEYS {
+        saved.push_str(&format!("{k}={}\n", secrets[*k]));
+    }
+    write_private(&config.data_dir.join(DATA_SECRETS_FILE), &saved)
 }
 
 fn random_secret() -> String {
@@ -210,13 +269,7 @@ pub fn configure(paths: &Paths, data_dir: PathBuf) -> Result<StackConfig, String
         },
     };
     std::fs::create_dir_all(&paths.config_dir).map_err(|e| e.to_string())?;
-    let existing = std::fs::read_to_string(paths.env_file())
-        .map(|t| parse_env(&t))
-        .unwrap_or_default();
-    write_private(
-        &paths.env_file(),
-        &render_env(&config, &paths.env_file(), &existing, legacy_mounts().as_ref()),
-    )?;
+    write_env(paths, &config)?;
     std::fs::write(
         paths.config_file(),
         serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?,
@@ -226,27 +279,38 @@ pub fn configure(paths: &Paths, data_dir: PathBuf) -> Result<StackConfig, String
 }
 
 /// Write a file only this user can read (it holds the install's secrets).
+///
+/// Written to a temp file (created 0600) and renamed into place, so a crash
+/// or power loss mid-write never leaves a truncated file — which the next
+/// start would read as "no secrets" and regenerate.
 fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    std::fs::write(path, text).map_err(|e| format!("Can't write {}: {e}", path.display()))?;
+    use std::io::Write;
+    let err = |e: std::io::Error| format!("Can't write {}: {e}", path.display());
+    let tmp = path.with_extension("tmp");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| e.to_string())?;
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
-    Ok(())
+    let mut f = opts.open(&tmp).map_err(err)?;
+    f.write_all(text.as_bytes()).map_err(err)?;
+    f.sync_all().map_err(err)?;
+    drop(f);
+    #[cfg(unix)]
+    {
+        // `mode` only applies when the file is created.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).map_err(err)?;
+    }
+    std::fs::rename(&tmp, path).map_err(err)
 }
 
 /// Before every start: bring the env file up to date with this app version
 /// (a new release pins new images) without touching the secrets.
 fn refresh_env(paths: &Paths, config: &StackConfig) -> Result<(), String> {
-    let existing = std::fs::read_to_string(paths.env_file())
-        .map(|t| parse_env(&t))
-        .unwrap_or_default();
-    write_private(
-        &paths.env_file(),
-        &render_env(config, &paths.env_file(), &existing, legacy_mounts().as_ref()),
-    )
+    write_env(paths, config)
 }
 
 // ── Docker ──────────────────────────────────────────────────────────────────
@@ -423,12 +487,33 @@ pub fn start(app: &AppHandle, paths: &Paths, config: &StackConfig) -> Result<(),
     Ok(())
 }
 
+/// Whether one of this stack's containers publishes `port` (after a reboot,
+/// `restart: unless-stopped` brings them back before the API answers).
 fn own_container_on(paths: &Paths, port: u16) -> bool {
     let Ok(mut ps) = compose(paths) else { return false };
-    ps.args(["ps", "--format", "{{.Publishers}}"])
+    // `-a`: a container that is restarting still holds its port.
+    ps.args(["ps", "-a", "--format", "json"])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("PublishedPort:{port}")))
+        .map(|o| publishes_port(&String::from_utf8_lossy(&o.stdout), port))
         .unwrap_or(false)
+}
+
+/// `docker compose ps --format json` prints one object per line (Compose
+/// ≥ 2.21) or a single array (older). `{{.Publishers}}` — the old check —
+/// prints `[{0.0.0.0 7777 7777 tcp}]` without field names, so looking for
+/// "PublishedPort:" never matched and a cold boot refused to start.
+fn publishes_port(ps_json: &str, port: u16) -> bool {
+    let rows: Vec<serde_json::Value> = match serde_json::from_str(ps_json.trim()) {
+        Ok(serde_json::Value::Array(rows)) => rows,
+        _ => ps_json
+            .lines()
+            .filter_map(|l| serde_json::from_str(l.trim()).ok())
+            .collect(),
+    };
+    rows.iter()
+        .filter_map(|r| r.get("Publishers")?.as_array())
+        .flatten()
+        .any(|p| p.get("PublishedPort").and_then(|v| v.as_u64()) == Some(port as u64))
 }
 
 pub fn api_healthy(config: &StackConfig) -> bool {
@@ -783,6 +868,53 @@ mod tests {
         assert!(check_move_target(&from, &empty).is_ok());
         std::fs::write(empty.join("thesis.docx"), "").unwrap();
         assert!(check_move_target(&from, &empty).is_err());
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn publishes_port_reads_compose_json_in_both_formats() {
+        let row = r#"{"Name":"geminibase-rest-api","Publishers":[{"URL":"0.0.0.0","TargetPort":7777,"PublishedPort":7777,"Protocol":"tcp"},{"URL":"","TargetPort":9000,"PublishedPort":0,"Protocol":"tcp"}]}"#;
+        let lines = format!("{row}\n{}\n", r#"{"Name":"db","Publishers":[]}"#);
+        assert!(publishes_port(&lines, 7777));
+        assert!(!publishes_port(&lines, 8091));
+        assert!(publishes_port(&format!("[{row}]"), 7777)); // Compose < 2.21
+        assert!(!publishes_port("", 7777));
+        // What `{{.Publishers}}` printed: no field names to match on.
+        assert!(!publishes_port("[{0.0.0.0 7777 7777 tcp}]", 7777));
+    }
+
+    #[test]
+    fn lost_env_file_reuses_saved_secrets_or_refuses() {
+        let tmp = std::env::temp_dir().join(format!("gemini-secrets-test-{}", random_secret()));
+        let paths = Paths { config_dir: tmp.join("cfg"), compose_file: tmp.join("c.yaml") };
+        let data = tmp.join("data");
+        configure(&paths, data.clone()).unwrap();
+        let original = parse_env(&std::fs::read_to_string(paths.env_file()).unwrap());
+        assert!(!tmp.join("cfg/gemini.tmp").exists()); // renamed into place
+        std::fs::write(data.join("postgres/PG_VERSION"), "16").unwrap();
+
+        // Truncated env file (crash mid-write, old app): the backup fills it.
+        std::fs::write(paths.env_file(), "").unwrap();
+        refresh_env(&paths, &load_config(&paths).unwrap()).unwrap();
+        let env = parse_env(&std::fs::read_to_string(paths.env_file()).unwrap());
+        for k in SECRET_KEYS {
+            assert_eq!(env[*k], original[*k], "{k}");
+        }
+
+        // Reinstall: config folder gone, same data folder → its copy is used.
+        std::fs::remove_dir_all(tmp.join("cfg")).unwrap();
+        configure(&paths, data.clone()).unwrap();
+        let env = parse_env(&std::fs::read_to_string(paths.env_file()).unwrap());
+        assert_eq!(env["GEMINI_DB_PASSWORD"], original["GEMINI_DB_PASSWORD"]);
+
+        // Every copy lost but a database exists → refuse, don't regenerate.
+        std::fs::remove_dir_all(tmp.join("cfg")).unwrap();
+        std::fs::remove_file(data.join(DATA_SECRETS_FILE)).unwrap();
+        let err = configure(&paths, data.clone()).unwrap_err();
+        assert!(err.contains("saved passwords are missing"), "{err}");
+
+        // A fresh folder with no database is fine: new secrets.
+        assert!(configure(&paths, tmp.join("fresh")).is_ok());
         std::fs::remove_dir_all(tmp).unwrap();
     }
 
