@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { apiUrl } from "@/features/files/lib/download"
 import {
   useDeleteRunResults,
   useExperimentDatasetNames,
@@ -35,7 +36,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 
 function downloadAuthed(filePath: string, suggestedName: string) {
   const token = localStorage.getItem("gemini.auth.token") ?? ""
-  const url = `/api/files/download/${filePath}`
+  const url = apiUrl(`/api/files/download/${filePath}`)
   void (async () => {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },

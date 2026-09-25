@@ -46,6 +46,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { apiUrl } from "@/features/files/lib/download"
 import { OrthoMapView } from "@/features/process/components/OrthoMapView"
 import {
   buildTitilerTileUrl,
@@ -68,7 +69,7 @@ const DEFAULT_BUCKET = "gemini"
 
 function downloadAuthed(filePath: string, suggestedName: string) {
   const token = localStorage.getItem("gemini.auth.token") ?? ""
-  const url = `/api/files/download/${filePath}`
+  const url = apiUrl(`/api/files/download/${filePath}`)
   // Use a transient anchor so Chrome triggers a save dialog with the
   // suggested filename. The bearer token can't be set on a plain GET via
   // <a>, so we fetch as Blob and rebuild the link. Acceptable for files

@@ -45,6 +45,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { apiUrl } from "@/features/files/lib/download"
 import {
   type BatchInferenceResult,
   isBatchInferenceResult,
@@ -263,7 +264,7 @@ function useAuthedBlobUrl(path: string | null): string | null {
     let cancelled = false
     let urlRef: string | null = null
     const token = localStorage.getItem("gemini.auth.token") ?? ""
-    fetch(`/api/files/download/${path}`, {
+    fetch(apiUrl(`/api/files/download/${path}`), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.blob() : null))
@@ -485,7 +486,7 @@ export function InferenceTool({
     }
     let cancelled = false
     const token = localStorage.getItem("gemini.auth.token") ?? ""
-    fetch(`/api/files/download/${DEFAULT_BUCKET}/${predictionsPath}`, {
+    fetch(apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${predictionsPath}`), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : null))

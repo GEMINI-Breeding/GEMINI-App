@@ -10,6 +10,8 @@
 
 import exifr from "exifr"
 
+import { apiUrl } from "@/features/files/lib/download"
+
 const DEFAULT_BUCKET = "gemini"
 const EXIF_RANGE_BYTES = 131072
 
@@ -22,7 +24,7 @@ function authHeaders(): Record<string, string> {
 
 export async function fetchObjectAsBlob(objectName: string): Promise<Blob> {
   const res = await fetch(
-    `/api/files/download/${DEFAULT_BUCKET}/${objectName}`,
+    apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectName}`),
     {
       headers: authHeaders(),
     },
@@ -49,7 +51,7 @@ export async function fetchExifHeader(
 ): Promise<ArrayBuffer | null> {
   try {
     const res = await fetch(
-      `/api/files/download/${DEFAULT_BUCKET}/${objectName}`,
+      apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectName}`),
       {
         headers: {
           ...authHeaders(),

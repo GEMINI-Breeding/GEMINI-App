@@ -22,6 +22,7 @@ import { GenotypingStudiesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { idAsString } from "@/features/admin/lib/ids"
+import { apiUrl } from "@/features/files/lib/download"
 import type { GenomicMatrixShape } from "@/features/import/lib/detection-engine"
 import type {
   FileWithPath,
@@ -351,7 +352,11 @@ function uploadWithProgress(
     if (populationName) fd.append("population_name", populationName)
 
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", `/api/genotyping_studies/id/${studyId}/ingest-pgen`, true)
+    xhr.open(
+      "POST",
+      apiUrl(`/api/genotyping_studies/id/${studyId}/ingest-pgen`),
+      true,
+    )
     // Pull the bearer token from localStorage the same way our SDK
     // does; lib/auth.ts mirrors this token under both keys.
     const token =
