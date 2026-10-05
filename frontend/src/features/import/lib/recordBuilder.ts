@@ -220,6 +220,36 @@ export function collectPlotSpecs(
   return { plotSpecs, inlineGermplasmNames, missingGermplasmRefs }
 }
 
+export interface NonNumericPlotRows {
+  count: number
+  /** A few distinct offending values, for the warning text. */
+  examples: string[]
+}
+
+/**
+ * Rows whose plot-number cell is filled but isn't a number (`SG1`,
+ * `S/CP1`). Both `collectPlotSpecs` and `buildTraitRecords` skip these, so
+ * the mapping step warns about them before the user imports.
+ */
+export function nonNumericPlotRows(
+  rows: Array<Record<string, unknown>>,
+  plotNumberColumn: string | null,
+  maxExamples = 5,
+): NonNumericPlotRows {
+  const result: NonNumericPlotRows = { count: 0, examples: [] }
+  if (!plotNumberColumn) return result
+  for (const row of rows) {
+    const raw = row[plotNumberColumn]
+    if (raw == null || raw === "") continue
+    if (!Number.isNaN(Number(raw))) continue
+    result.count++
+    const text = String(raw)
+    if (result.examples.length < maxExamples && !result.examples.includes(text))
+      result.examples.push(text)
+  }
+  return result
+}
+
 function rowScalar(
   row: Record<string, unknown>,
   mode: "fixed" | "column",

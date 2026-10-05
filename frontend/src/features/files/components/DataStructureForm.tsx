@@ -151,7 +151,7 @@ export function DataStructureForm({
               onChange={(c) => onScopeChange(field, c)}
               options={opt.options}
               isLoading={opt.isLoading}
-              required
+              required={!config?.optionalFields?.includes(field)}
               disabled={disabled}
               description={
                 disabled ? "Pick or create an experiment first." : undefined

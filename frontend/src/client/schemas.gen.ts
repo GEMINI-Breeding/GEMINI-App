@@ -4043,6 +4043,41 @@ export const ParseHeadersResponseSchema = {
                 type: 'string'
             },
             type: 'array'
+        },
+        sheets: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            default: []
+        },
+        preview: {
+            items: {
+                items: {
+                    oneOf: [
+                        {
+                            type: 'string'
+                        },
+                        {
+                            type: 'null'
+                        }
+                    ]
+                },
+                type: 'array'
+            },
+            type: 'array',
+            default: []
+        },
+        numeric_columns: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            default: []
+        },
+        row_count: {
+            type: 'integer',
+            default: 0
         }
     },
     type: 'object',
@@ -5319,6 +5354,17 @@ export const ReferenceDatasetOutputSchema = {
                     type: 'null'
                 }
             ]
+        },
+        warnings: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            default: []
+        },
+        skipped_empty_rows: {
+            type: 'integer',
+            default: 0
         }
     },
     type: 'object',
@@ -5336,6 +5382,13 @@ export const ReferenceMatchReportSchema = {
         },
         unmatched: {
             type: 'integer'
+        },
+        unmatched_examples: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            default: []
         }
     },
     type: 'object',

@@ -47,6 +47,7 @@ import {
   reservedColumnSet,
   seedSheetConfig,
 } from "@/features/import/lib/columnMapping"
+import { nonNumericPlotRows } from "@/features/import/lib/recordBuilder"
 import {
   detectSkipRows,
   parseSpreadsheet,
@@ -418,6 +419,7 @@ export function StepColumnMapping({
 
           <PlotColumnsSection
             headers={headers}
+            rows={currentSheet.rows}
             config={currentConfig}
             onUpdate={updateCurrentConfig}
           />
@@ -649,14 +651,20 @@ function ColumnSelect({
 
 function PlotColumnsSection({
   headers,
+  rows,
   config,
   onUpdate,
 }: {
   headers: string[]
+  rows: Array<Record<string, unknown>>
   config: SheetMapping
   onUpdate: (u: Partial<SheetMapping>) => void
 }) {
   const plotUnmapped = !config.plotNumberColumn
+  const nonNumeric = useMemo(
+    () => nonNumericPlotRows(rows, config.plotNumberColumn),
+    [rows, config.plotNumberColumn],
+  )
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <div className="flex items-center gap-2">
@@ -673,6 +681,17 @@ function PlotColumnsSection({
         >
           No plot column mapped. Records from this sheet will be saved without
           plot linkage and won&apos;t appear on plot maps.
+        </p>
+      )}
+      {nonNumeric.count > 0 && (
+        <p
+          data-testid="plot-non-numeric-warning"
+          className="text-sm text-amber-700 dark:text-amber-400"
+        >
+          {nonNumeric.count} row(s) have a plot number that isn&apos;t a number
+          (e.g. {nonNumeric.examples.join(", ")}) and will be skipped. Plot
+          numbers must be numeric — renumber those plots, or import them from a
+          separate sheet.
         </p>
       )}
       <div className="space-y-2">

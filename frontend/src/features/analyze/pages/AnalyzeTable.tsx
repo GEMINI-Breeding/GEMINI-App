@@ -192,7 +192,7 @@ export function AnalyzeTable() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-table">
-      <ProcessScopeSelectors />
+      <ProcessScopeSelectors allowAllPopulations />
 
       {!scopeReady ? (
         <p className="text-muted-foreground text-sm">
@@ -286,6 +286,8 @@ export function AnalyzeTable() {
               data-testid="analyze-table-status"
             >
               {matrixQuery.data.message || matrixQuery.data.status}
+              {ctx.populationName &&
+                ` Records may not carry population "${ctx.populationName}" — try "All populations".`}
             </p>
           )}
 

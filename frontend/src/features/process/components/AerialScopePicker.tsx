@@ -122,6 +122,9 @@ export function buildAerialScope(
   }
 }
 
+/** Select value for "no population filter" (Radix Select can't use ""). */
+const ALL_POPULATIONS = "__all_populations__"
+
 function filterVisible(
   all: ExperimentOutput[],
   myIds: string[],
@@ -142,8 +145,16 @@ function filterVisible(
  * Auto-picks the first visible experiment on mount if none is set yet, and
  * auto-picks any single-option child selector — same UX the deleted sidebar
  * ScopeChildSelectors offered.
+ *
+ * `allowAllPopulations` (Analyze pages) adds an "All populations" choice and
+ * stops auto-picking the only population: trait records often carry no
+ * population at all, so pinning the view to one would hide every plot.
  */
-export function ProcessScopeSelectors() {
+export function ProcessScopeSelectors({
+  allowAllPopulations = false,
+}: {
+  allowAllPopulations?: boolean
+} = {}) {
   const { user, isUserLoading } = useAuth()
   const {
     experimentId,
@@ -200,13 +211,14 @@ export function ProcessScopeSelectors() {
   }, [siteId, sites, setSiteId])
   useEffect(() => {
     if (
+      !allowAllPopulations &&
       !populationId &&
       populations.length === 1 &&
       populations[0].id != null
     ) {
       setPopulationId(String(populations[0].id))
     }
-  }, [populationId, populations, setPopulationId])
+  }, [allowAllPopulations, populationId, populations, setPopulationId])
 
   const seasonOptions = (seasons ?? [])
     .filter((s) => s.id != null)
@@ -342,8 +354,12 @@ export function ProcessScopeSelectors() {
           Population
         </Label>
         <Select
-          value={populationId ?? undefined}
-          onValueChange={(v) => setPopulationId(v || null)}
+          value={
+            populationId ?? (allowAllPopulations ? ALL_POPULATIONS : undefined)
+          }
+          onValueChange={(v) =>
+            setPopulationId(v && v !== ALL_POPULATIONS ? v : null)
+          }
           disabled={
             !experimentId ||
             loadingPopulations ||
@@ -368,6 +384,9 @@ export function ProcessScopeSelectors() {
             />
           </SelectTrigger>
           <SelectContent>
+            {allowAllPopulations && (
+              <SelectItem value={ALL_POPULATIONS}>All populations</SelectItem>
+            )}
             {populationOptions.map((o) => (
               <SelectItem key={o.id} value={o.id}>
                 {o.name}

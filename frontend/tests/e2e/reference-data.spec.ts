@@ -123,7 +123,16 @@ test.describe("Reference data", () => {
     await page.waitForTimeout(500)
     await expect(traitName).toHaveValue("LAI_hand")
     await uploadRef.click()
-    await expect(refDialog).toBeHidden({ timeout: 30_000 })
+    // Plot 99 matches nothing, so the upload stops on a review screen that
+    // says so instead of closing on a toast.
+    const result = page.getByTestId("ref-upload-result")
+    await expect(result).toBeVisible({ timeout: 30_000 })
+    await expect(result.getByTestId("ref-upload-match")).toContainText(
+      "2 of 3",
+    )
+    await expect(result.getByTestId("ref-upload-match")).toContainText("99")
+    await result.getByTestId("ref-upload-done").click()
+    await expect(refDialog).toBeHidden({ timeout: 10_000 })
 
     // ── 3. Manage: listed with its plot count; the original downloads
     //       byte-for-byte. ──────────────────────────────────────────────

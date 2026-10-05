@@ -4824,6 +4824,8 @@ export class ReferenceDataService {
      * ParseHeaders
      * @param data The data for the request.
      * @param data.formData
+     * @param data.sheets
+     * @param data.headerRow
      * @returns ParseHeadersResponse Document created, URL follows
      * @throws ApiError
      */
@@ -4831,6 +4833,10 @@ export class ReferenceDataService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/reference_data/parse-headers',
+            query: {
+                sheets: data.sheets,
+                header_row: data.headerRow
+            },
             formData: data.formData,
             mediaType: 'multipart/form-data',
             errors: {
@@ -4850,6 +4856,9 @@ export class ReferenceDataService {
      * @param data.population
      * @param data.date
      * @param data.originalObject
+     * @param data.legacyReferenceId
+     * @param data.sheets
+     * @param data.headerRow
      * @returns ReferenceDatasetOutput Document created, URL follows
      * @throws ApiError
      */
@@ -4864,7 +4873,10 @@ export class ReferenceDataService {
                 location: data.location,
                 population: data.population,
                 date: data.date,
-                original_object: data.originalObject
+                original_object: data.originalObject,
+                legacy_reference_id: data.legacyReferenceId,
+                sheets: data.sheets,
+                header_row: data.headerRow
             },
             formData: data.formData,
             mediaType: 'multipart/form-data',

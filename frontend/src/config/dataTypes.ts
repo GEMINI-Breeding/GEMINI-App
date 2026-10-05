@@ -1,5 +1,7 @@
 type DataTypeConfig = {
   fields: string[]
+  /** Fields shown in the form that may be left empty. */
+  optionalFields?: string[]
   fileType: string
   directory: string[]
   defaultPlatform?: string
@@ -180,6 +182,11 @@ export const dataTypes: Record<string, DataTypeConfig> = {
   },
   "Reference Data": {
     fields: ["name", "experiment", "season", "location", "population", "date"],
+    // A dataset with no population applies to every population at its site
+    // (see analyze/lib/referenceJoin). Requiring one forced users to invent
+    // a population the trait data doesn't carry. The name defaults to the
+    // file name.
+    optionalFields: ["name", "population"],
     fileType: ".csv,.xlsx,.xls",
     // Scoped so two experiments' "lai.csv" don't overwrite each other.
     directory: ["ReferenceData", "Experiment", "Location", "Population"],

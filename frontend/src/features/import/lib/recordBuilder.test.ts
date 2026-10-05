@@ -16,6 +16,7 @@ import {
   collectPopulationNames,
   collectSeasonAndSiteNames,
   collectTraitUnits,
+  nonNumericPlotRows,
   pickGermplasmFromRow,
 } from "./recordBuilder"
 import type { ColumnMapping, GermplasmReview, SheetMapping } from "./types"
@@ -435,5 +436,27 @@ describe("buildTraitRecords", () => {
         source_column: "ndvi",
       })
     })
+  })
+})
+
+describe("nonNumericPlotRows", () => {
+  const rows = [
+    { Plot: 3001, Yield: 1 },
+    { Plot: "SG1", Yield: 2 },
+    { Plot: "S/CP1", Yield: 3 },
+    { Plot: "SG1", Yield: 4 },
+    { Plot: "", Yield: 5 },
+    { Plot: "3002", Yield: 6 },
+  ]
+
+  it("counts filled, non-numeric plot cells with distinct examples", () => {
+    expect(nonNumericPlotRows(rows, "Plot")).toEqual({
+      count: 3,
+      examples: ["SG1", "S/CP1"],
+    })
+  })
+
+  it("is empty when no plot column is mapped", () => {
+    expect(nonNumericPlotRows(rows, null)).toEqual({ count: 0, examples: [] })
   })
 })

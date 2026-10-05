@@ -34,6 +34,16 @@ describe("requiredFormFields", () => {
   it("matches the dataTypes config for a single-field wizard type", () => {
     expect(requiredFormFields("Trait Data")).toEqual(["experiment"])
   })
+
+  it("leaves out a type's optional fields", () => {
+    // Reference data with no population applies to every population.
+    expect(requiredFormFields("Reference Data")).toEqual([
+      "experiment",
+      "season",
+      "location",
+      "date",
+    ])
+  })
 })
 
 describe("isFieldFilled", () => {

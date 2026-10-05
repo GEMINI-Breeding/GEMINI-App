@@ -16,7 +16,8 @@ export function requiredFormFields(
 ): string[] {
   if (!dataType) return []
   const cfg = dataTypes[dataType as keyof typeof dataTypes]
-  return ((cfg as { fields?: string[] } | undefined)?.fields ?? []).slice()
+  const optional = new Set(cfg?.optionalFields ?? [])
+  return (cfg?.fields ?? []).filter((field) => !optional.has(field))
 }
 
 /**

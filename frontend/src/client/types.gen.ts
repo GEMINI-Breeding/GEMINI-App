@@ -760,6 +760,10 @@ export type ParseHeadersRequest = {
 
 export type ParseHeadersResponse = {
     headers: Array<(string)>;
+    sheets?: Array<(string)>;
+    preview?: Array<Array<(string | null)>>;
+    numeric_columns?: Array<(string)>;
+    row_count?: number;
 };
 
 export type PlotAssociationsRequest = {
@@ -981,12 +985,15 @@ export type ReferenceDatasetOutput = {
 } | null);
     created_at?: (string | null);
     match_report?: (ReferenceMatchReport | null);
+    warnings?: Array<(string)>;
+    skipped_empty_rows?: number;
 };
 
 export type ReferenceMatchReport = {
     total: number;
     matched: number;
     unmatched: number;
+    unmatched_examples?: Array<(string)>;
 };
 
 export type ReferencePlotList = {
@@ -3204,6 +3211,8 @@ export type ApiReferenceDataListDatasetsResponse = (Array<ReferenceDatasetOutput
 
 export type ApiReferenceDataParseHeadersParseHeadersData = {
     formData: ParseHeadersRequest;
+    headerRow?: (number | null);
+    sheets?: (string | null);
 };
 
 export type ApiReferenceDataParseHeadersParseHeadersResponse = (ParseHeadersResponse);
@@ -3213,10 +3222,13 @@ export type ApiReferenceDataUploadUploadData = {
     date?: (string | null);
     experiment?: (string | null);
     formData: ReferenceUploadRequest;
+    headerRow?: (number | null);
+    legacyReferenceId?: (string | null);
     location?: (string | null);
     name: string;
     originalObject?: (string | null);
     population?: (string | null);
+    sheets?: (string | null);
 };
 
 export type ApiReferenceDataUploadUploadResponse = (ReferenceDatasetOutput);

@@ -271,7 +271,7 @@ export function AnalyzeMap() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-map">
-      <ProcessScopeSelectors />
+      <ProcessScopeSelectors allowAllPopulations />
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1">
