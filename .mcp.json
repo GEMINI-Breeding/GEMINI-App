@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gemi-agent": {
+      "command": "python",
+      "args": ["-m", "gemi_agent", "mcp"],
+      "cwd": "agent"
+    }
+  }
+}

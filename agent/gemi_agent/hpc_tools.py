@@ -1,0 +1,488 @@
+"""Tools for connecting the app to a Slurm cluster from this computer:
+survey the cluster, choose where each part should run, write the cluster
+configuration, and drive `hpc/gemi-hpc` (start, workers, model, tunnels,
+shut down).
+
+These run on the person's computer and use their SSH access; they are the
+only tools that work before any stack exists. Nothing here runs arbitrary
+commands on the cluster: the survey is a fixed read-only script, and
+everything else goes through `gemi-hpc`'s own subcommands.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import time
+from pathlib import Path
+from typing import Any, Optional
+
+from .client import AGENT_DIR, RESOURCES
+from .tools import _bool, _int, _str, _tool
+
+# Source checkout: the repository. Packaged app: scripts and backend source ship
+# read-only with the app, and the clusters' settings live with the person's data.
+REPO = AGENT_DIR.parent if RESOURCES is None else RESOURCES
+HPC = REPO / "hpc"
+CLUSTERS = (HPC / "clusters") if RESOURCES is None else (AGENT_DIR / "clusters")
+STATE = AGENT_DIR / "work" / "hpc.json"          # tunnels opened by this computer
+API_PORT, LLM_PORT = 7777, 8000                  # where the app and the agent expect them
+_strs = {"type": "array", "items": _str}
+
+
+# ── plumbing ─────────────────────────────────────────────────────────────────
+
+def _home() -> Path:
+    return Path(os.environ.get("USERPROFILE") or Path.home())
+
+
+def _bash() -> str:
+    # On Windows, Git for Windows' bash first: a bare `bash` on PATH can be WSL's
+    # launcher (System32 or the WindowsApps alias), which sees neither /c/… paths
+    # nor this computer's ssh keys.
+    git = [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe"] if os.name == "nt" else []
+    for cand in (*git, shutil.which("bash")):
+        if cand and Path(cand).exists() and "System32" not in cand and "WindowsApps" not in cand:
+            return cand
+    raise RuntimeError("bash not found (on Windows install Git for Windows)")
+
+
+def _posix(p: Path) -> str:
+    """C:\\Users\\me\\.ssh\\id_rsa -> /c/Users/me/.ssh/id_rsa (what Git Bash's ssh and gemi-hpc want)."""
+    s = str(p).replace("\\", "/")
+    m = re.match(r"^([A-Za-z]):/(.*)$", s)
+    return f"/{m.group(1).lower()}/{m.group(2)}" if m else s
+
+
+def parse_ssh(command: str) -> dict:
+    """`ssh [-i key] [-p port] user@host` (or just user@host) -> its parts."""
+    words = shlex.split(command.strip(), posix=True)
+    if words and words[0] == "ssh":
+        words = words[1:]
+    out: dict[str, Any] = {"key": None, "port": None, "target": None}
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w == "-i" and i + 1 < len(words):
+            out["key"] = words[i + 1]
+            i += 2
+        elif w == "-p" and i + 1 < len(words):
+            out["port"] = int(words[i + 1])
+            i += 2
+        elif w.startswith("-"):
+            i += 2 if w in ("-o", "-l", "-J") else 1
+        else:
+            out["target"] = w
+            break
+    if not out["target"] or not re.match(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$", out["target"]):
+        raise ValueError("give the SSH login as `ssh user@host` (optionally with -i keyfile, -p port)")
+    return out
+
+
+def _ssh_args(target: str, key: Optional[str], port: Optional[int]) -> list[str]:
+    known = _home() / ".ssh" / "known_hosts"
+    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"UserKnownHostsFile={_posix(known)}"]
+    if key:
+        args += ["-i", _posix(Path(key).expanduser()), "-o", "IdentitiesOnly=yes"]
+    if port:
+        args += ["-p", str(port)]
+    return args + [target]
+
+
+def _find_key(target: str, key: Optional[str], port: Optional[int]) -> Optional[str]:
+    """The key that logs in without a password: the one given, the agent's
+    default, or the first of the usual files that works."""
+    candidates: list[Optional[str]] = [key] if key else [None]
+    if not key:
+        candidates += [str(p) for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa", "id_ecdsa")) if p.exists()]
+    last = ""
+    for k in candidates:
+        r = subprocess.run(_ssh_args(target, k, port) + ["echo ok"], capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and "ok" in r.stdout:
+            return k or ""
+        last = (r.stderr or r.stdout).strip().splitlines()[-1:] or [""]
+        last = last[0]
+    raise RuntimeError(f"could not log in to {target} with a key (no password prompt is possible here): {last}. "
+                       "Set up key-based SSH login first: ssh-keygen, then ssh-copy-id.")
+
+
+def _gemi_hpc(args: list[str], cluster: Optional[str] = None, timeout: int = 600, env: Optional[dict] = None) -> str:
+    e = dict(os.environ, **(env or {}))
+    if cluster:
+        e["GEMI_CLUSTER"] = cluster
+    e["GEMI_CLUSTERS_DIR"] = _posix(CLUSTERS)
+    e["GEMI_AUDIT_LOG"] = _posix(AGENT_DIR / "work" / "hpc-audit.log")
+    e["GEMI_BACKEND_DIR"] = _posix(REPO / "backend")
+    if (REPO / "backend.tgz").exists():       # the packaged app ships the backend source as one archive
+        e["GEMI_BACKEND_TGZ"] = _posix(REPO / "backend.tgz")
+    e["COPYFILE_DISABLE"] = "1"          # macOS tar: no AppleDouble files in what is sent to the cluster
+    r = subprocess.run([_bash(), _posix(HPC / "gemi-hpc"), *args], capture_output=True, text=True, timeout=timeout,
+                       env=e, cwd=str(REPO))
+    out = (r.stdout + ("\n" + r.stderr if r.returncode else "")).strip()
+    if r.returncode:
+        raise RuntimeError(f"gemi-hpc {' '.join(args)} failed: {out[-800:]}")
+    return out
+
+
+def active_cluster() -> Optional[str]:
+    f = CLUSTERS / "active"
+    name = f.read_text().strip() if f.exists() else ""
+    return name or None
+
+
+def _conf(cluster: str) -> dict:
+    path = CLUSTERS / cluster / "launch.conf"
+    if not path.exists():
+        raise ValueError(f"no cluster named {cluster!r}; run hpc_configure first")
+    out = {}
+    for line in path.read_text().splitlines():
+        m = re.match(r'^([A-Z_a-z0-9]+)=(.*?)(\s+#.*)?$', line)
+        if m:
+            v = m.group(2).strip().strip('"').strip("'")
+            d = re.match(r"^\$\{[A-Z_]+:-(.*)\}$", v)
+            out[m.group(1)] = d.group(1) if d else v
+    return out
+
+
+def _state() -> dict:
+    return json.loads(STATE.read_text()) if STATE.exists() else {}
+
+
+def _port_open(port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+# ── survey ───────────────────────────────────────────────────────────────────
+
+def _recommend(parts: list[dict], assoc: list[dict], est: list[dict], storage: list[dict], preempt: dict) -> dict:
+    def soon(kind: str) -> list[dict]:
+        rows = [e for e in est if e["kind"] == kind and isinstance(e["minutes"], int)]
+        # Soonest first; among equals prefer partitions that are not preemptible.
+        return sorted(rows, key=lambda e: (e["minutes"] // 10, preempt.get(e["partition"], "OFF") != "OFF"))
+
+    core, work, gpu = soon("core"), soon("worker"), soon("gpu")
+    gres = {p["name"]: p["gres"] for p in parts}
+
+    def big_gpu(e: dict) -> int:      # prefer cards that fit the 31B model (>= 40 GB)
+        g = gres.get(e["partition"], "")
+        return 0 if re.search(r"a100|h100|a6000|6000_ada|l40|a40|v100s?-32|rtx8000", g) else 1
+
+    gpu = sorted(gpu, key=lambda e: (big_gpu(e), e["minutes"] // 10))
+    roots = sorted((s for s in storage if s["writable"] and not s["path"].startswith("/home")),
+                   key=lambda s: -_size_gb(s["free"]))
+    return {
+        "core": core[0] if core else None,
+        "workers_try": [f"{e['partition']}:{e['account']}" for e in work[:4]],
+        "llm_try": [f"{e['partition']}:{e['account']}:gpu:1" for e in gpu[:4]],
+        "data_root_candidates": [f"{s['path']} ({s['free']} free)" for s in roots[:4]],
+        "why": "core and workers: the partition/account that can start soonest, non-preemptible first. "
+               "LLM: GPUs with 40 GB or more first (the 31B model), then soonest. "
+               "Data root: writable shared storage with the most free space, never the home directory.",
+    }
+
+
+def _size_gb(text: str) -> float:
+    m = re.match(r"^([0-9.]+)([KMGTP])", text or "")
+    return float(m.group(1)) * {"K": 1e-6, "M": 1e-3, "G": 1, "T": 1e3, "P": 1e6}[m.group(2)] if m else 0.0
+
+
+def hpc_probe(args: dict) -> dict:
+    """Log in and survey the cluster (read-only)."""
+    ssh = parse_ssh(args["ssh"])
+    key = _find_key(ssh["target"], ssh["key"], ssh["port"])
+    script = (HPC / "tools" / "probe.sh").read_text().replace("\r\n", "\n")
+    root = args.get("data_root") or ""
+    # Bytes, not text: on Windows text mode would turn the script's line ends into CRLF.
+    r = subprocess.run(_ssh_args(ssh["target"], key or None, ssh["port"]) +
+                       [f"GEMI_PROBE_ROOT={shlex.quote(root)} bash -ls"],
+                       input=script.encode(), capture_output=True, timeout=300)
+    stdout, stderr = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+    body = stdout.split("@@probe", 1)[-1].split("@@end", 1)[0]
+    rows = [line.split("|") for line in body.splitlines() if "|" in line]
+    err = next((x[1] for x in rows if x[0] == "error"), None)
+    if err or not rows:
+        raise RuntimeError(err or f"the survey returned nothing: {(stderr or stdout)[-300:]}")
+    merged: dict[str, dict] = {}        # sinfo prints one row per node type; one entry per partition here
+    for x in rows:
+        if x[0] != "partition":
+            continue
+        p = merged.setdefault(x[1], {"name": x[1], "available": x[2], "time_limit": x[3], "nodes": 0,
+                                     "node_types": [], "gres": "", "idle_or_partly_free_nodes": int(x[8])})
+        p["nodes"] += int(x[4])
+        gpu = "" if x[7] in ("(null)", "") else re.sub(r"\(.*?\)", "", x[7])
+        p["node_types"].append(f"{x[4]}x {x[5]} cpu, {round(int(x[6].rstrip('+')) / 1024)} GB" + (f", {gpu}" if gpu else ""))
+        if gpu and gpu not in p["gres"]:
+            p["gres"] = (p["gres"] + " " + gpu).strip()
+    parts = list(merged.values())
+    preempt = {x[1]: x[2] for x in rows if x[0] == "preempt"}
+    assoc = [{"account": x[1], "partition": x[2], "qos": x[3] if len(x) > 3 else ""} for x in rows if x[0] == "assoc"]
+    est = []
+    for x in rows:
+        if x[0] == "estimate":
+            est.append({"kind": x[1], "partition": x[2], "account": x[3], "gres": x[4],
+                        "minutes": int(x[5]) if re.match(r"^-?\d+$", x[5]) else x[5]})
+    storage = [{"path": x[1], "size": x[2], "free": x[3], "writable": x[4] == "yes"} for x in rows if x[0] == "storage"]
+    mine = {a["partition"] for a in assoc}
+    host = next((x for x in rows if x[0] == "host"), ["", "", "", "", ""])
+    container = next((x for x in rows if x[0] == "container"), ["", "none"])
+    existing = next((x for x in rows if x[0] == "existing"), None)
+    result = {
+        "login": ssh["target"], "ssh_key": key or "(default key)", "login_node": host[1], "user": host[3],
+        "slurm": next((x[1] for x in rows if x[0] == "slurm"), ""),
+        "containers": " ".join(container[1:]) if container[1] != "none" else
+                      "NOT FOUND - the stack needs Apptainer or Singularity",
+        "internet_from_login_node": {x[1]: x[2] for x in rows if x[0] == "internet"},
+        "my_accounts": assoc,
+        "partitions_i_can_use": [{**p, "preemptible": preempt.get(p["name"], "OFF") != "OFF"}
+                                 for p in parts if p["name"] in mine],
+        "other_partitions": sorted(p["name"] for p in parts if p["name"] not in mine),
+        "start_estimates_minutes": est,
+        "storage": storage,
+        "already_installed": ({"root": existing[1], "images": existing[2].split(), "data_folders": existing[3].split()}
+                              if existing else None),
+        "recommendation": _recommend(parts, assoc, est, storage, preempt),
+    }
+    return {"result": result}
+
+
+# ── configuration ────────────────────────────────────────────────────────────
+
+CONF_TEMPLATE = """# Launch settings for {name}, written by the agent's hpc_configure from a
+# survey of the cluster ({when}). Sourced by hpc/gemi-hpc and the remote scripts.
+
+HPC_HOST={login}
+HPC_KEY={key}
+HPC_KNOWN_HOSTS={known}
+GEMI_HPC_ROOT={root}
+
+# Published stack the images come from; current source is mounted over it.
+GEMI_IMAGE_REGISTRY=ghcr.io/gemini-breeding
+GEMI_IMAGE_VERSION={version}
+
+# Core job (database, storage, API): small, long-running.
+CORE_PARTITION=${{CORE_PARTITION:-{core_partition}}}
+CORE_ACCOUNT=${{CORE_ACCOUNT:-{core_account}}}
+CORE_CPUS=4
+CORE_MEM=16G
+CORE_TIME=2-00:00:00
+
+# Worker jobs: "partition:account" tried in order; first that can start soon wins.
+WORKER_TRY="{worker_try}"
+WORKER_TIME=1-00:00:00
+WORKER_RES_amiga="cpus=8 mem=32G gpus=0"
+WORKER_RES_stitch="cpus=16 mem=56G gpus=0"
+WORKER_RES_odm="cpus=16 mem=56G gpus=0"
+WORKER_RES_geo="cpus=4 mem=16G gpus=0"
+WORKER_RES_ml="cpus=8 mem=32G gpus={ml_gpus}"
+
+LOCAL_API_PORT=auto
+
+# Local LLM for the agent (vLLM, OpenAI-compatible API).
+LLM_IMAGE=vllm/vllm-openai:latest
+LLM_MODEL={llm_model}
+LLM_NAME=gemma4
+LLM_TRY="{llm_try}"
+LLM_RES="cpus=8 mem=48G"
+LLM_TIME=0-12:00:00
+LLM_ARGS='--max-model-len 32768 --gpu-memory-utilization 0.92'
+LLM_PULL_PARTITION={pull_partition}
+LLM_PULL_ACCOUNT={pull_account}
+"""
+
+
+def hpc_configure(args: dict) -> dict:
+    """Write (or replace) a cluster's launch.conf and make it the active one."""
+    name = re.sub(r"[^a-z0-9_-]", "", str(args["name"]).lower())
+    if not name:
+        raise ValueError("name: letters, digits, - and _ only")
+    ssh = parse_ssh(args["ssh"])
+    key = _find_key(ssh["target"], ssh["key"], ssh["port"])
+    key_path = Path(key).expanduser() if key else next(
+        (p for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa")) if p.exists()), _home() / ".ssh" / "id_rsa")
+    worker_try = args["workers_try"] if isinstance(args["workers_try"], list) else str(args["workers_try"]).split()
+    llm_try = args.get("llm_try") or []
+    llm_try = llm_try if isinstance(llm_try, list) else str(llm_try).split()
+    for entry in worker_try:
+        if entry.count(":") != 1:
+            raise ValueError(f"workers_try entries are partition:account, got {entry!r}")
+    core_partition, core_account = str(args["core"]).split(":")
+    version = (REPO / "frontend" / "src-tauri" / "stack-version") if RESOURCES is None else (REPO / "stack-version")
+    folder = CLUSTERS / name
+    folder.mkdir(parents=True, exist_ok=True)
+    conf = CONF_TEMPLATE.format(
+        name=name, when=time.strftime("%Y-%m-%d"), login=ssh["target"], key=_posix(key_path),
+        known=_posix(_home() / ".ssh" / "known_hosts"), root=str(args["data_root"]).rstrip("/"),
+        version=version.read_text().strip() if version.exists() else "latest",
+        core_partition=core_partition, core_account=core_account, worker_try=" ".join(worker_try),
+        ml_gpus=1 if args.get("ml_gpu") else 0,
+        llm_model=args.get("llm_model") or "google/gemma-4-31B-it-qat-w4a16-ct", llm_try=" ".join(llm_try),
+        pull_partition=worker_try[0].split(":")[0], pull_account=worker_try[0].split(":")[1])
+    (folder / "launch.conf").write_text(conf, newline="\n")
+    (CLUSTERS / "active").write_text(name + "\n", newline="\n")
+    return {"result": {"cluster": name, "file": str(folder / "launch.conf"), "active": True,
+                       "next": "hpc action=sync, then action=pull if images are not installed yet, then action=up"}}
+
+
+# ── running it ───────────────────────────────────────────────────────────────
+
+ACTIONS = ("status", "sync", "pull", "pull_llm", "pull_ml_deps", "up", "worker", "llm_up", "llm_status", "llm_down",
+           "connect", "disconnect", "logs", "down")
+
+
+def _tunnel(conf: dict, local: int, remote_ip: str, remote_port: str) -> int:
+    known = conf.get("HPC_KNOWN_HOSTS", "")
+    cmd = ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
+           "-o", f"UserKnownHostsFile={known}", "-i", conf["HPC_KEY"], "-o", "IdentitiesOnly=yes",
+           "-L", f"127.0.0.1:{local}:{remote_ip}:{remote_port}", conf["HPC_HOST"]]
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0)) if os.name == "nt" else 0
+    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags, start_new_session=os.name != "nt")
+    for _ in range(40):
+        if _port_open(local):
+            return p.pid
+        if p.poll() is not None:
+            break
+        time.sleep(0.5)
+    raise RuntimeError(f"could not open the tunnel on localhost:{local} (is the port in use?)")
+
+
+def _kill(pid: int) -> None:
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+        else:
+            os.kill(pid, 15)
+    except OSError:
+        pass
+
+
+def _kv(text: str) -> dict:
+    return dict(line.split("=", 1) for line in text.splitlines() if re.match(r"^[A-Z_]+=", line))
+
+
+def hpc(args: dict) -> dict:
+    """Drive the cluster session through gemi-hpc."""
+    action = args["action"]
+    if action not in ACTIONS:
+        raise ValueError(f"action must be one of {', '.join(ACTIONS)}")
+    cluster = args.get("cluster") or active_cluster()
+    if not cluster:
+        raise ValueError("no cluster configured yet: run hpc_probe, then hpc_configure")
+    conf = _conf(cluster)
+    out: Any
+    if action == "status":
+        jobs = _gemi_hpc(["status"], cluster)
+        llm = _gemi_hpc(["llm", "status"], cluster)
+        st = _state()
+        out = {"cluster": cluster, "jobs_and_session": jobs, "llm": re.sub(r"LLM_KEY=.*", "", llm),
+               "this_computer": {"api_tunnel": _port_open(API_PORT) and st.get("api_pid") is not None,
+                                 "llm_tunnel": _port_open(st.get("llm_port", LLM_PORT)) and st.get("llm_pid") is not None,
+                                 "app_api": f"http://127.0.0.1:{API_PORT}"}}
+    elif action == "sync":
+        out = _gemi_hpc(["sync"], cluster)
+    elif action == "pull":
+        out = _gemi_hpc(["pull"], cluster) + "\nThis is a Slurm job (about 20 min). Check with action=logs service=pull."
+    elif action == "pull_llm":
+        out = _gemi_hpc(["llm", "pull"], cluster) + "\nA Slurm job (up to an hour). Check with action=logs service=pull-llm."
+    elif action == "pull_ml_deps":
+        out = _gemi_hpc(["pull", "ml-deps"], cluster) + "\nA Slurm job (~15 min). Check with action=logs service=pull-mldeps."
+    elif action == "up":
+        out = _gemi_hpc(["up"], cluster, timeout=2000)
+    elif action == "worker":
+        names = args.get("workers") or []
+        names = names if isinstance(names, list) else str(names).split()
+        bad = [n for n in names if n not in ("amiga", "stitch", "geo", "ml", "odm")]
+        if bad or not names:
+            raise ValueError("workers: one or more of amiga, stitch, geo, ml, odm")
+        out = _gemi_hpc(["worker", *names], cluster, timeout=600)
+    elif action == "llm_up":
+        out = _gemi_hpc(["llm", "up"], cluster, timeout=600)
+    elif action == "llm_status":
+        out = re.sub(r"LLM_KEY=.*", "", _gemi_hpc(["llm", "status"], cluster))
+    elif action == "llm_down":
+        out = _gemi_hpc(["llm", "down"], cluster)
+    elif action == "logs":
+        service = re.sub(r"[^a-z0-9-]", "", str(args.get("service") or "core"))
+        out = _gemi_hpc(["logs", service], cluster, env={"LINES_N": str(int(args.get("lines") or 25))})[-3500:]
+    elif action == "down":
+        hpc({"action": "disconnect", "cluster": cluster})
+        out = _gemi_hpc(["down"], cluster, timeout=900)
+    elif action == "disconnect":
+        st = _state()
+        for k in ("api_pid", "llm_pid"):
+            if st.get(k):
+                _kill(int(st[k]))
+        STATE.unlink(missing_ok=True)
+        out = "tunnels closed"
+    else:  # connect
+        out = _connect(cluster, conf, bool(args.get("use_cluster_model")))
+    return {"result": out}
+
+
+def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
+    """Open the tunnels the app needs on this computer: the API on its usual
+    port (so the app works unchanged), and the cluster's model if it is up."""
+    session = _kv(_gemi_hpc(["status"], cluster))
+    if "CORE_IP" not in session:
+        raise RuntimeError("the core is not up yet: hpc action=up first")
+    st = _state()
+    for k in ("api_pid", "llm_pid"):
+        if st.get(k):
+            _kill(int(st[k]))
+    if _port_open(API_PORT):
+        raise RuntimeError(f"localhost:{API_PORT} is already in use (a local Docker stack?). Stop it, or use that stack.")
+    st = {"cluster": cluster, "api_pid": _tunnel(conf, API_PORT, session["CORE_IP"], session["API_PORT"])}
+    result: dict[str, Any] = {"app_api": f"http://127.0.0.1:{API_PORT}", "core_node": session.get("CORE_NODE")}
+    llm = _kv(_gemi_hpc(["llm", "env"], cluster))
+    if "LLM_IP" in llm:
+        port = LLM_PORT if not _port_open(LLM_PORT) else LLM_PORT + 1
+        st["llm_pid"], st["llm_port"] = _tunnel(conf, port, llm["LLM_IP"], llm["LLM_PORT"]), port
+        result["model"] = {"base_url": f"http://127.0.0.1:{port}/v1", "model": llm["LLM_MODEL_NAME"]}
+        if use_model:
+            from .runner import save_config
+
+            save_config({"base_url": result["model"]["base_url"], "model": llm["LLM_MODEL_NAME"],
+                         "api_key": llm["LLM_KEY"], "tool_mode": "text", "vision": True})
+            result["model"]["agent_now_uses_it"] = True
+    else:
+        result["model"] = "not running on the cluster (hpc action=llm_up)"
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(st))
+    login = _kv(_gemi_hpc(["login"], cluster))
+    result["app_login"] = {"email": login.get("GEMINI_FIRST_SUPERUSER_EMAIL"),
+                           "password": login.get("GEMINI_FIRST_SUPERUSER_PASSWORD"),
+                           "note": "the stack's administrator account; show it to the person so they can sign in"}
+    return result
+
+
+def _hpc(fn, description: str, props: dict, required: list[str]) -> None:
+    _tool(fn, description, props, required, track=False, group="hpc")
+
+
+_hpc(hpc_probe, "Log in to a Slurm cluster and survey it (read-only): partitions and GPUs you may use, accounts, "
+     "estimated wait per partition for the core / a worker / a GPU job, container runtime, storage, and a "
+     "recommended placement. Needs key-based SSH login.",
+     {"ssh": {**_str, "description": "the person's SSH command, e.g. `ssh jdoe@login.cluster.edu`"},
+      "data_root": {**_str, "description": "optional: an existing GEMI directory on the cluster to check"}}, ["ssh"])
+_hpc(hpc_configure, "Write the cluster's settings (launch.conf) from the choices made after hpc_probe and make it "
+     "the active cluster.",
+     {"name": {**_str, "description": "short name for the cluster, e.g. mycluster"}, "ssh": _str,
+      "data_root": {**_str, "description": "directory on the cluster's shared storage for images and data"},
+      "core": {**_str, "description": "partition:account for the core job"},
+      "workers_try": {**_strs, "description": "partition:account list, best first"},
+      "llm_try": {**_strs, "description": "partition:account:gres list for the model, best first"},
+      "llm_model": _str, "ml_gpu": _bool}, ["name", "ssh", "data_root", "core", "workers_try"])
+_hpc(hpc, "Run the cluster session: action = status | sync (copy code) | pull (container images, once) | pull_llm "
+     "(model image + weights, once) | pull_ml_deps (model backends for inference, once) | up (start core) | worker "
+     "(workers: amiga stitch geo ml odm) | llm_up | llm_status | llm_down | connect (open tunnels so the app on "
+     "this computer reaches the cluster; returns the app login) | disconnect | logs (service) | down (stop all).",
+     {"action": _str, "workers": _strs, "service": _str, "lines": _int, "cluster": _str,
+      "use_cluster_model": {**_bool, "description": "with connect: make the agent use the cluster's model"}},
+     ["action"])

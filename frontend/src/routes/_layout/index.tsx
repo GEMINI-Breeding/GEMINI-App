@@ -1,13 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DashboardBuilder } from "@/features/dashboard/components/DashboardBuilder"
+import { AgentHome } from "@/features/agent/pages/AgentHome"
 
 export const Route = createFileRoute("/_layout/")({
-  component: DashboardPage,
+  component: AgentHome,
   head: () => ({
-    meta: [{ title: "Dashboard - GEMINI" }],
+    meta: [{ title: "Agent - GEMINI" }],
   }),
 })
-
-function DashboardPage() {
-  return <DashboardBuilder />
-}

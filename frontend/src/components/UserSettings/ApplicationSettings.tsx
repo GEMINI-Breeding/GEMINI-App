@@ -3,6 +3,7 @@ import {
   CheckCircle,
   HardDrive,
   Info,
+  KeyRound,
   RefreshCw,
 } from "lucide-react"
 import { useCallback, useState } from "react"
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
 import { LegacyImport } from "./LegacyImport"
+import { SignInSettings } from "./SignInSettings"
 import { StackSettings } from "./StackSettings"
 
 type UpdateStatus =
@@ -97,12 +99,13 @@ const SETTINGS_NAV_GROUPS = [
   {
     items: [
       { id: "data", label: "Data & services", icon: HardDrive },
+      { id: "signin", label: "Sign-in", icon: KeyRound },
       { id: "about", label: "About", icon: Info },
     ],
   },
 ] as const
 
-type SettingsSection = "data" | "about"
+type SettingsSection = "data" | "signin" | "about"
 
 const ApplicationSettings = () => {
   const [active, setActive] = useState<SettingsSection>("data")
@@ -121,6 +124,7 @@ const ApplicationSettings = () => {
             <LegacyImport />
           </>
         )}
+        {active === "signin" && <SignInSettings />}
         {active === "about" && <AboutSettings />}
       </div>
     </div>

@@ -8,7 +8,7 @@
  *     one job per field, as the old backend did. Submitting a job per
  *     plot from the client would mean hundreds of jobs each paying
  *     container + model startup.
- *   - Model list comes from the pipeline's saved Roboflow config (set in
+ *   - Model list comes from the pipeline's saved model config (set in
  *     the R3 wizard's step 3). No extra fetch required.
  *   - Threshold slider does client-side NMS / filtering on the cached
  *     predictions JSON; no /apply-inference-threshold endpoint needed.
@@ -46,6 +46,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { apiUrl } from "@/features/files/lib/download"
+import {
+  type InferenceModel,
+  modelDisplayName,
+  modelJobParams,
+  modelKey,
+  modelProblem,
+  normalizeModel,
+  SOURCE_LABELS,
+  TASK_LABELS,
+} from "@/features/process/lib/inferenceModels"
 import {
   type BatchInferenceResult,
   isBatchInferenceResult,
@@ -215,23 +225,25 @@ async function loadActiveBoundaries(
   return fc?.features?.length ? fc : undefined
 }
 
-interface RoboflowModel {
-  label: string
-  roboflow_api_key: string
-  roboflow_model_id: string
-  task_type: string
-}
-
 export interface Prediction {
   image?: string
   class: string
   confidence: number
-  x: number
-  y: number
-  width: number
-  height: number
+  /** Box geometry; absent for classification (whole-image) results. */
+  x?: number
+  y?: number
+  width?: number
+  height?: number
   points?: Array<{ x: number; y: number }>
 }
+
+const hasBox = (
+  p: Prediction,
+): p is Prediction & { x: number; y: number; width: number; height: number } =>
+  typeof p.x === "number" &&
+  typeof p.y === "number" &&
+  typeof p.width === "number" &&
+  typeof p.height === "number"
 
 const CLASS_COLOURS = [
   "#ef4444",
@@ -301,20 +313,28 @@ export function InferenceTool({
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
 
-  // Roboflow models from the pipeline config (R3 wizard step 3).
+  // Models from the pipeline config (wizard step 3). The self-hosted
+  // server URL applies to Roboflow models only.
   const localServerUrl =
     pipeline.params.inference_mode === "local"
       ? (
           (pipeline.params.local_server_url as string | undefined) ?? ""
         ).trim() || undefined
       : undefined
-  const models = useMemo<RoboflowModel[]>(() => {
-    const arr = (pipeline.params.roboflow_models as RoboflowModel[]) ?? []
-    return arr.filter((m) => m.roboflow_model_id?.trim())
+  const models = useMemo<InferenceModel[]>(() => {
+    const arr = (pipeline.params.roboflow_models as unknown[]) ?? []
+    return arr.map(normalizeModel).filter((m) => modelKey(m))
   }, [pipeline.params.roboflow_models])
 
   const [activeModelIdx, setActiveModelIdx] = useState(0)
   const activeModel = models[activeModelIdx]
+  // Zero-shot labels for the next run only, pre-filled from the pipeline's
+  // saved prompt — lets a researcher try prompts without editing the pipeline.
+  const [promptOverrides, setPromptOverrides] = useState<
+    Record<number, string>
+  >({})
+  const activePrompt =
+    promptOverrides[activeModelIdx] ?? activeModel?.hf_prompt ?? ""
 
   // Image source: prefer plot-image crops if SPLIT_ORTHOMOSAIC has run;
   // otherwise fall back to raw images for a single-image smoke test.
@@ -373,7 +393,9 @@ export function InferenceTool({
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null)
   const submit = useMutation({
     mutationFn: async () => {
-      if (!activeModel) throw new Error("Pick a Roboflow model first")
+      if (!activeModel) throw new Error("Pick a model first")
+      const problem = modelProblem({ ...activeModel, hf_prompt: activePrompt })
+      if (problem) throw new Error(problem)
       if (mode === "single" && !activeImage) {
         throw new Error("Pick an image first")
       }
@@ -406,12 +428,11 @@ export function InferenceTool({
         inference: {
           ...(mode === "all" ? { imagesPrefix: activePrefix } : { imagePath }),
           ...(boundaries ? { boundaries } : {}),
-          countLabel: activeModel.label || activeModel.roboflow_model_id,
-          // The pipeline form has always collected these; until now nothing
-          // read them, so choosing "local" silently still used the cloud.
-          ...(localServerUrl ? { apiUrl: localServerUrl } : {}),
-          apiKey: activeModel.roboflow_api_key,
-          modelId: activeModel.roboflow_model_id,
+          countLabel: modelDisplayName(activeModel),
+          model: modelJobParams(activeModel, {
+            localServerUrl,
+            prompt: activePrompt,
+          }),
           outputPredictionsPath: outputPath,
         },
       })
@@ -512,12 +533,11 @@ export function InferenceTool({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">
-            No Roboflow models configured
-          </CardTitle>
+          <CardTitle className="text-base">No models configured</CardTitle>
           <CardDescription>
             Open the pipeline settings (Step 3 of the wizard) and add at least
-            one Roboflow model entry. Then return here to run inference.
+            one model — Roboflow, Hugging Face, or your own weights. Then return
+            here to run inference.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -538,7 +558,7 @@ export function InferenceTool({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="mb-1.5 text-xs" htmlFor="inference-model">
-                Roboflow model
+                Model
               </Label>
               <Select
                 value={String(activeModelIdx)}
@@ -553,7 +573,8 @@ export function InferenceTool({
                 <SelectContent>
                   {models.map((m, i) => (
                     <SelectItem key={i} value={String(i)}>
-                      {m.label || m.roboflow_model_id}
+                      {modelDisplayName(m)} · {SOURCE_LABELS[m.source]},{" "}
+                      {TASK_LABELS[m.task_type].toLowerCase()}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -611,10 +632,28 @@ export function InferenceTool({
             className="text-muted-foreground text-xs"
             data-testid="inference-endpoint"
           >
-            {localServerUrl
-              ? `Using the local inference server at ${localServerUrl}.`
-              : "Using Roboflow cloud inference."}
+            {endpointDescription(activeModel, localServerUrl)}
           </p>
+          {activeModel?.source === "huggingface" &&
+            activeModel.hf_zero_shot && (
+              <div className="space-y-1">
+                <Label className="text-xs" htmlFor="inference-prompt">
+                  Labels to look for (this run only)
+                </Label>
+                <Input
+                  id="inference-prompt"
+                  data-testid="inference-prompt"
+                  value={activePrompt}
+                  placeholder="weed, crop, soil"
+                  onChange={(e) =>
+                    setPromptOverrides((o) => ({
+                      ...o,
+                      [activeModelIdx]: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            )}
           {mode === "all" && (
             <p
               className="text-muted-foreground text-xs"
@@ -807,6 +846,24 @@ export function InferenceTool({
   )
 }
 
+function endpointDescription(
+  model: InferenceModel | undefined,
+  localServerUrl: string | undefined,
+): string {
+  if (!model) return ""
+  if (model.source === "huggingface") {
+    return model.hf_mode === "cloud"
+      ? `Using Hugging Face cloud inference for ${model.hf_model_id}.`
+      : `Running ${model.hf_model_id} in the processing worker (downloaded on first use, then cached).`
+  }
+  if (model.source === "local_weights") {
+    return `Running your uploaded weights (${modelDisplayName(model)}) in the processing worker.`
+  }
+  return localServerUrl
+    ? `Using the local inference server at ${localServerUrl}.`
+    : "Using Roboflow cloud inference."
+}
+
 function PredictionOverlay({
   src,
   alt,
@@ -839,8 +896,25 @@ function PredictionOverlay({
         }}
         draggable={false}
       />
+      {predictions.length > 0 && !predictions.some(hasBox) && (
+        // Classification: whole-image labels, best first — no boxes to draw.
+        <div
+          className="absolute left-2 top-2 space-y-1"
+          data-testid="inference-classification"
+        >
+          {predictions.map((p, i) => (
+            <span
+              key={i}
+              className="block w-fit rounded-sm px-1.5 py-0.5 text-xs font-medium text-white"
+              style={{ background: classColour(p.class) }}
+            >
+              {p.class} {(p.confidence * 100).toFixed(0)}%
+            </span>
+          ))}
+        </div>
+      )}
       {imgRef.current &&
-        predictions.map((p, i) => {
+        predictions.filter(hasBox).map((p, i) => {
           const img = imgRef.current
           if (!img) return null
           const w = img.clientWidth

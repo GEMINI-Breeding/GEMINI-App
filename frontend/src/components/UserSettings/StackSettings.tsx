@@ -24,12 +24,15 @@ import {
 } from "@/components/ui/dialog"
 import { getToken } from "@/lib/auth"
 import {
+  isDesktopApp,
   isManagedStack,
   moveStackData,
   onStackProgress,
   restartStack,
+  setStackMode,
   stackDataSize,
   stackLogs,
+  stackMode,
   stackStatus,
   stopStackAndQuit,
 } from "@/lib/stack"
@@ -49,7 +52,38 @@ async function activeJobCount(apiUrl: string): Promise<number> {
 }
 
 export function StackSettings() {
+  if (isDesktopApp() && stackMode() === "cluster") return <ClusterStackNotice />
   return isManagedStack() ? <ManagedStackSettings /> : <DevStackNotice />
+}
+
+/** Desktop app using a cluster: where things are, and the way back to Docker. */
+function ClusterStackNotice() {
+  return (
+    <div
+      className="flex max-w-xl flex-col gap-3"
+      data-testid="stack-cluster-notice"
+    >
+      <h2 className="text-lg font-medium">Data & services</h2>
+      <p className="text-muted-foreground text-sm">
+        GEMINI is set to run on an HPC cluster. The data and the processing
+        services are there; start, stop and place them from the Compute panel on
+        the home page. Nothing runs in Docker on this computer.
+      </p>
+      <Button
+        variant="outline"
+        className="w-fit"
+        onClick={() => {
+          setStackMode("local")
+          window.location.assign("/")
+        }}
+      >
+        Use this computer instead (Docker)
+      </Button>
+      <p className="text-muted-foreground text-xs">
+        Switching does not stop anything on the cluster and does not move data.
+      </p>
+    </div>
+  )
 }
 
 function DevStackNotice() {

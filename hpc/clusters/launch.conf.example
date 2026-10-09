@@ -1,0 +1,50 @@
+# Template for hpc/clusters/<name>/launch.conf (that file is not committed: it names your
+# cluster, account and paths). The agent's hpc_configure writes one from a survey; or copy this.
+
+HPC_HOST=you@login.cluster.edu
+HPC_KEY=/c/Users/you/.ssh/id_ed25519
+HPC_KNOWN_HOSTS=/c/Users/you/.ssh/known_hosts
+GEMI_HPC_ROOT=/group/yourlab/gemini_app
+
+# Published stack the images come from; current source is mounted over it.
+GEMI_IMAGE_REGISTRY=ghcr.io/gemini-breeding
+GEMI_IMAGE_VERSION=sha-86074c4
+
+# Core job (database, storage, API): small, long-running.
+CORE_PARTITION=${CORE_PARTITION:-gpu-part}
+CORE_ACCOUNT=${CORE_ACCOUNT:-labgrp}
+CORE_CPUS=4
+CORE_MEM=16G
+CORE_TIME=2-00:00:00
+
+# Worker jobs: "partition:account" tried in order; first that can start soon wins.
+WORKER_TRY="gpu-part:labgrp gpu-part2:labgrp shared:general"
+WORKER_TIME=1-00:00:00
+WORKER_RES_amiga="cpus=8 mem=32G gpus=0"
+WORKER_RES_stitch="cpus=16 mem=56G gpus=0"
+WORKER_RES_odm="cpus=16 mem=56G gpus=0"
+WORKER_RES_geo="cpus=4 mem=16G gpus=0"
+WORKER_RES_ml="cpus=8 mem=32G gpus=0"
+
+LOCAL_API_PORT=auto
+
+# Local LLM for the agent (vLLM, OpenAI-compatible API).
+LLM_IMAGE=vllm/vllm-openai:latest
+LLM_MODEL=google/gemma-4-31B-it-qat-w4a16-ct
+LLM_NAME=gemma4
+LLM_TRY="gpu-part:labgrp:gpu:1 shared:general:gpu:1 gpu-part2:labgrp:gpu:1"
+LLM_RES="cpus=8 mem=48G"
+LLM_TIME=0-12:00:00
+LLM_ARGS='--max-model-len 32768 --gpu-memory-utilization 0.92'
+LLM_PULL_PARTITION=gpu-part
+LLM_PULL_ACCOUNT=labgrp
+
+# Job limits the gate enforces (defaults shown). Lower them freely; raising them, or
+# GEMI_ALLOW_UNSAFE=1, is a deliberate choice for a person to make, never a tool.
+# GEMI_MAX_CPUS=32
+# GEMI_MAX_MEM_GB=128
+# GEMI_MAX_GPUS=1
+# GEMI_MAX_TIME=2-00:00:00
+# GEMI_MAX_JOBS=10
+# More placements the Compute panel and the agent may use ("partition:account ..."):
+# GEMI_EXTRA_PLACES=""

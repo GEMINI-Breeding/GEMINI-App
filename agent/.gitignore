@@ -1,0 +1,4 @@
+.env
+work/
+__pycache__/
+config.json

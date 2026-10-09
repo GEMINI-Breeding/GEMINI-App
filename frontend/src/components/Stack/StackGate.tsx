@@ -14,6 +14,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getToken, login, onLogout } from "@/lib/auth"
+import { signInRequired } from "@/lib/autoSignIn"
 import { openUrl } from "@/lib/platform"
 import {
   applyStackUrls,
@@ -21,6 +22,7 @@ import {
   isManagedStack,
   onStackProgress,
   type StackStatus,
+  setStackMode,
   stackCredentials,
   stackLogs,
   stackStatus,
@@ -82,7 +84,7 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
         status = await stackStatus()
       }
       applyStackUrls(status)
-      if (!getToken()) await signInToStack()
+      if (!getToken() && !signInRequired()) await signInToStack()
       setView({ kind: "ready" })
     } catch (e) {
       setView({ kind: "error", message: String(e) })
@@ -106,6 +108,7 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onLogout(() => {
+        if (signInRequired()) return // the layout shows the login page
         void signInToStack()
           .then(() => window.location.assign("/"))
           .catch((e) => setView({ kind: "error", message: String(e) }))
@@ -137,11 +140,46 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
             }}
           />
         )}
+        {(view.kind === "docker" || view.kind === "first-run") && (
+          <UseCluster />
+        )}
         {view.kind === "starting" && <Starting lines={view.lines} />}
         {view.kind === "error" && (
           <StartError message={view.message} onRetry={bringUp} />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The other way to run GEMINI: nothing on this computer, processing on an
+ * HPC cluster. Offered wherever the local path asks for something (Docker,
+ * a data folder); the agent then sets the cluster up from an SSH login.
+ */
+function UseCluster() {
+  return (
+    <div
+      className="space-y-2 rounded-md border p-3"
+      data-testid="stack-use-cluster"
+    >
+      <p className="text-sm font-medium">Have an HPC cluster instead?</p>
+      <p className="text-muted-foreground text-sm">
+        GEMINI can run its processing on a Slurm cluster and keep the data
+        there. Nothing is installed on this computer and Docker is not needed.
+        You give the agent the SSH command you log in with; it looks at the
+        cluster, proposes where each part should run, and starts it after you
+        agree.
+      </p>
+      <Button
+        variant="outline"
+        onClick={() => {
+          setStackMode("cluster")
+          window.location.assign("/setup")
+        }}
+      >
+        Set up on a cluster
+      </Button>
     </div>
   )
 }

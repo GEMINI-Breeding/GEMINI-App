@@ -1,3 +1,4 @@
+mod agent;
 mod stack;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -258,6 +259,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(stack::StackLock(std::sync::Mutex::new(())))
+        .manage(agent::Agent(std::sync::Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             download_to_file,
             open_devtools,
@@ -279,6 +281,13 @@ pub fn run() {
                     .build(),
             )?;
             install_app_menu(app.handle())?;
+            // The agent service (home page) runs beside the app. Its address is
+            // known before the window exists, so page code can read it at once.
+            let mut init = init.clone();
+            match agent::start(app.handle()) {
+                Ok(url) => init.push_str(&format!("\nwindow.__GEMI_AGENT_URL__ = {url:?};\n")),
+                Err(e) => log::warn!("agent service not started: {e}"),
+            }
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("GEMI")
                 .inner_size(1200.0, 800.0)
@@ -291,6 +300,11 @@ pub fn run() {
             // and the next launch is instant. Settings can stop it.
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                agent::stop(app);
+            }
+        });
 }

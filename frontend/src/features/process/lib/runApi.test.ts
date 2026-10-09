@@ -1116,3 +1116,41 @@ describe("markStepComplete + markStepSkipped", () => {
     expect(getRun(run.id)?.steps.gcp_selection?.status).toBe("skipped")
   })
 })
+
+describe("executeStep — inference model sources", () => {
+  it("sends a non-Roboflow model's parameters instead of api_key/model_id", async () => {
+    const run = seedRun()
+    submitMock.mockResolvedValue({ id: "inf-hf" })
+    await executeStep({
+      ...baseInput(run, "inference"),
+      inference: {
+        imagePath: "Processed/x/PlotImages/plot_1.png",
+        model: {
+          source: "huggingface",
+          task_type: "detection",
+          hf_model_id: "facebook/detr-resnet-50",
+          hf_mode: "local",
+        },
+        outputPredictionsPath: "out.json",
+      },
+    })
+    const params = submitMock.mock.calls[0][0].requestBody.parameters
+    expect(params.source).toBe("huggingface")
+    expect(params.hf_model_id).toBe("facebook/detr-resnet-50")
+    expect(params).not.toHaveProperty("api_key")
+    expect(params).not.toHaveProperty("model_id")
+  })
+
+  it("rejects an inference step with no model at all", async () => {
+    const run = seedRun()
+    await expect(
+      executeStep({
+        ...baseInput(run, "inference"),
+        inference: {
+          imagePath: "Processed/x/PlotImages/plot_1.png",
+          outputPredictionsPath: "out.json",
+        },
+      }),
+    ).rejects.toThrow(/needs a model/)
+  })
+})

@@ -42,7 +42,7 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
   plot_boundary_prep:
     "Draw the outer field boundary, configure plot grid dimensions, and save as a versioned plot-boundary record.",
   inference:
-    "Run Roboflow detection or segmentation on plot images and view results.",
+    "Run detection, segmentation or classification on plot images (Roboflow, Hugging Face or your own weights) and view results.",
 }
 
 const STEP_PHASE: Record<string, string> = {}

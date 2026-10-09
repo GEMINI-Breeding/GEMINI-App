@@ -50,8 +50,49 @@ type StackWindow = Window & {
 
 const w = () => window as StackWindow
 
-export function isManagedStack(): boolean {
+/** The packaged desktop app (as opposed to a browser or a development build). */
+export function isDesktopApp(): boolean {
   return typeof window !== "undefined" && w().__GEMI_MANAGED_STACK__ === true
+}
+
+/**
+ * Where the processing stack runs. "local": Docker on this computer, started
+ * and stopped by the app. "cluster": an HPC cluster the agent set up; the app
+ * then starts nothing here and reaches the cluster through the agent
+ * service's tunnel, exactly like the browser does.
+ */
+export type StackMode = "local" | "cluster"
+const MODE_KEY = "gemini.stack.mode"
+/** The tunnel the agent service opens to a cluster's API. */
+export const CLUSTER_API_URL = "http://127.0.0.1:7777"
+
+export function stackMode(): StackMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "cluster" ? "cluster" : "local"
+  } catch {
+    return "local"
+  }
+}
+
+export function setStackMode(mode: StackMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode)
+  } catch {
+    // Storage unavailable: stays local.
+  }
+}
+
+/** The desktop app, running its own Docker stack. */
+export function isManagedStack(): boolean {
+  return isDesktopApp() && stackMode() === "local"
+}
+
+/** Desktop app pointed at a cluster: send API calls to the tunnel. */
+export function applyClusterUrls(): void {
+  if (isDesktopApp() && stackMode() === "cluster") {
+    w().__GEMI_BACKEND_URL__ = CLUSTER_API_URL
+    OpenAPI.BASE = CLUSTER_API_URL
+  }
 }
 
 // Safe to import in the browser: it only touches Tauri when called.

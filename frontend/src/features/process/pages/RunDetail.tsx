@@ -33,7 +33,6 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-
 import {
   type FileMetadata,
   FilesService,
@@ -60,6 +59,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
+import { RunAgentCard } from "@/features/agent/components/RunAgentCard"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import {
   type DataSyncChoice,
@@ -210,7 +210,7 @@ const GROUND_STEPS: StepDef[] = [
   {
     key: "inference",
     label: "Inference",
-    description: "Roboflow detection/segmentation on plot images",
+    description: "Detection, segmentation or classification on plot images",
     kind: "interactive",
     wiredIn: "R5c",
   },
@@ -273,7 +273,7 @@ const AERIAL_STEPS: StepDef[] = [
   {
     key: "inference",
     label: "Inference",
-    description: "Roboflow detection/segmentation on plot images",
+    description: "Detection, segmentation or classification on plot images",
     kind: "interactive",
     wiredIn: "R5c",
   },
@@ -1931,6 +1931,7 @@ export function RunDetail() {
           scope && (
             <div className="mb-6 space-y-4">
               <RunScopeSummary scope={scope} />
+              {run && <RunAgentCard runId={run.id} kind={pipeline.type} />}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Inputs</CardTitle>

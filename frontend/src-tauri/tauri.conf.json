@@ -37,7 +37,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../backend/gemini/pipeline/docker-compose.prod.yaml": "stack/docker-compose.yaml"
+      "../../backend/gemini/pipeline/docker-compose.prod.yaml": "stack/docker-compose.yaml",
+      "agent-resources/": "agent/"
     },
     "linux": {
       "deb": {
@@ -53,7 +54,10 @@
       "frameworks": [],
       "minimumSystemVersion": "10.13",
       "exceptionDomain": ""
-    }
+    },
+    "externalBin": [
+      "binaries/gemi-agent"
+    ]
   },
   "plugins": {}
 }

@@ -82,10 +82,17 @@ export interface InferenceParams {
    * container, so the form's `http://localhost:9002` default works as typed.
    */
   apiUrl?: string
-  /** Roboflow API key. */
-  apiKey: string
-  /** "workspace/model/version" or "workspace/model". */
-  modelId: string
+  /** Roboflow API key. Ignored when `model` is set. */
+  apiKey?: string
+  /** Roboflow "workspace/model/version" or "workspace/model". Ignored when `model` is set. */
+  modelId?: string
+  /**
+   * Source-specific model parameters (`source`, `task_type`, `hf_*`,
+   * `weights_path`, …) from `modelJobParams()` in `inferenceModels.ts`.
+   * Covers Hugging Face and uploaded local weights as well as Roboflow;
+   * without it the job is a Roboflow detection from apiKey/modelId.
+   */
+  model?: Record<string, unknown>
   /** Default 0.1 in the worker. */
   confidenceThreshold?: number
   /** Default 0.5 in the worker. */
@@ -498,6 +505,11 @@ export async function executeStep(
           "inference needs exactly one of imagePath or imagesPrefix",
         )
       }
+      if (!i.model && !(i.apiKey && i.modelId)) {
+        throw new Error(
+          "inference needs a model (or a Roboflow key + model ID)",
+        )
+      }
       const params: Record<string, unknown> = {
         // Exactly one of these is set (guarded above). The worker branches
         // on which key it receives.
@@ -507,9 +519,13 @@ export async function executeStep(
           ? { boundaries: i.boundaries }
           : {}),
         ...(i.countLabel ? { count_label: i.countLabel } : {}),
-        ...(i.apiUrl ? { api_url: i.apiUrl } : {}),
-        api_key: i.apiKey,
-        model_id: i.modelId,
+        ...(i.model
+          ? i.model
+          : {
+              ...(i.apiUrl ? { api_url: i.apiUrl } : {}),
+              api_key: i.apiKey,
+              model_id: i.modelId,
+            }),
         output_predictions_path: i.outputPredictionsPath,
         ...(typeof i.confidenceThreshold === "number"
           ? { confidence_threshold: i.confidenceThreshold }

@@ -13,6 +13,15 @@ const APP_VERSION: string = JSON.parse(
   readFileSync(path.resolve(__dirname, "src-tauri/tauri.conf.json"), "utf8"),
 ).version
 
+// Where the dev proxy sends /api and /titiler. Defaults are the local Docker
+// stack; override to point the dev server at another stack (e.g. an SSH
+// tunnel to an HPC session: GEMI_API_TARGET=http://127.0.0.1:<port>).
+const API_TARGET = process.env.GEMI_API_TARGET || "http://127.0.0.1:7777"
+const TITILER_TARGET =
+  process.env.GEMI_TITILER_TARGET || "http://127.0.0.1:8091"
+// The agent service (agent/gemi_agent/service.py) behind the home page.
+const AGENT_TARGET = process.env.GEMI_AGENT_TARGET || "http://127.0.0.1:7790"
+
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   resolve: {
@@ -46,7 +55,7 @@ export default defineConfig({
       // cross-origin issues with localhost:PORT). 7777 is the default
       // GEMINI_REST_API_PORT.
       "/api": {
-        target: "http://127.0.0.1:7777",
+        target: API_TARGET,
         changeOrigin: true,
         // Proxy WebSockets under the same prefix so wsManager can subscribe
         // to /api/jobs/{id}/progress using the same origin as HTTP calls.
@@ -57,12 +66,16 @@ export default defineConfig({
       // BackendStatus's compatibility check fetches the Vite SPA fallback
       // (index.html) and fails to parse as JSON.
       "/schema": {
-        target: "http://127.0.0.1:7777",
+        target: API_TARGET,
+        changeOrigin: true,
+      },
+      "/agent": {
+        target: AGENT_TARGET,
         changeOrigin: true,
       },
       // Same reason: /healthz lives at the Litestar root.
       "/healthz": {
-        target: "http://127.0.0.1:7777",
+        target: API_TARGET,
         changeOrigin: true,
       },
       // TiTiler runs in the GEMINIbase compose stack at :8091 and serves COG
@@ -76,7 +89,7 @@ export default defineConfig({
       // so the browser's network log stays quiet and the e2e console-
       // error guard doesn't fire on legitimate use.
       "/titiler": {
-        target: "http://127.0.0.1:8091",
+        target: TITILER_TARGET,
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/titiler/, ""),
         // selfHandleResponse so the proxyRes listener can intercept the

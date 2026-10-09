@@ -1,0 +1,240 @@
+#!/bin/bash -l
+# gemi-gate — every remote action of GEMI passes through this script.
+#
+# hpc/gemi-hpc (and so the app's Compute panel and the agent's cluster tools)
+# never sends shell text to the cluster: it runs this gate as the ssh remote
+# command with a word list. Only the commands below exist; all of them act
+# inside the GEMI directory this script lives in ($ROOT = two levels up);
+# anything else is refused with exit 77. Every call is logged to
+# $ROOT/logs/gate.log as ALLOW or REFUSED.
+#
+# Same idea as Heliades' heliades-gate: the cluster's storage is shared and
+# not backed up, so no session may run arbitrary commands there.
+#
+# Menu (arguments in <> are checked; [where=partition:account[:gres]] must be
+# a placement named in the cluster's launch.conf):
+#   ps | status | session | login | limits | selftest
+#   logs <name> [lines]
+#   core-submit [where=…] | core-state | core-log | down
+#   worker <amiga|stitch|geo|ml|odm> [where=…] | stop-worker <name>
+#   llm-up [model] [where=…] | llm-down | llm-env | llm-status
+#   pull-images [name…] | pull-mldeps | pull-llm [model…]
+#   recv <backend|hpc>            (a tar stream on stdin, into a staging folder)
+#   sync-finish <cluster> <rev>   (move the staged folders into place)
+#
+# Wrapped in main() so bash has read the whole file before running any of it:
+# sync-finish replaces this very script.
+
+main() {
+  set -u
+  local here ROOT LOG cmd
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT="$(cd "$here/../.." && pwd)"
+  [ "$(basename "$here")" = remote ] && [ "$(basename "$(dirname "$here")")" = hpc ] && [ "$ROOT" != / ] \
+    || { echo "gemi-gate: not installed at <root>/hpc/remote ($here)" >&2; exit 78; }
+  mkdir -p "$ROOT/logs"
+  LOG="$ROOT/logs/gate.log"
+  cmd="${SSH_ORIGINAL_COMMAND:-$*}"
+  # When sshd runs this as a forced command, the original command names the gate first.
+  case "$cmd" in */gemi-gate\ *) cmd="${cmd#*/gemi-gate }" ;; esac
+
+  audit() { printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$cmd" >> "$LOG"; }
+  refuse() { audit REFUSED; echo "gemi-gate: refused: ${cmd:-<empty>}${1:+ ($1)}" >&2; exit 77; }
+
+  [ -n "$cmd" ] || refuse
+  # Whitelisted characters only: no quotes, globs, redirections, pipes, subshells or newlines.
+  if printf '%s' "$cmd" | LC_ALL=C grep -q '[^A-Za-z0-9 _./,=:@%+-]'; then refuse "character not allowed"; fi
+  case "$cmd" in *..*) refuse "no .. allowed" ;; esac
+  local -a argv rest
+  set -f; read -r -a argv <<< "$cmd"; set +f
+  local first="${argv[0]}"; rest=("${argv[@]:1}")
+
+  export GEMI_HPC_ROOT="$ROOT"
+  # shellcheck disable=SC1091
+  source "$ROOT/hpc/remote/lib.sh"
+  local CONF="$HPC/clusters/current/launch.conf"
+  [ -f "$CONF" ] && source "$CONF"
+
+  # Output marker: the login shell prints a banner first; the client cuts above this line.
+  echo "@@gemi@@"
+
+  # where=partition:account[:gres] -> must be a placement the cluster's launch.conf names.
+  local WHERE=""
+  local -a words=()
+  local a
+  for a in ${rest[@]+"${rest[@]}"}; do
+    case "$a" in where=*) WHERE="${a#where=}" ;; *) words+=("$a") ;; esac
+  done
+  WHERE="${WHERE//,/ }"      # several placements to try, in order
+  if [ -n "$WHERE" ]; then
+    allowed_place "$WHERE" || refuse "placement $WHERE is not in launch.conf (CORE_*, WORKER_TRY, LLM_TRY, GEMI_EXTRA_PLACES)"
+  fi
+  one_of() { local x=$1; shift; local o; for o in "$@"; do [ "$x" = "$o" ] && return 0; done; return 1; }
+  nwords() { [ "${#words[@]}" -ge "$1" ] && [ "${#words[@]}" -le "$2" ] || refuse "wrong number of arguments"; }
+  gemi_jobs() { squeue -h -u "$USER" -o '%i %j' | awk '$2 ~ /^gemi-/'; }
+
+  case "$first" in
+    ps)
+      nwords 0 0; audit ALLOW
+      squeue -h -u "$USER" -o 'job|%i|%j|%P|%T|%M|%l|%N|%r' | awk -F'|' '$3 ~ /^gemi-/'
+      [ -s "$RUN/session.env" ] && echo 'up|session'
+      [ -s "$RUN/llm.env" ] && echo 'up|llm'
+      true
+      ;;
+    status)
+      nwords 0 0; audit ALLOW
+      squeue -u "$USER" -o '%.10i %.18j %.14P %.9T %.10M %.12l %R' | awk 'NR==1 || $2 ~ /^gemi-/'
+      ;;
+    session)
+      nwords 0 0; audit ALLOW
+      cat "$RUN/session.env" 2>/dev/null || true
+      ;;
+    login)
+      nwords 0 0; audit ALLOW
+      grep -E '^GEMINI_FIRST_SUPERUSER_(EMAIL|PASSWORD)=' "$RUN/secrets.env"
+      ;;
+    limits)
+      nwords 0 0; audit ALLOW
+      echo "max_cpus=$GEMI_MAX_CPUS max_mem_gb=$GEMI_MAX_MEM_GB max_gpus=$GEMI_MAX_GPUS max_time=$GEMI_MAX_TIME max_jobs=$GEMI_MAX_JOBS allow_unsafe=${GEMI_ALLOW_UNSAFE:-0}"
+      echo "places=$(places | tr '\n' ' ')"
+      ;;
+    selftest)
+      # Proves the gate refuses: run by `gemi-hpc doctor`, which also sends a command that must fail.
+      nwords 0 0; audit ALLOW
+      echo "gate=ok root=$ROOT user=$USER host=$(hostname -s)"
+      ;;
+    logs)
+      nwords 1 2
+      local what="${words[0]}" n="${words[1]:-40}" f
+      [[ "$what" =~ ^[a-z0-9-]+$ ]] && [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -le 2000 ] || refuse "bad log name or line count"
+      audit ALLOW
+      if one_of "$what" rest-api db storage logger storage-init; then
+        f="$(ls -td "$LOGS"/session-*/ 2>/dev/null | head -1)$what.log"
+      elif [ "$what" = gate ]; then
+        f="$LOG"
+      else
+        f="$(ls -t "$LOGS/$what"-*.log 2>/dev/null | head -1)"
+      fi
+      echo "== $f"; [ -n "$f" ] && tail -n "$n" "$f"
+      true
+      ;;
+    core-submit)
+      nwords 0 0
+      if squeue -h -u "$USER" -n gemi-core -o %i | grep -q .; then
+        audit ALLOW; echo "a core job already exists:"; squeue -u "$USER" -n gemi-core -o '%i %P %T %M %N'; exit 0
+      fi
+      local part="$CORE_PARTITION" acct="$CORE_ACCOUNT"
+      [ -n "$WHERE" ] && { local w1="${WHERE%% *}"; part="${w1%%:*}"; acct="${w1#*:}"; acct="${acct%%:*}"; }
+      check_job "$CORE_CPUS" "$CORE_MEM" 0 "$CORE_TIME" || refuse "core resources over the limits"
+      audit SUBMIT
+      bash "$HPC/remote/make-env.sh" >/dev/null
+      rm -f "$RUN/session.env"
+      sbatch --partition="$part" --account="$acct" --cpus-per-task="$CORE_CPUS" --mem="$CORE_MEM" --time="$CORE_TIME" \
+        --output="$LOGS/core-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/core.sbatch"
+      ;;
+    core-state)
+      nwords 0 0; audit ALLOW
+      squeue -h -u "$USER" -n gemi-core -o '%T %r'
+      ;;
+    core-log)
+      nwords 0 0; audit ALLOW
+      tail -25 "$(ls -t "$LOGS"/core-*.log 2>/dev/null | head -1)" || true
+      ;;
+    down)
+      nwords 0 0; audit STOP
+      local ids core i
+      ids=$(squeue -h -u "$USER" -o '%i %j' | awk '$2 ~ /^gemi-worker-/ {print $1}')
+      # shellcheck disable=SC2086
+      [ -n "$ids" ] && scancel $ids
+      scancel -u "$USER" -n gemi-core -t PENDING
+      core=$(squeue -h -u "$USER" -n gemi-core -t RUNNING -o %i)
+      # shellcheck disable=SC2086
+      [ -n "$core" ] && scancel --batch --signal=TERM $core
+      for i in $(seq 1 30); do squeue -h -u "$USER" -o '%j' | grep -Eq '^gemi-(core|worker-)' || break; sleep 5; done
+      squeue -u "$USER" -o '%.10i %.18j %.9T' | awk 'NR==1 || $2 ~ /^gemi-/'; echo done
+      ;;
+    worker)
+      nwords 1 1
+      one_of "${words[0]}" amiga stitch geo ml odm || refuse "unknown worker"
+      audit SUBMIT
+      GEMI_WORKER_TRY="$WHERE" bash "$HPC/remote/submit-worker.sh" "${words[0]}"
+      ;;
+    stop-worker)
+      nwords 1 1
+      one_of "${words[0]}" amiga stitch geo ml odm || refuse "unknown worker"
+      audit STOP
+      scancel -u "$USER" -n "gemi-worker-${words[0]}"; echo "stopped worker ${words[0]}"
+      ;;
+    llm-up)
+      nwords 0 1; audit SUBMIT
+      GEMI_LLM_TRY="$WHERE" bash "$HPC/remote/submit-llm.sh" "${words[0]:-}"
+      ;;
+    llm-down)
+      nwords 0 0; audit STOP
+      scancel -u "$USER" -n gemi-llm; rm -f "$RUN/llm.env"; echo stopped
+      ;;
+    llm-env)
+      nwords 0 0; audit ALLOW
+      cat "$RUN/llm.env" 2>/dev/null || echo '(LLM not up)'
+      ;;
+    llm-status)
+      nwords 0 0; audit ALLOW
+      squeue -u "$USER" -n gemi-llm,gemi-pull-llm -o '%.10i %.14j %.14P %.9T %.10M %.12l %R'
+      grep -v KEY "$RUN/llm.env" 2>/dev/null || echo '(LLM not up)'
+      ;;
+    pull-images)
+      audit SUBMIT
+      sbatch --partition="$CORE_PARTITION" --account="$CORE_ACCOUNT" --output="$LOGS/pull-%j.log" \
+        --export=ALL,GEMI_HPC_ROOT="$ROOT",GEMI_IMAGE_REGISTRY="$GEMI_IMAGE_REGISTRY",GEMI_IMAGE_VERSION="$GEMI_IMAGE_VERSION",ONLY="${words[*]-}" \
+        "$HPC/remote/pull-images.sbatch"
+      ;;
+    pull-mldeps)
+      nwords 0 0; audit SUBMIT
+      sbatch --partition="${LLM_PULL_PARTITION:-$CORE_PARTITION}" --account="${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}" \
+        --output="$LOGS/pull-mldeps-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/pull-mldeps.sbatch"
+      ;;
+    pull-llm)
+      audit SUBMIT
+      sbatch --partition="${LLM_PULL_PARTITION:-$CORE_PARTITION}" --account="${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}" \
+        --output="$LOGS/pull-llm-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT",MODELS="${words[*]-}" "$HPC/remote/pull-llm.sbatch"
+      ;;
+    recv)
+      # A tar stream on stdin into a staging folder; nothing live is touched until sync-finish.
+      nwords 1 1
+      local stage
+      case "${words[0]}" in
+        backend) stage="$ROOT/src/backend.new" ;;
+        hpc) stage="$ROOT/hpc.new" ;;
+        *) refuse "recv takes backend or hpc" ;;
+      esac
+      audit RECV
+      mkdir -p "$ROOT/src"; rm -rf "$stage"; mkdir "$stage"
+      tar -xzf - -C "$stage" --no-same-owner
+      echo "received ${words[0]}: $(find "$stage" -type f | wc -l) files"
+      ;;
+    sync-finish)
+      nwords 2 2
+      local cluster="${words[0]}" rev="${words[1]}"
+      [[ "$cluster" =~ ^[a-z0-9_-]+$ ]] || refuse "bad cluster name"
+      [ -d "$ROOT/src/backend.new" ] && [ -d "$ROOT/hpc.new/remote" ] && [ -d "$ROOT/hpc.new/clusters/$cluster" ] \
+        || refuse "nothing staged (recv backend and recv hpc first)"
+      audit SYNC
+      # Updated in place (rsync), never by swapping directories: running services
+      # have these folders mounted, and a swap leaves them on a deleted copy.
+      cd "$ROOT" && mkdir -p src/backend hpc \
+        && rsync -a --delete src/backend.new/ src/backend/ \
+        && rsync -a --delete --exclude=clusters/current hpc.new/ hpc/ \
+        && rm -rf src/backend.new hpc.new \
+        && mkdir -p hpc/clusters/current && rsync -a --delete "hpc/clusters/$cluster/" hpc/clusters/current/ \
+        && find hpc \( -name '*.sh' -o -name '*.sbatch' -o -name 'gemi-gate' -o -name 'launch.conf' \) -print0 | xargs -0 sed -i 's/\r$//' \
+        && chmod 755 hpc/remote/gemi-gate \
+        && echo "$rev $(date -Is)" > src/backend/SYNCED_REV && echo "synced: $(cat src/backend/SYNCED_REV)"
+      ;;
+    *)
+      refuse "not on the menu"
+      ;;
+  esac
+}
+
+main "$@"
+exit $?

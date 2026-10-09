@@ -9,6 +9,7 @@ import { ConfirmDialogProvider } from "./components/ui/confirm-dialog"
 import { Toaster } from "./components/ui/sonner"
 import { ProcessProvider } from "./contexts/ProcessContext"
 import { installAuthInterceptors } from "./lib/auth"
+import { applyClusterUrls } from "./lib/stack"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
@@ -17,6 +18,8 @@ import { routeTree } from "./routeTree.gen"
 // cross-origin issues with localhost:PORT requests. The desktop app's
 // StackGate points OpenAPI.BASE at its local stack once that is up.
 OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
+// Desktop app set to use a cluster: the API is the agent service's tunnel.
+applyClusterUrls()
 
 // Wire the JWT bearer-token resolver and the 401 interceptor. After this call,
 // OpenAPI.TOKEN reads from localStorage on every request and a 401 response

@@ -1,6 +1,5 @@
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react"
-
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -17,6 +16,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
+import { markSignedOut } from "@/lib/autoSignIn"
 import { getInitials } from "@/utils"
 
 interface UserInfoProps {
@@ -55,6 +55,7 @@ export function User({ user }: { user: any }) {
 
   const handleLogout = () => {
     handleMenuClick()
+    markSignedOut()
     logout()
     navigate({ to: "/login" })
   }

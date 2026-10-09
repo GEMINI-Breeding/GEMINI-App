@@ -3,6 +3,16 @@
  * scope (narrowed to the run's datasets), the chosen track's msgs_synced
  * points, and its frames in capture order. Shared by Plot Marking and the
  * edge-crop editor.
+ *
+ * Two ways to find the tracks:
+ *  - Direct: when the run names its datasets, each one's
+ *    `{id}/RGB/Metadata/msgs_synced.csv` is read and its frame names taken
+ *    from it. One small request per dataset, whatever the track's size.
+ *  - Listing: otherwise (or when a dataset has no msgs_synced.csv there,
+ *    e.g. a handheld pass) the whole raw scope is listed. That listing is
+ *    recursive — fine for hundreds of files, but it never returned for a
+ *    102-log Amiga day (127k objects), which left Plot Marking on
+ *    "Loading frames…".
  */
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
@@ -19,50 +29,112 @@ import {
 import { type AerialScope, rawScopePrefix } from "@/features/process/lib/paths"
 import { isLoggedIn } from "@/lib/auth"
 
+interface DirectTrack {
+  track: GroundTrack
+  points: TrackPoint[]
+}
+
+/** Amiga frame names carry the capture time, so they sort in capture order. */
+const AMIGA_FRAME = /^rgb-\d+\.(jpe?g|png)$/i
+
+/**
+ * msgs_synced.csv is appended to per extracted log, so after several logs
+ * its rows are in extraction order, not capture order. Amiga frames are
+ * put back in capture order by name; other sources keep the file's order.
+ */
+export function inCaptureOrder(points: TrackPoint[]): TrackPoint[] {
+  if (!points.length || !points.every((p) => AMIGA_FRAME.test(p.image)))
+    return points
+  return [...points].sort((a, b) =>
+    a.image < b.image ? -1 : a.image > b.image ? 1 : 0,
+  )
+}
+
+async function fetchTrackCsv(path: string): Promise<TrackPoint[] | null> {
+  const res = await fetch(
+    apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${path}`),
+    { headers: authHeaders() },
+  )
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`msgs_synced.csv: HTTP ${res.status}`)
+  return inCaptureOrder(parseTrack(await res.text()))
+}
+
 export function useGroundTrack(
   scope: AerialScope | null,
   datasetShortIds: string[] | undefined,
 ) {
   const rawPrefix = scope ? rawScopePrefix(scope) : null
+  // Keyed on strings, not the scope/array objects: callers often build
+  // those per render, and a new track object per render re-runs every
+  // effect downstream (it looped the crop tool's image loading).
+  const idsKey = (datasetShortIds ?? []).join(",")
+
+  const direct = useQuery<DirectTrack[]>({
+    queryKey: ["ground-track", "direct", rawPrefix, idsKey],
+    queryFn: async () => {
+      const found: DirectTrack[] = []
+      for (const id of idsKey.split(",")) {
+        const msgsSyncedPath = `${rawPrefix}${id}/RGB/Metadata/msgs_synced.csv`
+        const points = await fetchTrackCsv(msgsSyncedPath)
+        if (!points?.length) continue
+        found.push({
+          points,
+          track: {
+            dataset: id,
+            imagesPrefix: `${rawPrefix}${id}/RGB/Images/top/`,
+            images: points.map((p) => p.image),
+            msgsSyncedPath,
+          },
+        })
+      }
+      return found
+    },
+    enabled: isLoggedIn() && Boolean(rawPrefix) && Boolean(idsKey),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+  const useDirect = (direct.data?.length ?? 0) > 0
+  // List only when the direct way is not available or found nothing.
+  const needListing =
+    Boolean(rawPrefix) && (!idsKey || (direct.isFetched && !useDirect))
+
   const listing = useQuery<FileMetadata[]>({
     queryKey: ["files", "list", rawPrefix],
     queryFn: async () =>
       ((await FilesService.apiFilesListFilePathListFiles({
         filePath: `${DEFAULT_BUCKET}/${rawPrefix}`,
       })) as FileMetadata[] | null) ?? [],
-    enabled: isLoggedIn() && Boolean(rawPrefix),
+    enabled: isLoggedIn() && needListing,
   })
-  // Keyed on strings, not the scope/array objects: callers often build
-  // those per render, and a new track object per render re-runs every
-  // effect downstream (it looped the crop tool's image loading).
-  const idsKey = (datasetShortIds ?? []).join(",")
   const tracks = useMemo<GroundTrack[]>(() => {
     if (!rawPrefix) return []
+    if (useDirect) return (direct.data ?? []).map((d) => d.track)
     const all = findGroundTracks(listing.data ?? [], rawPrefix)
     const wanted = idsKey ? idsKey.split(",") : []
     const mine = all.filter((t) => wanted.includes(t.dataset))
     return mine.length ? mine : all
-  }, [listing.data, rawPrefix, idsKey])
+  }, [useDirect, direct.data, listing.data, rawPrefix, idsKey])
   const [trackKey, setTrackKey] = useState<string | null>(null)
   const track =
     tracks.find((t) => t.imagesPrefix === trackKey) ?? tracks[0] ?? null
 
   const trackCsv = useQuery<TrackPoint[]>({
     queryKey: ["ground-track", track?.msgsSyncedPath],
-    queryFn: async () => {
-      const res = await fetch(
-        apiUrl(
-          `/api/files/download/${DEFAULT_BUCKET}/${track?.msgsSyncedPath}`,
-        ),
-        { headers: authHeaders() },
-      )
-      if (!res.ok) throw new Error(`msgs_synced.csv: HTTP ${res.status}`)
-      return parseTrack(await res.text())
-    },
-    enabled: Boolean(track?.msgsSyncedPath),
+    queryFn: async () =>
+      (await fetchTrackCsv(track?.msgsSyncedPath as string)) ?? [],
+    enabled: !useDirect && Boolean(track?.msgsSyncedPath),
     staleTime: Number.POSITIVE_INFINITY,
   })
-  const points = trackCsv.data ?? []
+  const points = useMemo(
+    () =>
+      useDirect
+        ? ((direct.data ?? []).find(
+            (d) => d.track.imagesPrefix === track?.imagesPrefix,
+          )?.points ?? [])
+        : (trackCsv.data ?? []),
+    [useDirect, direct.data, track?.imagesPrefix, trackCsv.data],
+  )
 
   // Frames in capture order: msgs_synced's order when it names them.
   const images = useMemo(() => {
@@ -81,9 +153,12 @@ export function useGroundTrack(
     setTrackKey,
     points,
     images,
-    /** Frames listed; msgs_synced (if any) read. */
-    isReady:
-      listing.isSuccess && (!track?.msgsSyncedPath || trackCsv.isFetched),
-    isLoading: listing.isLoading,
+    /** Frames known; msgs_synced (if any) read. */
+    isReady: useDirect
+      ? true
+      : listing.isSuccess && (!track?.msgsSyncedPath || trackCsv.isFetched),
+    isLoading: useDirect
+      ? false
+      : direct.isLoading || (needListing && listing.isLoading),
   }
 }

@@ -13,7 +13,11 @@ findings.md
 progress.md
 orphan-audit-report.md
 orphan-cleanup-handoff.md
-.claude/
+# Claude Code: personal state stays local; the project's skills and the
+# cluster guard hook are part of the checkout (see agent/SETUP.md, section 6).
+.claude/*
+!.claude/skills/
+!.claude/settings.json
 
 # Frontend test coverage output
 frontend/coverage/
@@ -25,3 +29,23 @@ frontend/playwright-report/
 
 # Local example datasets (multi-GB; not source)
 ExampleDatasets/
+
+scratchpad
+
+# Cluster site details (host, account, paths): never committed. Template: hpc/clusters/launch.conf.example
+hpc/clusters/*/
+hpc/clusters/active
+
+# Built by agent/build_desktop.py before `tauri build`
+frontend/src-tauri/binaries/
+frontend/src-tauri/agent-resources/
+
+# Working notes of local sessions (machine paths, site details) and local data
+/Agent.md
+/AGENT_NEW.md
+/FieldDesign_*.xlsx
+*.tmp.cjs
+
+# Python bytecode
+__pycache__/
+*.pyc

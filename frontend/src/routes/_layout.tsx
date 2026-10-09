@@ -23,6 +23,7 @@ import { hydrateRunStore } from "@/features/process/lib/runStore"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { onLogout } from "@/lib/auth"
+import { autoSignIn } from "@/lib/autoSignIn"
 import { openUrl } from "@/lib/platform"
 
 export const Route = createFileRoute("/_layout")({
@@ -33,8 +34,12 @@ export const Route = createFileRoute("/_layout")({
   // on the backend (GEMINI_JWT_SECRET empty) we still redirect only when
   // the caller has no stored token — which is the same condition as
   // "never logged in," so the flow stays consistent.
-  beforeLoad: () => {
-    if (!isLoggedIn()) {
+  //
+  // By default there is no login step: the app signs in with this
+  // computer's own account (lib/autoSignIn.ts). The login page is only
+  // reached when that is switched off in Settings, or is not available.
+  beforeLoad: async () => {
+    if (!isLoggedIn() && !(await autoSignIn())) {
       throw redirect({ to: "/login" })
     }
   },
@@ -59,7 +64,12 @@ function Layout() {
 
   useEffect(() => {
     const off = onLogout(() => {
-      navigate({ to: "/login" })
+      // An expired session signs straight back in; only a deliberate
+      // sign-out (or required sign-in) shows the login page.
+      void autoSignIn().then((ok) => {
+        if (ok) window.location.reload()
+        else navigate({ to: "/login" })
+      })
     })
     return off
   }, [navigate])

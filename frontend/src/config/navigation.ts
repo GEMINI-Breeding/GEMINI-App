@@ -1,4 +1,5 @@
 import {
+  Bot,
   ChartSpline,
   Dna,
   Folder,
@@ -38,7 +39,10 @@ export type NavItem = {
 // point at /import was retired; detection-engine + StepDetect are still
 // present in `features/import/` for the future unification task.
 export const sidebarItems: NavItem[] = [
-  { icon: Home, title: "Home", path: "/" },
+  // Home is the agent runner; the widget dashboard it replaced lives on
+  // at /dashboard.
+  { icon: Bot, title: "Agent", path: "/" },
+  { icon: Home, title: "Dashboard", path: "/dashboard" },
   { icon: Folder, title: "Files", path: "/files" },
   {
     icon: Play,

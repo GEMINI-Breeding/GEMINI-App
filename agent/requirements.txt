@@ -1,0 +1,6 @@
+# What the agent's tools use beyond the standard library.
+# The service, the cluster tools, uploads and job control need none of these;
+# the picture tools (plot marking, plot boundaries, charts) and .xlsx field designs do.
+numpy
+pillow
+openpyxl

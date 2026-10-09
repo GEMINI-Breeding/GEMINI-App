@@ -231,6 +231,14 @@ export function BackendStatus({ onReady }: BackendStatusProps) {
             API is up (default port 7777). Last result: {lastOutcome || "—"}
           </p>
         )}
+        {showLateHint && (
+          <p style={{ fontSize: "13px", marginTop: "12px" }}>
+            No processing stack set up yet?{" "}
+            <a href="/setup" data-testid="backend-setup-link">
+              Set it up with the agent
+            </a>
+          </p>
+        )}
         <div style={{ marginTop: "20px", fontSize: "32px" }}>...</div>
       </div>
     )

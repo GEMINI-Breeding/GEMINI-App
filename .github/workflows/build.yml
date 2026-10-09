@@ -27,6 +27,8 @@ on:
     paths:
       - "frontend/**"
       - "backend"
+      - "agent/**"
+      - "hpc/**"
       - ".github/workflows/build.yml"
   pull_request:
     paths:
@@ -112,6 +114,25 @@ jobs:
         with:
           workspaces: frontend/src-tauri
           prefix-key: "v3"
+
+      # The agent service ships inside the app as one executable, with the
+      # cluster scripts as resources. tauri.conf.json names both (externalBin,
+      # resources), so they must exist before anything in src-tauri is built.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the agent executable and its resources
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller -r agent/requirements.txt
+          python agent/build_desktop.py
+          # It must start on this system and know its tools without a stack.
+          exe=$(ls frontend/src-tauri/binaries/gemi-agent-*)
+          "$exe" skills | head -c 300
+          GEMI_AGENT_HOME="$RUNNER_TEMP/agent-home" PYTHONPATH=agent python agent/tests/test_policy.py
+          GEMI_AGENT_HOME="$RUNNER_TEMP/agent-home" PYTHONPATH=agent python agent/tests/test_runner_tools.py
 
       - name: Rust unit tests (stack manager)
         working-directory: frontend/src-tauri

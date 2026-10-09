@@ -28,6 +28,7 @@ import { PasswordInput } from "@/components/ui/password-input"
 import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { login } from "@/lib/auth"
+import { autoSignIn, clearSignedOut, signInRequired } from "@/lib/autoSignIn"
 
 const formSchema = z.object({
   username: z.email(),
@@ -39,7 +40,9 @@ type FormData = z.infer<typeof formSchema>
 export const Route = createFileRoute("/login")({
   component: Login,
   beforeLoad: async () => {
-    if (isLoggedIn()) {
+    // No login step by default: sign in with this computer's own account
+    // unless the person signed out or asked for a login screen.
+    if (isLoggedIn() || (await autoSignIn())) {
       throw redirect({ to: "/" })
     }
   },
@@ -117,6 +120,7 @@ function Login() {
     mutationFn: ({ username, password }: FormData) => login(username, password),
     onSuccess: async () => {
       setLoginError(null)
+      clearSignedOut()
       await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
       navigate({ to: "/" })
     },
@@ -143,6 +147,16 @@ function Login() {
         >
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-bold">Login to your account</h1>
+            <p className="text-muted-foreground text-sm">
+              Nothing to sign in to yet?{" "}
+              <RouterLink
+                to="/setup"
+                className="underline underline-offset-4"
+                data-testid="setup-link"
+              >
+                Set up with the agent
+              </RouterLink>
+            </p>
           </div>
 
           <div className="grid gap-4">
@@ -212,6 +226,30 @@ function Login() {
               Log In
             </LoadingButton>
           </div>
+
+          {/* After a deliberate sign-out: back in without a password, as
+              this computer's own account, unless a login was asked for. */}
+          {!signInRequired() && (
+            <button
+              type="button"
+              data-testid="continue-without-signin"
+              className="text-muted-foreground hover:text-foreground text-center text-sm underline underline-offset-4"
+              onClick={async () => {
+                if (await autoSignIn({ afterSignOut: true })) {
+                  await queryClient.invalidateQueries({
+                    queryKey: ["currentUser"],
+                  })
+                  navigate({ to: "/" })
+                } else {
+                  toast.error(
+                    "Automatic sign-in is not available here. Sign in with an account.",
+                  )
+                }
+              }}
+            >
+              Continue as this computer's account
+            </button>
+          )}
 
           {/* Self-registration is off unless the server enables it. */}
           {capabilities.data?.signup_enabled && (

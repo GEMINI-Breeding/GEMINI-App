@@ -32,8 +32,14 @@ import { getToken } from "@/lib/auth"
 
 const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024 // 8 MiB (>= S3 5 MiB minimum)
 const DEFAULT_PARALLEL_PARTS = 4
-/** Delays before each retry of a failed chunk. */
-const CHUNK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000]
+/**
+ * Delays before each retry of a failed chunk. The tail is long on purpose:
+ * a multi-hour batch over Wi-Fi or an SSH tunnel sees outages of a minute
+ * or more, and giving up on one chunk fails the whole queue.
+ */
+const CHUNK_RETRY_DELAYS_MS = [
+  1_000, 3_000, 10_000, 30_000, 60_000, 60_000, 120_000,
+]
 
 export type ChunkedUploadProgress = {
   /** Bytes uploaded so far across all chunks (including already-resumed ones). */

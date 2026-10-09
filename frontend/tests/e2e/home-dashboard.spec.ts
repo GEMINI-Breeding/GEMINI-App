@@ -103,7 +103,7 @@ test.describe("Home dashboard", () => {
     })
 
     // ── 2. Home → drag a KPI widget onto the canvas. ─────────────────────
-    await page.goto("/")
+    await page.goto("/dashboard")
     await expect(page.getByTestId("widget-template-kpi")).toBeVisible({
       timeout: 15_000,
     })

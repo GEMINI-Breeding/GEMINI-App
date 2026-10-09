@@ -49,6 +49,9 @@ function buildStyle(
         type: "raster",
         tiles: baseTiles,
         tileSize: 256,
+        // Deepest level these basemaps serve; beyond it the tiles are
+        // stretched instead of requested (and coming back blank).
+        maxzoom: 19,
         attribution: baseAttr,
       },
     },
@@ -196,11 +199,26 @@ export function TraitMap({
       hi = 1
     }
     const bbox = bboxOf(data)
+    // Zoom to the plots: a fixed zoom left small trials (a rover block is
+    // ~100 m across, its plots a metre wide) as a few unreadable pixels.
+    // Map zoom levels count 512 px tiles; assume ~900 x 420 px of map.
+    let zoom = 17
+    if (bbox) {
+      const lat = (bbox[1] + bbox[3]) / 2
+      const lonSpan = Math.max(bbox[2] - bbox[0], 1e-6)
+      const latSpan =
+        Math.max(bbox[3] - bbox[1], 1e-6) / Math.cos((lat * Math.PI) / 180)
+      const fit = Math.min(
+        Math.log2((360 * 900) / (512 * lonSpan)),
+        Math.log2((360 * 420) / (512 * latSpan)),
+      )
+      zoom = Math.max(12, Math.min(22, fit - 0.3))
+    }
     const view = bbox
       ? {
           longitude: (bbox[0] + bbox[2]) / 2,
           latitude: (bbox[1] + bbox[3]) / 2,
-          zoom: 17,
+          zoom,
           pitch: 0,
           bearing: 0,
         }
@@ -237,6 +255,10 @@ export function TraitMap({
     },
     updateTriggers: { getFillColor: [traitColumn, range, fillOpacity] },
     getLineColor: traitColumn ? [40, 40, 40, 220] : [255, 220, 50, 240],
+    // Outline width in screen pixels. The layer's default is 1 *metre*,
+    // which swallowed the fill of narrow plots (a rover bed is ~1 m wide).
+    lineWidthUnits: "pixels",
+    getLineWidth: traitColumn ? 1 : 2,
     lineWidthMinPixels: traitColumn ? 1 : 2,
   })
 
@@ -307,7 +329,7 @@ export function TraitMap({
       </DeckGL>
       {traitColumn ? (
         <div
-          className="absolute bottom-2 left-2 rounded bg-white/85 px-2 py-1 text-xs shadow"
+          className="absolute bottom-2 left-2 rounded bg-white/85 px-2 py-1 text-xs text-neutral-900 shadow"
           data-testid="trait-map-legend"
           data-min={range[0]}
           data-max={range[1]}
@@ -316,7 +338,7 @@ export function TraitMap({
         </div>
       ) : (
         <div
-          className="absolute bottom-2 left-2 rounded bg-white/85 px-2 py-1 text-xs shadow"
+          className="absolute bottom-2 left-2 rounded bg-white/85 px-2 py-1 text-xs text-neutral-900 shadow"
           data-testid="trait-map-legend"
         >
           {data.features.length} plot{data.features.length === 1 ? "" : "s"}

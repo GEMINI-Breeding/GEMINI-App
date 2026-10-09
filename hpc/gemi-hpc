@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+# gemi-hpc — run the GEMINIbase stack on an HPC cluster (Slurm + Apptainer)
+# from this PC. Local-only tooling (branch local/hpc).
+#
+#   gemi-hpc sync              copy current backend source + these scripts to the cluster
+#   gemi-hpc pull [names...]   convert the stack's images to .sif (Slurm job; first time only)
+#   gemi-hpc pull ml-deps      one-time: model backends for the ml worker (torch, transformers, ultralytics)
+#   gemi-hpc up                start a session: submit the core job, wait until the API is up
+#   gemi-hpc worker <name>...  submit worker jobs (amiga stitch geo ml odm), with partition fallback
+#   gemi-hpc stop <name>...    stop worker jobs
+#   gemi-hpc status            jobs of this tooling + where the core is
+#   gemi-hpc ps                the same, one machine-readable line per job (for the app's Compute panel)
+#   gemi-hpc app               open the app against the cluster: tunnel + frontend on free local ports
+#   gemi-hpc tunnel [port]     only the API tunnel (default: any free port); Ctrl-C to close
+#   gemi-hpc login             print the HPC stack's app login
+#   gemi-hpc logs [service]    tail a session log (rest-api db storage logger), a job log, or `gate`
+#   gemi-hpc down              end the session: stop workers, then the core (clean shutdown)
+#   gemi-hpc llm pull [model…] one-time: vLLM image + model weights (Slurm job)
+#   gemi-hpc llm up [model]    local LLM on a GPU (partition fallback); also: llm down | status | env
+#   gemi-hpc llm tunnel [port] make the LLM reachable at http://localhost:<port>/v1 from this PC
+#   gemi-hpc doctor            check the connection, the gate (it must refuse), limits, jobs in flight
+#
+# Cluster: hpc/clusters/<GEMI_CLUSTER>/launch.conf (default: the active one). Start from
+# hpc/clusters/launch.conf.example, or let the agent's hpc_configure write it.
+#
+# Safety: nothing here sends shell text to the cluster. Every remote action
+# runs hpc/remote/gemi-gate there with a word list; the gate has a fixed menu
+# confined to GEMI_HPC_ROOT, enforces the job limits, and logs each call
+# (gemi-hpc logs gate). The only other ssh uses are port forwards (-N -L) and
+# the one-time install of the gate itself by `sync`.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/.." && pwd)
+# Which cluster: GEMI_CLUSTER, else the one the agent's hpc_configure made active.
+# Where the clusters' settings are: beside this script in a checkout; in the
+# person's app data when this script ships inside the desktop app (read-only).
+CLUSTERS=${GEMI_CLUSTERS_DIR:-$HERE/clusters}
+BACKEND=${GEMI_BACKEND_DIR:-$REPO/backend}
+CLUSTER=${GEMI_CLUSTER:-$(cat "$CLUSTERS/active" 2>/dev/null || true)}
+[ -n "$CLUSTER" ] || { echo "no cluster is configured: copy hpc/clusters/launch.conf.example to hpc/clusters/<name>/launch.conf, fill it in, and put <name> in hpc/clusters/active (or set GEMI_CLUSTER)" >&2; exit 2; }
+[[ "$CLUSTER" =~ ^[a-z0-9_-]+$ ]] || { echo "bad cluster name: $CLUSTER" >&2; exit 2; }
+[ -f "$CLUSTERS/$CLUSTER/launch.conf" ] || { echo "no settings for cluster '$CLUSTER' ($CLUSTERS/$CLUSTER/launch.conf)" >&2; exit 2; }
+source "$CLUSTERS/$CLUSTER/launch.conf"
+# The root is used in remote paths: refuse anything that is not a plain absolute path.
+[[ "$GEMI_HPC_ROOT" =~ ^/[A-Za-z0-9_./-]+$ && "$GEMI_HPC_ROOT" != *..* && "$GEMI_HPC_ROOT" == /*/*/* ]] \
+  || { echo "GEMI_HPC_ROOT must be an absolute path at least three levels deep, without spaces: $GEMI_HPC_ROOT" >&2; exit 2; }
+
+SSH_OPTS=(-i "$HPC_KEY" -o IdentitiesOnly=yes -o UserKnownHostsFile="$HPC_KNOWN_HOSTS"
+          -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30)
+GATE="$GEMI_HPC_ROOT/hpc/remote/gemi-gate"
+MARK="@@gemi@@"
+AUDIT=${GEMI_AUDIT_LOG:-$REPO/agent/work/hpc-audit.log}
+
+# gate <words...>: run one menu entry of the gate on the cluster. The gate
+# prints a marker after the login banner; only what follows it is shown.
+# The remote login shell parses the command line before the gate sees it, so
+# the same character whitelist is applied here first: nothing with a quote,
+# semicolon, pipe, redirection, glob or substitution ever leaves this PC.
+clean() {
+  if printf '%s' "$*" | LC_ALL=C grep -q '[^A-Za-z0-9 _./,=:@%+-]' || [[ "$*" == *..* ]]; then
+    echo "gemi-hpc: refused locally (character not allowed in a gate command): $*" >&2; return 77
+  fi
+}
+gate() {
+  clean "$@" || return 77
+  mkdir -p "$(dirname "$AUDIT")" 2>/dev/null && printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLUSTER" "$*" >> "$AUDIT" || true
+  local out rc=0
+  out=$(ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1) || rc=$?
+  if grep -q "^$MARK\$" <<< "$out"; then sed -n "/^$MARK\$/,\$p" <<< "$out" | sed 1d; else
+    # No marker: the gate refused before it started, is not installed, or ssh failed.
+    grep -E 'gemi-gate|No such file|Permission denied|Could not resolve|timed out|refused' <<< "$out" >&2 || tail -3 <<< "$out" >&2
+  fi
+  return $rc
+}
+# gate_in <words...>: the same with this command's stdin passed through (tar streams).
+gate_in() {
+  clean "$@" || return 77
+  printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLUSTER" "$*" >> "$AUDIT" 2>/dev/null || true
+  ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1 | sed -n "/^$MARK\$/,\$p" | sed 1d
+}
+where_arg() { [ -n "${1:-}" ] && echo "where=${1// /,}" || true; }
+session() { gate session || true; }
+free_local_port() {
+  node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
+}
+
+cmd=${1:-help}; shift || true
+case "$cmd" in
+  sync)
+    echo "syncing backend source and hpc scripts -> $HPC_HOST:$GEMI_HPC_ROOT"
+    if ! gate selftest >/dev/null 2>&1; then
+      # First contact (or a cluster synced before the gate existed): install the
+      # gate. This is the only shell text ever sent, and it is fixed.
+      echo "installing the gate at $GATE"
+      tr -d '\r' < "$HERE/remote/gemi-gate" | ssh "${SSH_OPTS[@]}" "$HPC_HOST" \
+        "mkdir -p $GEMI_HPC_ROOT/hpc/remote && cat > $GATE && chmod 755 $GATE"
+      tr -d '\r' < "$HERE/remote/lib.sh" | ssh "${SSH_OPTS[@]}" "$HPC_HOST" "cat > $GEMI_HPC_ROOT/hpc/remote/lib.sh"
+      gate selftest >/dev/null || { echo "the gate did not answer after installing it" >&2; exit 1; }
+    fi
+    if [ -n "${GEMI_BACKEND_TGZ:-}" ]; then
+      gate_in recv backend < "$GEMI_BACKEND_TGZ"
+    else
+      tar -C "$BACKEND" --exclude='__pycache__' --exclude='*.pyc' -czf - gemini alembic alembic.ini pyproject.toml \
+        | gate_in recv backend
+    fi
+    # Only this cluster's settings go up (not other clusters', not the `active` marker).
+    tar -czf - -C "$HERE" remote tools -C "$(dirname "$CLUSTERS")" "$(basename "$CLUSTERS")/$CLUSTER" \
+      | gate_in recv hpc
+    # In a checkout the revision is the backend's commit; in the packaged app, the file shipped with it.
+    if [ -n "${GEMI_BACKEND_TGZ:-}" ]; then
+      rev=$(tr -d '[:space:]' < "$BACKEND/REVISION" 2>/dev/null || echo packaged)
+    else
+      rev=$(git -C "$BACKEND" rev-parse --short HEAD 2>/dev/null || echo unknown)
+      if ! git -C "$BACKEND" diff --quiet 2>/dev/null; then rev="$rev+uncommitted"; fi
+    fi
+    gate sync-finish "$CLUSTER" "$rev"
+    ;;
+  pull)
+    if [ "${1:-}" = ml-deps ]; then
+      gate pull-mldeps; echo "follow with: gemi-hpc logs pull-mldeps"; exit 0
+    fi
+    gate pull-images "$@"
+    echo "follow with: gemi-hpc logs pull"
+    ;;
+  up)
+    # CORE_PLACE="partition:account" starts the core somewhere else for this session.
+    gate core-submit $(where_arg "${CORE_PLACE:-}")
+    echo "waiting for the core to come up (queue time varies)..."
+    for _ in $(seq 1 180); do
+      s=$(session)
+      if [ -n "$s" ]; then echo "$s"; echo "core is up. Next: gemi-hpc worker amiga ...; gemi-hpc tunnel"; exit 0; fi
+      st=$(gate core-state || true)
+      [ -z "$st" ] && { echo "core job is gone — it failed. Last log lines:"; gate core-log; exit 1; }
+      printf '  %s\n' "$st"; sleep 10
+    done
+    echo "still not up after 30 min; check: gemi-hpc status"; exit 1
+    ;;
+  worker)
+    [ $# -gt 0 ] || { echo "usage: gemi-hpc worker <amiga|stitch|geo|ml|odm>..."; exit 1; }
+    # GEMI_WORKER_TRY="partition:account ..." picks the placement for this submit
+    # (it must be one the cluster's launch.conf names).
+    for w in "$@"; do echo "worker $w:"; gate worker "$w" $(where_arg "${GEMI_WORKER_TRY:-}"); done
+    ;;
+  stop)
+    [ $# -gt 0 ] || { echo "usage: gemi-hpc stop <amiga|stitch|geo|ml|odm>..."; exit 1; }
+    for w in "$@"; do gate stop-worker "$w"; done
+    ;;
+  ps)
+    gate ps
+    ;;
+  status)
+    gate status
+    s=$(session); [ -n "$s" ] && echo "$s" || echo "(no session up)"
+    ;;
+  tunnel)
+    s=$(session); [ -n "$s" ] || { echo "no session up — run: gemi-hpc up"; exit 1; }
+    eval "$s"
+    port=${1:-$LOCAL_API_PORT}; [ "$port" = auto ] && port=$(free_local_port)
+    echo "HPC API at http://localhost:$port  ->  $CORE_NODE:$API_PORT   (Ctrl-C to close)"
+    echo "if the core restarts on another node, re-run this command"
+    exec ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$port:$CORE_IP:$API_PORT" "$HPC_HOST"
+    ;;
+  app)
+    # Tunnel + the frontend dev server pointed at it, both on free local ports,
+    # so the local Docker stack (7777) and a local dev server (5173) can stay up.
+    s=$(session); [ -n "$s" ] || { echo "no session up — run: gemi-hpc up"; exit 1; }
+    eval "$s"
+    api_port=$(free_local_port); web_port=$(free_local_port)
+    # The tunnel is reopened if it drops (Wi-Fi blip, sleep): a long upload
+    # retries its chunks for a few minutes and carries on once it is back.
+    keep=$(mktemp)
+    ( while [ -e "$keep" ]; do
+        ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$api_port:$CORE_IP:$API_PORT" "$HPC_HOST" &
+        echo $! > "$keep.pid"; wait $!
+        [ -e "$keep" ] && { echo "  tunnel dropped; reconnecting..." >&2; sleep 3; }
+      done ) &
+    trap 'rm -f "$keep"; kill "$(cat "$keep.pid" 2>/dev/null)" 2>/dev/null; rm -f "$keep.pid"' EXIT
+    for _ in $(seq 1 30); do
+      curl -s -m 3 -o /dev/null "http://127.0.0.1:$api_port/healthz" && break; sleep 1
+    done
+    curl -s -m 5 -o /dev/null "http://127.0.0.1:$api_port/healthz" || { echo "tunnel to $CORE_NODE:$API_PORT did not come up"; exit 1; }
+    echo
+    echo "  GEMI on $CLUSTER:  http://localhost:$web_port"
+    gate login | sed 's/^GEMINI_FIRST_SUPERUSER_EMAIL=/  email:    /; s/^GEMINI_FIRST_SUPERUSER_PASSWORD=/  password: /'
+    echo "  (API tunnel on localhost:$api_port; Ctrl-C stops the app and the tunnel, not the HPC session)"
+    # The agent service (home page) runs here, on this PC, so the agent can
+    # upload local files; it reaches the cluster's API through the tunnel, and
+    # the cluster's LLM (if `gemi-hpc llm up` is running) through a second one.
+    agent_port=$(free_local_port)
+    llm=$(gate llm-env | grep -E '^[A-Z_]+=' || true)
+    if [ -n "$llm" ]; then
+      eval "$llm"; llm_port=$(free_local_port)
+      ssh "${SSH_OPTS[@]}" -N -L "127.0.0.1:$llm_port:$LLM_IP:$LLM_PORT" "$HPC_HOST" &
+      llm_pid=$!
+      export GEMI_LLM_URL="http://127.0.0.1:$llm_port/v1" GEMI_LLM_MODEL="$LLM_MODEL_NAME" GEMI_LLM_KEY="$LLM_KEY"
+      echo "  agent model: $LLM_MODEL_NAME on $LLM_NODE (tunnel on localhost:$llm_port)"
+    else
+      echo "  agent model: not started on the cluster (gemi-hpc llm up) — using agent/config.json"
+    fi
+    ( cd "$REPO/agent" && GEMI_API="http://127.0.0.1:$api_port" GEMI_EMAIL= GEMI_PASSWORD= \
+        python -m gemi_agent serve --port "$agent_port" ) &
+    agent_pid=$!
+    trap 'rm -f "$keep"; kill "$(cat "$keep.pid" 2>/dev/null)" ${llm_pid:-} $agent_pid 2>/dev/null; rm -f "$keep.pid"' EXIT
+    echo
+    cd "$REPO/frontend"
+    GEMI_API_TARGET="http://127.0.0.1:$api_port" GEMI_AGENT_TARGET="http://127.0.0.1:$agent_port" \
+      VITE_DISABLE_UPDATE_CHECK=1 npx vite --port "$web_port" --strictPort
+    ;;
+  login)
+    gate login
+    ;;
+  logs)
+    gate logs "${1:-core}" "${LINES_N:-40}"
+    ;;
+  down)
+    echo "stopping workers, then the core (clean shutdown)"
+    gate down
+    ;;
+  llm)
+    sub=${1:-status}; shift || true
+    case "$sub" in
+      pull) gate pull-llm "$@"; echo "follow with: gemi-hpc logs pull-llm" ;;
+      up)
+        gate llm-up ${1:+"$1"} $(where_arg "${GEMI_LLM_TRY:-}")
+        echo "when it is up: gemi-hpc llm env   (model load takes a few minutes after the job starts)" ;;
+      down) gate llm-down ;;
+      env) gate llm-env ;;
+      status) gate llm-status ;;
+      tunnel)
+        e=$(gate llm-env | grep -E '^[A-Z_]+=' || true); [ -n "$e" ] || { echo "LLM not up — run: gemi-hpc llm up"; exit 1; }
+        eval "$e"; port=${1:-$(free_local_port)}
+        echo "LLM at http://localhost:$port/v1   model: $LLM_MODEL_NAME   key: $LLM_KEY   (Ctrl-C to close)"
+        exec ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$port:$LLM_IP:$LLM_PORT" "$HPC_HOST" ;;
+      *) echo "usage: gemi-hpc llm pull|up|down|status|env|tunnel"; exit 1 ;;
+    esac
+    ;;
+  doctor)
+    echo "cluster    $CLUSTER  ($HPC_HOST, root $GEMI_HPC_ROOT)"
+    if out=$(gate selftest 2>&1); then echo "gate       $out"; else echo "gate       NOT ANSWERING: $out  (run: gemi-hpc sync)"; exit 1; fi
+    # The gate must refuse what is not on its menu; prove it with harmless probes.
+    ok=1
+    for probe in "rm -rf $GEMI_HPC_ROOT/logs" "ls /" "logs core;id" "worker odm where=nosuch:nobody"; do
+      if gate $probe >/dev/null 2>&1; then echo "gate       DID NOT REFUSE: $probe"; ok=0; fi
+    done
+    [ "$ok" = 1 ] && echo "gate       refuses commands off its menu (4 probes)" || exit 1
+    echo "limits     $(gate limits | tr '\n' ' ')"
+    echo "in flight:"; gate status | sed 's/^/  /'
+    s=$(session); [ -n "$s" ] && echo "session    up ($(grep -E '^CORE_NODE=' <<< "$s" | cut -d= -f2))" || echo "session    none"
+    echo "gate log   $(gate logs gate 2000 | grep -c REFUSED || true) refusals in the last 2000 calls (gemi-hpc logs gate)"
+    ;;
+  *)
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac
