@@ -24,10 +24,13 @@ what you do shows up there.
 | Look around | what exists, what is running | `monitor-jobs` | `status`, `entities`, `datasets`, `browse`, `jobs` |
 | Upload | local files into the app, in parallel | `upload-data` | `upload`, `tasks`, `cancel_task` |
 | Ground: extract | rover `.bin` logs → frames + GPS | `ground-pipeline` | automatic after upload; `jobs`, `wait_jobs` |
-| Ground: mark plots | start/end frame of every plot | `ground-plot-marking` | `passes`, `panorama`, `boundary_closeups`, `set_boundaries`, `apply_boundaries`, `save_markings` |
+| Ground: mark plots | the plots of a rover track, found from the crop | `ground-plot-marking` | `mark_plots_auto` (`continue_run` does it) |
 | Ground: stitch | one mosaic per plot | `ground-stitching` | `stitch`, `job_detail`, `stitch_result` |
 | Aerial | drone images → orthomosaic → plot traits | `aerial-pipeline` | `run_orthomosaic`, `run_trait_extraction` |
 | Inference | run a detection / segmentation / classification model | `inference` | `run_inference` |
+| Plot photos, no GPS | a folder of photos paired with the field design | `plot-photos` | `plots_from_images`, `mock_plot_design` |
+| Analyze | what traits there are; correlation, ANOVA, heritability, PCA, GGE | `analyze-traits` | `traits_available`, `analyze` |
+| Genotyping | marker files, GWAS of a trait | `genotyping` | `genotype_studies`, `genotype_import`, `gwas`, `gwas_result` |
 | Reference data | field design, hand measurements | `reference-data` | `reference_datasets` (upload is done in the app) |
 | Running on a cluster | start the stack, workers and a local model with Slurm | `hpc-session` | shell: `gemi-hpc` |
 
@@ -88,6 +91,10 @@ with the run and the page to open (`open_in_app`).
   page to open.
 - An existing run for the same scope is reused, so work continues where the
   person left off; they can also take over from the next step by hand.
+- New runs are filed where a person would look: in the workspace of their
+  experiment, marked with a small agent icon. Runs left in the old "Agent
+  runs" workspace are moved there with `regroup_runs` (`dry_run` first; only
+  the Process tab's folders change).
 - If a result says `process_tab: {"not_updated": …}`, the work itself still
   happened; mention that the Process tab may not show it.
 

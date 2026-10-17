@@ -151,6 +151,27 @@ export interface PlotViewerConfig {
   filters: Record<string, string[]>
 }
 
+/**
+ * A view from the Analyze tab, kept on the dashboard: generated on the
+ * Overview, or pinned by a person. Recomputed from the current data each
+ * time it is shown, so it follows new trait records.
+ */
+export type AnalysisKind =
+  | "summary"
+  | "trend"
+  | "correlation"
+  | "heritability"
+  | "field"
+
+export interface AnalysisConfig {
+  kind: AnalysisKind
+  experiment: string
+  /** Empty = every trait the experiment has. */
+  traits: string[]
+  /** For "field": the collection date (latest when unset). */
+  date?: string | null
+}
+
 // ── Widget definitions ─────────────────────────────────────────────────────────
 
 interface BaseWidget {
@@ -179,7 +200,13 @@ export interface PlotViewerWidgetDef extends BaseWidget {
   config: PlotViewerConfig
 }
 
+export interface AnalysisWidgetDef extends BaseWidget {
+  type: "analysis"
+  config: AnalysisConfig
+}
+
 export type DashboardWidget =
+  | AnalysisWidgetDef
   | KpiWidgetDef
   | ChartWidgetDef
   | TableWidgetDef

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 
 import { DatasetsService, type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { dataTypes } from "@/config/dataTypes"
 import { idAsString } from "@/features/admin/lib/ids"
 import type { EntityChoice } from "@/features/files/components/EntitySelectField"
@@ -34,6 +36,15 @@ import {
   missingFormFields,
   requiredFormFields,
 } from "@/features/files/lib/uploadFieldRequirements"
+import {
+  batchInfo,
+  batchLabelText,
+  batchNameSuffix,
+  duplicateLabels,
+  type FolderMeaning,
+  foldersOf,
+  groupByFolder,
+} from "@/features/files/lib/uploadGroups"
 import { isExtensionAllowed } from "@/features/files/utils/extensions"
 import type {
   SensorClassification,
@@ -206,6 +217,27 @@ export function UploadList({
   const [thermalHint, setThermalHint] = useState<
     "flir_jpeg" | "boson_tiff" | null
   >(null)
+  // Whole directories dropped: what do the folders stand for? Each folder can
+  // be its own upload batch (a run of the day, or a treatment), or the folders
+  // can be ignored and everything uploaded as one batch.
+  const [folderMeaning, setFolderMeaning] = useState<FolderMeaning>("one")
+  const [folderEdits, setFolderEdits] = useState<
+    Record<string, { run?: string; treatment?: string; include?: boolean }>
+  >({})
+  const canSplit =
+    dataType === "Image Data" || dataType === "Farm-ng Binary File"
+  const droppedFolders = useMemo(() => foldersOf(selected), [selected])
+  const baseLabels = {
+    run: formValues.diurnal === "1" ? (formValues.run_of_day ?? "") : "",
+    treatment: formValues.treatment ?? "",
+  }
+  const batches = (
+    canSplit && droppedFolders.length > 1
+      ? groupByFolder(selected, folderMeaning, baseLabels)
+      : groupByFolder(selected, "one", baseLabels)
+  ).map((g) => ({ ...g, ...(folderEdits[g.folder] ?? {}) }))
+  const labelClashes =
+    batches.length > 1 ? duplicateLabels(batches) : ([] as string[])
   const { showErrorToastWithCopy, showSuccessToast } = useCustomToast()
   const { run } = useUploadQueue()
   const { resolveScope } = useResolveScope()
@@ -357,6 +389,19 @@ export function UploadList({
       return
     }
 
+    if (labelClashes.length > 0) {
+      setRejection({
+        title: "Folders with the same labels",
+        description:
+          `More than one folder would be uploaded as ${labelClashes.join("; ")}. ` +
+          "Give each folder its own run of the day or treatment, or choose to upload everything as one batch.",
+        rejectedNames: [],
+        remediation:
+          "The labels are the only thing that tells same-day uploads apart later, in the Process tab and in results.",
+      })
+      return
+    }
+
     setIsUploading(true)
     // Hoisted into the outer scope so the catch handler can decide
     // whether to auto-delete the dataset we just created. Set inside
@@ -388,153 +433,176 @@ export function UploadList({
       // can delete just this submission via the per-dataset trash icon
       // in Manage Data, and two uploads at the same scope no longer
       // commingle on disk.
-      setResolveStatus(null)
-      const experimentName =
-        resolved.experiment?.name ?? merged.experiment ?? ""
-      let datasetId: string | undefined
-      let datasetShortId: string | null = null
-      if (experimentName) {
-        try {
-          const ds = await createOrGetDatasetForUpload({
-            experimentName,
-            dataTypeLabel: dataType,
-          })
-          datasetId = idAsString(ds.dataset.id) ?? undefined
-          if (datasetId) {
-            datasetShortId = extractDatasetShortId(datasetId)
+      const allUploaded: string[] = []
+      for (const batch of batches.filter(
+        (b) => b.include && b.files.length > 0,
+      )) {
+        setResolveStatus(null)
+        const experimentName =
+          resolved.experiment?.name ?? merged.experiment ?? ""
+        let datasetId: string | undefined
+        let datasetShortId: string | null = null
+        if (experimentName) {
+          try {
+            const ds = await createOrGetDatasetForUpload({
+              experimentName,
+              dataTypeLabel: dataType,
+              info: canSplit
+                ? batchInfo(batch, merged, batch.folder || undefined)
+                : undefined,
+              nameSuffix: canSplit ? batchNameSuffix(batch) : undefined,
+            })
+            datasetId = idAsString(ds.dataset.id) ?? undefined
+            if (datasetId) {
+              datasetShortId = extractDatasetShortId(datasetId)
+            }
+            // Only flag for cleanup if we *created* the row. An
+            // existing row (name collision) may already own data
+            // from a prior submission; auto-deleting that on failure
+            // would clobber data the user expected to keep.
+            if (ds.wasCreated && datasetId) {
+              createdDatasetIdForCleanup = datasetId
+            }
+          } catch (err) {
+            // Soft-failure: the upload still works; it just lands as
+            // legacy "experiment-owned, dataset-orphaned" and the user
+            // can only delete it via the experiment cascade. Without
+            // a dataset short-id the upload uses the legacy shape
+            // (`Raw/.../{sensor}/Images/`) — at the cost of
+            // commingling with any prior upload at the same scope.
+            // Surfaced as a toast so the user sees what happened.
+            const message = err instanceof Error ? err.message : String(err)
+            showErrorToastWithCopy(
+              `Could not create the upload's dataset (${message}). ` +
+                `The upload will continue without per-batch grouping.`,
+            )
           }
-          // Only flag for cleanup if we *created* the row. An
-          // existing row (name collision) may already own data
-          // from a prior submission; auto-deleting that on failure
-          // would clobber data the user expected to keep.
-          if (ds.wasCreated && datasetId) {
-            createdDatasetIdForCleanup = datasetId
-          }
-        } catch (err) {
-          // Soft-failure: the upload still works; it just lands as
-          // legacy "experiment-owned, dataset-orphaned" and the user
-          // can only delete it via the experiment cascade. Without
-          // a dataset short-id the upload uses the legacy shape
-          // (`Raw/.../{sensor}/Images/`) — at the cost of
-          // commingling with any prior upload at the same scope.
-          // Surfaced as a toast so the user sees what happened.
-          const message = err instanceof Error ? err.message : String(err)
-          showErrorToastWithCopy(
-            `Could not create the upload's dataset (${message}). ` +
-              `The upload will continue without per-batch grouping.`,
-          )
         }
-      }
 
-      const targetRootDir = buildTargetRootDir(
-        dataType,
-        merged,
-        datasetShortId,
-        subDir,
-      )
-      if (!targetRootDir) {
-        setRejection({
-          title: `Unknown data type: ${dataType}`,
-          description:
-            "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
-          rejectedNames: [],
-        })
-        return
-      }
-
-      const followUpJob = followUpForDataType(dataType)
-      // Duplicate check (see lib/duplicates). Image batches get their own
-      // folder, so look for the same names in earlier batches at this
-      // scope; everything else writes into one folder and would overwrite.
-      // (Farm-ng .bin files are deleted after extraction, so never match.)
-      let toUpload = selected
-      const batchSuffix = datasetShortId ? `/${datasetShortId}/Images` : null
-      const batchRoot =
-        batchSuffix && targetRootDir.endsWith(batchSuffix)
-          ? targetRootDir.slice(0, -batchSuffix.length)
-          : undefined
-      const listed =
-        ((await FilesService.apiFilesListFilePathListFiles({
-          filePath: `gemini/${batchRoot ?? targetRootDir}/`,
-        })) as FileMetadata[] | null) ?? []
-      const existing = existingUploadNames(
-        selected.map((f) => f.name),
-        listed.map((f) => f.object_name),
-        targetRootDir,
-        batchRoot,
-      )
-      if (existing.length > 0) {
-        const choice = await askAboutDuplicates(
-          existing,
-          selected.length,
-          batchRoot ?? targetRootDir,
-          batchRoot !== undefined,
+        const targetRootDir = buildTargetRootDir(
+          dataType,
+          merged,
+          datasetShortId,
+          subDir,
         )
-        if (choice === "cancel") {
-          if (createdDatasetIdForCleanup) {
-            await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
-              datasetId: createdDatasetIdForCleanup,
-            }).catch(() => {})
-          }
+        if (!targetRootDir) {
+          setRejection({
+            title: `Unknown data type: ${dataType}`,
+            description:
+              "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
+            rejectedNames: [],
+          })
           return
         }
-        if (choice === "skip") {
-          const skip = new Set(existing)
-          toUpload = selected.filter((f) => !skip.has(f.name))
-          if (toUpload.length === 0) {
-            setSelected([])
-            showSuccessToast("Every file is already uploaded — nothing to do.")
+
+        const followUpJob = followUpForDataType(dataType)
+        // Duplicate check (see lib/duplicates). Image batches get their own
+        // folder, so look for the same names in earlier batches at this
+        // scope; everything else writes into one folder and would overwrite.
+        // (Farm-ng .bin files are deleted after extraction, so never match.)
+        let toUpload = batch.files
+        const batchSuffix = datasetShortId ? `/${datasetShortId}/Images` : null
+        const batchRoot =
+          batchSuffix && targetRootDir.endsWith(batchSuffix)
+            ? targetRootDir.slice(0, -batchSuffix.length)
+            : undefined
+        const listed =
+          ((await FilesService.apiFilesListFilePathListFiles({
+            filePath: `gemini/${batchRoot ?? targetRootDir}/`,
+          })) as FileMetadata[] | null) ?? []
+        const existing = existingUploadNames(
+          batch.files.map((f) => f.name),
+          listed.map((f) => f.object_name),
+          targetRootDir,
+          batchRoot,
+        )
+        if (existing.length > 0) {
+          const choice = await askAboutDuplicates(
+            existing,
+            batch.files.length,
+            batchRoot ?? targetRootDir,
+            batchRoot !== undefined,
+          )
+          if (choice === "cancel") {
+            if (createdDatasetIdForCleanup) {
+              await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+                datasetId: createdDatasetIdForCleanup,
+              }).catch(() => {})
+            }
             return
           }
-        }
-      }
-
-      const tasks: UploadTask[] = toUpload.map((file) => ({
-        file,
-        objectPath: `${targetRootDir}/${file.name}`,
-        followUpJob,
-      }))
-
-      // The experiment is required by the Files-page UI gate, so by the
-      // time we get here `resolved.experiment` exists. Forward its id
-      // so the chunked-upload finalize handler can write the
-      // `experiment_files` pointer row that the Experiment.delete()
-      // cascade reads from.
-      // Build the per-batch THERMAL_EXTRACT submission when the
-      // upload form's calibration block is set. The worker expects
-      // the *dataset* prefix (the per-batch directory whose siblings
-      // are `Images/` and `RawThermal/`), not the `…/Images/`
-      // directory the files themselves landed in. `buildTargetRootDir`
-      // appends `Images` for the "Image Data" data type — strip it.
-      const datasetPrefix = `${targetRootDir.replace(/\/Images$/, "")}/`
-      const postUploadJob: PostUploadJob | undefined = thermalCalibration
-        ? {
-            jobType: "THERMAL_EXTRACT",
-            parameters: {
-              dataset_prefix: datasetPrefix,
-              thermal_calibration: thermalCalibration,
-            },
+          if (choice === "skip") {
+            const skip = new Set(existing)
+            toUpload = batch.files.filter((f) => !skip.has(f.name))
+            if (toUpload.length === 0) {
+              showSuccessToast(
+                batches.length > 1
+                  ? `${batch.folder || "This batch"}: every file is already uploaded.`
+                  : "Every file is already uploaded — nothing to do.",
+              )
+              if (createdDatasetIdForCleanup) {
+                await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+                  datasetId: createdDatasetIdForCleanup,
+                }).catch(() => {})
+                createdDatasetIdForCleanup = undefined
+              }
+              continue
+            }
           }
-        : undefined
+        }
 
-      const result = await run(tasks, {
-        title:
-          followUpJob?.kind === "extract_binary"
-            ? `Processing ${toUpload.length} .bin file${toUpload.length === 1 ? "" : "s"}`
-            : thermalCalibration
-              ? `Uploading ${toUpload.length} thermal file${toUpload.length === 1 ? "" : "s"}`
-              : `Uploading ${toUpload.length} file${toUpload.length === 1 ? "" : "s"}`,
-        experimentId: resolved.experiment?.id,
-        datasetId,
-        postUploadJob,
-      })
-      // Upload succeeded — clear the cleanup flag so the catch
-      // branch below (which only runs on a throw) won't trigger.
-      // Belt-and-suspenders; the try wouldn't reach this line on
-      // failure anyway, but explicit is better than implicit.
-      createdDatasetIdForCleanup = undefined
-      onUploadComplete?.(result.uploaded.map((u) => u.objectPath))
+        const tasks: UploadTask[] = toUpload.map((file) => ({
+          file,
+          objectPath: `${targetRootDir}/${file.name}`,
+          followUpJob,
+        }))
+
+        // The experiment is required by the Files-page UI gate, so by the
+        // time we get here `resolved.experiment` exists. Forward its id
+        // so the chunked-upload finalize handler can write the
+        // `experiment_files` pointer row that the Experiment.delete()
+        // cascade reads from.
+        // Build the per-batch THERMAL_EXTRACT submission when the
+        // upload form's calibration block is set. The worker expects
+        // the *dataset* prefix (the per-batch directory whose siblings
+        // are `Images/` and `RawThermal/`), not the `…/Images/`
+        // directory the files themselves landed in. `buildTargetRootDir`
+        // appends `Images` for the "Image Data" data type — strip it.
+        const datasetPrefix = `${targetRootDir.replace(/\/Images$/, "")}/`
+        const postUploadJob: PostUploadJob | undefined = thermalCalibration
+          ? {
+              jobType: "THERMAL_EXTRACT",
+              parameters: {
+                dataset_prefix: datasetPrefix,
+                thermal_calibration: thermalCalibration,
+              },
+            }
+          : undefined
+
+        const batchLabel = batchLabelText(batchInfo(batch, {}, undefined))
+        const result = await run(tasks, {
+          title:
+            (followUpJob?.kind === "extract_binary"
+              ? `Processing ${toUpload.length} .bin file${toUpload.length === 1 ? "" : "s"}`
+              : thermalCalibration
+                ? `Uploading ${toUpload.length} thermal file${toUpload.length === 1 ? "" : "s"}`
+                : `Uploading ${toUpload.length} file${toUpload.length === 1 ? "" : "s"}`) +
+            (batchLabel ? ` (${batchLabel})` : ""),
+          experimentId: resolved.experiment?.id,
+          datasetId,
+          postUploadJob,
+        })
+        // Upload succeeded — clear the cleanup flag so the catch
+        // branch below (which only runs on a throw) won't trigger.
+        // Belt-and-suspenders; the try wouldn't reach this line on
+        // failure anyway, but explicit is better than implicit.
+        createdDatasetIdForCleanup = undefined
+        allUploaded.push(...result.uploaded.map((u) => u.objectPath))
+      }
+      onUploadComplete?.(allUploaded)
       setSelected([])
+      setFolderEdits({})
+      setFolderMeaning("one")
       setThermalDefaultMode(null)
       setThermalCalibration(null)
       setThermalHint(null)
@@ -651,6 +719,113 @@ export function UploadList({
         disabled={disabled}
         disabledReason={disabledReason}
       />
+
+      {canSplit && droppedFolders.length > 1 && (
+        <div
+          className="border-border bg-card space-y-3 rounded-lg border p-6"
+          data-testid="upload-folder-mapping"
+        >
+          <div>
+            <h3 className="text-foreground">
+              {droppedFolders.length} folders: what do they stand for?
+            </h3>
+            <p className="text-muted-foreground text-sm">
+              Each folder can be kept as its own upload, labelled so it can be
+              told apart later. All of them go under the experiment, site,
+              population and date chosen on the left.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["one", "Nothing: upload as one batch"],
+                ["runs", "Runs of the day (diurnal)"],
+                ["treatments", "Treatments"],
+              ] as const
+            ).map(([value, text]) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={folderMeaning === value ? "default" : "outline"}
+                data-testid={`upload-folders-${value}`}
+                onClick={() => {
+                  setFolderMeaning(value)
+                  setFolderEdits({})
+                }}
+              >
+                {text}
+              </Button>
+            ))}
+          </div>
+          {folderMeaning !== "one" && (
+            <div className="space-y-2">
+              <div className="text-muted-foreground grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 text-xs">
+                <span />
+                <span>Folder</span>
+                <span>Run of the day</span>
+                <span>Treatment</span>
+              </div>
+              {batches.map((b) => (
+                <div
+                  key={b.folder}
+                  className="grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 text-sm"
+                  data-testid="upload-folder-row"
+                >
+                  <Checkbox
+                    checked={b.include}
+                    aria-label={`Upload ${b.folder || "loose files"}`}
+                    onCheckedChange={(v) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: { ...prev[b.folder], include: v === true },
+                      }))
+                    }
+                  />
+                  <span className="truncate" title={b.folder}>
+                    {b.folder || "(files not in a folder)"}{" "}
+                    <span className="text-muted-foreground text-xs">
+                      {b.files.length} file{b.files.length === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <Input
+                    value={b.run}
+                    placeholder="—"
+                    disabled={!b.include}
+                    onChange={(e) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: { ...prev[b.folder], run: e.target.value },
+                      }))
+                    }
+                  />
+                  <Input
+                    value={b.treatment}
+                    placeholder="—"
+                    disabled={!b.include}
+                    onChange={(e) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: {
+                          ...prev[b.folder],
+                          treatment: e.target.value,
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+              {labelClashes.length > 0 && (
+                <p className="text-destructive text-sm">
+                  More than one folder has the same labels (
+                  {labelClashes.join("; ")}). Give each its own run or
+                  treatment, or they cannot be told apart later.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {selected.length > 0 && (
         <div className="border-border bg-card rounded-lg border p-6">

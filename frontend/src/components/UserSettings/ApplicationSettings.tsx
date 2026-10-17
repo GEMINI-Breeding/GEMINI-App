@@ -1,7 +1,9 @@
 import {
   AlertCircle,
   CheckCircle,
+  Cpu,
   HardDrive,
+  Home,
   Info,
   KeyRound,
   RefreshCw,
@@ -9,8 +11,12 @@ import {
 import { useCallback, useState } from "react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
 import { Button } from "@/components/ui/button"
+import { ComputePanel } from "@/features/agent/components/ComputePanel"
+import { restartWalkthrough } from "@/features/agent/components/Welcome"
+import useAuth from "@/hooks/useAuth"
 import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
+import { HomeSettings } from "./HomeSettings"
 import { LegacyImport } from "./LegacyImport"
 import { SignInSettings } from "./SignInSettings"
 import { StackSettings } from "./StackSettings"
@@ -48,6 +54,24 @@ function AboutSettings() {
         <span className="text-muted-foreground text-sm font-mono">
           {CURRENT_VERSION}
         </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium">Set-up walkthrough</span>
+        <span className="text-muted-foreground text-sm">
+          Where the processing runs and which model the agent uses.
+        </span>
+        <Button
+          variant="outline"
+          className="mt-1 w-fit"
+          data-testid="restart-walkthrough"
+          onClick={() => {
+            restartWalkthrough()
+            window.location.assign("/")
+          }}
+        >
+          Run it again
+        </Button>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -98,17 +122,20 @@ function AboutSettings() {
 const SETTINGS_NAV_GROUPS = [
   {
     items: [
+      { id: "home", label: "Home", icon: Home },
       { id: "data", label: "Data & services", icon: HardDrive },
+      { id: "compute", label: "Compute", icon: Cpu },
       { id: "signin", label: "Sign-in", icon: KeyRound },
       { id: "about", label: "About", icon: Info },
     ],
   },
 ] as const
 
-type SettingsSection = "data" | "signin" | "about"
+type SettingsSection = "home" | "data" | "compute" | "signin" | "about"
 
 const ApplicationSettings = () => {
-  const [active, setActive] = useState<SettingsSection>("data")
+  const [active, setActive] = useState<SettingsSection>("home")
+  const { user } = useAuth()
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -123,6 +150,16 @@ const ApplicationSettings = () => {
             <StackSettings />
             <LegacyImport />
           </>
+        )}
+        {active === "home" && <HomeSettings />}
+        {active === "compute" && (
+          <div className="flex h-full min-h-[70vh] flex-col gap-2">
+            <p className="text-muted-foreground text-sm">
+              Where processing runs: the stack, and the workers that start when
+              a job needs them and stop when idle.
+            </p>
+            <ComputePanel canManage={Boolean(user?.is_superuser)} wide />
+          </div>
         )}
         {active === "signin" && <SignInSettings />}
         {active === "about" && <AboutSettings />}

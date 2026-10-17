@@ -50,7 +50,16 @@ class Track:
     def _load(self) -> list[Frame]:
         cached = self.cache / "msgs_synced.csv"
         if not cached.exists():
-            cached.write_bytes(self.client.download(self.msgs_path))
+            try:
+                data = self.client.download(self.msgs_path)
+            except Exception as e:
+                if "404" in str(e) or "not found" in str(e).lower():
+                    raise RuntimeError(
+                        "this track has no extracted images yet: the rover log is still being extracted, or extraction "
+                        "failed. Check with next_step for the run (or jobs with job_type EXTRACT_BINARY) and wait for "
+                        "it to finish before marking plots.") from None
+                raise
+            cached.write_bytes(data)
         rows = list(csv.DictReader(io.StringIO(cached.read_text())))
         if not rows:
             raise RuntimeError(f"{self.msgs_path} is empty")

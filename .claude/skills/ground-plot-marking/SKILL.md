@@ -7,12 +7,47 @@ description: Mark the start and end frame of every plot on a ground-rover (Amiga
 
 ## Quick path
 
-1. `passes` — the passes (bed traversals) of the track.
-2. For each pass N: `panorama` with `pass` N and `redetect` true — proposed boundaries on the whole bed.
-3. For each boundary: `boundary_closeup` with `pass` N and `index` I — read the offset of the stake from the ruler.
-4. One `set_boundaries` for the pass with all offsets in `shift` (no fixes needed: `set_boundaries` with only `pass`).
-5. After all passes: `apply_boundaries`, then `markings` (its `problems` must be empty), then `save_markings`.
-No stake visible at a boundary: leave it unshifted and say so. Never guess.
+1. Ask the person (or `run_facts`): how many plots a bed has, and whether there are border plots at the ends. If they do not know, go on without: the tool works without them.
+2. `mark_plots_auto` with `track`, and `plots_per_bed` and `border_plots` if known. Send no other arguments. It finds the plots from where plants are and where bare soil is (no stakes needed), for every pass, in one call.
+3. Read its result and do what its `next` says. `passes_to_check` empty: do not look at pictures, go to step 4. Otherwise look at those passes with `panorama` (`track`, `pass`, `markings`: true, nothing else). `recommendation`:
+   - `single frames`: all the plants of a plot fit in one camera frame. Do NOT call `stitch`. Tell the person: "stitching is not needed for this dataset; each plot's image is the raw frame that shows it whole."
+   - `stitch`: plots are longer than a frame; go on to stitching.
+   - `mixed`: only the plots that do not fit one frame are stitched (`stitch_units` leaves the others out by itself).
+4. `markings` (its `problems` must be empty), then `save_markings`.
+5. Report to the person: repeat `tell_the_person` from the `mark_plots_auto` result word for word (plots marked, passes that need a look, stitching or not), then say what you did next.
+Do not read positions off pictures unless a pass is flagged; then correct that pass with `set_boundaries`.
+
+## Where plots begin and end
+
+`mark_plots_auto` does not look for stakes: many fields have none, and stakes
+fall over. It reads the bed as a strip of plants and bare soil:
+
+- the alleys between plots are the stretches without plants; where an alley is
+  hidden (weeds, a thin stand) the usual plot length of the field, found from
+  the passes where the pattern is clear, places the boundary instead;
+- with `plots_per_bed` it keeps the run of that many plots that carries the
+  most plants, so bare ground at the ends of a pass is not counted as plots;
+- a pass whose pattern is weak, or whose count differs from `plots_per_bed`,
+  is listed in `passes_to_check`. Those are the only passes to look at.
+
+**Plot spacing in metres is the anchor that does not change with the season.** The result reports
+`plot_spacing_m`: plot length plus alley, as measured from the crop on the passes where the pattern is
+clear. It is a property of how the field was planted, the same on every pass and every date (on the two
+fields it was checked on it varied by 0.5 % and 2 % between passes). So:
+
+- record it for the field once (`run_facts`, `plot_spacing_m`), or take it from the field design or the
+  person ("10 ft plots with 2 ft alleys" is 3.66);
+- on dates when the crop does not show the alleys (seedlings barely up, or a closed canopy), give it to
+  `mark_plots_auto` as `plot_spacing_m`: boundaries are then laid out at that spacing and the crop only
+  decides where the first one falls. `continue_run` passes it by itself once it is recorded.
+
+Distance along a pass comes from the rover's GPS as a distance travelled, which is reliable even when
+its absolute position is not; with no usable GPS at all, the camera's fixed image scale is used instead.
+
+For each plot it also says whether all its plants fit **one camera frame**.
+Young crops and short plots usually do; then that frame, cut to the plot, is a
+better plot image than a mosaic (no seams, no stitch job), and stitching is
+skipped. Long plots (several frames each) are stitched as before.
 
 You are doing the job a person does in the app's **Plot Marking** step with the
 ← / → keys and S (start), E (end), N (next plot): step through the rover's

@@ -22,10 +22,18 @@ Any combination works; the pieces only need to reach each other over HTTP.
 
 1. Open GEMI. On the first screen choose **Set up on a cluster** (no Docker
    needed), or let it start its own services on this computer.
-2. On the setup page click **choose one** and pick the agent's model. For
-   Claude: provider "Claude (Anthropic)", paste an API key from the Anthropic
-   Console, **Save and test**. (A Claude.ai subscription login cannot be used
-   by other apps; it has to be an API key.)
+2. Give the agent a model, one of:
+   - **Set up a free open model** on the setup page: pick one (Gemma 4 31B is
+     the tested one) and where it runs. *This computer* downloads it with
+     [Ollama](https://ollama.com) (install Ollama first). *A cluster* takes
+     your SSH command, looks at the cluster, and installs and starts the
+     model on a GPU. Each step shows its expected time; a first install on a
+     cluster is the long one (the model server and the weights, 20 to 60
+     minutes).
+   - **Use a hosted one**: provider "Claude (Anthropic)" or "OpenAI", paste
+     an API key, **Save and test**. 
+   - No model in the app at all: drive GEMI from a coding agent's terminal
+     (README, "Install the app, then drive it from a coding agent's terminal").
 3. Type the SSH command you log in to the cluster with, e.g.
    `ssh you@login.cluster.edu`. Key-based login must already work: the app
    cannot answer a password or two-factor prompt.

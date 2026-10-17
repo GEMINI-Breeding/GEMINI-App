@@ -9,8 +9,9 @@
  */
 
 import L, { type FeatureGroup } from "leaflet"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
+import { tilesDownMessage, watchTileLayer } from "@/lib/tileHealth"
 import "@geoman-io/leaflet-geoman-free"
 import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css"
 
@@ -92,6 +93,7 @@ export function BoundaryMap({
   const mapRef = useRef<L.Map | null>(null)
   const layerRef = useRef<FeatureGroup | null>(null)
   const orthoLayerRef = useRef<L.TileLayer | null>(null)
+  const [tilesDown, setTilesDown] = useState(false)
   const didFitOrthoRef = useRef(false)
   const onChangeRef = useRef(onFeaturesChange)
   const onSelectBlockRef = useRef(onSelectBlock)
@@ -402,6 +404,7 @@ export function BoundaryMap({
       map.removeLayer(orthoLayerRef.current)
       orthoLayerRef.current = null
     }
+    setTilesDown(false)
     if (!orthoTileUrl) return
     const opts: L.TileLayerOptions = {
       opacity: orthoOpacity ?? 0.85,
@@ -423,6 +426,7 @@ export function BoundaryMap({
     const layer = L.tileLayer(orthoTileUrl, opts)
     layer.addTo(map)
     orthoLayerRef.current = layer
+    return watchTileLayer(layer, setTilesDown)
   }, [orthoTileUrl, orthoOpacity])
 
   // First-load fit-to-ortho when no features are drawn yet. The
@@ -547,14 +551,24 @@ export function BoundaryMap({
   }, [features, selectedBlockId, selectedCellIds])
 
   return (
-    <div
-      ref={mapEl}
-      // `isolate` creates a new stacking context so Leaflet's pane
-      // z-indexes (200-800) stay scoped to inside the map. Without it,
-      // panes participate in the root stacking context and render *above*
-      // body-portaled dialogs/overlays (z-50), which makes the
-      // FieldDesignUploadDialog appear cut off or hidden behind tiles.
-      className={className ?? "h-[500px] w-full rounded-md border isolate"}
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={mapEl}
+        // `isolate` creates a new stacking context so Leaflet's pane
+        // z-indexes (200-800) stay scoped to inside the map. Without it,
+        // panes participate in the root stacking context and render *above*
+        // body-portaled dialogs/overlays (z-50), which makes the
+        // FieldDesignUploadDialog appear cut off or hidden behind tiles.
+        className={className ?? "h-[500px] w-full rounded-md border isolate"}
+      />
+      {tilesDown && (
+        <div
+          className="pointer-events-none absolute inset-x-2 top-2 z-[1000] rounded-md border border-amber-300 bg-amber-50/95 p-2 text-xs text-amber-900"
+          data-testid="tiles-down"
+        >
+          {tilesDownMessage()}
+        </div>
+      )}
+    </div>
   )
 }

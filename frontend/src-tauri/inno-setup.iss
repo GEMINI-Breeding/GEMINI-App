@@ -63,6 +63,16 @@ Source: "..\..\backend\gemini\pipeline\docker-compose.prod.yaml"; \
   DestDir: "{app}\stack"; DestName: "docker-compose.yaml"; \
   Flags: ignoreversion
 
+; The agent service the app starts (home page), and the files it reads:
+; cluster scripts, the backend source for a cluster, the stack version.
+; Both are built by agent/build_desktop.py before the app is built.
+Source: "target\release\gemi-agent.exe"; \
+  DestDir: "{app}"; \
+  Flags: ignoreversion
+Source: "agent-resources\*"; \
+  DestDir: "{app}\agent"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs
+
 [InstallDelete]
 ; v0.0.5's program files (not user data): its bundled Python backend
 ; (~4 GB) and its executable, which had the generic name app.exe.

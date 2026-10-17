@@ -102,8 +102,14 @@ test.describe("Home dashboard", () => {
       timeout: 10_000,
     })
 
-    // ── 2. Home → drag a KPI widget onto the canvas. ─────────────────────
+    // ── 2. The generated Overview shows the data with nothing built. ─────
     await page.goto("/dashboard")
+    await expect(page.getByTestId("overview-summary")).toBeVisible({
+      timeout: 30_000,
+    })
+
+    // ── 3. The person's own tab → drag a KPI widget onto the canvas. ────
+    await page.getByRole("button", { name: "My views" }).click()
     await expect(page.getByTestId("widget-template-kpi")).toBeVisible({
       timeout: 15_000,
     })

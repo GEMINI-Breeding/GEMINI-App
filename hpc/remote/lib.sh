@@ -99,3 +99,65 @@ allowed_place() {
     places | cut -d: -f1,2 | grep -qxF "$pa" || return 1
   done
 }
+
+# ── stop when idle ───────────────────────────────────────────────────────────
+# Workers and the model hold a node (often a GPU) for as long as their job
+# runs, whether or not there is work. These watch for work from inside the job
+# and end it after a quiet spell, so nothing waits on an allocation it does
+# not use, whether or not the app or the agent is open to stop it.
+
+# Job types each worker claims (same table as the agent's compute.py).
+worker_job_types() {
+  case "$1" in
+    amiga) echo "EXTRACT_BINARY" ;;
+    stitch) echo "RUN_STITCH ASSOCIATE_BOUNDARIES" ;;
+    odm) echo "RUN_ODM" ;;
+    geo) echo "SPLIT_ORTHOMOSAIC CREATE_COG" ;;
+    ml) echo "LOCATE_PLANTS EXTRACT_TRAITS" ;;
+    gwas) echo "RUN_GWAS" ;;
+    *) echo "" ;;
+  esac
+}
+
+# open_jobs <api base> <job types...>: number of PENDING + RUNNING jobs of
+# those types, or "?" when the API cannot be asked (then nothing is stopped).
+open_jobs() {
+  local base=$1; shift
+  GEMI_BASE="$base" GEMI_TYPES="$*" python3 - <<'PY' 2>/dev/null || echo "?"
+import json, os, urllib.request
+base, types = os.environ["GEMI_BASE"], os.environ["GEMI_TYPES"].split()
+def call(path, body=None, token=None):
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
+                                 headers={"Content-Type": "application/json",
+                                          **({"Authorization": "Bearer " + token} if token else {})})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+tok = call("/api/users/login/access-token", {"email": os.environ["GEMINI_FIRST_SUPERUSER_EMAIL"],
+                                             "password": os.environ["GEMINI_FIRST_SUPERUSER_PASSWORD"]})["access_token"]
+n = 0
+for status in ("PENDING", "RUNNING"):
+    for t in types:
+        n += len(call(f"/api/jobs/all?limit=1000&status={status}&job_type={t}", token=tok) or [])
+print(n)
+PY
+}
+
+# worker_idle_watch <worker pid> <minutes> <job types...>: end the worker after
+# <minutes> in a row with no job of its types waiting or running. 0 = never.
+worker_idle_watch() {
+  local pid=$1 minutes=$2; shift 2
+  [ "${minutes:-0}" -gt 0 ] && [ -n "$*" ] || return 0
+  command -v python3 >/dev/null 2>&1 || { log "idle watch off: no python3 on this node"; return 0; }
+  ( set -a; source "$RUN/secrets.env" 2>/dev/null; set +a
+    local quiet=0 n
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 60
+      n=$(open_jobs "http://$CORE_IP:$API_PORT" "$@")
+      if [ "$n" = "0" ]; then quiet=$((quiet + 1)); else quiet=0; fi
+      if [ "$quiet" -ge "$minutes" ]; then
+        log "idle for $minutes min (no $* waiting or running): stopping, to free the allocation"
+        kill -TERM "$pid" 2>/dev/null
+        return 0
+      fi
+    done ) &
+}

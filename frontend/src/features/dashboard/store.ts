@@ -5,7 +5,7 @@
  * State is serialised to JSON on every write and loaded once on mount.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import type {
   DashboardState,
   DashboardTab,
@@ -15,10 +15,13 @@ import type {
 
 const STORAGE_KEY = "gemini-dashboard"
 
+/** The generated Overview: not stored, always first, cannot be deleted. */
+export const AUTO_TAB_ID = "auto"
+
 function defaultState(): DashboardState {
   return {
-    tabs: [{ id: "tab-default", name: "Overview", widgets: [] }],
-    activeTabId: "tab-default",
+    tabs: [{ id: "tab-default", name: "My views", widgets: [] }],
+    activeTabId: AUTO_TAB_ID,
   }
 }
 
@@ -40,9 +43,16 @@ function migrateWidget(w: DashboardWidget): DashboardWidget {
 }
 
 function migrateState(raw: DashboardState): DashboardState {
+  // The empty tab older versions opened on is now "My views"; the Overview
+  // is generated. A tab the person filled or renamed keeps its name.
+  const tabs = raw.tabs.map((t) =>
+    t.id === "tab-default" && t.name === "Overview" && t.widgets.length === 0
+      ? { ...t, name: "My views" }
+      : t,
+  )
   return {
     ...raw,
-    tabs: raw.tabs.map((tab) => ({
+    tabs: tabs.map((tab) => ({
       ...tab,
       widgets: tab.widgets.map(migrateWidget),
     })),
@@ -67,8 +77,30 @@ function save(state: DashboardState) {
   }
 }
 
+/**
+ * Keep a view on the dashboard, from anywhere (the Overview, Analyze): added
+ * to the person's first tab. A dashboard already open picks it up on its
+ * next load; `pinned` listeners update it at once.
+ */
+const pinListeners = new Set<() => void>()
+export function pinWidget(widget: DashboardWidget): string {
+  const s = load()
+  const tab = s.tabs[0]
+  tab.widgets = [...tab.widgets, widget]
+  save(s)
+  for (const l of pinListeners) l()
+  return tab.name
+}
+
 export function useDashboardStore() {
   const [state, _setState] = useState<DashboardState>(load)
+  useEffect(() => {
+    const reload = () => _setState(load())
+    pinListeners.add(reload)
+    return () => {
+      pinListeners.delete(reload)
+    }
+  }, [])
 
   const setState = useCallback(
     (updater: (prev: DashboardState) => DashboardState) => {
@@ -112,7 +144,11 @@ export function useDashboardStore() {
         if (remaining.length === 0) return s // always keep at least one
         const nextActive =
           remaining.find((t) => t.id === s.activeTabId) ?? remaining[0]
-        return { tabs: remaining, activeTabId: nextActive.id }
+        return {
+          tabs: remaining,
+          activeTabId:
+            s.activeTabId === AUTO_TAB_ID ? AUTO_TAB_ID : nextActive.id,
+        }
       })
     },
     [setState],
@@ -234,10 +270,12 @@ export function useDashboardStore() {
 
   const activeTab: DashboardTab =
     state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0]
+  const autoActive = state.activeTabId === AUTO_TAB_ID
 
   return {
     state,
     activeTab,
+    autoActive,
     addTab,
     renameTab,
     deleteTab,

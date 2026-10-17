@@ -20,6 +20,7 @@ import { isManagedStack, stackCredentials } from "@/lib/stack"
 
 const REQUIRE_KEY = "gemini.auth.requireSignIn"
 const SIGNED_OUT_KEY = "gemini.auth.signedOut"
+const AUTO_KEY = "gemini.auth.automatic" // this session came from autoSignIn
 
 function read(store: () => Storage, key: string): boolean {
   try {
@@ -62,6 +63,20 @@ export function clearSignedOut(): void {
   write(() => sessionStorage, SIGNED_OUT_KEY, false)
 }
 
+/** The person typed a login: there are accounts, show whose session this is. */
+export function markManualSignIn(): void {
+  write(() => localStorage, AUTO_KEY, false)
+}
+
+/**
+ * Nobody signs in here: the app opened with the install's own account and no
+ * login screen was asked for. There is then no "user" to show or sign out of;
+ * signing out would only lock the person out of their own app.
+ */
+export function noAccountsInUse(): boolean {
+  return !signInRequired() && read(() => localStorage, AUTO_KEY)
+}
+
 let inFlight: Promise<boolean> | null = null
 
 /**
@@ -88,6 +103,7 @@ export function autoSignIn(
         setToken(r.token)
       }
       clearSignedOut()
+      write(() => localStorage, AUTO_KEY, true)
       return true
     } catch {
       return false // no agent service, no stack, bad account: fall back to the login page

@@ -8,6 +8,7 @@ import { ThemeProvider } from "./components/theme-provider"
 import { ConfirmDialogProvider } from "./components/ui/confirm-dialog"
 import { Toaster } from "./components/ui/sonner"
 import { ProcessProvider } from "./contexts/ProcessContext"
+import { OnboardingGate } from "./features/agent/components/Welcome"
 import { installAuthInterceptors } from "./lib/auth"
 import { applyClusterUrls } from "./lib/stack"
 import "./index.css"
@@ -56,18 +57,22 @@ declare module "@tanstack/react-router" {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      {/* Desktop app: nothing below talks to the API before the local
-          stack is up and signed in. A no-op in the browser. */}
-      <StackGate>
-        <QueryClientProvider client={queryClient}>
-          <ProcessProvider>
-            <ConfirmDialogProvider>
-              <RouterProvider router={router} />
-              <Toaster richColors closeButton />
-            </ConfirmDialogProvider>
-          </ProcessProvider>
-        </QueryClientProvider>
-      </StackGate>
+      <QueryClientProvider client={queryClient}>
+        {/* First open: where the work runs and which model the agent uses.
+            Skipped entirely once both are answered. */}
+        <OnboardingGate>
+          {/* Desktop app: nothing below talks to the API before the local
+              stack is up and signed in. A no-op in the browser. */}
+          <StackGate>
+            <ProcessProvider>
+              <ConfirmDialogProvider>
+                <RouterProvider router={router} />
+                <Toaster richColors closeButton />
+              </ConfirmDialogProvider>
+            </ProcessProvider>
+          </StackGate>
+        </OnboardingGate>
+      </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,
 )

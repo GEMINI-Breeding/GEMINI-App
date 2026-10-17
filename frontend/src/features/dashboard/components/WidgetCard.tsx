@@ -20,6 +20,7 @@ import {
 } from "@/components/Common/ExpandableSection"
 import { Button } from "@/components/ui/button"
 import type { DashboardWidget, PlotViewerConfig } from "../types"
+import { AnalysisWidget } from "../widgets/AnalysisWidget"
 import { ChartWidget } from "../widgets/ChartWidget"
 import { KpiWidget } from "../widgets/KpiWidget"
 import { PlotViewerWidget } from "../widgets/PlotViewerWidget"
@@ -79,6 +80,7 @@ export function WidgetCard({
 
   const content = (
     <>
+      {widget.type === "analysis" && <AnalysisWidget config={widget.config} />}
       {widget.type === "kpi" && <KpiWidget config={widget.config} />}
       {widget.type === "chart" && <ChartWidget config={widget.config} />}
       {widget.type === "table" && <TableWidget config={widget.config} />}
@@ -146,15 +148,17 @@ export function WidgetCard({
                 <Maximize2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-6 h-6"
-              onClick={() => setConfigOpen(true)}
-              title="Configure widget"
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-            </Button>
+            {widget.type !== "analysis" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-6 h-6"
+                onClick={() => setConfigOpen(true)}
+                title="Configure widget"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -181,7 +185,7 @@ export function WidgetCard({
       </FullscreenModal>
 
       {/* Config dialog */}
-      {configOpen && (
+      {configOpen && widget.type !== "analysis" && (
         <WidgetConfigDialog
           widget={widget}
           open={configOpen}

@@ -1,6 +1,7 @@
 import { FolderTree } from "lucide-react"
 import { useEffect } from "react"
 
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { dataTypes } from "@/config/dataTypes"
@@ -66,6 +67,11 @@ export function DataStructureForm({
     : undefined
   const fields = config?.fields ?? []
   const hasDateField = fields.includes("date")
+  // Sensor data collected in the field on a date: the kinds that can come
+  // in more than one part per day (several runs, or one per treatment).
+  const isFieldCollection =
+    fileType === "Image Data" || fileType === "Farm-ng Binary File"
+  const diurnal = values.diurnal === "1"
 
   // The native <input type="date"> shows today's date in the picker even when
   // the underlying value is empty, so users think the field is set. Mirror
@@ -154,11 +160,72 @@ export function DataStructureForm({
               required={!config?.optionalFields?.includes(field)}
               disabled={disabled}
               description={
-                disabled ? "Pick or create an experiment first." : undefined
+                disabled
+                  ? "Pick or create an experiment first."
+                  : field === "platform"
+                    ? "Decides the processing: rovers and handheld cameras go through the ground pipeline (plot marking, stitching); drones, with built-in or mounted sensors, through the aerial one (orthomosaic)."
+                    : undefined
               }
             />
           )
         })}
+
+        {isFieldCollection && (
+          <div
+            className="border-border space-y-4 border-t pt-4"
+            data-testid="upload-batch-labels"
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="treatment">Treatment (optional)</Label>
+              <Input
+                id="treatment"
+                data-testid="upload-treatment"
+                placeholder="e.g. irrigated, drought"
+                value={values.treatment ?? ""}
+                onChange={(e) => onValueChange("treatment", e.target.value)}
+              />
+              <p className="text-muted-foreground text-xs">
+                Only if this experiment's data is collected separately per
+                treatment. Each treatment is kept as its own upload.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="diurnal"
+                  data-testid="upload-diurnal"
+                  checked={diurnal}
+                  onCheckedChange={(v) => {
+                    onValueChange("diurnal", v === true ? "1" : "")
+                    if (v !== true) onValueChange("run_of_day", "")
+                  }}
+                />
+                <Label htmlFor="diurnal" className="font-normal">
+                  Diurnal data: this field was covered more than once on this
+                  date
+                </Label>
+              </div>
+              {diurnal && (
+                <div className="space-y-1.5 pl-6">
+                  <Label htmlFor="run_of_day">Run of the day</Label>
+                  <Input
+                    id="run_of_day"
+                    data-testid="upload-run-of-day"
+                    placeholder="e.g. 1, 2, morning, 14:00"
+                    value={values.run_of_day ?? ""}
+                    onChange={(e) =>
+                      onValueChange("run_of_day", e.target.value)
+                    }
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Which of the day's runs these files are. Each run is kept as
+                    its own upload and gets its own pipeline run.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

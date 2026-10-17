@@ -507,7 +507,9 @@ def mock_field_design(args: dict) -> dict:
         for k, pl in enumerate(mine, 1):
             rows.append({"plot": pl["plot_id"], "bed": p["pass"], "tier": k,
                          "genotype": f"MOCK-{(pl['plot_id'] * 7 + p['pass'] * 3) % genotypes + 1:03d}"})
-    out = Path(args.get("save_as") or (track.cache / "mock_field_design.csv"))
+    given = str(args.get("save_as") or "")
+    # A name that is not a file to write (the word "stand-in", say) is not a place to save to.
+    out = Path(given) if given.lower().endswith((".csv", ".txt")) else track.cache / "mock_field_design.csv"
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["plot", "bed", "tier", "genotype"])
         w.writeheader()

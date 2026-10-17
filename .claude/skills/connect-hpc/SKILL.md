@@ -7,6 +7,7 @@ description: Connect the GEMINI app to the person's HPC cluster from just their 
 
 ## Quick path
 
+0. **The cluster's own rules first.** `cluster_rules` lists the rules its administrators publish for AI agents; read each with `cluster_rules` and its name. They override everything below (partitions, accounts, sizes, times, what may run on a login node). If a step here would break one, do not take it: tell the person which rule. Cluster actions are refused until they are read.
 1. `hpc_probe` with the person's `ssh` command — a read-only survey.
 2. Tell them the plan in plain words: where the core, the workers and the model would run, where the data goes. Wait for a yes.
 3. `hpc_configure` with those choices (asks first).

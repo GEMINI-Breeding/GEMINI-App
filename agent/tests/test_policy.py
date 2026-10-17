@@ -57,7 +57,13 @@ path = Path(__file__).resolve().parents[2] / "scripts" / "hooks" / "remote_guard
 spec = importlib.util.spec_from_file_location("remote_guard", path)
 hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
+hook.site_rules = lambda: []                       # a cluster without published agent rules: the gate only
 assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "ssh a@b ls"}})[0] == "deny"
+hook.site_rules = lambda: ["site-rules"]              # one that publishes them its rules govern, so ask
+assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "ssh a@b ls"}})[0] == "ask"
+assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "sbatch x.sh"}})[0] == "ask"
+assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "bash hpc/gemi-hpc site-skills"}})[0] == "allow"
+hook.site_rules = lambda: []
 assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "bash hpc/gemi-hpc ps"}})[0] == "allow"
 assert hook.decide({"tool_name": "mcp__gemi-agent__hpc", "tool_input": {"action": "down"}})[0] == "ask"
 assert hook.decide({"tool_name": "mcp__gemi-agent__status", "tool_input": {}}) is None

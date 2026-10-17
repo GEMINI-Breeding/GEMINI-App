@@ -10,8 +10,9 @@
  */
 
 import L from "leaflet"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
+import { tilesDownMessage, watchTileLayer } from "@/lib/tileHealth"
 
 const DEFAULT_CENTER: L.LatLngTuple = [38.5, -121.7]
 const DEFAULT_ZOOM = 6
@@ -39,6 +40,7 @@ export function OrthoMapView({
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const orthoLayerRef = useRef<L.TileLayer | null>(null)
+  const [tilesDown, setTilesDown] = useState(false)
   const didFitOrthoRef = useRef(false)
 
   // One-time map init.
@@ -98,6 +100,7 @@ export function OrthoMapView({
       map.removeLayer(orthoLayerRef.current)
       orthoLayerRef.current = null
     }
+    setTilesDown(false)
     if (!orthoTileUrl) return
     const layer = L.tileLayer(orthoTileUrl, {
       opacity: orthoOpacity ?? 1,
@@ -107,6 +110,7 @@ export function OrthoMapView({
     })
     layer.addTo(map)
     orthoLayerRef.current = layer
+    return watchTileLayer(layer, setTilesDown)
   }, [orthoTileUrl, orthoOpacity])
 
   // First-load fit-to-ortho once bounds arrive. There's no feature-fit branch
@@ -128,12 +132,22 @@ export function OrthoMapView({
   }, [orthoBounds])
 
   return (
-    <div
-      ref={mapEl}
-      data-testid="ortho-viewer-map"
-      // `isolate` keeps Leaflet's pane z-indexes (200-800) inside the map's
-      // stacking context so they don't leak above the dialog (z-50).
-      className={className ?? "h-[480px] w-full rounded-md border isolate"}
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={mapEl}
+        data-testid="ortho-viewer-map"
+        // `isolate` keeps Leaflet's pane z-indexes (200-800) inside the map's
+        // stacking context so they don't leak above the dialog (z-50).
+        className={className ?? "h-[480px] w-full rounded-md border isolate"}
+      />
+      {tilesDown && (
+        <div
+          className="pointer-events-none absolute inset-x-2 top-2 z-[1000] rounded-md border border-amber-300 bg-amber-50/95 p-2 text-xs text-amber-900"
+          data-testid="tiles-down"
+        >
+          {tilesDownMessage()}
+        </div>
+      )}
+    </div>
   )
 }

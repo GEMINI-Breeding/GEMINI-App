@@ -48,3 +48,15 @@ LLM_PULL_ACCOUNT=labgrp
 # GEMI_MAX_JOBS=10
 # More placements the Compute panel and the agent may use ("partition:account ..."):
 # GEMI_EXTRA_PLACES=""
+
+# Stop when idle (from inside each job; 0 = never). A worker ends after this many minutes with no job
+# of its kinds waiting or running; GPU workers sooner. The model ends after this long with no request.
+WORKER_IDLE_MINUTES=20
+WORKER_IDLE_MINUTES_GPU=5
+LLM_IDLE_MINUTES=30
+# Rules the cluster's administrators publish for AI agents (skills),
+# comma separated. When set (or found by `gemi-hpc site-skills`), those rules govern:
+# the Claude Code guard asks before raw ssh/Slurm commands instead of denying them.
+# SITE_RULES=<skill name>
+# Where the gate looks for them on the cluster (default: common system skill folders).
+# SITE_SKILL_DIRS="/share/claude/skills $HOME/.claude/skills"

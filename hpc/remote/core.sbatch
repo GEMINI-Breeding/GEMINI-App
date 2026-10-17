@@ -25,7 +25,7 @@ set -a; source "$RUN/secrets.env"; set +a
 
 IP=$(node_ip)
 DB_PORT=$(free_port); S3_PORT=$(free_port); S3_CONSOLE_PORT=$(free_port)
-REDIS_PORT=$(free_port); API_PORT=$(free_port)
+REDIS_PORT=$(free_port); API_PORT=$(free_port); TITILER_PORT=$(free_port)
 TMP=/tmp/gemi-$USER-$SLURM_JOB_ID
 PGLOCAL=$TMP/pgdata
 SNAP=$DATA/pgsnap
@@ -86,6 +86,7 @@ stop_all() {
   rm -f "$RUN/session.env"
   [ -n "${BK_PID:-}" ] && kill "$BK_PID" 2>/dev/null
   [ -n "${API_PID:-}" ] && kill -TERM "$API_PID" 2>/dev/null
+  [ -n "${TITILER_PID:-}" ] && kill -TERM "$TITILER_PID" 2>/dev/null
   sleep 2
   [ -n "${PG_PID:-}" ] && kill -INT "$PG_PID" 2>/dev/null      # Postgres "fast" shutdown
   [ -n "${MINIO_PID:-}" ] && kill -TERM "$MINIO_PID" 2>/dev/null
@@ -152,6 +153,24 @@ $APT $(private_ipc "$TMP/shm-api") --env-file "$RUN/stack.env" --env GEMINI_RUN_
 API_PID=$!
 wait_for 300 "rest-api" curl -sf "http://127.0.0.1:$API_PORT/healthz" || { tail -30 "$SLOG/rest-api.log"; stop_all; exit 1; }
 
+# --- TiTiler: map tiles of orthomosaics and rover mosaics, read from the session's storage ---
+# Without it the app's maps (orthomosaic preview, plot boundaries, Analyze map) show no imagery.
+# Not needed for processing: a TiTiler that does not start is logged and the session goes on.
+if [ -s "$IMAGES/titiler.sif" ]; then
+  apptainer exec --cleanenv --no-home --writable-tmpfs \
+    --env "AWS_ACCESS_KEY_ID=$GEMINI_STORAGE_ACCESS_KEY,AWS_SECRET_ACCESS_KEY=$GEMINI_STORAGE_SECRET_KEY,AWS_S3_ENDPOINT=http://127.0.0.1:$S3_PORT,AWS_HTTPS=NO,AWS_VIRTUAL_HOSTING=FALSE,GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR,GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES,VSI_CACHE=TRUE,VSI_CACHE_SIZE=5000000" \
+    "$IMAGES/titiler.sif" uvicorn titiler.application.main:app --host 0.0.0.0 --port "$TITILER_PORT" \
+    >"$SLOG/titiler.log" 2>&1 &
+  TITILER_PID=$!
+  if ! wait_for 120 "titiler" curl -sf "http://127.0.0.1:$TITILER_PORT/healthz"; then
+    log "titiler did not come up (maps will show no imagery): $(tail -3 "$SLOG/titiler.log" | tr '\n' ' ')"
+    kill "$TITILER_PID" 2>/dev/null; TITILER_PID=""; TITILER_PORT=""
+  fi
+else
+  log "no titiler.sif (gemi-hpc pull titiler): maps will show no imagery"
+  TITILER_PORT=""
+fi
+
 ( while sleep "${GEMI_DB_BACKUP_SECONDS:-600}"; do backup_db; done ) &
 BK_PID=$!
 
@@ -162,6 +181,7 @@ CORE_NODE=$(hostname)
 CORE_IP=$IP
 API_PORT=$API_PORT
 S3_PORT=$S3_PORT
+TITILER_PORT=$TITILER_PORT
 REDIS_PORT=$REDIS_PORT
 SESSION_LOGS=$SLOG
 STARTED=$(date -Is)

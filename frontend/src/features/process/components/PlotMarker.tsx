@@ -13,8 +13,10 @@
  *
  * Keys: ← / → move, S start, E end, N new plot, D delete plot, Ctrl/⌘+S save.
  */
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import L from "leaflet"
+import { AutoMarkBar } from "./AutoMarkBar"
 import "leaflet/dist/leaflet.css"
 import {
   AlertCircle,
@@ -599,6 +601,15 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
             </button>
           </div>
         </div>
+
+        <AutoMarkBar
+          runId={run.id}
+          hasPlots={plots.length > 0}
+          onSaved={() => {
+            loadedRef.current = false
+            void versions.refetch().then(() => loadVersion(undefined))
+          }}
+        />
 
         {!track.msgsSyncedPath && (
           <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800 text-xs">

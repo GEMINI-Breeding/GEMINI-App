@@ -24,8 +24,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { useDrag } from "../hooks/useDrag"
 import { useTraitRecords } from "../hooks/useTraitData"
-import { useDashboardStore } from "../store"
+import { AUTO_TAB_ID, useDashboardStore } from "../store"
 import type { DashboardWidget } from "../types"
+import { AutoOverview } from "./AutoOverview"
 import { DashboardCanvas } from "./DashboardCanvas"
 import { DragGhost } from "./DragGhost"
 import { WidgetConfigDialog } from "./WidgetConfigDialog"
@@ -52,6 +53,19 @@ function TabBar({
 }: TabBarProps) {
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
+      <button
+        type="button"
+        onClick={() => onSelect(AUTO_TAB_ID)}
+        title="Generated from your data"
+        data-testid="dashboard-tab-overview"
+        className={`px-3 py-1 text-xs font-medium rounded-t border-b-2 transition-colors flex-shrink-0 ${
+          activeTabId === AUTO_TAB_ID
+            ? "border-primary text-primary bg-primary/5"
+            : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+        }`}
+      >
+        Overview
+      </button>
       {tabs.map((tab) => (
         <div key={tab.id} className="relative group/tab flex-shrink-0">
           <button
@@ -179,7 +193,7 @@ function AddTabDialog({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function DashboardBuilder() {
+export function DashboardBuilder({ embedded = false }: { embedded?: boolean }) {
   const store = useDashboardStore()
   const queryClient = useQueryClient()
   const { isFetching: isSyncing } = useTraitRecords()
@@ -286,19 +300,29 @@ export function DashboardBuilder() {
   return (
     // Layout now removes padding/max-width for the home route, so we just fill the space.
     <div className="flex flex-1 overflow-hidden min-h-0">
-      {/* Left sidebar */}
-      <WidgetToolbox
-        onDragStart={drag.start}
-        draggingTemplateId={drag.draggingId}
-      />
+      {/* Left sidebar: widgets to drag onto the person's own tabs */}
+      {!store.autoActive && (
+        <WidgetToolbox
+          onDragStart={drag.start}
+          draggingTemplateId={drag.draggingId}
+        />
+      )}
 
       {/* Right side */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="bg-card border-b border-border flex-shrink-0">
           {/* Top bar — h-16 matches the sticky app header and toolbox header */}
-          <div className="h-16 px-4 flex items-center justify-between border-b border-border">
-            <span className="text-xl font-semibold">Dashboard</span>
+          <div
+            className={`${embedded ? "h-10" : "h-16"} px-4 flex items-center justify-between border-b border-border`}
+          >
+            <span
+              className={
+                embedded ? "text-sm font-medium" : "text-xl font-semibold"
+              }
+            >
+              Dashboard
+            </span>
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"
@@ -329,15 +353,19 @@ export function DashboardBuilder() {
         </div>
 
         {/* Canvas — receives ref for bounds detection */}
-        <DashboardCanvas
-          ref={drag.canvasRef}
-          tab={store.activeTab}
-          draggingTemplateId={drag.draggingId}
-          isOver={drag.isOverCanvas}
-          onUpdateWidget={handleUpdateWidget}
-          onRemoveWidget={handleRemoveWidget}
-          onReorderWidget={handleReorderWidget}
-        />
+        {store.autoActive ? (
+          <AutoOverview />
+        ) : (
+          <DashboardCanvas
+            ref={drag.canvasRef}
+            tab={store.activeTab}
+            draggingTemplateId={drag.draggingId}
+            isOver={drag.isOverCanvas}
+            onUpdateWidget={handleUpdateWidget}
+            onRemoveWidget={handleRemoveWidget}
+            onReorderWidget={handleReorderWidget}
+          />
+        )}
       </div>
 
       {/* Floating ghost that follows the cursor while dragging */}

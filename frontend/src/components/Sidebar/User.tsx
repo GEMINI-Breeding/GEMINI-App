@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
-import { markSignedOut } from "@/lib/autoSignIn"
+import { markSignedOut, noAccountsInUse } from "@/lib/autoSignIn"
 import { getInitials } from "@/utils"
 
 interface UserInfoProps {
@@ -45,7 +45,10 @@ export function User({ user }: { user: any }) {
   const navigate = useNavigate()
   const { logout } = useAuth()
 
-  if (!user) return null
+  // Signed in by the app itself, no login screen asked for: no account to
+  // show, and no sign-out to lock the person out with (Settings → Sign-in
+  // turns accounts on, and this menu returns).
+  if (!user || noAccountsInUse()) return null
 
   const handleMenuClick = () => {
     if (isMobile) {

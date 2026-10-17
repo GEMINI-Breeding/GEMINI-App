@@ -56,6 +56,12 @@ fi
 log "worker $W on $(hostname) -> core $CORE_NODE (job $CORE_JOB_ID)"
 apptainer "${ARGS[@]}" "$IMAGES/worker-$W.sif" &
 PID=$!
+# Ends this job after a quiet spell (no job of this worker's kinds waiting or running), so it does
+# not hold a node, least of all a GPU, between batches of work. launch.conf sets the minutes.
+source "$HPC/clusters/current/launch.conf" 2>/dev/null
+if [ "${GEMI_GPUS:-0}" -gt 0 ]; then IDLE=${WORKER_IDLE_MINUTES_GPU:-5}; else IDLE=${WORKER_IDLE_MINUTES:-20}; fi
+worker_idle_watch "$PID" "$IDLE" $(worker_job_types "$W")
+log "worker $W stops itself after $IDLE min with no work"
 # SIGTERM (preemption, scancel, time limit): the worker stops claiming and exits.
 trap 'log "worker $W: stop signal"; kill -TERM $PID 2>/dev/null; wait $PID; exit 0' TERM INT
 wait $PID

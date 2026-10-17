@@ -61,7 +61,7 @@ import {
   modelDisplayName,
   modelKey,
   normalizeModel,
-  SOURCE_LABELS,
+  sourceLabel,
   usesRoboflowServer,
 } from "@/features/process/lib/inferenceModels"
 import {
@@ -1027,7 +1027,7 @@ export function ProcessingPipeline() {
                           ? configuredModels
                               .map(
                                 (m) =>
-                                  `${modelDisplayName(m)} (${SOURCE_LABELS[m.source]})`,
+                                  `${modelDisplayName(m)} (${sourceLabel(m.source)})`,
                               )
                               .join(", ")
                           : "—"}

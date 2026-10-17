@@ -13,6 +13,7 @@
  */
 import { useNavigate } from "@tanstack/react-router"
 import {
+  Bot,
   FolderOpen,
   Layers,
   MoreVertical,
@@ -21,6 +22,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +42,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ExperimentRuns } from "@/features/process/components/ExperimentRuns"
+import {
+  legacyRunCount,
+  regroupAgentRuns,
+} from "@/features/process/lib/regroup"
 import {
   createWorkspace,
   deleteWorkspace,
@@ -53,6 +60,7 @@ import {
 interface WorkspaceStats {
   aerial: number
   ground: number
+  agent: number
 }
 
 function useWorkspaceStats(workspaceId: string): WorkspaceStats {
@@ -69,6 +77,7 @@ function useWorkspaceStats(workspaceId: string): WorkspaceStats {
   return {
     aerial: runs.filter((r) => aerialPipelineIds.has(r.pipelineId)).length,
     ground: runs.filter((r) => groundPipelineIds.has(r.pipelineId)).length,
+    agent: runs.filter((r) => r.createdBy === "agent").length,
   }
 }
 
@@ -149,14 +158,69 @@ function WorkspaceCard({
             </span>{" "}
             {stats.ground} dataset{stats.ground !== 1 ? "s" : ""}
           </p>
+          {stats.agent > 0 && (
+            <p
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+              title="Runs the agent started; marked with this icon inside"
+            >
+              <Bot className="h-3 w-3" />
+              {stats.agent} started by the agent
+            </p>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
+function RegroupBanner() {
+  // re-render when the store changes
+  useWorkspaces()
+  const n = legacyRunCount()
+  if (n === 0) return null
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-4 py-2 text-sm">
+      <Bot className="h-4 w-4 text-muted-foreground" />
+      <span className="flex-1">
+        {n} run{n === 1 ? "" : "s"} the agent started {n === 1 ? "is" : "are"}{" "}
+        in the old "Agent runs" workspace. Move them into their experiments'
+        workspaces? They keep the agent mark; jobs and data are not touched.
+      </span>
+      <Button
+        size="sm"
+        data-testid="regroup-agent-runs"
+        onClick={() => {
+          const moved = regroupAgentRuns()
+          toast.success(`Moved ${moved} run${moved === 1 ? "" : "s"}`)
+        }}
+      >
+        Move them
+      </Button>
+    </div>
+  )
+}
+
+const VIEW_KEY = "gemi.process.view"
+
 export function WorkspaceDashboard() {
   const workspaces = useWorkspaces()
+  const [view, setViewState] = useState<"experiments" | "workspaces">(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "workspaces"
+        ? "workspaces"
+        : "experiments"
+    } catch {
+      return "experiments"
+    }
+  })
+  const setView = (v: "experiments" | "workspaces") => {
+    setViewState(v)
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      // remembered for this visit only
+    }
+  }
 
   const [open, setOpen] = useState(false)
   const [newWorkspace, setNewWorkspace] = useState({
@@ -193,10 +257,31 @@ export function WorkspaceDashboard() {
           <div>
             <h1 className="text-xl font-semibold">Process</h1>
             <p className="text-muted-foreground text-sm">
-              Create and manage your phenotyping projects
+              Every run by experiment and date; workspaces hold pipeline
+              settings
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex rounded-md border p-0.5" role="tablist">
+              {(
+                [
+                  ["experiments", "By experiment"],
+                  ["workspaces", "Workspaces"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === id}
+                  data-testid={`process-view-${id}`}
+                  onClick={() => setView(id)}
+                  className={`rounded px-3 py-1 text-sm ${view === id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button data-onboarding="process-new-workspace">
@@ -262,7 +347,10 @@ export function WorkspaceDashboard() {
       </div>
 
       <div className="flex-1 overflow-auto px-6 pb-6">
-        {workspaces.length === 0 ? (
+        <RegroupBanner />
+        {view === "experiments" ? (
+          <ExperimentRuns />
+        ) : workspaces.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
             <FolderOpen className="h-10 w-10 text-muted-foreground" />
             <p className="text-muted-foreground text-sm">

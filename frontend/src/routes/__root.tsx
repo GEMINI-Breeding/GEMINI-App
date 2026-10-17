@@ -1,35 +1,14 @@
-import {
-  createRootRoute,
-  HeadContent,
-  Outlet,
-  useRouterState,
-} from "@tanstack/react-router"
-import { useState } from "react"
+import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router"
 import ErrorComponent from "@/components/Common/ErrorComponent"
 import NotFound from "@/components/Common/NotFound"
-import { BackendStatus } from "@/components/System"
 
 function RootComponent() {
-  const [backendReady, setBackendReady] = useState(false)
-  // First-run setup has no backend to wait for: that is what it sets up.
-  const onSetup = useRouterState({
-    select: (st) => st.location.pathname === "/setup",
-  })
-
-  if (!backendReady && !onSetup) {
-    return <BackendStatus onReady={() => setBackendReady(true)} />
-  }
-
+  // The app opens whether or not the processing stack answers: the layout's
+  // ConnectionNotice says what is missing and how to fix it.
   return (
     <>
       <HeadContent />
       <Outlet />
-      {/* {import.meta.env.DEV && (
-        <>
-          <TanStackRouterDevtools position="bottom-left" />
-          <ReactQueryDevtools buttonPosition="bottom-left" />
-        </>
-      )} */}
     </>
   )
 }

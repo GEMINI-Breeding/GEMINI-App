@@ -128,7 +128,20 @@ def stitch_stats(args: dict) -> dict:
     """Outcome of a stitch version: how many plots, frames used, failures."""
     from PIL import Image, ImageDraw
 
-    prefix = args["output_prefix"].rstrip("/") + "/"
+    if args.get("output_prefix"):
+        prefix = str(args["output_prefix"]).rstrip("/") + "/"
+    else:
+        # Named by its run (or track): the newest stitch of that track.
+        from . import guide
+        from .ground import processed_prefix
+        from .tools import _track
+
+        if not (args.get("run") or args.get("track")):
+            raise ValueError("stitch_stats needs `run` (words naming the rover run) or `output_prefix`")
+        track = _track({"track": args.get("track") or args.get("run")})
+        prefix = guide._latest_stitch(processed_prefix(track.prefix))
+        if not prefix:
+            raise ValueError("this run has no stitch output yet: stitching has not run, or has not finished")
     m = json.loads(client().download(prefix + "stitch_manifest.json"))
     plots = m.get("plots") or {}
     frames = [int(p.get("frames") or 0) for p in plots.values()]
@@ -155,7 +168,9 @@ _tool(inference_stats, "Statistics and a chart for an inference run: detections 
       "Use after run_inference finishes; show the chart and state the numbers.",
       {"predictions_path": _str, "title": _str}, ["predictions_path"], track=False, group="inference")
 _tool(stitch_stats, "Statistics and a chart for a stitch version (plots stitched / failed, frames per plot).",
-      {"output_prefix": _str}, ["output_prefix"], track=False, group="ground")
+      {"run": {**_str, "description": "words naming the rover run; its newest stitch is reported"},
+       "track": _str, "output_prefix": {**_str, "description": "a particular stitch version's folder, instead of run"}},
+      [], track=False, group="ground")
 _ = _int
 
 
@@ -242,6 +257,11 @@ def _write_trait(scope: dict, trait: str, units: str, values: dict, label: str) 
                                       "dataset_info": {"source": "agent"}})
     except Exception:
         pass                                    # exists already
+    try:
+        # A new experiment has no season until something makes one, and a trait record needs it.
+        c.post_json("/api/seasons", {"season_name": str(scope["year"]), "experiment_name": scope["experiment"]})
+    except Exception:
+        pass                                    # exists already
     from urllib.parse import quote
 
     found = c.get_json("/api/traits?trait_name=" + quote(trait)) or []
@@ -260,6 +280,21 @@ def _write_trait(scope: dict, trait: str, units: str, values: dict, label: str) 
 def canopy_cover(args: dict) -> dict:
     """Green cover (fraction of the image that is plant) for every plot image
     under a prefix; optionally stored as a trait."""
+    if not args.get("images_prefix"):
+        # Named by its run: the plot images of that run.
+        from . import guide
+        from .process_runs import ProcessRuns
+
+        if not args.get("run"):
+            raise ValueError("canopy_cover needs `run` (words naming the run) or `images_prefix`")
+        pr = ProcessRuns(client())
+        runs, pipelines = guide._state(pr)
+        found = guide._match(runs, str(args["run"]))
+        if len(found) != 1:
+            raise ValueError(f"`run` must pick exactly one run; it matches {len(found)}: " +
+                             ", ".join(guide._label(pr.describe(r, pipelines)) for r in (found or runs)[:8]))
+        up = found[0].get("uploadScope") or {}
+        args = {**args, "images_prefix": "Processed/" + "/".join(str(up[k]) for k in guide.SCOPE_KEYS) + "/PlotImages/"}
     from concurrent.futures import ThreadPoolExecutor
     import io
 
@@ -302,13 +337,23 @@ def canopy_cover(args: dict) -> dict:
     if args.get("values"):
         out["values"] = values
     if args.get("save_as_trait", True) and scope:
-        out["stored"] = _write_trait(scope, str(args.get("trait_name") or "canopy cover (agent)"), "fraction", values,
-                                     "canopy cover")
+        try:
+            out["stored"] = _write_trait(scope, str(args.get("trait_name") or "canopy cover (agent)"), "fraction", values,
+                                         "canopy cover")
+        except Exception as e:
+            # The measurement is made; only keeping it in the app failed. Say so, and give the numbers.
+            out["stored"] = False
+            out["not_stored_because"] = str(e)[-300:]
+            out["tell_the_person"] = (f"Mean green canopy cover is {out['mean']} over {out['plots']} plots (from "
+                                      f"{out['min']} to {out['max']}). The values could not be saved in the app as a "
+                                      "trait, so they are not in Analyze or on the map.")
     return {"result": out}
 
 
 _tool(canopy_cover, "Green canopy cover (0-1) of every plot image under a PlotImages prefix, from colour; stored "
       "as a per-plot trait so it shows in Analyze and on the map. A simple, model-free measurement.",
-      {"images_prefix": _str, "trait_name": _str, "save_as_trait": {"type": "boolean"}, "limit": _int,
+      {"run": {**_str, "description": "words naming the run whose plot images to measure"},
+       "images_prefix": {**_str, "description": "a PlotImages folder, instead of run"},
+       "trait_name": _str, "save_as_trait": {"type": "boolean"}, "limit": _int,
        "values": {"type": "boolean", "description": "also return the value of every plot"}},
-      ["images_prefix"], track=False, group="inference")
+      [], track=False, group="inference")

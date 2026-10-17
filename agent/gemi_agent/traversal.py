@@ -191,6 +191,11 @@ def stitch_units(args: dict) -> dict:
     lay = _load(track)
     c = client()
     only = {int(i) for i in args["units"]} if args.get("units") else None
+    from .automark import single_frames
+
+    # Plots whose plants fit one camera frame need no mosaic: their image is that frame.
+    single = {} if args.get("stitch_all") else single_frames(track)
+    skipped = [u["unit"] for u in lay["units"] if u["marking_plot"] in single and (only is None or u["unit"] in only)]
     settings = {"forward_limit": 4, "max_reprojection_error": 1.0, "batch_size": 10, "min_inliers": 20,
                 **dict(args.get("settings") or {})}
     scope = scope_from_path(track.prefix)
@@ -208,7 +213,8 @@ def stitch_units(args: dict) -> dict:
     for i, half in enumerate(halves):
         plots = [{"plot_id": u["unit"], "start_image": track.frames[u["start"]].name,
                   "end_image": track.frames[u["end"]].name, "direction": u["direction"] or "left"}
-                 for u in lay["units"] if u["half"] == half and (only is None or u["unit"] in only)]
+                 for u in lay["units"] if u["half"] == half and (only is None or u["unit"] in only)
+                 and u["marking_plot"] not in single]
         if not plots:
             continue
         s = dict(settings)
@@ -233,9 +239,17 @@ def stitch_units(args: dict) -> dict:
                 pr.set_step(run, key, "completed")
         for j in jobs:
             pr.set_step(run, "stitching", "running", job_id=str(j["job_id"]))
+        if not jobs and skipped:
+            pr.set_step(run, "stitching", "completed",
+                        outputs={"skipped": f"all {len(skipped)} plots fit one camera frame; no mosaics needed"})
         return pr.describe(run)
 
-    return {"result": {"jobs": jobs, "process_tab": process_tab(update)}}
+    out: dict[str, Any] = {"jobs": jobs, "process_tab": process_tab(update)}
+    if skipped:
+        out["not_stitched_single_frame_plots"] = len(skipped)
+        out["next"] = ("wait_jobs with the job ids, then place_plot_images" if jobs else
+                       "nothing to stitch: every plot fits one camera frame. Call place_plot_images now.")
+    return {"result": out}
 
 
 def place_plot_images(args: dict) -> dict:
@@ -249,28 +263,73 @@ def place_plot_images(args: dict) -> dict:
     by_unit = {u["unit"]: u for u in lay["units"]}
     exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
     done, missing = 0, []
+
+    def put(name: str, data: bytes) -> None:
+        total = max(1, -(-len(data) // (8 * 1024 * 1024)))
+        for i in range(total):
+            c.upload_chunk(data[i * 8 * 1024 * 1024:(i + 1) * 8 * 1024 * 1024], i, total,
+                           f"agent:{name}:{len(data)}", name, str(exp["id"]) if exp else None)
+
+    def name_of(u: dict) -> str:
+        return f"{out_prefix}plot_{u['unit']}_accession_{str(u['genotype']).replace(' ', '_')}.png"
+
+    # Plots that fit one camera frame: the frame with the plot in its middle, cut to
+    # the plot (and to its half of the picture when the camera sees two rows).
+    from concurrent.futures import ThreadPoolExecutor
+    from .automark import single_frames
+
+    single = {} if args.get("stitched_only") else single_frames(track)
+    todo = [u for u in lay["units"] if u["marking_plot"] in single]
+
+    def from_frame(u: dict) -> Optional[int]:
+        import io
+        from PIL import Image
+
+        s1 = single[u["marking_plot"]]
+        try:
+            img = Image.open(io.BytesIO(c.download(track.images_prefix + track.frames[s1["frame"]].name))).convert("RGB")
+            a, b = s1["crop"]
+            top, bottom = {None: (0, img.height), "top": (0, img.height // 2), "bottom": (img.height // 2, img.height)}[u["half"]]
+            buf = io.BytesIO()
+            img.crop((int(a * img.width), top, int(b * img.width), bottom)).save(buf, "PNG")
+            put(name_of(u), buf.getvalue())
+            return None
+        except Exception:                         # one bad frame must not lose the rest
+            return int(u["unit"])
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            failed = [r for r in pool.map(from_frame, todo) if r is not None]
+        done += len(todo) - len(failed)
+        missing += failed
+    from_frames = done
     for job in lay.get("stitch_jobs") or []:
         manifest = json.loads(c.download(job["output_prefix"] + "stitch_manifest.json"))
         for pid in manifest.get("succeeded_plots") or []:
             u = by_unit.get(int(pid))
             if u is None:
                 continue
-            data = c.download(f"{job['output_prefix']}full_res_mosaic_temp_plot_{pid}.png")
-            name = f"{out_prefix}plot_{u['unit']}_accession_{str(u['genotype']).replace(' ', '_')}.png"
-            total = max(1, -(-len(data) // (8 * 1024 * 1024)))
-            for i in range(total):
-                c.upload_chunk(data[i * 8 * 1024 * 1024:(i + 1) * 8 * 1024 * 1024], i, total,
-                               f"agent:{name}:{len(data)}", name, str(exp["id"]) if exp else None)
+            if u["marking_plot"] in single:
+                continue                           # already filed from its frame
+            put(name_of(u), c.download(f"{job['output_prefix']}full_res_mosaic_temp_plot_{pid}.png"))
             done += 1
         missing += [int(p) for p in (manifest.get("failed_plots") or {})]
 
     def update(pr):
         run = pr.ensure_run(scope, "ground")
+        if from_frames and not lay.get("stitch_jobs") and (run["steps"].get("stitching") or {}).get("status") != "completed":
+            pr.set_step(run, "stitching", "completed",
+                        outputs={"skipped": f"{from_frames} plots fit one camera frame; no mosaics needed"})
         pr.set_step(run, "associate_boundaries", "completed",
-                    outputs={"plot_images_prefix": out_prefix, "matched": done, "method": "driving pattern"})
+                    outputs={"plot_images_prefix": out_prefix, "matched": done, "method": "driving pattern",
+                             "from_single_frames": from_frames, "from_mosaics": done - from_frames})
         return pr.describe(run)
 
-    return {"result": {"plot_images": done, "failed_to_stitch": missing, "output": out_prefix,
+    waiting = [u["unit"] for u in lay["units"] if u["marking_plot"] not in single] if not lay.get("stitch_jobs") else []
+    return {"result": {"plot_images": done, "from_single_frames": from_frames, "from_mosaics": done - from_frames,
+                       "failed": missing, "output": out_prefix,
+                       **({"still_to_stitch": len(waiting), "next": "stitch_units, wait_jobs, then place_plot_images again"}
+                          if waiting else {}),
                        "process_tab": process_tab(update)}}
 
 
@@ -291,9 +350,12 @@ _t(traversal_layout, "Rover: work out each marked plot's bed, tier and design pl
 _t(traversal_boundaries, "Rover: save schematic plot boundaries (regular grid at the start corner) from the "
    "traversal layout, so results map onto plots without usable GPS.",
    {"plot_length_m": _num, "bed_width_m": _num, "origin": {"type": "array", "items": _num}, "name": _str}, [])
-_t(stitch_units, "Rover: stitch every plot of the traversal layout under its design number; with two rows per "
-   "pass, each half of the frame is stitched separately.",
+_t(stitch_units, "Rover: stitch the plots of the traversal layout under their design numbers; with two rows per "
+   "pass, each half of the frame is stitched separately. Plots that fit one camera frame are skipped.",
    {"units": {"type": "array", "items": _int}, "settings": {"type": "object"},
-    "custom_options": {**_str, "description": "AgRowStitch options as YAML, e.g. 'final_resolution: 0.5' to stitch at half resolution (about 4x faster)"}}, [])
-_t(place_plot_images, "Rover: after stitch_units finishes, file each mosaic under its plot number and genotype "
-   "(the association step) using the traversal layout.", {}, [])
+    "custom_options": {**_str, "description": "AgRowStitch options as YAML, e.g. 'final_resolution: 0.5' to stitch at half resolution (about 4x faster)"},
+    "stitch_all": {**_bool, "description": "also stitch plots that fit one camera frame (default false: they are skipped)"}}, [])
+_t(place_plot_images, "Rover: file each plot's image under its plot number and genotype (the association step) using "
+   "the traversal layout. A plot whose plants fit one camera frame gets that raw frame, cut to the plot (no "
+   "stitching needed); a longer plot gets its mosaic from stitch_units.",
+   {"stitched_only": {**_bool, "description": "ignore single frames; file mosaics only"}}, [])

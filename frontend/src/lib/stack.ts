@@ -65,6 +65,8 @@ export type StackMode = "local" | "cluster"
 const MODE_KEY = "gemini.stack.mode"
 /** The tunnel the agent service opens to a cluster's API. */
 export const CLUSTER_API_URL = "http://127.0.0.1:7777"
+/** TiTiler beside that API: the map tiles (orthomosaics, rover mosaics). */
+export const CLUSTER_TITILER_URL = "http://127.0.0.1:8091"
 
 export function stackMode(): StackMode {
   try {
@@ -91,6 +93,10 @@ export function isManagedStack(): boolean {
 export function applyClusterUrls(): void {
   if (isDesktopApp() && stackMode() === "cluster") {
     w().__GEMI_BACKEND_URL__ = CLUSTER_API_URL
+    // Without this the map asked the app's own origin for tiles ("/titiler"),
+    // which only the browser's dev server answers: no underlay, and no zoom
+    // to it, in the boundary editor and every other map.
+    w().__GEMI_TITILER_URL__ = CLUSTER_TITILER_URL
     OpenAPI.BASE = CLUSTER_API_URL
   }
 }

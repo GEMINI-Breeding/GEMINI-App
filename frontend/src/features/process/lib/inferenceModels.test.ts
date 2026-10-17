@@ -122,3 +122,46 @@ describe("display and storage names", () => {
     )
   })
 })
+
+describe("models from jobs, any provider", () => {
+  it("names the model a job ran, for each known source", async () => {
+    const { modelFromJobParams, modelDisplayName } = await import(
+      "./inferenceModels"
+    )
+    const hf = modelFromJobParams({
+      source: "huggingface",
+      hf_model_id: "google/owlvit-base-patch32",
+      hf_zero_shot: true,
+      hf_prompt: "panicle",
+      count_label: "owlvit panicle",
+      images_prefix: "Processed/x/PlotImages/",
+    })
+    expect(hf && modelDisplayName(hf)).toBe("owlvit panicle")
+    const w = modelFromJobParams({
+      source: "local_weights",
+      weights_path: "Models/weights/rice.pt",
+    })
+    expect(w?.weights_name).toBe("rice.pt")
+    const rf = modelFromJobParams({ source: "roboflow", model_id: "pods/3" })
+    expect(rf?.roboflow_model_id).toBe("pods/3")
+  })
+  it("keeps an unknown provider's settings and sends them back unchanged", async () => {
+    const { modelFromJobParams, modelJobParams, normalizeModel, modelProblem } =
+      await import("./inferenceModels")
+    const m = modelFromJobParams({
+      source: "replicate",
+      version: "abc123",
+      images_prefix: "x",
+      count_label: "pods",
+    })
+    expect(m?.extra).toEqual({ version: "abc123" })
+    const again = normalizeModel(JSON.parse(JSON.stringify(m)))
+    expect(again.source).toBe("replicate")
+    expect(modelProblem(again)).toBeNull()
+    expect(modelJobParams(again)).toEqual({
+      version: "abc123",
+      source: "replicate",
+      task_type: "detection",
+    })
+  })
+})

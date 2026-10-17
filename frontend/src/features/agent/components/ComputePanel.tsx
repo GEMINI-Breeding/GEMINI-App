@@ -41,6 +41,35 @@ const DOT: Record<ComputeState, string> = {
   unknown: "bg-muted-foreground/40",
 }
 
+/**
+ * A Slurm pending reason in plain words. `QOSGrp*` limits are the group's
+ * shared allowance being in use: nothing is queued ahead, and waiting is the
+ * right thing to do (the cluster's rules say not to work around them).
+ */
+export function queueReason(reason: string | null | undefined): string {
+  if (!reason) return ""
+  const r = reason.replace(/[()]/g, "")
+  if (/^QOSGrpCpu/.test(r))
+    return "your group's CPU allowance is in use by other jobs; nothing is queued ahead of you, it starts when some finish"
+  if (/^QOSGrpMem/.test(r))
+    return "your group's memory allowance is in use by other jobs; nothing is queued ahead of you, it starts when some finish"
+  if (/^QOSGrpGRES|^QOSGrpGpu/.test(r))
+    return "your group's GPUs are all in use; it starts when one frees up"
+  if (/^QOSMax|^AssocMax|^AssocGrp/.test(r))
+    return "a per-user or per-account limit is reached; it starts when one of your own jobs finishes"
+  if (r === "Priority")
+    return "other jobs have priority on this partition; it starts in turn"
+  if (r === "Resources")
+    return "next in line, waiting for a node with enough free CPUs or memory"
+  if (/ReqNodeNotAvail|Reservation/.test(r))
+    return "the nodes are reserved or down (often maintenance)"
+  if (r === "BeginTime") return "set to start later"
+  if (r === "Dependency") return "waiting for another job to finish"
+  if (/^PartitionTimeLimit/.test(r))
+    return "asks for more time than the partition allows; it will not start"
+  return r
+}
+
 function stateLine(p: ComputePart): string {
   if (p.busy) return p.busy.action === "starting" ? "Submitting…" : "Stopping…"
   const at = p.partition ? ` on ${p.partition}` : ""
@@ -52,7 +81,7 @@ function stateLine(p: ComputePart): string {
         ? `Loading the model${p.node ? ` on ${p.node}` : at}`
         : `Starting${at}`
     case "queued":
-      return `Waiting in the queue${at}${p.reason ? ` (${p.reason})` : ""}`
+      return `Waiting in the queue${at}${p.reason ? `: ${queueReason(p.reason)}` : ""}`
     case "stopping":
       return "Stopping"
     case "stopped":
@@ -228,7 +257,14 @@ function Row({
   )
 }
 
-export function ComputePanel({ canManage }: { canManage: boolean }) {
+export function ComputePanel({
+  canManage,
+  wide = false,
+}: {
+  canManage: boolean
+  /** Fill the space given (Settings) instead of a side column (agent page). */
+  wide?: boolean
+}) {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const compute = useQuery({
@@ -260,7 +296,11 @@ export function ComputePanel({ canManage }: { canManage: boolean }) {
 
   return (
     <Card
-      className="flex w-80 shrink-0 flex-col overflow-hidden"
+      className={
+        wide
+          ? "flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+          : "flex w-80 shrink-0 flex-col overflow-hidden"
+      }
       data-testid="agent-compute"
     >
       <CardContent className="flex min-h-0 flex-1 flex-col p-3">
@@ -332,7 +372,13 @@ export function ComputePanel({ canManage }: { canManage: boolean }) {
           <p className="mt-2 text-xs text-red-700 dark:text-red-400">{error}</p>
         )}
 
-        <div className="mt-1 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div
+          className={
+            wide
+              ? "mt-2 grid min-h-0 flex-1 content-start gap-x-6 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3 [&>*]:border-b"
+              : "mt-1 min-h-0 flex-1 overflow-y-auto pr-1"
+          }
+        >
           {(data?.parts ?? []).map((p) => (
             <Row
               // The saved placement arrives with the data; remount when it changes.

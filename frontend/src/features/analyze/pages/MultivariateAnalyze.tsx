@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
+import { Pin } from "lucide-react"
 import { useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import {
   type ExperimentOutput,
@@ -14,6 +16,8 @@ import {
 } from "@/client"
 import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { pinWidget } from "@/features/dashboard/store"
+import { correlationSentence } from "@/features/dashboard/widgets/AnalysisWidget"
 
 import { AggregationControl } from "../components/AggregationControl"
 import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
@@ -346,6 +350,37 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
               data-testid="mv-warning"
             >
               {corrResults.matrix.message || corrResults.matrix.status}
+            </div>
+          )}
+          {corrResults && corrResults.matrix.status === "ok" && (
+            <div className="flex items-center gap-3 text-sm">
+              <span className="flex-1">
+                {correlationSentence(corrResults.correlation)}
+              </span>
+              {experiments.size === 1 && (
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border px-3 text-xs"
+                  data-testid="mv-pin-correlation"
+                  onClick={() => {
+                    const experiment = [...experiments][0]
+                    const tab = pinWidget({
+                      instanceId: `widget-${Date.now()}`,
+                      type: "analysis",
+                      title: `Which traits move together · ${experiment}`,
+                      span: "md",
+                      config: {
+                        kind: "correlation",
+                        experiment,
+                        traits: [...corrTraits],
+                      },
+                    })
+                    toast.success(`Pinned to the dashboard ("${tab}")`)
+                  }}
+                >
+                  <Pin className="h-3 w-3" /> Pin to dashboard
+                </button>
+              )}
             </div>
           )}
           {corrResults && corrResults.matrix.status === "ok" && (

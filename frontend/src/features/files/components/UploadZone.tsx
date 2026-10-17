@@ -15,6 +15,8 @@
 import { Image, Upload } from "lucide-react"
 import { useRef, useState } from "react"
 
+import { setFolder } from "../lib/uploadGroups"
+
 interface UploadZoneProps {
   onFilesAdded?: (files: File[]) => void
   /** Hint for the native file picker. Examples: "image/*", ".csv,.xlsx" */
@@ -71,6 +73,9 @@ async function entryToFiles(entry: FileSystemEntryLike): Promise<File[]> {
     const file = await new Promise<File>((resolve, reject) =>
       entry.file(resolve, reject),
     )
+    // "/2026-09-17/run2/DJI_0001.JPG" -> "2026-09-17/run2": kept so the
+    // upload step can ask what the folders stand for (runs, treatments).
+    setFolder(file, entry.fullPath.split("/").slice(0, -1).join("/"))
     return [file]
   }
   // Directory: read all children, recurse. Run in parallel for speed —

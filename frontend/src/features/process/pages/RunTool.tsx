@@ -3,9 +3,11 @@
  *
  * Dispatches on `?step=` to the matching interactive component.
  */
+
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 import { useMemo } from "react"
+import { PanelBoundary } from "@/components/Common/PanelBoundary"
 
 import { Button } from "@/components/ui/button"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
@@ -123,65 +125,70 @@ export function RunTool() {
           </div>
         </div>
 
-        {!run ? (
-          <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
-            <p className="text-muted-foreground text-sm">
-              {storeReady
-                ? "Run not found. It may have been deleted."
-                : "Loading…"}
-            </p>
-          </div>
-        ) : !scope ? (
-          <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
-            <p className="text-muted-foreground text-sm">
-              The run is missing a flight date / platform / sensor. Pick those
-              in the Run Setup card on the run page first.
-            </p>
-            <Button variant="outline" onClick={goBack}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to run
-            </Button>
-          </div>
-        ) : step === "plot_boundary_prep" ? (
-          <PlotBoundaryPrep
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : step === "gcp_selection" && workspace ? (
-          <GcpPicker
-            workspace={workspace}
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : step === "image_review" ? (
-          <ImageReviewer
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : step === "inference" && workspace && pipeline ? (
-          <InferenceTool
-            pipeline={pipeline}
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : step === "plot_marking" ? (
-          <PlotMarker
-            run={run}
-            scope={scope}
-            onSaved={goBack}
-            onCancel={goBack}
-          />
-        ) : (
-          <ToolPlaceholder step={step} runId={runId} />
-        )}
+        <PanelBoundary
+          what={`the ${label} panel`}
+          resetKey={`${runId}:${step}`}
+        >
+          {!run ? (
+            <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
+              <p className="text-muted-foreground text-sm">
+                {storeReady
+                  ? "Run not found. It may have been deleted."
+                  : "Loading…"}
+              </p>
+            </div>
+          ) : !scope ? (
+            <div className="border rounded-md bg-muted/30 p-6 flex flex-col items-center gap-3">
+              <p className="text-muted-foreground text-sm">
+                The run is missing a flight date / platform / sensor. Pick those
+                in the Run Setup card on the run page first.
+              </p>
+              <Button variant="outline" onClick={goBack}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to run
+              </Button>
+            </div>
+          ) : step === "plot_boundary_prep" ? (
+            <PlotBoundaryPrep
+              run={run}
+              scope={scope}
+              onSaved={goBack}
+              onCancel={goBack}
+            />
+          ) : step === "gcp_selection" && workspace ? (
+            <GcpPicker
+              workspace={workspace}
+              run={run}
+              scope={scope}
+              onSaved={goBack}
+              onCancel={goBack}
+            />
+          ) : step === "image_review" ? (
+            <ImageReviewer
+              run={run}
+              scope={scope}
+              onSaved={goBack}
+              onCancel={goBack}
+            />
+          ) : step === "inference" && workspace && pipeline ? (
+            <InferenceTool
+              pipeline={pipeline}
+              run={run}
+              scope={scope}
+              onSaved={goBack}
+              onCancel={goBack}
+            />
+          ) : step === "plot_marking" ? (
+            <PlotMarker
+              run={run}
+              scope={scope}
+              onSaved={goBack}
+              onCancel={goBack}
+            />
+          ) : (
+            <ToolPlaceholder step={step} runId={runId} />
+          )}
+        </PanelBoundary>
       </div>
     </div>
   )

@@ -43,7 +43,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { NewRunDialog } from "@/features/process/components/NewRunDialog"
+import {
+  runState,
+  TAG_CLASS,
+  TAG_HINT,
+  TAG_LABEL,
+} from "@/features/process/lib/runStatus"
 import {
   deletePipeline,
   deleteRun,
@@ -54,19 +61,6 @@ import {
   useRuns,
   useWorkspace,
 } from "@/features/process/lib/runStore"
-
-function statusBadgeClass(status: string) {
-  switch (status) {
-    case "completed":
-      return "bg-green-500/10 text-green-700 hover:bg-green-500/20"
-    case "running":
-      return "bg-blue-500/10 text-blue-700 hover:bg-blue-500/20"
-    case "failed":
-      return "bg-red-500/10 text-red-700 hover:bg-red-500/20"
-    default:
-      return "bg-gray-500/10 text-gray-700 hover:bg-gray-500/20"
-  }
-}
 
 function PipelineCard({
   pipeline,
@@ -169,8 +163,9 @@ function PipelineCard({
                   <div className="flex items-center gap-3">
                     <Play className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="text-sm font-medium">
+                      <p className="flex items-center gap-1.5 text-sm font-medium">
                         {run.name ?? `Run ${run.id.slice(0, 8)}`}
+                        <AgentRunMark run={run} />
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(run.createdAt).toLocaleString()}
@@ -179,10 +174,11 @@ function PipelineCard({
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge
-                      className={statusBadgeClass(run.status)}
+                      className={TAG_CLASS[runState(run, pipeline.type).tag]}
+                      title={TAG_HINT[runState(run, pipeline.type).tag]}
                       variant="secondary"
                     >
-                      {run.status}
+                      {TAG_LABEL[runState(run, pipeline.type).tag]}
                     </Badge>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

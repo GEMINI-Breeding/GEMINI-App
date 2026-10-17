@@ -21,6 +21,50 @@ from .panorama import (Panorama, along_track_m, boundaries_from_positions, bound
 # logged in from the environment; the agent service sets one per run (the
 # signed-in user's) with use_client().
 _client_var: contextvars.ContextVar[Optional[Client]] = contextvars.ContextVar("gemi_client", default=None)
+# When the person's current message arrived (set by the chat loop). "The person confirmed what they
+# were shown" can only be true of something shown BEFORE that moment - in this conversation or an
+# earlier one. None outside a chat (command line, MCP): then only "it was shown" is checked.
+TURN_STARTED: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar("gemi_turn_started", default=None)
+
+
+def shown_file():
+    from .client import AGENT_DIR
+
+    return AGENT_DIR / "work" / "shown.json"
+
+
+def mark_shown(key: str) -> None:
+    """Remember that something was put in front of the person, and when."""
+    import json as _json
+    import time as _time
+
+    p = shown_file()
+    data = _json.loads(p.read_text()) if p.exists() else {}
+    data.setdefault(key, _time.time())               # the first showing counts: re-showing does not reset it
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(data))
+
+
+def confirmable(key: str) -> bool:
+    """Was this shown to the person before their current message? Only then can they have confirmed it."""
+    import json as _json
+
+    p = shown_file()
+    when = (_json.loads(p.read_text()) if p.exists() else {}).get(key)
+    if when is None:
+        return False
+    started = TURN_STARTED.get()
+    return started is None or when < started
+
+
+def forget_shown(key: str) -> None:
+    import json as _json
+
+    p = shown_file()
+    if p.exists():
+        data = _json.loads(p.read_text())
+        if data.pop(key, None) is not None:
+            p.write_text(_json.dumps(data))
 _default_client: Optional[Client] = None
 _tracks: dict[tuple[int, str], Track] = {}
 
@@ -45,10 +89,34 @@ def _track(args: dict) -> Track:
         raise ValueError("`track` is required: the dataset folder, e.g. "
                          "Raw/2026/EXP/SITE/POP/2026-09-17/Amiga/RGB/c0fca235/")
     c = client()
+    prefix = str(prefix).strip()
+    if not prefix.startswith("Raw/"):
+        prefix = _track_of_run(prefix)
+    elif not prefix.endswith("/"):
+        prefix += "/"
     key = (id(c), prefix)
     if key not in _tracks:
         _tracks[key] = Track(c, prefix)
     return _tracks[key]
+
+
+def _track_of_run(words: str) -> str:
+    """A rover run named in words (or by the name the Process tab shows) instead
+    of by its folder: the folder of that run's track."""
+    from . import guide
+    from .process_runs import ProcessRuns
+
+    pr = ProcessRuns(client())
+    runs, pipelines = guide._state(pr)
+    from .process_runs import pipeline_type
+
+    ground = [r for r in runs if guide._track(r) and pipeline_type(r.get("uploadScope") or {}) == "ground"]
+    found = guide._match(ground, words)
+    if len(found) != 1:
+        raise ValueError(f"`track` {words!r} is not a dataset folder (Raw/…/) and does not name one rover run. "
+                         "Rover runs: " + (", ".join(f"{guide._label(pr.describe(r, pipelines))} = {guide._track(r)}"
+                                                     for r in ground[:8]) or "none yet"))
+    return str(guide._track(found[0]))
 
 
 def _pass(track: Track, n: int) -> dict:
@@ -464,8 +532,15 @@ def save_markings(args: dict) -> dict:
                     outputs={"directory": m.directory, "version": res.get("version"), "plots": len(m.plots)})
         return pr.describe(run)
 
-    return {"result": {"saved_version": res.get("version"), "plots": len(m.plots), "directory": m.directory,
-                       "process_tab": process_tab(update)}}
+    out = {"saved_version": res.get("version"), "plots": len(m.plots), "directory": m.directory,
+           "process_tab": process_tab(update)}
+    auto = track.cache / "auto_marks.json"
+    if auto.exists():
+        # Saving is usually the last call before the reply: hand over what the person must hear.
+        told = json.loads(auto.read_text()).get("tell_the_person")
+        if told:
+            out["tell_the_person"] = told + " The markings are saved."
+    return {"result": out}
 
 
 def pull_markings(args: dict) -> dict:
@@ -563,6 +638,22 @@ def _tool(fn: Callable[[dict], dict], description: str, props: dict, required: l
                                      "required": [*(["track"] if track else []), *required]}}
 
 
+ALIASES: dict[str, dict[str, str]] = {
+    "*": {"path": "paths", "job": "job_id", "id": "job_id", "task": "task_id", "run_id": "run", "skill": "name"},
+    "upload": {"location": "site", "trial": "population", "crop": "population", "folder": "paths", "files": "paths",
+               "type": "data_type", "collection_date": "date"},
+    "run_inference": {"prefix": "images_prefix", "images": "images_prefix", "output": "output_predictions_path",
+                      "label": "count_label", "threshold": "confidence_threshold"},
+    "wait_jobs": {"job_id": "job_ids", "jobs": "job_ids", "ids": "job_ids", "timeout": "timeout_s"},
+    "read_skill": {"skill_name": "name"},
+    "inference_stats": {"predictions": "predictions_path", "output_predictions_path": "predictions_path",
+                        "paths": "predictions_path"},
+    "start_process": {"worker": "name", "process": "name"},
+    "stop_process": {"worker": "name", "process": "name"},
+    "run_facts": {"facts": "set"},
+}
+
+
 def check_args(name: str, args: dict) -> tuple[dict, Optional[str]]:
     """Arguments as the tool expects them, or a message that says exactly
     what to fix. Models often send "3" for 3, a string for a one-item list,
@@ -570,6 +661,15 @@ def check_args(name: str, args: dict) -> tuple[dict, Optional[str]]:
     reported with the valid names."""
     schema = TOOLS[name]["schema"]
     props, out = schema["properties"], {}
+    # Optional arguments sent empty (null, "", [], {}): the model listed every argument it saw. Not sent at all.
+    required = set(schema.get("required") or [])
+    args = {k: v for k, v in args.items() if k in required or v not in (None, "", [], {})}
+    # "run*": the mark the tool list puts on required arguments, copied into the call.
+    args = {(k.rstrip("*").strip() if isinstance(k, str) and k.rstrip("*").strip() in props else k): v for k, v in args.items()}
+    # Names models reach for instead of the real one ("path" for "paths", "location" for "site").
+    for wrong, right in {**ALIASES.get("*", {}), **ALIASES.get(name, {})}.items():
+        if wrong in args and wrong not in props and right in props and right not in args:
+            args = {**{k: v for k, v in args.items() if k != wrong}, right: args[wrong]}
     unknown = [k for k in args if k not in props]
     if unknown:
         return args, (f"{name} has no argument {', '.join(repr(k) for k in unknown)}. "
@@ -674,3 +774,7 @@ from . import field_tools  # noqa: E402,F401  (field design, plot boundaries, pl
 from . import traversal  # noqa: E402,F401  (rover plots from the driving pattern)
 from . import compute  # noqa: E402,F401  (what runs where: workers, start/stop)
 from . import guide  # noqa: E402,F401  (next_step: the one thing to do next)
+from . import automark  # noqa: E402,F401  (rover plots from the canopy's own rhythm)
+from . import analysis_tools  # noqa: E402,F401  (the Analyze tab: trait data and its analyses)
+from . import genotype_tools  # noqa: E402,F401  (the Genotyping tab: marker studies and GWAS)
+from . import plot_images  # noqa: E402,F401  (photos with no GPS, paired with the field design)

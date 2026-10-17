@@ -46,6 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { apiUrl } from "@/features/files/lib/download"
+import { InferenceResults } from "@/features/process/components/InferenceResults"
 import {
   type InferenceModel,
   modelDisplayName,
@@ -53,7 +54,7 @@ import {
   modelKey,
   modelProblem,
   normalizeModel,
-  SOURCE_LABELS,
+  sourceLabel,
   TASK_LABELS,
 } from "@/features/process/lib/inferenceModels"
 import {
@@ -74,7 +75,11 @@ import {
   useDeleteRunResults,
   useExperimentDatasetNames,
 } from "@/features/process/lib/runResults"
-import type { Pipeline, Run } from "@/features/process/lib/runStore"
+import {
+  type Pipeline,
+  type Run,
+  updatePipeline,
+} from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
 
@@ -529,18 +534,40 @@ export function InferenceTool({
     [predictions, confThreshold],
   )
 
+  const addModel = (m: InferenceModel) => {
+    const arr = (pipeline.params.roboflow_models as unknown[]) ?? []
+    updatePipeline(pipeline.id, {
+      params: { ...pipeline.params, roboflow_models: [...arr, m] },
+    })
+    showSuccessToast(`Added ${modelDisplayName(m)} to this pipeline`)
+  }
+  const results = (
+    <InferenceResults
+      run={run}
+      configured={models}
+      onOpen={(id) => {
+        setSubmittedJobId(id)
+        queryClient.invalidateQueries({ queryKey: ["jobs", id] })
+      }}
+      onAddModel={addModel}
+    />
+  )
+
   if (models.length === 0) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">No models configured</CardTitle>
-          <CardDescription>
-            Open the pipeline settings (Step 3 of the wizard) and add at least
-            one model — Roboflow, Hugging Face, or your own weights. Then return
-            here to run inference.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">No models configured</CardTitle>
+            <CardDescription>
+              {run.steps.inference?.jobIds?.length
+                ? "Models were run on this run (below) but are not in this pipeline's list. Add one with its button to run it again from here, or add others in the pipeline settings (Step 3 of the wizard)."
+                : "Open the pipeline settings (Step 3 of the wizard) and add at least one model — Roboflow, Hugging Face, your own weights, or another provider. Then return here to run inference."}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+        {results}
+      </div>
     )
   }
 
@@ -573,7 +600,7 @@ export function InferenceTool({
                 <SelectContent>
                   {models.map((m, i) => (
                     <SelectItem key={i} value={String(i)}>
-                      {modelDisplayName(m)} · {SOURCE_LABELS[m.source]},{" "}
+                      {modelDisplayName(m)} · {sourceLabel(m.source)},{" "}
                       {TASK_LABELS[m.task_type].toLowerCase()}
                     </SelectItem>
                   ))}
@@ -779,6 +806,8 @@ export function InferenceTool({
             experiment={run.uploadScope?.experiment}
           />
         )}
+
+      {results}
 
       {predictions && (
         <Card>

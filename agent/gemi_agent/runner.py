@@ -45,7 +45,8 @@ DEFAULTS = {"base_url": "http://127.0.0.1:8000/v1", "model": "gemma4", "api_key"
 # Always available: orientation, progress, and the things every stage needs.
 CORE_TOOLS = ("next_step", "continue_run", "run_facts", "read_skill", "status", "process_runs", "processes", "start_process", "stop_process",
               "hpc", "jobs", "job_detail", "wait_jobs", "cancel_job", "tasks", "wait_task", "browse", "datasets",
-              "entities")
+              "entities", "inference_stats", "stitch_stats", "canopy_cover", "traits_available", "analyze",
+              "genotype_studies", "gwas", "gwas_result", "cluster_rules")
 _SKILL_TOOLS: dict[str, list[str]] = {}
 
 
@@ -94,6 +95,10 @@ def save_config(patch: dict) -> dict:
 
 # ── model call ───────────────────────────────────────────────────────────────
 
+# (endpoint, model) pairs seen to answer with thinking only: see chat().
+_THINKS: set[tuple[str, str]] = set()
+
+
 def chat(cfg: dict, messages: list[dict], tools: Optional[list[dict]] = None) -> dict:
     body: dict[str, Any] = {"model": cfg["model"], "messages": messages, "temperature": cfg["temperature"],
                             "max_tokens": cfg["max_tokens"]}
@@ -104,13 +109,27 @@ def chat(cfg: dict, messages: list[dict], tools: Optional[list[dict]] = None) ->
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
     last = ""
+    who = (cfg["base_url"], cfg["model"])
+    if who in _THINKS:
+        body.update({"reasoning_effort": "none", "max_tokens": cfg["max_tokens"] * 3})
     for attempt, delay in enumerate((2, 5, 15, 0)):
         try:
             req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
             with urllib.request.urlopen(req, timeout=cfg["request_timeout_s"]) as r:
-                return json.load(r)["choices"][0]["message"]
+                msg = json.load(r)["choices"][0]["message"]
+            if (not (msg.get("content") or "").strip() and not msg.get("tool_calls") and who not in _THINKS
+                    and (msg.get("reasoning") or msg.get("reasoning_content"))):
+                # A model that thinks before it answers spent the whole reply on thinking. Ask it
+                # to think less and give it more room, for this call and the ones after it.
+                _THINKS.add(who)
+                body.update({"reasoning_effort": "none", "max_tokens": cfg["max_tokens"] * 3})
+                continue
+            return msg
         except urllib.error.HTTPError as e:
             last = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:400]}"
+            if e.code == 400 and "reasoning_effort" in body and "reasoning" in last.lower():
+                body.pop("reasoning_effort")           # this server does not take the hint; the extra room stays
+                continue
             if e.code < 500 and e.code != 429:
                 break
         except (urllib.error.URLError, TimeoutError, ConnectionError, KeyError, json.JSONDecodeError) as e:
@@ -166,11 +185,39 @@ def system_prompt(cfg: dict, names: list[str], context: dict) -> str:
     parts.append("Tools:\n" + _catalog(names))
     skill_list = TOOLS["skills"]["fn"]({})["result"]
     if skill_list:
-        parts.append("Skills (exact names for read_skill):\n" +
+        parts.append("Guides, one per stage (the whole list). Read one with read_skill and its name; there is no other way to list them:\n" +
                      "\n".join(f"- {s['name']}: {s['description']}" for s in skill_list))
+    try:
+        from .hpc_tools import _rules_dir, active_cluster
+
+        cl = active_cluster()
+        idx = _rules_dir(cl) / "index.json" if cl else None
+        rows = json.loads(idx.read_text()) if idx and idx.exists() else []
+        if rows:
+            parts.append(f"Cluster {cl} has rules for agents from its administrators: " +
+                         "; ".join(f"{r['name']} ({r['description'][:120]})" for r in rows) +
+                         ". Read them with cluster_rules before any cluster action and follow them over your own "
+                         "defaults.")
+    except Exception:
+        pass
     if context:
         parts.append("Context:\n" + "\n".join(f"- {k}: {v}" for k, v in context.items() if v))
     return "\n\n".join(parts)
+
+
+def _first_step_tool(skill: str) -> Optional[str]:
+    """The tool the first step of a skill's Quick path names, if it names one."""
+    try:
+        text = str(TOOLS["read_skill"]["fn"]({"name": skill})["result"])
+    except Exception:
+        return None
+    for line in text.splitlines():
+        if re.match(r"\s*1\. ", line):
+            for word in re.findall(r"`([a-z_]+)`", line):
+                if word in TOOLS:
+                    return word
+            return None
+    return None
 
 
 def native_tools(names: list[str]) -> list[dict]:
@@ -183,14 +230,42 @@ _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
 _GEMMA_CALL = re.compile(r"call:([A-Za-z_][A-Za-z0-9_]*)\s*[{(]")
 _CALL_JSON = re.compile(r"call:\s*\{")
+_PY_LITERAL = re.compile(r"(?<=[:\[,\s])(None|True|False)(?=\s*[,}\]])")
 _BARE_KEY = re.compile(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:')
 _SPECIAL = re.compile(r"<\|?/?[a-z_]+\|?>")
+# A reply that reports an action as done.
+_CLAIMS = re.compile(r"\b(?:has|have|had|was|were|is|are|I|I've|we|we've) (?:now |just |successfully |already )*(?:been )?"
+                     r"(uploaded|started|submitted|stopped|saved|stitched|marked|cancell?ed|deleted|launched|queued|recorded"
+                     r"|initiated|begun|kicked off|shut down)\b", re.I)
+# A reply that asks the person where something is stored.
+_ASKS_PATH = re.compile(r"\b(provide|give me|specify|tell me|what is|share)\b[^.?!\n]{0,60}\b(path|folder|directory|location|prefix)\b",
+                        re.I)
+# Calls that act on a cluster: they wait until its administrators' rules have been read.
+_CLUSTER_ACTS = {"start_process", "stop_process", "hpc_configure"}
+_CLUSTER_LOOKS = {"status", "logs", "llm_status"}          # hpc actions that only look
+# The tool behind a thing said to be done (word in the reply -> tool).
+_DOES = {"upload": "upload", "stitch": "stitch", "stop": "stop_process", "shut down": "hpc", "cancel": "cancel_job",
+         "saved": "save_markings", "mark": "mark_plots_auto"}
+# Tools that only look: calling them is not "doing" what the person asked.
+_READ_ONLY = {"read_skill", "skills", "status", "process_runs", "processes", "jobs", "job_detail", "tasks", "browse",
+              "datasets", "entities", "next_step", "markings", "passes", "inference_stats", "stitch_stats", "field_design"}
+# Waiting and polling are meant to be called again with the same arguments.
+_REPEATABLE = {"wait_jobs", "wait_task", "continue_run", "status", "processes", "jobs", "tasks"}
+# A reply that ends by promising an action instead of taking it.
+_ANNOUNCES = re.compile(r"\b(I will now|I'll now|I will next|I'll next|Next,? I will|Next,? I'll|I am now going to|"
+                        r"I'm now going to|Now I will|Now I'll|I will proceed to|I'll proceed to|Let me now|"
+                        r"I'll (?:first )?(?:check|look|start|begin|run|read|get|find|identify|see|verify|list|query)|"
+                        r"I will (?:first )?(?:check|look|start|begin|run|read|get|find|identify|see|verify|list|query)|"
+                        r"Let me (?:first )?(?:check|look|start|begin|run|read|get|find|identify|see|verify|list|query))\b",
+                        re.I)
 
 
 def _loose_json(text: str) -> Optional[dict]:
     """The JSON object at the start of `text`; also accepts unquoted keys
     ({name: "x"}), which is how some models write arguments."""
-    for candidate in (text, _BARE_KEY.sub(r'\1"\2":', text)):
+    # Also read Python's None / True / False where JSON has null / true / false.
+    py = _PY_LITERAL.sub(lambda m: {"None": "null", "True": "true", "False": "false"}[m.group(1)], text)
+    for candidate in (text, py, _BARE_KEY.sub(r'\1"\2":', py)):
         try:
             obj, _ = json.JSONDecoder().raw_decode(candidate)
         except json.JSONDecodeError:
@@ -198,6 +273,23 @@ def _loose_json(text: str) -> Optional[dict]:
         if isinstance(obj, dict):
             return obj
     return None
+
+
+def split_pycall(name: str, args: dict) -> tuple[str, dict]:
+    """A call written the way a programmer would, in the tool's name:
+    `gwas(study="x", trait="yield")` -> ("gwas", {"study": "x", "trait": "yield"})."""
+    if "(" not in name:
+        return name, args
+    import ast
+
+    head, _, rest = name.partition("(")
+    head = head.strip()
+    try:
+        node = ast.parse(f"f({rest.rsplit(')', 1)[0]})", mode="eval").body
+        found = {k.arg: ast.literal_eval(k.value) for k in node.keywords if k.arg}          # type: ignore[attr-defined]
+    except (SyntaxError, ValueError):
+        found = {}
+    return head, {**{k: v for k, v in found.items() if v is not None}, **args}
 
 
 def parse_text_call(text: str) -> Optional[tuple[str, dict]]:
@@ -227,13 +319,30 @@ def parse_text_call(text: str) -> Optional[tuple[str, dict]]:
         if 0 <= a < b:
             candidates.append(text[a:b + 1])
     for c in candidates:
-        try:
-            obj = json.loads(c)
-        except json.JSONDecodeError:
+        obj = _loose_json(c.strip())          # the first object: a reply may hold several calls in a row
+        if not isinstance(obj, dict):
             continue
+        # The same call in the shapes other toolkits use: {"tool": {"hpc": {...}}},
+        # {"name": "hpc", "arguments": {...}}, {"function": "hpc", "parameters": {...}}.
+        if isinstance(obj.get("tool"), dict) and len(obj["tool"]) == 1:
+            (n, a), = obj["tool"].items()
+            if isinstance(n, str) and isinstance(a, dict):
+                return n, a
+        if len(obj) == 1 and "tool" not in obj:
+            (n, a), = obj.items()
+            if isinstance(n, str) and isinstance(a, dict) and (n in TOOLS or n.replace("-", "_") in TOOLS):
+                return n.replace("-", "_") if n not in TOOLS else n, a
+        for nk in ("name", "function", "tool_name"):
+            if "tool" not in obj and isinstance(obj.get(nk), str):
+                a = obj.get("arguments", obj.get("parameters", obj.get("args")))
+                return obj[nk], a if isinstance(a, dict) else {}
         if isinstance(obj, dict) and isinstance(obj.get("tool"), str):
-            args = obj.get("args")
-            return obj["tool"], args if isinstance(args, dict) else {}
+            args = obj.get("args", obj.get("arguments", obj.get("parameters")))
+            if not isinstance(args, dict):
+                # Arguments written beside the tool name instead of under "args":
+                # {"tool": "continue_run", "run": "Davis 2026-08-21"}
+                args = {k: v for k, v in obj.items() if k not in ("tool", "args", "arguments", "parameters")}
+            return obj["tool"], args
     return None
 
 
@@ -275,6 +384,20 @@ class Run:
         self.approve = approve
         self.cancelled = False
         self.steps = 0
+        self._nudged = False
+        self._acted = False                 # a tool that changes something ran since the person last spoke
+        self._last_call, self._repeats = "", 0
+        self._counted = ""                  # the upload whose files were last counted (dry run) for the person
+        self._turn = 0                      # how many times the person has spoken
+        self._counted_turn = -1             # the turn in which that count was shown
+        self._overlay_turn = -1             # the turn in which a boundary preview was last shown
+        self._pairing_turn = -1             # the turn in which a photo-to-plot pairing was last shown
+        self._seen: dict[str, int] = {}     # how often each exact call was made since the person last spoke
+        self._calls = 0                     # tool calls made since the person last spoke
+        self._only_read_skill = False       # ... and every one of them was read_skill
+        self._waits_for_person = (-1, "")   # (turn, run) for which continue_run stopped to ask the person
+        self._shrink = 1.0                  # share of the usual history budget in use (drops when the model's context overflows)
+        self._rules_read: set[str] = set()  # cluster rule sets (site skills) read in this conversation
         self.lock = threading.Lock()
         self.created = time.time()
         if skill:
@@ -350,6 +473,16 @@ class Run:
         if not self.title:
             self.title = text.strip().splitlines()[0][:80]
         self.messages.append({"role": "user", "content": text})
+        self._nudged = False
+        self._acted = False
+        self._last_call, self._repeats = "", 0
+        self._turn += 1
+        from . import tools as _tools
+
+        _tools.TURN_STARTED.set(time.time())
+        self._seen = {}
+        self._calls = 0
+        self._only_read_skill = False
         self.event("user", text=text)
         self._work()
 
@@ -386,7 +519,18 @@ class Run:
                     return
                 self.steps += 1
                 native = self.cfg["tool_mode"] == "native"
-                msg = chat(self.cfg, self._window(), native_tools(self.names) if native else None)
+                try:
+                    msg = chat(self.cfg, self._window(), native_tools(self.names) if native else None)
+                except RuntimeError as e:
+                    if not re.search(r"context (size|length|window)|exceed_context|too many tokens|maximum context", str(e), re.I) \
+                            or self._shrink < 0.2:
+                        raise
+                    # The conversation outgrew the model's context: send less of the older part and go on.
+                    self._shrink *= 0.6
+                    self.event("status", text="the conversation is longer than the model can read at once; older tool "
+                                              "output is being shortened")
+                    self.steps -= 1
+                    continue
                 text = msg.get("content") or ""
                 call: Optional[tuple[str, dict, Optional[str]]] = None
                 if native and msg.get("tool_calls"):
@@ -402,16 +546,72 @@ class Run:
                     if parsed:
                         call = (parsed[0], parsed[1], None)
                     self.messages.append({"role": "assistant", "content": text})
+                if call is None and not self._nudged and _ANNOUNCES.search(text[-400:]):
+                    # Said what it will do next and stopped. Once per turn of the person: ask for the call.
+                    self._nudged = True
+                    self.event("assistant", text=_SPECIAL.sub("", text).strip())
+                    self.messages.append({"role": "user", "content":
+                                          "You said what you will do next but made no tool call. Make that call now. "
+                                          "If everything is already done, say what was done instead."})
+                    continue
+                if call is None and not self._acted and not self._nudged and _CLAIMS.search(text):
+                    # Says something was done, but no tool that does anything ran this turn.
+                    self._nudged = True
+                    self.event("assistant", text=_SPECIAL.sub("", text).strip())
+                    verb = _CLAIMS.search(text).group(1).lower()
+                    tool = next((t for k, t in _DOES.items() if k in verb or k in text.lower()), None)
+                    self.messages.append({"role": "user", "content":
+                                          "No tool that changes anything has run since the person's message, so that has "
+                                          "NOT been done. Make the tool call that does it now"
+                                          + (f" (the tool is `{tool}`: send it with what the person gave you, and it will "
+                                             "say exactly what is missing)" if tool and tool in TOOLS else "")
+                                          + ". If something you need is missing (a label, a file, a choice), ask the "
+                                            "person for exactly that instead."})
+                    continue
+                if call is None and self._only_read_skill and not self._nudged and "?" not in text:
+                    # Read the steps, then neither did the first one nor asked for anything.
+                    self._nudged = True
+                    self.event("assistant", text=_SPECIAL.sub("", text).strip())
+                    self.messages.append({"role": "user", "content":
+                                          "You read the steps but have not done them. Do step 1 now: make its tool call. If "
+                                          "the person has not given something a step needs (a label, a file, a choice), ask "
+                                          "them for exactly that, as a question."})
+                    continue
+                if call is None and self._calls == 0 and not self._nudged and _ASKS_PATH.search(text):
+                    # Asked the person where something is in the app's storage, without looking.
+                    self._nudged = True
+                    self.event("assistant", text=_SPECIAL.sub("", text).strip())
+                    self.messages.append({"role": "user", "content":
+                                          "Do not ask the person for a path inside the app: the tools find data by the "
+                                          "run's name (its site and date). Look first: read_skill for the stage, or "
+                                          "next_step, then make the call. Ask the person only for things only they know."})
+                    continue
                 if call is None:
                     self.event("assistant", text=_SPECIAL.sub("", text).strip())
                     self.status = "waiting"
                     self.save()
                     return
                 name, args, call_id = call
+                name, args = split_pycall(str(name), args)
                 if text and native:
                     self.event("assistant", text=text)
+                if name == "skills":
+                    # The list is already in the instructions; calling for it again is a wasted turn.
+                    self.event("tool", tool=name, args=args, result="(already listed in the instructions)")
+                    self._tool_reply(name, "The skills are listed in your instructions. Do not call skills. "
+                                     "Call read_skill with one of those names, or call the tool you need.", [], call_id)
+                    continue
+                if name not in TOOLS and name.replace("_", "-") in {s["name"] for s in TOOLS["skills"]["fn"]({})["result"]}:
+                    name, args = "read_skill", {"name": name.replace("_", "-")}     # a skill named as if it were a tool
                 if name not in TOOLS:
                     close = [n for n in TOOLS if name in n or n in name][:4]
+                    self._seen["?" + name] = self._seen.get("?" + name, 0) + 1
+                    if self._seen["?" + name] >= 3:
+                        self.event("assistant", text=f"I keep trying a tool that does not exist ({name}). Tell me what "
+                                                     "you would like me to do next.")
+                        self.status = "waiting"
+                        self.save()
+                        return
                     self.event("tool", tool=name, args=args, error="unknown tool")
                     self._tool_reply(name, f"There is no tool named {name!r}."
                                      + (f" Did you mean: {', '.join(close)}?" if close else "")
@@ -426,7 +626,40 @@ class Run:
                     self.messages[0] = {"role": "system", "content": system_prompt(self.cfg, self.names, self.context)}
                 if "track" in TOOLS[name]["schema"]["properties"] and not args.get("track") and self.context.get("track"):
                     args = {**args, "track": self.context["track"]}
+                key = name + " " + json.dumps(args, sort_keys=True, default=str)
                 args, problem = check_args(name, args)
+                if key == self._last_call and (problem or name not in _REPEATABLE):
+                    # The very same call twice in a row: the model is going round in a circle.
+                    self._repeats += 1
+                    self.event("tool", tool=name, args=args, error="repeated call, not run again")
+                    if self._repeats >= 2:
+                        self.event("assistant", text="I kept repeating the same step without getting further "
+                                                     f"({name}). Tell me what you would like me to do next.")
+                        self.status = "waiting"
+                        self.save()
+                        return
+                    first = _first_step_tool(str(args.get("name"))) if name == "read_skill" and not problem else None
+                    if first:
+                        self._tool_reply(name, f"You already have these steps; reading them again changes nothing. Step 1 "
+                                         f"is the tool `{first}`. Call `{first}` now.", [], call_id)
+                        continue
+                    self._tool_reply(name, "You just made this exact call" + (
+                        f" and it was refused: {problem}" if problem else "; its result is above and has not changed.") +
+                        " Do not send it again unchanged. Either make the NEXT call the steps name (a different tool, "
+                        "or different arguments), or answer the person with what you know or ask them what you need.",
+                        [], call_id)
+                    continue
+                self._last_call, self._repeats = key, 0
+                # Going round in a wider circle (A, B, A, B, A): the same call a third time since the
+                # person spoke, for a tool that is not meant to be polled.
+                self._seen[key] = self._seen.get(key, 0) + 1
+                if self._seen[key] >= 3 and name not in ("wait_jobs", "continue_run"):
+                    self.event("tool", tool=name, args=args, error="third identical call this turn, not run")
+                    self.event("assistant", text="I am going round in circles and not getting further "
+                                                 f"(I keep calling {name}). Tell me what you would like me to do next.")
+                    self.status = "waiting"
+                    self.save()
+                    return
                 if problem:
                     self.event("tool", tool=name, args=args, error=problem)
                     self._tool_reply(name, "NOT RUN. " + problem + " Send the call again, corrected.", [], call_id)
@@ -444,12 +677,160 @@ class Run:
                         self.status = "awaiting_approval"
                         self.event("approval_request", tool=name, args=args, reason=reason)
                         return
-                self._execute(name, args, call_id)
+                if name == "run_facts" and isinstance(args.get("set"), dict):
+                    kept, dropped = self._facts_said(args["set"])
+                    if dropped:
+                        args = {**args, "set": kept}
+                        if not kept:
+                            self.event("tool", tool=name, args=args, error="facts the person did not give: " + ", ".join(dropped))
+                            self._tool_reply(name, "NOT RECORDED. The person has not said: " + ", ".join(dropped) + ". Facts "
+                                             "are only what the person told you, not numbers from a tool's result. If you "
+                                             "need one of these, ask the person; otherwise go on with continue_run.",
+                                             [], call_id)
+                            continue
+                unread = self._rules_unread(name, args)
+                if unread:
+                    self.event("tool", tool=name, args=args, error="cluster rules not read yet: " + ", ".join(unread))
+                    self._tool_reply(name, "NOT RUN. This cluster's administrators publish rules for agents that have "
+                                     "not been read in this conversation: " + ", ".join(unread) + ". Read each with "
+                                     "cluster_rules and its name first, then make this call again if the rules allow "
+                                     "it.", [], call_id)
+                    continue
+                if name == "cluster_rules" and args.get("name"):
+                    self._rules_read.add(str(args["name"]))
+                if name == "upload":
+                    invented = self._not_said({k: args.get(k) for k in ("experiment", "site", "population", "date")})
+                    if invented:
+                        self.event("tool", tool=name, args=args, error="labels the person did not give: " + ", ".join(invented))
+                        self._tool_reply(name, "NOT RUN. The person has not said the " + " or the ".join(invented) +
+                                         " of this data (the values you sent are not in anything they wrote; examples in "
+                                         "a skill are not their data). Ask the person for: " + ", ".join(invented) +
+                                         ". Do not guess and do not upload until they answer.", [], call_id)
+                        continue
+                if name == "upload" and not args.get("dry_run"):
+                    # Count first, send second: an upload that was not counted for the person runs as the count.
+                    sig = json.dumps({k: args.get(k) for k in ("paths", "experiment", "site", "population", "date", "data_type",
+                                                              "platform", "sensor")}, sort_keys=True, default=str)
+                    if sig == self._counted and self._counted_turn == self._turn:
+                        self.event("tool", tool=name, args=args, error="waiting for the person to confirm the count")
+                        self._tool_reply(name, "NOT RUN YET. The person has not answered since you counted the files. Tell "
+                                         "them the number of files and where they will be filed, ask them to confirm, and "
+                                         "stop. Send this upload call again after they say yes.", [], call_id)
+                        continue
+                    if sig != self._counted:
+                        self._counted, self._counted_turn = sig, self._turn
+                        self._execute(name, {**args, "dry_run": True}, call_id, note=(
+                            "\n\nNOTHING HAS BEEN UPLOADED YET. This was the count (dry run) that comes first. Tell the "
+                            "person the number of files and where they will be filed, and ask them to confirm. When they "
+                            "do, send this same upload call again: it will then really upload."))
+                        continue
+                elif name == "upload":
+                    self._counted_turn = self._turn
+                    self._counted = json.dumps({k: args.get(k) for k in ("paths", "experiment", "site", "population", "date",
+                                                                         "data_type", "platform", "sensor")},
+                                               sort_keys=True, default=str)
+                if name == "continue_run" and self._waits_for_person == (self._turn, str(args.get("run"))):
+                    self.event("tool", tool=name, args=args, error="waiting for the person's answer")
+                    self._tool_reply(name, "NOT RUN. This run is waiting for the person: continue_run just said what it "
+                                     "needs from them. Ask them that now, as a question, and stop. Call continue_run "
+                                     "again after they answer.", [], call_id)
+                    continue
+                note = ""
+                if name == "continue_run" and args.get("boundaries_confirmed") and self._overlay_turn == self._turn:
+                    args = {**args, "boundaries_confirmed": False}
+                    note = ("\n\nboundaries_confirmed was ignored: the person has not yet answered after seeing the "
+                            "overlay. If this result asks them to look at it, show it, ask, and stop; send "
+                            "boundaries_confirmed true only after they say it is right.")
+                if name == "plots_from_images" and args.get("confirmed") and self._pairing_turn == self._turn:
+                    args = {**args, "confirmed": False}
+                    note = ("\n\n`confirmed` was ignored: the person has not yet answered after seeing the pairing. Show "
+                            "it to them, ask, and stop; send confirmed true only after they say it is right.")
+                self._acted = self._acted or name not in _READ_ONLY
+                self._only_read_skill = name == "read_skill" and (self._calls == 0 or self._only_read_skill)
+                self._calls += 1
+                self._execute(name, args, call_id, note=note)
         except Exception as e:
             self.status = "failed"
             self.event("error", text=f"{type(e).__name__}: {e}")
 
-    def _execute(self, name: str, args: dict, call_id: Optional[str]) -> None:
+    def _rules_unread(self, name: str, args: dict) -> list[str]:
+        """Rule sets of the active cluster not yet read here, when `name` acts on the cluster."""
+        acts = name in _CLUSTER_ACTS or (name == "hpc" and str(args.get("action")) not in _CLUSTER_LOOKS)
+        if not acts:
+            return []
+        try:
+            from .hpc_tools import site_rules
+
+            rows = site_rules()
+        except Exception:
+            return []
+        return [r["name"] for r in rows or [] if r["name"] not in self._rules_read]
+
+    def _person_text(self) -> str:
+        said = " ".join(str(m.get("content")) for m in self.messages[1:]
+                        if m["role"] == "user" and not str(m.get("content")).startswith(("TOOL RESULT", "Skill to follow",
+                                                                                         "Picture(s)", "You ", "No tool", "Do not")))
+        return (said + " " + " ".join(str(v) for v in self.context.values())).lower()
+
+    def _facts_said(self, facts: dict) -> tuple[dict, list[str]]:
+        """(facts the person's own words support, names of the others). Empty values are simply left out."""
+        said = self._person_text()
+        words = {"design_path": ("stand-in", "stand in", "standin", "mock", "made-up", "made up", "placeholder", "no field design",
+                                 "no design"),
+                 "gps_reliable": ("gps",)}
+        kept, dropped = {}, []
+        for k, v in facts.items():
+            if v in (None, "", [], {}):
+                continue
+            text = str(v).strip().lower()
+            if isinstance(v, bool) or text in ("true", "false", "yes", "no"):
+                ok = any(w in said for w in words.get(k, (k.replace("_", " "),)))
+            elif k == "design_path" and re.sub(r"[^a-z]", "", text) in ("standin", "mock", "mockfielddesign", "placeholder"):
+                ok = any(w in said for w in words["design_path"])
+            elif isinstance(v, (int, float)) or re.fullmatch(r"[\d.]+", text):
+                ok = re.search(rf"(?<![\d.]){re.escape(text.rstrip('0').rstrip('.') if '.' in text else text)}(?![\d])", said) is not None
+            elif isinstance(v, list):
+                ok = all(str(x).lower() in said for x in v)
+            else:
+                ok = text in said or text.replace("\\", "/") in said.replace("\\", "/") or \
+                    all(w in said for w in re.split(r"[\s_\-]+", text) if len(w) > 2)
+            if ok:
+                kept[k] = v
+            else:
+                dropped.append(k)
+        return kept, dropped
+
+    def _not_said(self, labels: dict) -> list[str]:
+        """Labels whose value appears nowhere in what the person wrote (or in the
+        context the run was started with). Filing data under a label nobody gave
+        is the one mistake that silently attaches results to the wrong plots."""
+        said = " ".join(str(m.get("content")) for m in self.messages[1:]
+                        if m["role"] == "user" and not str(m.get("content")).startswith(("TOOL RESULT", "Skill to follow",
+                                                                                         "Picture(s)")))
+        said = (said + " " + " ".join(str(v) for v in self.context.values())).lower()
+        months = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+                  "november", "december")
+        out = []
+        for key, value in labels.items():
+            v = str(value or "").strip().lower()
+            if not v:
+                continue                                  # a missing label is the tool's own complaint
+            if key == "date":
+                m = re.match(r"(\d{4})-(\d{2})-(\d{2})$", v)
+                if not m:
+                    continue
+                y, mo, d = m.groups()
+                day = str(int(d))
+                ok = v in said or (y in said and re.search(rf"\b0?{day}(st|nd|rd|th)?\b", said) and (
+                    months[int(mo) - 1] in said or months[int(mo) - 1][:3] in said
+                    or re.search(rf"\b0?{int(mo)}[/.-]", said) or re.search(rf"[/.-]0?{int(mo)}\b", said)))
+                if not ok:
+                    out.append("date")
+            elif v not in said and v.replace("_", " ") not in said and v.replace("-", " ") not in said:
+                out.append(key)
+        return out
+
+    def _execute(self, name: str, args: dict, call_id: Optional[str], note: str = "") -> None:
         if "track" in TOOLS[name]["schema"]["properties"] and not args.get("track") and self.context.get("track"):
             args = {**args, "track": self.context["track"]}
         t = time.time()
@@ -463,6 +844,15 @@ class Run:
                     text += "\n\nTools added to your list for this skill: " + ", ".join(added) + "."
             if len(text) > 12000:
                 text = text[:12000] + f"… [truncated, {len(text)} chars in all; narrow the request]"
+            text += note
+            if name == "continue_run" and ("overlay" in text.lower() or "pairing" in text.lower()) and "needs the person" in text:
+                self._overlay_turn = self._turn
+            if name == "plots_from_images" and "needs the person" in text:
+                self._pairing_turn = self._turn
+            if name == "continue_run" and '"state": "needs the person"' in text:
+                self._waits_for_person = (self._turn, str(args.get("run")))
+            elif name == "run_facts" and args.get("set"):
+                self._waits_for_person = (-1, "")          # answers recorded: the run can go on
             self.event("tool", tool=name, args=args, result=text[:4000], images=images, seconds=round(time.time() - t, 1))
         except Exception as e:
             text, images = f"ERROR {type(e).__name__}: {e}", []
@@ -488,14 +878,32 @@ class Run:
         (they dominate the context), and old tool output is shortened."""
         keep = self.cfg["max_images"]
         out: list[dict] = []
-        budget = 90000
-        for m in reversed(self.messages):
+        # What fits: the model's context, less room for its reply and for the instructions, at about three
+        # characters per token (tool output is JSON, which is token-heavy). `_shrink` drops after a
+        # "context exceeded" reply from the model's server, for the rest of the run.
+        room = (int(self.cfg.get("context_tokens") or 16000) - int(self.cfg["max_tokens"]) - 800) * 2.7
+        budget = int(max(6000, min(90000, room - len(str(self.messages[0].get("content") or "")))) * self._shrink)
+        whole, stubs, dropped = budget, int(budget * 0.15), 0
+        first_user = next((i for i, m in enumerate(self.messages) if m["role"] == "user"), -1)
+        for i in range(len(self.messages) - 1, -1, -1):
+            m = self.messages[i]
             m2 = {k: v for k, v in m.items() if k != "_images"}
             imgs = m.get("_images") or []
             content = m2.get("content")
             if isinstance(content, str) and m["role"] != "system":
-                if budget <= 0 and len(content) > 300:
-                    content = content[:300] + " … [older output shortened]"
+                if budget <= 0:
+                    # Past the budget: a short stub of each older message for a while, then nothing
+                    # (the person's first message always stays: it is the task).
+                    if stubs <= 0 and i != first_user:
+                        dropped += 1
+                        continue
+                    if len(content) > 300:
+                        content = content[:300] + " … [older output shortened]"
+                    stubs -= len(content)
+                elif len(content) > (int(whole * 0.6) if i == len(self.messages) - 1 else max(budget, 1500)):
+                    # The newest result may take most of the room; an older one only what is left.
+                    cut = int(whole * 0.6) if i == len(self.messages) - 1 else max(budget, 1500)
+                    content = content[:cut] + f" … [shortened: {len(content)} characters in all]"
                 budget -= len(content)
             if imgs and keep > 0:
                 use = imgs[:keep]
@@ -508,7 +916,12 @@ class Run:
             else:
                 m2["content"] = content
             out.append(m2)
-        return list(reversed(out))
+        out = list(reversed(out))
+        if dropped:
+            out.insert(1, {"role": "user", "content": f"[{dropped} older messages of this conversation are no longer shown. "
+                                                      "What matters from them is in the run's recorded facts and steps: "
+                                                      "next_step or run_facts show the current state.]"})
+        return out
 
 
 # ── terminal ─────────────────────────────────────────────────────────────────

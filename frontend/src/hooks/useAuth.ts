@@ -7,6 +7,7 @@ import {
   logout as _logout,
   onLogout,
 } from "@/lib/auth"
+import { checkBackend } from "@/lib/connection"
 
 /**
  * Reactive login-state hook. Synchronized with the Logout event dispatched
@@ -57,7 +58,10 @@ const useAuth = () => {
   // instead. Treat any failure of /api/users/me as token-rejection so
   // the _layout's onLogout listener can bounce the user to /login.
   useEffect(() => {
-    if (loggedIn && userError) _logout()
+    if (!loggedIn || !userError) return
+    void checkBackend().then((up) => {
+      if (up) _logout() // the stack answered and refused this session
+    })
   }, [loggedIn, userError])
 
   return {

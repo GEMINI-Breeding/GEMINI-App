@@ -11,6 +11,8 @@ All routes are under /agent/ and need the app's `Authorization: Bearer`
 token (checked against the REST API):
 
     GET  /agent/health                 (no auth)
+    GET  /agent/onboarding             (no auth; this computer only) what this computer can run, and which
+                                       set-up questions (processing, model) are already answered
     GET  /agent/auto_login             (no auth; this computer only) a session for the stack's owner
                                        account, so the app opens without a login screen
     PUT  /agent/auto_login             {require_sign_in: bool}  (administrators)
@@ -28,6 +30,11 @@ token (checked against the REST API):
     GET  /agent/image?path=...         a picture a tool produced
     GET  /agent/next_step?run=<id>     what is due for a Process-tab run (the `next_step` tool)
     GET  /agent/facts/<run id>         what the person has said about a run; PUT {fact: value} to change
+    POST /agent/automark               {run}  mark the run's rover track automatically (as the agent would)
+    GET  /agent/model_setup            open models to choose from, and the setup in flight (steps, estimates)
+    POST /agent/model_setup/local      {model}          download with Ollama on this computer and use it
+    POST /agent/model_setup/cluster/plan {ssh?}         survey a cluster: where the model would run
+    POST /agent/model_setup/cluster    {model, plan}    install, start on a GPU, connect
     GET  /agent/compute                what runs on the cluster: core, workers, model
     POST /agent/compute/start          {name, where?}   (administrators)
     POST /agent/compute/stop           {name}
@@ -73,31 +80,57 @@ def _require_sign_in() -> bool:
 
 
 def _owner_token() -> str:
-    """Sign in as the stack's own account: the one in agent/.env, else the
+    """Sign in as the stack's own account. Which stack answers can change under a
+    running app (a tunnel to the cluster one day, Docker on this computer the
+    next), so each known account is tried in turn: the one in agent/.env, the
+    first account of a stack run from this checkout with Docker, and the
     cluster stack's first account (read through the gate)."""
     import os
+    import urllib.error
     import urllib.request
 
+    from .client import AGENT_DIR
+
     c = Client()
-    email, password = os.environ.get("GEMI_EMAIL"), os.environ.get("GEMI_PASSWORD")
-    if not email or not password:
+
+    def attempt(email: Optional[str], password: Optional[str]) -> Optional[str]:
+        if not email or not password:
+            return None
+        req = urllib.request.Request(c.base + "/api/users/login/access-token",
+                                     data=json.dumps({"email": email, "password": password}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)["access_token"]
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 401, 403, 404, 422):
+                return None                         # not this stack's account: try the next
+            raise HttpError(502, f"could not sign in to the stack: HTTP {e.code}") from None
+        except Exception as e:
+            raise HttpError(502, f"could not sign in to the stack: {type(e).__name__}") from None
+
+    token = attempt(os.environ.get("GEMI_EMAIL"), os.environ.get("GEMI_PASSWORD"))
+    if token is None and any(h in c.base for h in ("127.0.0.1", "localhost")):
+        env = AGENT_DIR.parent / "backend" / "gemini" / "pipeline" / ".env"
+        if env.exists():
+            kv = dict(line.split("=", 1) for line in env.read_text(encoding="utf-8", errors="replace").splitlines()
+                      if "=" in line and not line.lstrip().startswith("#"))
+            clean = {k.strip(): v.strip().strip("'\"") for k, v in kv.items()}
+            token = attempt(clean.get("GEMINI_FIRST_SUPERUSER_EMAIL"), clean.get("GEMINI_FIRST_SUPERUSER_PASSWORD"))
+    if token is None:
         from .hpc_tools import _gemi_hpc, _kv, active_cluster
 
         cluster = active_cluster()
-        if not cluster:
-            raise HttpError(404, "no account is configured for signing in automatically")
-        login = _kv(_gemi_hpc(["login"], cluster, timeout=60))
-        email, password = login.get("GEMINI_FIRST_SUPERUSER_EMAIL"), login.get("GEMINI_FIRST_SUPERUSER_PASSWORD")
-        if not email or not password:
-            raise HttpError(404, "the cluster stack has no account to sign in with")
-    req = urllib.request.Request(c.base + "/api/users/login/access-token",
-                                 data=json.dumps({"email": email, "password": password}).encode(),
-                                 headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r)["access_token"]
-    except Exception as e:
-        raise HttpError(502, f"could not sign in to the stack: {type(e).__name__}") from None
+        if cluster:
+            try:
+                login = _kv(_gemi_hpc(["login"], cluster, timeout=30))
+            except Exception:
+                login = {}
+            token = attempt(login.get("GEMINI_FIRST_SUPERUSER_EMAIL"), login.get("GEMINI_FIRST_SUPERUSER_PASSWORD"))
+    if token is None:
+        raise HttpError(404, "no account that this stack accepts is configured for signing in automatically "
+                             "(set GEMI_EMAIL and GEMI_PASSWORD in agent/.env, or sign in under Settings)")
+    return token
 
 
 SETUP_USER = {"email": "local-setup", "is_superuser": True, "setup": True}
@@ -229,6 +262,14 @@ class Handler(BaseHTTPRequestHandler):
                 up = _api_up()
                 return self._send(200, {"mode": "ready" if up else "setup", "stack_reachable": up,
                                         "cluster": active_cluster(), "require_sign_in": _require_sign_in()})
+            if route == ["onboarding"] and method == "GET":
+                # For the first-open walkthrough: what this computer can run and which set-up
+                # questions are answered. Read-only facts about this computer, so this computer only.
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    raise HttpError(403, "only available on the computer running the app")
+                from . import onboarding
+
+                return self._send(200, onboarding.overview(_api_up()))
             if route == ["auto_login"] and method == "GET":
                 # Hands out the owner's session, so: this computer only (also by Host
                 # header, against DNS rebinding), and never when sign-in is required.
@@ -292,6 +333,27 @@ class Handler(BaseHTTPRequestHandler):
                         "note": "No processing stack is connected yet."}
             use_client(Client(token=token))
             return TOOLS["status"]["fn"]({})["result"]
+        if route[:1] == ["model_setup"]:
+            # Setting the agent's model up without an agent: an administrator's (or, before any
+            # stack exists, this computer's) click in the app is the consent for each of these.
+            from . import model_setup
+
+            if route == ["model_setup"] and method == "GET":
+                return model_setup.overview()
+            if not user.get("is_superuser"):
+                raise HttpError(403, "only an administrator can set the agent's model up")
+            body = self._body()
+            try:
+                if route == ["model_setup", "local"] and method == "POST":
+                    model_setup.start_local(str(body.get("model")))
+                    return model_setup.overview()
+                if route == ["model_setup", "cluster", "plan"] and method == "POST":
+                    return model_setup.cluster_plan(body.get("ssh") or None)
+                if route == ["model_setup", "cluster"] and method == "POST":
+                    model_setup.start_cluster(str(body.get("model")), dict(body.get("plan") or {}))
+                    return model_setup.overview()
+            except (KeyError, ValueError, RuntimeError) as e:
+                raise HttpError(400, str(e)) from None
         if route[:1] == ["compute"]:
             from . import compute
 
@@ -317,6 +379,21 @@ class Handler(BaseHTTPRequestHandler):
         if route == ["next_step"] and method == "GET" and not user.get("setup"):
             use_client(Client(token=token))
             return TOOLS["next_step"]["fn"]({"run": (query.get("run") or [""])[0]})["result"]
+        if route == ["automark"] and method == "POST" and not user.get("setup"):
+            # The Plot Marking screen's "Mark automatically": the same call the
+            # agent would make for this run (with the facts recorded for it),
+            # made directly. Saves when no pass needs a look.
+            use_client(Client(token=token))
+            body = self._body()
+            row = (TOOLS["next_step"]["fn"]({"run": str(body.get("run") or "")})["result"].get("runs") or [None])[0]
+            do = (row or {}).get("do") or {}
+            if do.get("tool") != "mark_plots_auto":
+                raise HttpError(409, "this run's plot marking is not due, or its rover track is not found"
+                                + (f" (next: {row.get('step')})" if row else ""))
+            try:
+                return TOOLS["mark_plots_auto"]["fn"]({**do["args"], "save": True})["result"]
+            except (ValueError, RuntimeError) as e:
+                raise HttpError(400, str(e)) from None
         if len(route) == 2 and route[0] == "facts" and not user.get("setup"):
             from . import guide
 

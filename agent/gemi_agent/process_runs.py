@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from .client import ApiError, Client
 
-WORKSPACE_NAME = "Agent runs"
+LEGACY_WORKSPACE = "Agent runs"   # where earlier versions put every agent run; `regroup` empties it
 GROUND_STEPS = ("data_sync", "plot_marking", "stitching", "plot_boundary_prep", "associate_boundaries", "inference")
 AERIAL_STEPS = ("data_sync", "image_review", "gcp_selection", "orthomosaic", "plot_boundary_prep",
                 "split_orthomosaic", "trait_extraction", "inference")
@@ -56,8 +56,67 @@ def scope_from_path(path: str) -> Optional[dict]:
     return scope
 
 
+# Ground: rovers, and cameras carried or set up at ground level. Aerial: cameras and sensors on a UAV.
+GROUND_PLATFORMS = ("amiga", "rover", "monopod", "ground", "handheld", "hand-held", "phone", "camera", "tripod", "pole",
+                    "cart", "walk", "manual", "plot photos")
+
+
 def pipeline_type(scope: dict) -> str:
-    return "ground" if scope.get("platform", "").lower() in ("amiga", "rover", "monopod", "ground") else "aerial"
+    p = str(scope.get("platform") or "").lower()
+    return "ground" if p in GROUND_PLATFORMS or any(w in p for w in ("handheld", "hand-held", "phone", "rover")) else "aerial"
+
+
+# -- inference model entries --------------------------------------------------
+# A pipeline's models live in params.roboflow_models (the key predates the
+# other sources). Each entry mirrors frontend lib/inferenceModels.ts: label,
+# source, task_type and the source's own fields. A provider the app does not
+# know yet keeps its settings under `extra`, passed to the worker unchanged,
+# so a new source needs no change here or in the app to be listed and re-run.
+_MODEL_FIELDS = {
+    "huggingface": {"hf_model_id": "hf_model_id", "hf_mode": "hf_mode", "hf_token": "hf_token",
+                    "hf_zero_shot": "hf_zero_shot", "hf_prompt": "hf_prompt"},
+    "roboflow": {"model_id": "roboflow_model_id", "api_key": "roboflow_api_key"},
+    "local_weights": {"weights_path": "weights_path"},
+}
+_JOB_ONLY = {"image_path", "images_prefix", "output_predictions_path", "count_label", "confidence_threshold",
+             "iou_threshold", "boundaries", "source", "task_type", "model_source", "per_plot"}
+
+
+def model_entry(params: dict) -> Optional[dict]:
+    """The pipeline entry for the model a LOCATE_PLANTS job's parameters name."""
+    source = str(params.get("source") or params.get("model_source") or "").strip()
+    if not source:
+        return None
+    entry: dict[str, Any] = {"label": str(params.get("count_label") or ""), "source": source,
+                             "task_type": str(params.get("task_type") or "detection")}
+    fields = _MODEL_FIELDS.get(source)
+    if fields is None:
+        extra = {k: v for k, v in params.items() if k not in _JOB_ONLY}
+        if not extra:
+            return None
+        entry["extra"] = extra
+    else:
+        for k, target in fields.items():
+            if params.get(k) not in (None, ""):
+                entry[target] = params[k]
+        if source == "local_weights":
+            entry["weights_name"] = str(params.get("weights_path") or "").rsplit("/", 1)[-1]
+        if source == "roboflow" and params.get("api_url"):
+            entry["extra"] = {"api_url": params["api_url"]}
+        if not any(entry.get(t) for t in fields.values()):
+            return None
+    return entry
+
+
+def model_identity(entry: dict) -> tuple:
+    """Source and model: two entries naming the same model are one."""
+    source = entry.get("source")
+    key = (entry.get("hf_model_id") if source == "huggingface" else
+           entry.get("roboflow_model_id") if source == "roboflow" else
+           entry.get("weights_path") if source == "local_weights" else
+           tuple(sorted((k, str(v)) for k, v in (entry.get("extra") or {}).items() if "key" not in k and "token" not in k)))
+    prompt = entry.get("hf_prompt") if entry.get("hf_zero_shot") else None
+    return source, key, prompt
 
 
 class ProcessRuns:
@@ -82,42 +141,121 @@ class ProcessRuns:
         matches = [r for r in st["runs"]
                    if types.get(r.get("pipelineId")) == kind
                    and {k: (r.get("uploadScope") or {}).get(k) for k in SCOPE_KEYS} == want]
+        new = set(scope.get("datasetShortIds") or [])
+        label = str(scope.get("batchLabel") or "")
+        # The run that already holds this batch, whichever it is.
+        owning = [r for r in matches if new and new & set((r.get("uploadScope") or {}).get("datasetShortIds") or [])]
+        if owning:
+            return max(owning, key=lambda r: r.get("updatedAt") or "")
+        # Otherwise a labelled batch (a run of the day, a treatment) only joins a run with the same label;
+        # each label is processed on its own. Unlabelled batches at one scope pool into one run, as before.
+        matches = [r for r in matches if str((r.get("uploadScope") or {}).get("batchLabel") or "") == label]
         if matches:
             run = max(matches, key=lambda r: r.get("updatedAt") or "")
             ids = set((run.get("uploadScope") or {}).get("datasetShortIds") or [])
-            new = set(scope.get("datasetShortIds") or [])
             if ids and new and not new <= ids:        # another upload batch joined this scope
                 run["uploadScope"]["datasetShortIds"] = sorted(ids | new)
                 self._save(run)
             return run
-        ws = next((w for w in st["workspaces"] if w.get("name") == WORKSPACE_NAME), None)
-        if ws is None:
-            ws = {"id": str(uuid.uuid4()), "name": WORKSPACE_NAME,
-                  "description": "Runs started by the agent. Open one to follow or continue it step by step.",
-                  "createdAt": _now()}
-            self._put("workspace", ws)
-        name = f"{'Ground' if kind == 'ground' else 'Aerial'} (agent)"
-        pipe = next((p for p in st["pipelines"]
-                     if p.get("workspaceId") == ws["id"] and p.get("type") == kind and p.get("name") == name), None)
-        if pipe is None:
-            pipe = {"id": str(uuid.uuid4()), "workspaceId": ws["id"], "name": name, "type": kind,
-                    "params": PIPELINE_PARAMS[kind], "createdAt": _now()}
-            self._put("pipeline", pipe)
+        ws = self._workspace_for(st, scope)
+        pipe = self._pipeline_for(st, ws, kind, scope)
         upload_scope = {**want}
         if scope.get("datasetShortIds"):
             upload_scope["datasetShortIds"] = list(scope["datasetShortIds"])
+        if label:
+            upload_scope["batchLabel"] = label
         exp = next((e for e in self.client.entities("experiments")
                     if e.get("experiment_name") == scope.get("experiment")), None)
         if exp:
             upload_scope["experimentId"] = str(exp["id"])
         run = {"id": str(uuid.uuid4()), "pipelineId": pipe["id"], "workspaceId": ws["id"],
-               "name": f"{scope.get('date')} · {scope.get('platform')}/{scope.get('sensor')}",
+               "name": f"{scope.get('date')} · {scope.get('platform')}/{scope.get('sensor')}" + (f" · {label}" if label else ""),
                "createdBy": "agent",
                "scope": {"experimentId": upload_scope.get("experimentId"), "seasonId": None, "siteId": None,
                          "populationId": None},
                "uploadScope": upload_scope, "status": "draft", "steps": {}, "createdAt": _now(), "updatedAt": _now()}
         self._put("run", run)
         return run
+
+    # -- where a person would file it ---------------------------------------
+    @staticmethod
+    def _norm(text: Any) -> str:
+        return " ".join(str(text or "").lower().replace("_", " ").replace("-", " ").split())
+
+    def _workspace_for(self, st: dict, scope: dict) -> dict:
+        """The workspace this experiment's runs live in: the one already holding
+        most runs of the experiment, else one named after it, else a new one
+        named after it. Never the legacy all-agent workspace."""
+        exp = self._norm(scope.get("experiment"))
+        spaces = [w for w in st["workspaces"] if w.get("name") != LEGACY_WORKSPACE]
+        held: dict[str, int] = {}
+        for r in st["runs"]:
+            if self._norm((r.get("uploadScope") or {}).get("experiment")) == exp:
+                held[r.get("workspaceId")] = held.get(r.get("workspaceId"), 0) + 1
+        found = max((w for w in spaces if held.get(w["id"])), key=lambda w: held[w["id"]], default=None)
+        found = found or next((w for w in spaces if self._norm(w.get("name")) == exp), None)
+        if found:
+            return found
+        ws = {"id": str(uuid.uuid4()), "name": str(scope.get("experiment") or "Unnamed experiment"),
+              "description": f"Experiment {scope.get('experiment')}", "createdAt": _now()}
+        self._put("workspace", ws)
+        st["workspaces"].append(ws)
+        return ws
+
+    def _pipeline_for(self, st: dict, ws: dict, kind: str, scope: dict,
+                      params: Optional[dict] = None) -> dict:
+        """A pipeline of this type in the workspace, preferring one whose runs
+        share this platform and sensor (same settings); else a new one."""
+        pipes = [p for p in st["pipelines"] if p.get("workspaceId") == ws["id"] and p.get("type") == kind]
+        kit = (self._norm(scope.get("platform")), self._norm(scope.get("sensor")))
+
+        def same_kit(p: dict) -> int:
+            return sum(1 for r in st["runs"] if r.get("pipelineId") == p["id"] and
+                       (self._norm((r.get("uploadScope") or {}).get("platform")),
+                        self._norm((r.get("uploadScope") or {}).get("sensor"))) == kit)
+        if pipes:
+            return max(pipes, key=same_kit)
+        name = f"{'Ground' if kind == 'ground' else 'Aerial'} · {scope.get('platform')}/{scope.get('sensor')}"
+        pipe = {"id": str(uuid.uuid4()), "workspaceId": ws["id"], "name": name, "type": kind,
+                "params": params or PIPELINE_PARAMS[kind], "createdAt": _now()}
+        self._put("pipeline", pipe)
+        st["pipelines"].append(pipe)
+        return pipe
+
+    def regroup(self, dry_run: bool = False) -> list[dict]:
+        """Move runs out of the legacy "Agent runs" workspace into their
+        experiment's workspace (keeping their pipeline settings when the
+        workspace has no pipeline of that type yet), then remove the legacy
+        workspace and its pipelines once empty. Jobs and data are untouched:
+        only the Process tab's folders change."""
+        st = self.state()
+        legacy = [w for w in st["workspaces"] if w.get("name") == LEGACY_WORKSPACE]
+        if not legacy:
+            return []
+        ids = {w["id"] for w in legacy}
+        old_pipes = {p["id"]: p for p in st["pipelines"] if p.get("workspaceId") in ids}
+        moved = []
+        for run in [r for r in st["runs"] if r.get("workspaceId") in ids]:
+            scope = run.get("uploadScope") or {}
+            old = old_pipes.get(run.get("pipelineId")) or {}
+            kind = old.get("type") or pipeline_type(scope)
+            ws = self._workspace_for(st, scope) if not dry_run else {"id": "?", "name": scope.get("experiment")}
+            pipe = (self._pipeline_for(st, ws, kind, scope, old.get("params")) if not dry_run
+                    else {"id": "?", "name": f"{kind} pipeline"})
+            moved.append({"run": run.get("name"), "to_workspace": ws.get("name"), "to_pipeline": pipe.get("name")})
+            if dry_run:
+                continue
+            run.update(workspaceId=ws["id"], pipelineId=pipe["id"], createdBy="agent")
+            self._put("run", run)
+        if not dry_run:
+            left = self.state()
+            for p in old_pipes:
+                if not any(r.get("pipelineId") == p for r in left["runs"]):
+                    self.client.request("DELETE", f"/api/process_state/pipeline/{p}")
+            for w in ids:
+                if not any(r.get("workspaceId") == w for r in left["runs"]):
+                    self.client.request("DELETE", f"/api/process_state/workspace/{w}")
+        return moved
 
     def _save(self, run: dict) -> None:
         run["updatedAt"] = _now()
@@ -168,7 +306,41 @@ class ProcessRuns:
         step = JOB_STEP.get(str(job.get("job_type")))
         if step:
             self.set_step(run, step, "running", job_id=str(job.get("id")))
+        if str(job.get("job_type")) == "LOCATE_PLANTS":
+            self.register_model(run, job.get("parameters") or {})
         return self.describe(run)
+
+    # -- inference models on the run's pipeline ------------------------------
+    def register_model(self, run: dict, params: dict) -> Optional[dict]:
+        """Add the model a LOCATE_PLANTS job ran to the run's pipeline, so the
+        Inference tool lists it and a person can run it again. Already listed
+        (same source and model) is left alone."""
+        entry = model_entry(params)
+        if entry is None:
+            return None
+        pipe = next((p for p in self.state()["pipelines"] if p["id"] == run.get("pipelineId")), None)
+        if pipe is None:
+            return None
+        params_ = dict(pipe.get("params") or {})
+        models = list(params_.get("roboflow_models") or [])
+        if any(model_identity(m) == model_identity(entry) for m in models):
+            return None
+        params_["roboflow_models"] = [*models, entry]
+        self._put("pipeline", {**pipe, "params": params_})
+        return entry
+
+    def register_models_from_jobs(self, run: dict) -> list[dict]:
+        """Backfill: every model this run's inference jobs used."""
+        added = []
+        for jid in (run.get("steps", {}).get("inference") or {}).get("jobIds") or []:
+            try:
+                job = self.client.job(jid)
+            except ApiError:
+                continue
+            got = self.register_model(run, job.get("parameters") or {})
+            if got:
+                added.append(got)
+        return added
 
     def settle(self) -> list[dict]:
         """Bring every running step up to date with its jobs. The Process page
@@ -223,6 +395,7 @@ class ProcessRuns:
         steps = {k: (run["steps"].get(k) or {}).get("status", "pending") for k in order}
         nxt = next((k for k in order if steps[k] not in ("completed", "skipped") and k not in OPTIONAL_STEPS), None)
         return {"run_id": run["id"], "name": run.get("name"), "pipeline": kind,
+                "batch_label": (run.get("uploadScope") or {}).get("batchLabel"),
                 "scope": {k: (run.get("uploadScope") or {}).get(k) for k in SCOPE_KEYS},
                 "steps": steps, "current_step": nxt,
                 "open_in_app": f"/process/{run['workspaceId']}/run/{run['id']}"}

@@ -28,7 +28,13 @@ import { PasswordInput } from "@/components/ui/password-input"
 import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { login } from "@/lib/auth"
-import { autoSignIn, clearSignedOut, signInRequired } from "@/lib/autoSignIn"
+import {
+  autoSignIn,
+  clearSignedOut,
+  markManualSignIn,
+  signInRequired,
+} from "@/lib/autoSignIn"
+import { checkBackend } from "@/lib/connection"
 
 const formSchema = z.object({
   username: z.email(),
@@ -45,6 +51,7 @@ export const Route = createFileRoute("/login")({
     if (isLoggedIn() || (await autoSignIn())) {
       throw redirect({ to: "/" })
     }
+    if (!(await checkBackend())) throw redirect({ to: "/" })
   },
   head: () => ({
     meta: [{ title: "Log In — GEMINI" }],
@@ -121,6 +128,7 @@ function Login() {
     onSuccess: async () => {
       setLoginError(null)
       clearSignedOut()
+      markManualSignIn()
       await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
       navigate({ to: "/" })
     },

@@ -653,7 +653,11 @@ def gap_boundaries(pano: Panorama, bands: list[tuple[float, float]] | None = Non
     for b0, b1 in bands or [(0.0, 1.0)]:
         prof = np.maximum(prof, green[int(h * b0): int(h * b1)].mean(axis=0)[: pano.total])
     sm = np.convolve(np.pad(prof, 30, mode="edge"), np.ones(61) / 61, mode="valid")
-    on = sm > 0.12
+    # What counts as "plants here" follows the crop: a closed canopy covers most
+    # of the row, seedlings a few percent of it. The level is set from the bed's
+    # own greenest stretches, never above the fixed level used for full canopy.
+    level = float(min(0.12, max(0.008, 0.35 * np.percentile(sm, 90))))
+    on = sm > level
     runs, s = [], None
     for i, v in enumerate(list(on) + [False]):
         if v and s is None:
@@ -671,7 +675,9 @@ def gap_boundaries(pano: Panorama, bands: list[tuple[float, float]] | None = Non
     plot_len = float(np.median([b - a_ for a_, b in long_runs]))
     starts = np.array([r[0] for r in long_runs], dtype=np.float32)
     steps = np.diff(starts)
-    steps = steps[(steps > plot_len) & (steps < 1.6 * plot_len)]
+    # Start-to-start distance of neighbouring plots. The alley can be nearly as
+    # long as the planted part (seedling trials planted on part of each plot).
+    steps = steps[(steps > plot_len) & (steps < 2.3 * plot_len)]
     pitch = float(np.median(steps)) if len(steps) else plot_len * 1.15
     gap = max(40.0, pitch - plot_len)
     # Emptiness: mean canopy over a window as wide as an alley.
@@ -691,7 +697,7 @@ def gap_boundaries(pano: Panorama, bands: list[tuple[float, float]] | None = Non
         if hi <= lo:
             break
         j = lo + int(np.argmin(empty[lo:hi + 1]))
-        clear = empty[j] < 0.08                    # a real alley, not just the thinnest canopy
+        clear = empty[j] < level * 0.67            # a real alley, not just the thinnest canopy
         x = float(j if clear else exp)
         out.append({"x": int(min(x, pano.total - 1)), "inferred": not clear})
     return out

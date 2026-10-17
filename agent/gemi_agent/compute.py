@@ -52,7 +52,7 @@ _last: dict[str, dict] = {}        # part -> outcome of its last action (shown o
 # ── preferences ──────────────────────────────────────────────────────────────
 
 def prefs() -> dict:
-    p = {"auto_start": True, "idle_stop_minutes": 60, "where": {}}
+    p = {"auto_start": True, "idle_stop_minutes": 20, "where": {}}
     if PREFS.exists():
         try:
             p.update(json.loads(PREFS.read_text()))
@@ -349,7 +349,14 @@ def ensure_worker(job_type: str) -> Optional[dict]:
     if name is None or not active_cluster():
         return None
     try:
-        row = next(p for p in overview(with_jobs=False)["parts"] if p["name"] == name)
+        parts = overview(with_jobs=False)["parts"]
+        core = next((p for p in parts if p["name"] == "core"), None)
+        if core is None or core["state"] != "running":
+            # A cluster is configured, but the stack this job went to is not running there (Docker on
+            # this computer, say): its own workers take the job. Starting a cluster worker would hold a
+            # cluster slot for a job it can never see.
+            return None
+        row = next(p for p in parts if p["name"] == name)
         if row["state"] in ("running", "starting", "queued") or row["busy"]:
             note = {"worker": name, "state": "starting" if row["busy"] else row["state"]}
             if note["state"] != "running":
@@ -383,7 +390,14 @@ def processes(args: dict) -> dict:
         row["handles"] = p["job_types"] or p["does"]
         rows.append(row)
     need = [p["name"] for p in ov["parts"] if p["jobs_waiting"] and p["state"] == "stopped"]
+    # Workers that hold a cluster slot and have nothing to do. The core and the agent's own
+    # model are not workers: they are what the session and this conversation run on.
+    idle = [p["name"] for p in ov["parts"] if p["name"] in WORKERS and p["state"] == "running"
+            and not p["jobs_running"] and not p["jobs_waiting"]]
     return {"result": {"cluster": ov["cluster"], "processes": rows, "error": ov["error"],
+                       "idle_workers": idle,
+                       "not_workers": "core is the session itself (ended only with hpc down); llm is the agent's own model",
+                       "next": "this lists workers only. For where each pipeline run stands and its next step: process_runs",
                        "starts_workers_automatically": ov["auto_start"],
                        "needs_starting": need or None}}
 
@@ -407,6 +421,8 @@ def stop_process(args: dict) -> dict:
     row = next(p for p in overview(fresh=True)["parts"] if p["name"] == name) if name in WORKERS or name == "llm" else None
     if row is None:
         raise ValueError(f"name must be one of {', '.join(WORKERS)}, llm")
+    if row["state"] == "stopped":
+        return {"result": {"name": name, "stopped": True, "note": f"{name} was not running; nothing was done"}}
     if row["jobs_running"] and not args.get("force"):
         raise RuntimeError(f"{name} is working on {row['jobs_running']} job(s); stopping it now interrupts them. "
                            "Ask the person, then repeat with force=true.")

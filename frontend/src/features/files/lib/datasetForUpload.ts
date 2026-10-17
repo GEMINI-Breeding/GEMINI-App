@@ -30,6 +30,14 @@ export type CreateOrGetDatasetArgs = {
    * name in the metadata step is preserved.
    */
   explicitName?: string
+  /**
+   * Extra facts about this batch stored on the dataset: which run of
+   * the day it is, its treatment, and the scope it was uploaded under
+   * (see `lib/uploadGroups.batchInfo`).
+   */
+  info?: Record<string, string>
+  /** Appended to the auto-name so batches can be told apart in lists. */
+  nameSuffix?: string
 }
 
 function dataTypeSlug(label: string): string {
@@ -115,7 +123,8 @@ export async function createOrGetDatasetForUpload(
 ): Promise<CreateOrGetDatasetResult> {
   const datasetName =
     args.explicitName?.trim() ||
-    autoDatasetName(args.experimentName, args.dataTypeLabel)
+    autoDatasetName(args.experimentName, args.dataTypeLabel) +
+      (args.nameSuffix ? `__${args.nameSuffix}` : "")
   // The path here is informational only — the backend stores it in
   // `dataset_info` for later reference; the actual files land at
   // whatever path the chunked-upload caller picks.
@@ -129,6 +138,7 @@ export async function createOrGetDatasetForUpload(
           files_prefix: `gemini/${filesPrefix}`,
           bucket: "gemini",
           data_type_label: args.dataTypeLabel,
+          ...(args.info ?? {}),
         },
       },
     })) as DatasetOutput

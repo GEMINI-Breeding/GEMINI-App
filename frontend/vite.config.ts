@@ -41,6 +41,15 @@ export default defineConfig({
     // The Rust shell's build output (src-tauri/target) is thousands of
     // files that change on every cargo build; none are app sources.
     watch: { ignored: ["**/src-tauri/**"] },
+    // Transform the pages at start-up, not on the first click: otherwise the
+    // first visit to each sidebar tab waits while its modules are compiled,
+    // and the click looks as if it did nothing.
+    warmup: {
+      clientFiles: [
+        "./src/routes/**/*.tsx",
+        "./src/features/*/pages/*.tsx",
+      ],
+    },
     fs: {
       // Allow serving from anywhere the workspace can resolve files
       // from. In the worktree dev setup, frontend/node_modules is a

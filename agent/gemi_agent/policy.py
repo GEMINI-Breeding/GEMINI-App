@@ -66,7 +66,7 @@ def tool_approval(name: str, args: Optional[dict] = None) -> Optional[str]:
 
 # ── shell commands (for a harness with a shell, e.g. Claude Code) ────────────
 
-GEMI_HPC_FREE = {"status", "ps", "logs", "doctor", "help"}
+GEMI_HPC_FREE = {"status", "ps", "logs", "doctor", "help", "site-skills"}
 GEMI_HPC_ASK = {"sync", "pull", "up", "worker", "stop", "down", "app", "tunnel", "login", "llm"}
 _ENV = r"(?:[A-Z_][A-Z0-9_]*=[^\s;&|<>`$()]*\s+)*"
 _GEMI_HPC = re.compile(
@@ -90,9 +90,14 @@ def _cli_args(text: str) -> dict:
     return out
 
 
-def shell_decision(command: str, host: Optional[str] = None) -> Optional[tuple[str, str]]:
+def shell_decision(command: str, host: Optional[str] = None,
+                   site_rules: Optional[list[str]] = None) -> Optional[tuple[str, str]]:
     """("allow" | "ask" | "deny", reason) for a shell command that touches the
-    cluster; None for commands this policy has nothing to say about."""
+    cluster; None for commands this policy has nothing to say about.
+
+    `site_rules` names the rules the cluster's administrators publish for agents
+    (skills the site publishes). When there are some, those rules govern: raw
+    remote and Slurm commands ask the person instead of being denied."""
     m = _GEMI_HPC.match(command)
     if m:
         sub = m.group("sub") or "help"
@@ -112,6 +117,9 @@ def shell_decision(command: str, host: Optional[str] = None) -> Optional[tuple[s
         if why:
             return "ask", f"{m.group('tool')}: {why}"
         return None
+    if site_rules and (_REMOTE.search(command) or (host and host in command) or _SLURM.search(command)):
+        return "ask", ("raw cluster command; this cluster publishes its own rules for agents (" +
+                       ", ".join(site_rules) + "), which govern it instead of the gate")
     if _REMOTE.search(command) or (host and host in command):
         return "deny", DENY_REMOTE
     # A gated command inside something longer (a pipe, a chain, a loop) cannot be

@@ -7,19 +7,17 @@ description: Run the ground (rover) pipeline end to end — upload .bin logs, ex
 
 ## Quick path
 
-1. `continue_run` with `run` naming the rover run — it stitches, files plots and stops where it needs you or the person.
-2. It stops at **Plot marking**: `read_skill` `ground-plot-marking` and work it pass by pass.
-3. It stops at **Plot boundaries**: ask for the field design file and whether GPS can be trusted; record with `run_facts`; `continue_run` again.
-4. GPS not trustworthy: follow "From the driving pattern" below (`traversal_layout` first).
-
-Rover (Amiga) logs become one stitched image per plot. Steps, in order:
+1. `continue_run` with `run` naming the rover run. It does the steps it can and stops where it needs you or the person.
+2. It stops at **Plot marking**: `read_skill` `ground-plot-marking` (one call, `mark_plots_auto`, marks the whole track).
+3. It stops at **Plot boundaries**: ask for the field design file and whether GPS can be trusted; record the answers with `run_facts` (no design yet: `design_path` = `stand-in`); `continue_run` again.
+4. GPS not trustworthy, or marking recommended `single frames` / `mixed`: follow "From the driving pattern" below (`traversal_layout` first). `continue_run` says so itself.
 
 | # | Step | How | Done when |
 |---|---|---|---|
 | 1 | Upload `.bin` logs | skill `upload-data`, `data_type: amiga_bin` | upload task `completed` |
 | 2 | Extraction | automatic, one EXTRACT_BINARY job per file | all jobs COMPLETED |
 | 3 | Plot marking | skill `ground-plot-marking` | markings saved, no problems |
-| 4 | Stitching | skill `ground-stitching` | manifest: all plots succeeded |
+| 4 | Stitching (only plots longer than one camera frame) | skill `ground-stitching` | manifest: all plots succeeded |
 | 5 | (optional) inference on the mosaics | skill `inference` | predictions written |
 
 Never skip ahead: each step needs the previous one's output.
@@ -54,9 +52,13 @@ one crop row or two.
 3. `traversal_boundaries` (nominal `plot_length_m`, `bed_width_m`) saves
    schematic boundaries so results can be shown per plot.
 4. `stitch_units` — with two rows per pass, the top and bottom halves of
-   the frame are stitched as separate plots (two jobs).
-5. When the stitch jobs have finished: `place_plot_images`, then inference
-   on `…/PlotImages/` with `per_plot: true`.
+   the frame are stitched as separate plots (two jobs). Plots whose plants
+   fit one camera frame are left out; when that is all of them it starts no
+   job and says so.
+5. When the stitch jobs (if any) have finished: `place_plot_images`. A
+   single-frame plot gets the raw frame that shows it whole, cut to the plot;
+   a longer plot gets its mosaic. Both are filed under the plot's number and
+   genotype. Then inference on `…/PlotImages/` with `per_plot: true`.
 
 ## Finding the track
 

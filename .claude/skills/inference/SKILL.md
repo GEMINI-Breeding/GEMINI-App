@@ -7,15 +7,17 @@ description: Run a detection, segmentation or classification model (Roboflow, Hu
 
 ## Quick path
 
-1. Images: a `…/PlotImages/` folder (check it with `browse`).
-2. Model: ask which. It goes in `model` as an object with `source` (`roboflow`, `huggingface` or `local_weights`) and that source's keys (table below).
-3. `run_inference` with `images_prefix`, `output_predictions_path` (`…/predictions/<name>-v1.json`), `model`, `per_plot` true, `count_label`.
-4. `wait_jobs`, then `inference_stats` with the predictions path. Report images, detections, and how many images had none.
-Few or no detections is a result: say so; do not lower the threshold until something appears.
+1. `run_inference` with `run` (words naming the pipeline run: its site and date as the person said them) and `model` in short form: `huggingface:<model id>`, `roboflow:<model id>` or `weights:<path>`. Do not build storage paths yourself: `run` finds the plot images and chooses where the predictions go.
+2. Its result has a `next` list: make those two calls in order (`wait_jobs`, then `inference_stats`).
+3. Report the numbers `inference_stats` gives: images, detections, how many images had none.
+Few or no detections is a result: say so plainly; do not lower the threshold until something appears.
+Asked about predictions that already exist ("did it work?", a `.json` under `predictions/`): one call, `inference_stats` with `predictions_path`; do not run the model again.
 
 `run_inference` submits a LOCATE_PLANTS job to the ml worker. It runs one
 model over one image or every image under a folder and writes a predictions
 JSON file.
+
+The model you run is added to the run's pipeline model list by itself (any source, including providers the app has no form for), so the person sees it in the Inference tool with its results and can run it again by hand. Runs from before this have their models added with `register_models`.
 
 ## What to collect first
 

@@ -127,6 +127,8 @@ export interface RunUploadScope {
    * single-dataset tools (GCP picker, image review, thermal preflight).
    */
   datasetShortIds?: string[]
+  /** Run of the day and/or treatment of these batches ("run 2 · drought"). */
+  batchLabel?: string
 }
 
 export interface Run {
@@ -151,6 +153,8 @@ export interface Run {
    * should use `uploadScope`.
    */
   aerialFields?: AerialScopeFields
+  /** "agent" when the app's agent started this run (shown as a small mark on the run). */
+  createdBy?: "agent"
   status: "draft" | "running" | "completed" | "failed"
   steps: Record<string, RunStepState>
   createdAt: IsoDate
@@ -633,6 +637,29 @@ export function appendStepJobId(
   })
 }
 
+/** File a run under another pipeline (and that pipeline's workspace). */
+export function moveRun(id: Id, pipelineId: Id): void {
+  const pipeline = current.pipelines.find((p) => p.id === pipelineId)
+  if (!pipeline) throw new Error(`moveRun: pipeline ${pipelineId} not found`)
+  setState({
+    ...current,
+    runs: current.runs.map((r) =>
+      r.id === id
+        ? {
+            ...r,
+            pipelineId,
+            workspaceId: pipeline.workspaceId,
+            updatedAt: nowIso(),
+          }
+        : r,
+    ),
+  })
+}
+
+export function getState(): StoreState {
+  return current
+}
+
 export function deleteRun(id: Id): void {
   setState({ ...current, runs: current.runs.filter((r) => r.id !== id) })
 }
@@ -702,6 +729,16 @@ export function useWorkspaceRuns(workspaceId: Id | undefined): Run[] {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   if (!workspaceId) return []
   return state.runs.filter((r) => r.workspaceId === workspaceId)
+}
+
+export function useAllRuns(): Run[] {
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return state.runs
+}
+
+export function useAllPipelines(): Pipeline[] {
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return state.pipelines
 }
 
 export function useRun(id: Id | undefined): Run | undefined {

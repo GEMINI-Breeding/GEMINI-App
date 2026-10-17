@@ -137,6 +137,114 @@ export function takeAgentRequest(): string | null {
   }
 }
 
+/** An open model the agent can use, with where it can run. */
+export interface OpenModel {
+  key: string
+  label: string
+  by: string
+  tested: boolean
+  /** How it did on GEMI's own checks of the pipeline steps; null when not run yet. */
+  checks: {
+    passed: number
+    of: number
+    weak: string[]
+    seconds_per_check: number
+    when: string
+  } | null
+  note: string
+  /** Ollama tag (this computer). */
+  ollama: string
+  /** Hugging Face id (cluster); null when it cannot be set up there. */
+  hf: string | null
+  gpu_gb: number | null
+  disk_gb: number
+}
+
+/** An open model with whether it fits this computer. */
+export interface FittedModel extends OpenModel {
+  fit: "yes" | "slow" | "no"
+  why: string
+}
+
+/** What the first-open walkthrough needs: this computer, and what is already answered. */
+/** A model found on this computer, ready to be chosen without installing anything. */
+export interface FoundModel {
+  server: string
+  base_url: string
+  model: string
+  /** In memory now (answers at once), not only on disk. */
+  loaded: boolean
+  label: string
+  key: string | null
+  checks: OpenModel["checks"]
+  vision: boolean | null
+}
+
+export interface Onboarding {
+  system: { os: string; summary: string; ram_gb: number | null }
+  docker: "running" | "not_running" | "missing"
+  ollama: "running" | "installed" | "missing"
+  models: FittedModel[]
+  recommended: string | null
+  advice: string
+  /** Models already there to use: installed in Ollama, or served on this computer (vLLM, LM Studio…). */
+  found: FoundModel[]
+  processing: {
+    answered: boolean
+    stack_reachable: boolean
+    cluster: string | null
+  }
+  model: {
+    answered: boolean
+    configured: boolean
+    reachable: boolean
+    model: string | null
+    where: string | null
+  }
+}
+
+export interface ModelSetupStep {
+  name: string
+  estimate_s: number
+  status: "waiting" | "running" | "done" | "failed"
+  detail: string
+  seconds?: number
+  running_s?: number
+  remaining_s?: number
+  percent?: number
+}
+
+export interface ModelSetupJob {
+  where: "local" | "cluster"
+  model: string
+  label: string
+  state: "running" | "done" | "failed"
+  steps: ModelSetupStep[]
+  error: string | null
+  elapsed_s: number
+  estimate_s: number
+}
+
+export interface ModelSetup {
+  models: OpenModel[]
+  local: { ollama: "running" | "installed" | "missing"; installed: string[] }
+  cluster: string | null
+  current: { base_url: string; model: string }
+  job: ModelSetupJob | null
+}
+
+/** Where a model would run on a cluster, from a read-only survey. */
+export interface ClusterModelPlan {
+  cluster: string
+  configured: boolean
+  host: string
+  data_root: string
+  llm_try: string[]
+  gpu_wait_min: number | null
+  server_installed: boolean
+  existing_install?: boolean
+}
+
 export type ComputeState =
   | "running"
   | "starting"
@@ -262,11 +370,28 @@ export const agentApi = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  onboarding: () => call<Onboarding>("/onboarding"),
+  modelSetup: () => call<ModelSetup>("/model_setup"),
+  modelSetupLocal: (model: string) =>
+    call<ModelSetup>("/model_setup/local", post({ model })),
+  modelSetupClusterPlan: (ssh?: string) =>
+    call<ClusterModelPlan>("/model_setup/cluster/plan", post({ ssh })),
+  modelSetupCluster: (model: string, plan: ClusterModelPlan) =>
+    call<ModelSetup>("/model_setup/cluster", post({ model, plan })),
   /** What is due for a Process-tab run (the agent's `next_step` tool). */
   nextStep: (runId: string) =>
     call<{ runs: AgentNextStep[] }>(
       `/next_step?run=${encodeURIComponent(runId)}`,
     ),
+  /** Mark a run's rover track automatically; saved unless a pass needs a look. */
+  automark: (runId: string) =>
+    call<{
+      plots: number
+      passes_marked: number
+      passes_to_check?: number[] | null
+      tell_the_person?: string
+      saved_version?: number | null
+    }>("/automark", post({ run: runId })),
   /** What the person has said about a run (field design, orientation, …). */
   facts: (runId: string) =>
     call<{ facts: Record<string, unknown> }>(`/facts/${runId}`),

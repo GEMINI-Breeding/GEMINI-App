@@ -202,6 +202,59 @@ them to change how the agent works; any model can read them.
 Planned: a first-run setup on the home page that connects a cluster, cloud
 GPU or this computer and picks a model with the agent's help.
 
+#### Install the app, then drive it from a coding agent's terminal
+
+The installed app contains `gemi-agent`, one executable with every tool the
+in-app agent has. A coding agent (Claude Code, Codex, Gemini CLI, any MCP
+client) can use it directly, with its own model: no model has to be set up
+in the app at all.
+
+1. Install GEMI for your system from the
+   [releases page](https://github.com/GEMINI-Breeding/GEMINI-App/releases)
+   and open it once (macOS: the build is not notarized yet; allow it under
+   System Settings → Privacy & Security → Open Anyway).
+2. Find the executable:
+
+   | System | Path |
+   |---|---|
+   | macOS | `/Applications/GEMI.app/Contents/MacOS/gemi-agent` |
+   | Windows | `gemi-agent.exe` in the folder GEMI was installed to |
+   | Linux (.deb) | `/usr/bin/gemi-agent` |
+
+3. Register it as an MCP server. Claude Code:
+
+   ```bash
+   claude mcp add gemi -- /Applications/GEMI.app/Contents/MacOS/gemi-agent mcp
+   ```
+
+   Other clients: a stdio MCP server whose command is that path and whose
+   one argument is `mcp`.
+4. Ask the coding agent in plain words, for example: *"Use the gemi tools.
+   Read the skill connect-hpc and set GEMI up on my cluster; my login is
+   `ssh you@login.cluster.edu`."* Then: *"upload the photos in
+   ~/flights/2026-08-21 as a drone flight for Davis / Sorghum and continue
+   that run."*
+
+The terminal and the app share one set of settings and state (the app's data
+folder), so what the coding agent sets up appears in the app, and the other
+way round. The same executable also works by hand:
+`gemi-agent tools`, `gemi-agent status`, `gemi-agent processes`,
+`gemi-agent chat "what is running?"` (that last one needs a model set in the
+app).
+
+Working from a source checkout instead: see
+[agent/SETUP.md](agent/SETUP.md), "Quick start: a terminal". There the skills
+and the cluster guard for Claude Code come with the repository.
+
+#### An open model without an agent
+
+The home page's setup offers **Set up a free open model**: pick Gemma 4 or
+another open model, and where it runs. On this computer GEMI uses
+[Ollama](https://ollama.com) to download and serve it. On a cluster it looks
+at the cluster over SSH, chooses a GPU queue, installs the model server and
+the weights, starts it and connects. Each step shows its expected and actual
+time.
+
 #### Compute panel and cluster safety
 
 The home page's **Compute** panel lists the core, each worker and the agent

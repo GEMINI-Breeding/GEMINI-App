@@ -7,6 +7,7 @@ description: Run the GEMINI stack, its workers and a local language model on a S
 
 ## Quick path
 
+0. **The cluster's own rules first.** `cluster_rules` lists the rules its administrators publish for AI agents; read each with `cluster_rules` and its name. They override everything below (partitions, accounts, sizes, times, what may run on a login node). If a step here would break one, do not take it: tell the person which rule. Cluster actions are refused until they are read.
 1. `processes` — the core, each worker and the model with their state.
 2. Nothing running: `hpc` with `action` `up` (asks the person), then `hpc` with `action` `connect`.
 3. Workers: none to start by hand; a submitted job starts its worker. `stop_process` an idle one when the work is done.

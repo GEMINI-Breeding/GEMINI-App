@@ -60,6 +60,7 @@ import {
   type PlotGeometryStateSnapshot,
   useActivatePlotGeometryVersion,
   useLoadPlotGeometryVersion,
+  usePlotGeometryVersions,
   useSavePlotGeometryVersion,
 } from "@/features/process/hooks/usePlotGeometry"
 import {
@@ -491,6 +492,31 @@ export function PlotBoundaryPrep({
     }
   }, [])
 
+  // No draft: open on the boundaries this scope already uses (its active
+  // version), however they were made: by hand, imported, or by the agent.
+  // Otherwise saved boundaries only appeared after picking them in Versions,
+  // and the map stayed empty.
+  const versionsForOpen = usePlotGeometryVersions(directory)
+  const openedActiveRef = useRef(false)
+  useEffect(() => {
+    if (openedActiveRef.current || loadSource) return
+    if (draftApi.initialDraft?.runId === run.id) {
+      openedActiveRef.current = true
+      return
+    }
+    const rows = versionsForOpen.data
+    if (!rows) return
+    openedActiveRef.current = true
+    const active = rows.find((v) => v.is_active)
+    if (active) setLoadSource({ directory, version: active.version })
+  }, [
+    versionsForOpen.data,
+    loadSource,
+    directory,
+    run.id,
+    draftApi.initialDraft,
+  ])
+
   const save = useSavePlotGeometryVersion()
   const activate = useActivatePlotGeometryVersion()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -661,7 +687,15 @@ export function PlotBoundaryPrep({
         selectedCellIds: [],
       }
     }
-    if (fd) {
+    // Only a field design the editor itself saved (its parsed rows and the
+    // row/column transform) can be reopened in the editor. A version made
+    // elsewhere (the agent, an import) may carry just a note of where the
+    // design came from: reopening that as a design crashed the page.
+    if (
+      fd &&
+      Array.isArray((fd as { rows?: unknown }).rows) &&
+      (fd as { transform?: unknown }).transform
+    ) {
       nextState = { ...nextState, fieldDesign: fd, gridMode: "fd" }
     }
     // Run the reconciled features through buildNextStateForFeatures so

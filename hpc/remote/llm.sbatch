@@ -51,4 +51,23 @@ umask 077
   echo "LLM_KEY=$KEY"
 } > "$RUN/llm.env"
 log "vLLM up after ${t}s: http://$IP:$PORT/v1 (model name: $LLM_NAME)"
+# The model holds a GPU while it waits for questions. End the job after LLM_IDLE_MINUTES with no
+# request served (vLLM's own counters), so an agent that has gone quiet does not keep a GPU busy.
+IDLE=${LLM_IDLE_MINUTES:-30}
+if [ "$IDLE" -gt 0 ]; then
+  ( last="" quiet=0
+    while kill -0 $PID 2>/dev/null; do
+      sleep 60
+      m=$(curl -sf -m 10 -H "Authorization: Bearer $KEY" "http://127.0.0.1:$PORT/metrics" 2>/dev/null) || continue
+      done_n=$(echo "$m" | awk '/^vllm:request_success_total/ {s += $NF} END {printf "%d", s}')
+      busy=$(echo "$m" | awk '/^vllm:num_requests_(running|waiting)/ {s += $NF} END {printf "%d", s}')
+      if [ "$done_n" = "$last" ] && [ "${busy:-0}" -eq 0 ]; then quiet=$((quiet + 1)); else quiet=0; fi
+      last=$done_n
+      if [ "$quiet" -ge "$IDLE" ]; then
+        log "no requests for $IDLE min: stopping the model to free the GPU (gemi-hpc llm up starts it again)"
+        kill -TERM $PID 2>/dev/null
+        break
+      fi
+    done ) &
+fi
 wait $PID

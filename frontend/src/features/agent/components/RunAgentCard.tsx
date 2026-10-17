@@ -9,7 +9,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Bot, Loader2 } from "lucide-react"
+import { Bot, ListChecks, Loader2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { agentApi, queueAgentRequest } from "@/features/agent/lib/agentApi"
+import { setHomePrefs, useAgentEnabled } from "@/lib/homePrefs"
 
 type Facts = Record<string, unknown>
 type Field =
@@ -120,6 +121,7 @@ export function RunAgentCard({
 }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const agentOn = useAgentEnabled()
   const fields = kind === "ground" ? GROUND : AERIAL
   const next = useQuery({
     queryKey: ["agent", "next_step", runId],
@@ -133,7 +135,9 @@ export function RunAgentCard({
     retry: false,
   })
   const [draft, setDraft] = useState<Record<string, string>>({})
-  const [open, setOpen] = useState(false)
+  // null: not toggled yet; the form then shows while facts are still missing,
+  // so they are given once, up front, rather than at whichever step stops.
+  const [toggled, setOpen] = useState<boolean | null>(null)
   useEffect(() => {
     if (!facts.data) return
     const f: Facts = facts.data.facts
@@ -165,6 +169,11 @@ export function RunAgentCard({
   const row = next.data?.runs?.[0]
   if (!row) return null
   const needs = row.ask_person_first ?? []
+  const open =
+    toggled ??
+    (row.state !== "all steps done" &&
+      (needs.length > 0 ||
+        Object.values(facts.data?.facts ?? {}).every((v) => v == null)))
   const finished = row.state === "all steps done"
   const set = (key: string, value: string) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -178,7 +187,11 @@ export function RunAgentCard({
     <Card data-testid="run-agent-card">
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <Bot className="text-muted-foreground h-4 w-4 shrink-0" />
+          {agentOn ? (
+            <Bot className="text-muted-foreground h-4 w-4 shrink-0" />
+          ) : (
+            <ListChecks className="text-muted-foreground h-4 w-4 shrink-0" />
+          )}
           <div className="min-w-0 flex-1 text-sm">
             {finished ? (
               <span>Every step of this run is done.</span>
@@ -191,8 +204,10 @@ export function RunAgentCard({
                     : row.state === "failed"
                       ? " · failed"
                       : needs.length > 0
-                        ? " · the agent needs something from you first"
-                        : " · the agent can do this"}
+                        ? " · needs something from you first"
+                        : agentOn
+                          ? " · the agent can do this"
+                          : " · ready"}
                 </span>
               </>
             )}
@@ -209,14 +224,10 @@ export function RunAgentCard({
               </ul>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setOpen((o) => !o)}
-          >
+          <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>
             {open ? "Hide field facts" : "Field facts"}
           </Button>
-          {!finished && (
+          {!finished && agentOn && (
             <Button
               size="sm"
               data-testid="run-continue-with-agent"
@@ -224,6 +235,7 @@ export function RunAgentCard({
                 queueAgentRequest(
                   `Continue the run "${row.run}" (id ${runId}): call continue_run for it, and tell me what you did and what you need from me.`,
                 )
+                setHomePrefs({ view: "agent" })
                 navigate({ to: "/" })
               }}
             >

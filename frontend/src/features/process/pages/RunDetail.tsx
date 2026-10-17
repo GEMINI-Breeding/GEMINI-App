@@ -40,6 +40,7 @@ import {
   JobsService,
   PlotGeometryService,
 } from "@/client"
+import { PanelBoundary } from "@/components/Common/PanelBoundary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { RunAgentCard } from "@/features/agent/components/RunAgentCard"
+import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import {
   type DataSyncChoice,
@@ -80,6 +82,7 @@ import {
   type PreviewPlot,
 } from "@/features/process/components/TraitPreview"
 import { TraitRecordsPanel } from "@/features/process/components/TraitRecordsPanel"
+import { useBatchLabels } from "@/features/process/hooks/useBatchLabels"
 import {
   capabilityWarningForStep,
   useCapabilities,
@@ -143,6 +146,15 @@ import {
 } from "@/features/process/lib/traitInputs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
+
+/** A step's panel, kept from taking the whole page down if it fails. */
+function boundPanel(what: string, key: string, panel: React.ReactNode) {
+  return panel ? (
+    <PanelBoundary what={what} resetKey={key}>
+      {panel}
+    </PanelBoundary>
+  ) : null
+}
 
 // ── Step definitions (mirror main's GROUND_STEPS / AERIAL_STEPS) ────────────
 
@@ -839,10 +851,13 @@ function DatasetMultiSelect({
   available,
   selected,
   onChange,
+  labels = {},
 }: {
   available: string[]
   selected: string[]
   onChange: (next: string[]) => void
+  /** Short id → "run 2 · drought", for batches labelled at upload. */
+  labels?: Record<string, string>
 }) {
   if (available.length <= 1) {
     // Single dataset (or zero) at this scope — nothing to choose. Hide
@@ -903,7 +918,14 @@ function DatasetMultiSelect({
                 onChange(Array.from(next).sort())
               }}
             >
-              {id}
+              {labels[id] ? (
+                <span title={`dataset ${id}`}>
+                  <span className="font-sans">{labels[id]}</span>{" "}
+                  <span className="opacity-60">{id}</span>
+                </span>
+              ) : (
+                id
+              )}
             </button>
           )
         })}
@@ -1012,6 +1034,7 @@ export function RunDetail() {
   // image key under rawScopePrefix and pulls the segment immediately
   // before `Images`. Legacy paths (no short-id) are omitted from the
   // multi-select but still flow through "all datasets" listing.
+  const batchLabels = useBatchLabels(run?.uploadScope?.experiment)
   const availableShortIds = useMemo<string[]>(() => {
     if (!scope) return []
     const prefix = rawScopePrefix(scope)
@@ -1379,7 +1402,21 @@ export function RunDetail() {
   }, [])
 
   const steps = pipeline?.type === "ground" ? GROUND_STEPS : AERIAL_STEPS
-  const stepsState: Record<string, { status: string }> = run?.steps ?? {}
+  // Plot boundaries are done when the scope has an active version, whoever
+  // saved it: the editor, an import, the agent, or another run of the same
+  // scope. The run's own record of the step may never have been updated
+  // (work done from another run, or outside this page), which left the step
+  // "Ready to start" and every step after it locked while plot images
+  // already existed.
+  const hasActiveBoundaries = boundaryVersions.some((v) => v.is_active)
+  const recorded: Record<string, { status: string }> = run?.steps ?? {}
+  const stepsState: Record<string, { status: string }> =
+    hasActiveBoundaries &&
+    !["completed", "running"].includes(
+      recorded.plot_boundary_prep?.status ?? "",
+    )
+      ? { ...recorded, plot_boundary_prep: { status: "completed" } }
+      : recorded
   const nextKey = getNextStep(steps, stepsState)
   const isAnyExecuting = Object.values(stepsState).some(
     (s) => s.status === "running",
@@ -1888,8 +1925,9 @@ export function RunDetail() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-2xl font-semibold">
+            <h1 className="flex items-center gap-2 text-2xl font-semibold">
               {run.name ?? `Run ${run.id.slice(0, 8)}`}
+              <AgentRunMark run={run} className="h-5 w-5" />
             </h1>
             <p className="text-muted-foreground text-sm">
               {pipeline?.name ?? "Pipeline"} ·{" "}
@@ -2011,7 +2049,9 @@ export function RunDetail() {
                         : undefined
                     }
                     headerBadge={headerBadge}
-                    extraContent={
+                    extraContent={boundPanel(
+                      `the ${step.label} results`,
+                      `${run?.id}:${step.key}`,
                       step.key === "orthomosaic" ? (
                         status === "completed" ? (
                           <OrthoVersionsPanel
@@ -2024,6 +2064,7 @@ export function RunDetail() {
                           <div className="space-y-3">
                             <DatasetMultiSelect
                               available={availableShortIds}
+                              labels={batchLabels}
                               selected={run.uploadScope?.datasetShortIds ?? []}
                               onChange={(next) =>
                                 run.uploadScope &&
@@ -2075,8 +2116,8 @@ export function RunDetail() {
                           <strong>{step.wiredIn}</strong>. The step row is shown
                           here so the wizard order is visible.
                         </p>
-                      ) : null
-                    }
+                      ) : null,
+                    )}
                   />
                 )
               })}

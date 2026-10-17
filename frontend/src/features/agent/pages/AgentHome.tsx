@@ -45,6 +45,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { AgentText } from "@/features/agent/components/AgentText"
 import { ComputePanel } from "@/features/agent/components/ComputePanel"
+import { ModelSetupDialog } from "@/features/agent/components/ModelSetupDialog"
 import {
   type AgentConfig,
   type AgentEvent,
@@ -130,11 +131,13 @@ function SettingsDialog({
   onOpenChange,
   config,
   canEdit,
+  onOpenModelSetup,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   config: AgentConfig | undefined
   canEdit: boolean
+  onOpenModelSetup: () => void
 }) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Partial<AgentConfig>>({})
@@ -180,6 +183,18 @@ function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
+          <p className="text-sm">
+            No model yet?{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              data-testid="agent-open-model-setup"
+              onClick={onOpenModelSetup}
+            >
+              Set up a free open model
+            </button>{" "}
+            on this computer or on your cluster; GEMI does the steps.
+          </p>
           <div className="grid gap-1.5">
             <Label>Provider</Label>
             <Select
@@ -337,18 +352,18 @@ function ToolEvent({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(false)
   const args = JSON.stringify(event.args ?? {})
   return (
-    <div className="text-xs" data-testid="agent-tool-event">
+    <div className="min-w-0 text-xs" data-testid="agent-tool-event">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 text-left"
+        className="text-muted-foreground hover:text-foreground flex w-full min-w-0 items-center gap-1.5 text-left"
       >
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
         />
         <Wrench className="h-3 w-3 shrink-0" />
-        <span className="font-mono">{event.tool}</span>
-        <span className="truncate font-mono opacity-70">
+        <span className="shrink-0 font-mono">{event.tool}</span>
+        <span className="min-w-0 truncate font-mono opacity-70">
           {args === "{}" ? "" : args}
         </span>
         {event.error && (
@@ -390,13 +405,16 @@ function Conversation({ run }: { run: AgentRun }) {
     end.current?.scrollIntoView({ block: "end" })
   }, [count])
   return (
-    <div className="flex flex-col gap-3" data-testid="agent-conversation">
+    <div
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="agent-conversation"
+    >
       {run.events.map((e) => {
         if (e.kind === "user")
           return (
             <div
               key={e.n}
-              className="bg-primary/10 ml-12 self-end rounded-lg px-3 py-2 text-sm whitespace-pre-wrap"
+              className="bg-primary/10 ml-12 max-w-full self-end rounded-lg px-3 py-2 text-sm [overflow-wrap:anywhere] whitespace-pre-wrap"
             >
               {e.text}
             </div>
@@ -405,7 +423,7 @@ function Conversation({ run }: { run: AgentRun }) {
           return (
             <div
               key={e.n}
-              className="mr-12 flex gap-2 text-sm"
+              className="mr-12 flex min-w-0 gap-2 text-sm [overflow-wrap:anywhere]"
               data-testid="agent-reply"
             >
               <Bot className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
@@ -452,7 +470,17 @@ function Conversation({ run }: { run: AgentRun }) {
  * stack exists. The agent then has the cluster-setup tools only; once the
  * stack answers, the page offers the way to the sign-in.
  */
-export function AgentHome({ setup = false }: { setup?: boolean }) {
+export function AgentHome({
+  setup = false,
+  inLayout = false,
+  height = "h-[calc(100vh-6rem)]",
+}: {
+  setup?: boolean
+  /** Shown inside the app's layout (sidebar) even in set-up mode. */
+  inLayout?: boolean
+  /** Height class inside the layout (Home's tab row takes some). */
+  height?: string
+}) {
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const [selected, setSelected] = useState<string | null>(null)
@@ -461,6 +489,7 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
   const [skill, setSkill] = useState(NO_SKILL)
   const [track, setTrack] = useState("")
   const [computeOpen, setComputeOpen] = useState(true)
+  const [modelSetupOpen, setModelSetupOpen] = useState(false)
 
   const mode = useQuery({
     queryKey: ["agent", "mode"],
@@ -599,9 +628,9 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
   return (
     <div
       className={
-        setup
-          ? "flex h-screen gap-4 p-4"
-          : "flex h-[calc(100vh-6rem)] gap-4 pr-4"
+        setup && !inLayout
+          ? "flex h-screen w-full min-w-0 gap-4 overflow-hidden p-4"
+          : `flex ${height} w-full min-w-0 gap-4 overflow-hidden pr-4`
       }
     >
       {/* Left: runs and stack status */}
@@ -679,12 +708,12 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
 
       {/* Middle: conversation */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-3 flex items-center gap-2">
-          <h1 className="truncate text-lg font-medium">
+        <div className="mb-3 flex min-w-0 items-center gap-2">
+          <h1 className="min-w-0 truncate text-lg font-medium">
             {current ? current.title || "Run" : "Agent"}
           </h1>
           {current && <StatusBadge status={current.status} />}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <span
               className="text-muted-foreground text-xs"
               data-testid="agent-model-name"
@@ -716,7 +745,7 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto pr-1">
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
           {setup && (
             <Card className="mb-3" data-testid="agent-setup-banner">
               <CardContent className="flex flex-wrap items-center gap-3 p-3 text-sm">
@@ -725,32 +754,42 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
                     <span className="flex-1">
                       The processing stack is connected
                       {mode.data?.cluster ? ` (${mode.data.cluster})` : ""}.
-                      Sign in to use the whole app.
+                      Files, Process and Analyze are ready.
                     </span>
                     <Button asChild>
-                      <a href="/login">Sign in</a>
+                      <a href="/">Open GEMI</a>
                     </Button>
                   </>
                 ) : (
                   <span>
-                    <span className="font-medium">First-time setup.</span> No
-                    processing stack is connected yet. Tell the agent where your
-                    compute is — for a cluster, paste the SSH command you use to
-                    log in (for example{" "}
+                    <span className="font-medium">Connect your compute.</span>{" "}
+                    No processing stack is connected yet, so Files, Process and
+                    Analyze have nothing to show until it is. Tell the agent
+                    where your compute is — for a cluster, paste the SSH command
+                    you use to log in (for example{" "}
                     <span className="font-mono">ssh you@login.cluster.edu</span>
                     ) — and it will look around, propose where each part should
                     run, and start it. The agent needs a language model first:{" "}
                     <button
                       type="button"
                       className="underline underline-offset-2"
+                      data-testid="agent-setup-open-model"
+                      onClick={() => setModelSetupOpen(true)}
+                    >
+                      set up a free open model
+                    </button>{" "}
+                    (on this computer or on your cluster; GEMI does the steps),
+                    or{" "}
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
                       data-testid="agent-setup-choose-model"
                       onClick={() => setSettingsOpen(true)}
                     >
-                      choose one
+                      use a hosted one
                     </button>{" "}
-                    (Claude with an API key, or any other) and press “Save and
-                    test”. The cluster login itself must work with an SSH key,
-                    without a password prompt.
+                    with an API key (Claude, OpenAI). The cluster login itself
+                    must work with an SSH key, without a password prompt.
                   </span>
                 )}
               </CardContent>
@@ -843,7 +882,7 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
               <Input
                 className="min-w-0 flex-1"
                 value={track}
-                placeholder="Rover track folder (optional), e.g. Raw/2026/EXP/SITE/POP/2026-09-17/Amiga/RGB/c0fca235/"
+                placeholder="Rover run (optional), in words: e.g. the Davis rover run of 2026-09-17"
                 onChange={(e) => setTrack(e.target.value)}
               />
             </div>
@@ -879,7 +918,16 @@ export function AgentHome({ setup = false }: { setup?: boolean }) {
         <ComputePanel canManage={setup || Boolean(user?.is_superuser)} />
       )}
 
+      <ModelSetupDialog
+        open={modelSetupOpen}
+        onOpenChange={setModelSetupOpen}
+        canEdit={setup || Boolean(user?.is_superuser)}
+      />
       <SettingsDialog
+        onOpenModelSetup={() => {
+          setSettingsOpen(false)
+          setModelSetupOpen(true)
+        }}
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         config={config.data}

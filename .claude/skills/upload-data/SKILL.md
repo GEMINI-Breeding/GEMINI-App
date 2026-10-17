@@ -7,10 +7,23 @@ description: Upload local files or folders (rover .bin logs, images, orthomosaic
 
 ## Quick path
 
-1. Get from the person: paths, experiment, site, population, date (the collection date), data type. Ask for what is missing.
-2. `upload` with `"dry_run": true` — tell them the file count and size.
-3. `upload` again without `dry_run` — note the `task_id`.
-4. `wait_task` with that `task_id` until `completed`. Report files and failures as numbers.
+1. Call `upload` now with `"dry_run": true` and what the person gave you. The shape (drone photos; for rover `.bin` logs use `"data_type": "amiga_bin"` and leave `platform` out):
+   `{"tool": "upload", "args": {"paths": ["<the folder or file they named>"], "experiment": "<experiment>", "site": "<site>", "population": "<population>", "date": "<YYYY-MM-DD>", "data_type": "images", "platform": "Drone", "dry_run": true}}`
+   Replace every `<…>` with the person's own words: in "the wheat trial at Fargo, flown 3 May 2025" the population is the crop or trial, the site is the place, the date is when the data was collected (never today). Leave out a label they did not give: do not invent one.
+2. If the tool says a label is missing, or that the person has not given one: ask the person for exactly those labels and stop. A folder name is not a label.
+3. It returns a file count: tell the person the count and where the files will be filed, ask them to confirm, and stop.
+4. On their yes: the same `upload` call without `dry_run`, then `wait_task` with the `task_id` it returns. Report files done and failed as numbers.
+
+## One day, several parts: runs of the day and treatments
+
+Data for the same experiment, site, population, date, platform and sensor sometimes comes in parts. Each part is kept as its own upload and gets its own pipeline run, told apart by two optional labels:
+
+- `run_of_day`: only for **diurnal data**, when the field was covered more than once that day ("the morning and the afternoon flight", "run 2"). Do not set it for an ordinary single run.
+- `treatment`: only when collection was split by treatment ("the drought block", "irrigated").
+
+Use a label only when the person said it. When the path holds **several folders**, `upload` stops and returns their names: ask the person what the folders stand for, then call again with `folders_are`: `runs` (each folder is a run of the same day), `treatments` (each folder is a treatment), or `one` (ignore the folders, one batch). Folders named `run1`, `run2`, `flight_3` give the run number; any other name is used as it is. A label given alongside applies to every folder (`folders_are: treatments` with `run_of_day: 2` = the second run, split by treatment).
+
+Afterwards the runs are named with their label, e.g. "Davis Cowpea 2026-09-17, run 2 · drought", and that is how to refer to them in `continue_run`.
 
 `upload` sends files from the machine the agent runs on into the app's
 storage. It runs in the background and survives the tool call; you poll it.

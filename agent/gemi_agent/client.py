@@ -19,15 +19,49 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-# Two places. In a source checkout both are the `agent/` folder. In the packaged
-# desktop app the program is read-only, so the app sets:
+# Two places. In a source checkout both are the `agent/` folder. The packaged
+# executable (`gemi-agent`, inside the desktop app) is read-only, so it uses:
 #   GEMI_AGENT_HOME       writable: config.json, .env, work/, clusters/ (the person's settings and state)
-#   GEMI_AGENT_RESOURCES  read-only files shipped with the app: skills/, hpc/, backend/, stack-version
+#   GEMI_AGENT_RESOURCES  read-only files shipped with the app: hpc/, backend.tgz, stack-version
+# The app sets both when it starts the service. Run by hand from a terminal (or
+# by a coding agent as an MCP server) the executable finds the same two places
+# itself, so the terminal and the app share one set of settings.
 _SOURCE_DIR = Path(__file__).resolve().parent.parent
-AGENT_DIR = Path(os.environ["GEMI_AGENT_HOME"]).resolve() if os.environ.get("GEMI_AGENT_HOME") else _SOURCE_DIR
-RESOURCES = Path(os.environ["GEMI_AGENT_RESOURCES"]).resolve() if os.environ.get("GEMI_AGENT_RESOURCES") else None
-# The packaged executable carries the skills inside itself.
 _FROZEN = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) else None
+APP_ID = "com.gemi.desktop"
+
+
+def _packaged_home() -> Path:
+    """The desktop app's data folder for the agent (where Tauri's app_data_dir puts it)."""
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / APP_ID / "agent"
+
+
+def _packaged_resources() -> Optional[Path]:
+    """The files shipped beside the executable: Contents/Resources/agent in a macOS
+    app, an `agent` folder beside it on Windows, /usr/lib/<name>/agent for a Linux package."""
+    exe = Path(sys.executable).resolve().parent
+    for cand in (exe.parent / "Resources" / "agent", exe / "agent", exe.parent / "lib" / "GEMI" / "agent",
+                 exe.parent / "lib" / "gemi" / "agent"):
+        if (cand / "hpc" / "gemi-hpc").is_file():
+            return cand
+    return None
+
+
+if os.environ.get("GEMI_AGENT_HOME"):
+    AGENT_DIR = Path(os.environ["GEMI_AGENT_HOME"]).resolve()
+else:
+    AGENT_DIR = _packaged_home() if _FROZEN else _SOURCE_DIR
+if os.environ.get("GEMI_AGENT_RESOURCES"):
+    RESOURCES: Optional[Path] = Path(os.environ["GEMI_AGENT_RESOURCES"]).resolve()
+else:
+    RESOURCES = _packaged_resources() if _FROZEN else None
+# The packaged executable carries the skills inside itself.
 SKILLS_DIR = (_FROZEN / "skills") if _FROZEN else (_SOURCE_DIR / "skills")
 AGENT_DIR.mkdir(parents=True, exist_ok=True)
 RETRY_DELAYS = (1, 3, 10, 30)

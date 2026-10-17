@@ -17,7 +17,7 @@
 #   logs <name> [lines]
 #   core-submit [where=…] | core-state | core-log | down
 #   worker <amiga|stitch|geo|ml|odm> [where=…] | stop-worker <name>
-#   llm-up [model] [where=…] | llm-down | llm-env | llm-status
+#   llm-up [model] [where=…] | llm-down | llm-env | llm-status | llm-ready [model]
 #   pull-images [name…] | pull-mldeps | pull-llm [model…]
 #   recv <backend|hpc>            (a tar stream on stdin, into a staging folder)
 #   sync-finish <cluster> <rev>   (move the staged folders into place)
@@ -103,6 +103,48 @@ main() {
       nwords 0 0; audit ALLOW
       echo "gate=ok root=$ROOT user=$USER host=$(hostname -s)"
       ;;
+    site-skills)
+      # Rules the cluster's administrators publish for AI agents, as skills (a folder with a SKILL.md,
+      # as skills): where to run what, limits, etiquette. Read-only. Without a name: one line
+      # per skill (name|folder|description). With a name: that SKILL.md and the other files beside it;
+      # with a name and a file: that file of the skill. Only these folders are ever read.
+      nwords 0 2
+      audit ALLOW
+      local dirs="${SITE_SKILL_DIRS:-/etc/claude-code/skills/etc/claude/skills /usr/share/claude/skills /usr/local/share/claude/skills /share/claude/skills /share/apps/claude/skills /opt/claude/skills /etc/skel/.claude/skills $HOME/.claude/skills}"
+      local d s
+      if [ "${#words[@]}" -eq 0 ]; then
+        for d in $dirs; do
+          # a skill folder, or one inside a checkout of its repository
+          for s in "$d"/*/SKILL.md "$d"/*/*/SKILL.md; do
+            [ -f "$s" ] || continue
+            printf '%s|%s|%s\n' "$(basename "$(dirname "$s")")" "$(dirname "$(dirname "$s")")" \
+              "$(awk '/^description:/ {sub(/^description:[ ]*/, ""); print; exit}' "$s" | cut -c1-400)"
+          done
+        done
+        true
+      else
+        [[ "${words[0]}" =~ ^[A-Za-z0-9._-]+$ ]] || refuse "bad skill name"
+        local file="${words[1]:-SKILL.md}"
+        [[ "$file" =~ ^[A-Za-z0-9._/-]+$ ]] || refuse "bad file name"
+        local found=""
+        for d in $dirs; do
+          for s in "$d/${words[0]}/SKILL.md" "$d"/*/"${words[0]}/SKILL.md"; do
+            [ -f "$s" ] && { found="$(dirname "$s")"; break 2; }
+          done
+        done
+        [ -n "$found" ] || refuse "no site skill ${words[0]}"
+        local real; real=$(readlink -f "$found/$file")
+        case "$real" in "$(readlink -f "$found")"/*) ;; *) refuse "outside the skill" ;; esac
+        [ -f "$real" ] || refuse "no such file in the skill"
+        echo "== $found/$file"
+        head -c 200000 "$real"
+        if [ "$file" = SKILL.md ]; then
+          echo; echo "== other files in this skill:"
+          (cd "$found" && find . -type f ! -name SKILL.md | sed 's|^\./||' | head -50)
+        fi
+        true
+      fi
+      ;;
     logs)
       nwords 1 2
       local what="${words[0]}" n="${words[1]:-40}" f
@@ -173,6 +215,13 @@ main() {
       nwords 0 0; audit STOP
       scancel -u "$USER" -n gemi-llm; rm -f "$RUN/llm.env"; echo stopped
       ;;
+    llm-ready)
+      # Is the model server installed, and (given a model) are its weights here?
+      nwords 0 1; audit ALLOW
+      local m="${words[0]:-${LLM_MODEL:-}}"
+      [[ "$m" =~ ^[A-Za-z0-9._/-]*$ ]] || refuse "bad model name"
+      echo "image=$([ -s "$IMAGES/vllm.sif" ] && echo yes || echo no) weights=$([ -n "$m" ] && [ -d "$DATA/llm/hf/hub/models--${m//\//--}/snapshots" ] && echo yes || echo no) model=$m"
+      ;;
     llm-env)
       nwords 0 0; audit ALLOW
       cat "$RUN/llm.env" 2>/dev/null || echo '(LLM not up)'
@@ -195,8 +244,34 @@ main() {
       ;;
     pull-llm)
       audit SUBMIT
-      sbatch --partition="${LLM_PULL_PARTITION:-$CORE_PARTITION}" --account="${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}" \
-        --output="$LOGS/pull-llm-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT",MODELS="${words[*]-}" "$HPC/remote/pull-llm.sbatch"
+      if squeue -h -u "$USER" -n gemi-pull-llm -o %i | grep -q .; then
+        echo "a download job already exists (gemi-hpc llm pull-cancel to drop it):"
+        squeue -u "$USER" -n gemi-pull-llm -o '%i %P %a %T %r'; exit 0
+      fi
+      # A download needs no GPU and little else, so it can go wherever a few CPUs are free:
+      # of the placements asked for (or the configured one), the one Slurm says starts soonest.
+      local try="${WHERE:-${LLM_PULL_PARTITION:-$CORE_PARTITION}:${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}}"
+      local -a common=(--cpus-per-task="${LLM_PULL_CPUS:-4}" --mem="${LLM_PULL_MEM:-24G}" --output="$LOGS/pull-llm-%j.log"
+                       --export=ALL,GEMI_HPC_ROOT="$ROOT",MODELS="${words[*]-}")
+      local best="" best_wait=999999999 now entry part acct est start wait_s
+      now=$(date +%s)
+      for entry in $try; do
+        part=${entry%%:*}; acct=${entry#*:}; acct=${acct%%:*}
+        est=$(sbatch --test-only --partition="$part" --account="$acct" "${common[@]}" "$HPC/remote/pull-llm.sbatch" 2>&1)
+        start=$(echo "$est" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}' | head -1)
+        if [ -z "$start" ]; then echo "  $part ($acct): not usable ($(echo "$est" | head -1 | cut -c1-90))"; continue; fi
+        wait_s=$(( $(date -d "$start" +%s) - now ))
+        echo "  $part ($acct): could start in ~$(( wait_s > 0 ? wait_s / 60 : 0 )) min"
+        if [ "$wait_s" -lt "$best_wait" ]; then best="$part:$acct" best_wait=$wait_s; fi
+        [ "$wait_s" -le 600 ] && break
+      done
+      [ -n "$best" ] || { echo "no placement accepted the download job"; exit 1; }
+      sbatch --partition="${best%%:*}" --account="${best#*:}" "${common[@]}" "$HPC/remote/pull-llm.sbatch" \
+        | sed "s/$/ (gemi-pull-llm on ${best%%:*}, account ${best#*:})/"
+      ;;
+    pull-llm-cancel)
+      nwords 0 0; audit STOP
+      scancel -u "$USER" -n gemi-pull-llm; echo "download job dropped (files already fetched are kept)"
       ;;
     recv)
       # A tar stream on stdin into a staging folder; nothing live is touched until sync-finish.

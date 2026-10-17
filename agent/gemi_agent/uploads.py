@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -17,7 +18,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .client import AGENT_DIR, Client
 
@@ -83,7 +84,7 @@ def summary(t: dict) -> dict:
 
 def start(client: Client, files: list[Path], *, experiment: str, site: str, population: str, date: str,
           platform: str, sensor: str, data_type: str, parallel: int = 3, dataset_id: Optional[str] = None,
-          extract: Optional[bool] = None) -> dict:
+          extract: Optional[bool] = None, run_of_day: str = "", treatment: str = "", source_folder: str = "") -> dict:
     """Create what the upload needs in the app (experiment, site, population,
     season of that year, platform, sensor, a dataset) and start the batch."""
     kind = DATA_TYPES.get(data_type)
@@ -105,10 +106,19 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
     else:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         name = f"{experiment}-{kind['label'].replace(' ', '')}-{stamp}-{uuid.uuid4().hex[:4]}"
+        # Same-day batches at one scope are told apart by these two labels (the app's upload page
+        # stores the same keys): which run of the day, and which treatment.
+        labels = {k: str(v).strip() for k, v in (("run_of_day", run_of_day), ("treatment", treatment),
+                                                 ("source_folder", source_folder)) if str(v or "").strip()}
+        slug = "__".join(f"{'run' if k == 'run_of_day' else 'trt'}-{re.sub(r'[^A-Za-z0-9]+', '-', v)}"
+                         for k, v in labels.items() if k != "source_folder")
+        if slug:
+            name += "__" + slug
         ds = client.post_json("/api/datasets", {
             "dataset_name": name, "experiment_name": experiment,
             "dataset_info": {"files_prefix": f"gemini/Raw/{experiment}", "bucket": "gemini",
-                             "data_type_label": kind["label"]}})
+                             "data_type_label": kind["label"], "season": year, "site": site, "population": population,
+                             "collection_date": date, "platform": platform, "sensor": sensor, **labels}})
         ds_id = str(ds["id"])
     prefix = f"Raw/{year}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}/{ds_id[:8]}/{kind['subdir']}"
     task_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
@@ -116,6 +126,7 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
         "id": task_id, "status": "running", "created": time.time(), "heartbeat": time.time(),
         "parallel": max(1, min(int(parallel), 8)), "prefix": prefix, "dataset_id": ds_id,
         "experiment_id": str(exp["id"]), "extract": kind["extract"] if extract is None else bool(extract),
+        "batch_label": batch_label(run_of_day, treatment),
         "files": [{"path": str(f), "name": f.name, "size": f.stat().st_size, "sent": 0, "status": "pending"}
                   for f in files],
     }
@@ -130,6 +141,12 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
                      stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags,
                      start_new_session=os.name != "nt")
     return summary(task)
+
+
+def batch_label(run_of_day: Any, treatment: Any) -> str:
+    """"run 2 · drought": how a labelled batch is shown; "" when it has no labels."""
+    run, trt = str(run_of_day or "").strip(), str(treatment or "").strip()
+    return " · ".join(x for x in (f"run {run}" if run else "", trt) if x)
 
 
 def cancel(task_id: str) -> dict:
@@ -238,6 +255,8 @@ def _show_on_process_tab(client: Client, task: dict) -> None:
         scope = scope_from_path(task["prefix"])
         if scope is None:
             return
+        if task.get("batch_label"):
+            scope["batchLabel"] = task["batch_label"]     # a labelled batch gets its own pipeline run
         pr = ProcessRuns(client)
         run = pr.ensure_run(scope)
         pr.set_step(run, "data_sync", "completed", outputs={"files": len(task["files"])})

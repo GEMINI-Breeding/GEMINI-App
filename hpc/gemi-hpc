@@ -16,9 +16,11 @@
 #   gemi-hpc logs [service]    tail a session log (rest-api db storage logger), a job log, or `gate`
 #   gemi-hpc down              end the session: stop workers, then the core (clean shutdown)
 #   gemi-hpc llm pull [model…] one-time: vLLM image + model weights (Slurm job)
+#                            GEMI_PULL_TRY='partition:account ...' chooses where; llm pull-cancel drops it
 #   gemi-hpc llm up [model]    local LLM on a GPU (partition fallback); also: llm down | status | env
 #   gemi-hpc llm tunnel [port] make the LLM reachable at http://localhost:<port>/v1 from this PC
 #   gemi-hpc doctor            check the connection, the gate (it must refuse), limits, jobs in flight
+#   gemi-hpc site-skills [name [file]]  the cluster admins' rules for AI agents (skills the site publishes)
 #
 # Cluster: hpc/clusters/<GEMI_CLUSTER>/launch.conf (default: the active one). Start from
 # hpc/clusters/launch.conf.example, or let the agent's hpc_configure write it.
@@ -167,11 +169,22 @@ case "$cmd" in
     s=$(session); [ -n "$s" ] || { echo "no session up — run: gemi-hpc up"; exit 1; }
     eval "$s"
     api_port=$(free_local_port); web_port=$(free_local_port)
+    # Map tiles come from the session's own TiTiler, through the same tunnel. Without it the
+    # dev server's /titiler went to this PC's Docker TiTiler, which cannot see the cluster's files.
+    tiles=()
+    if [ -n "${TITILER_PORT:-}" ]; then
+      tiler_port=$(free_local_port)
+      tiles=(-L "127.0.0.1:$tiler_port:$CORE_IP:$TITILER_PORT")
+      export GEMI_TITILER_TARGET="http://127.0.0.1:$tiler_port"
+    else
+      echo "  note: this session has no map tile server (started before it was added, or titiler.sif is"
+      echo "        missing): orthomosaic previews and map imagery will be blank until the next session"
+    fi
     # The tunnel is reopened if it drops (Wi-Fi blip, sleep): a long upload
     # retries its chunks for a few minutes and carries on once it is back.
     keep=$(mktemp)
     ( while [ -e "$keep" ]; do
-        ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$api_port:$CORE_IP:$API_PORT" "$HPC_HOST" &
+        ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$api_port:$CORE_IP:$API_PORT" "${tiles[@]}" "$HPC_HOST" &
         echo $! > "$keep.pid"; wait $!
         [ -e "$keep" ] && { echo "  tunnel dropped; reconnecting..." >&2; sleep 3; }
       done ) &
@@ -210,6 +223,10 @@ case "$cmd" in
   login)
     gate login
     ;;
+  site-skills)
+    # The cluster administrators' rules for AI agents (skills the site publishes), read-only.
+    gate site-skills "$@"
+    ;;
   logs)
     gate logs "${1:-core}" "${LINES_N:-40}"
     ;;
@@ -220,19 +237,21 @@ case "$cmd" in
   llm)
     sub=${1:-status}; shift || true
     case "$sub" in
-      pull) gate pull-llm "$@"; echo "follow with: gemi-hpc logs pull-llm" ;;
+      pull) gate pull-llm "$@" $(where_arg "${GEMI_PULL_TRY:-}"); echo "follow with: gemi-hpc logs pull-llm" ;;
+      pull-cancel) gate pull-llm-cancel ;;
       up)
         gate llm-up ${1:+"$1"} $(where_arg "${GEMI_LLM_TRY:-}")
         echo "when it is up: gemi-hpc llm env   (model load takes a few minutes after the job starts)" ;;
       down) gate llm-down ;;
       env) gate llm-env ;;
       status) gate llm-status ;;
+      ready) gate llm-ready ${1:+"$1"} ;;
       tunnel)
         e=$(gate llm-env | grep -E '^[A-Z_]+=' || true); [ -n "$e" ] || { echo "LLM not up — run: gemi-hpc llm up"; exit 1; }
         eval "$e"; port=${1:-$(free_local_port)}
         echo "LLM at http://localhost:$port/v1   model: $LLM_MODEL_NAME   key: $LLM_KEY   (Ctrl-C to close)"
         exec ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$port:$LLM_IP:$LLM_PORT" "$HPC_HOST" ;;
-      *) echo "usage: gemi-hpc llm pull|up|down|status|env|tunnel"; exit 1 ;;
+      *) echo "usage: gemi-hpc llm pull|pull-cancel|up|down|status|ready|env|tunnel"; exit 1 ;;
     esac
     ;;
   doctor)
@@ -245,6 +264,8 @@ case "$cmd" in
     done
     [ "$ok" = 1 ] && echo "gate       refuses commands off its menu (4 probes)" || exit 1
     echo "limits     $(gate limits | tr '\n' ' ')"
+    rules=$(gate site-skills 2>/dev/null | cut -d'|' -f1 | tr '\n' ' ')
+    echo "site rules ${rules:-none found (set SITE_SKILL_DIRS in launch.conf if the admins publish skills elsewhere)}"
     echo "in flight:"; gate status | sed 's/^/  /'
     s=$(session); [ -n "$s" ] && echo "session    up ($(grep -E '^CORE_NODE=' <<< "$s" | cut -d= -f2))" || echo "session    none"
     echo "gate log   $(gate logs gate 2000 | grep -c REFUSED || true) refusals in the last 2000 calls (gemi-hpc logs gate)"

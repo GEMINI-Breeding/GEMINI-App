@@ -31,6 +31,7 @@ HPC = REPO / "hpc"
 CLUSTERS = (HPC / "clusters") if RESOURCES is None else (AGENT_DIR / "clusters")
 STATE = AGENT_DIR / "work" / "hpc.json"          # tunnels opened by this computer
 API_PORT, LLM_PORT = 7777, 8000                  # where the app and the agent expect them
+TILES_PORT = 8091                                # the session's TiTiler (map tiles), where the desktop app looks
 _strs = {"type": "array", "items": _str}
 
 
@@ -367,6 +368,66 @@ def _kv(text: str) -> dict:
     return dict(line.split("=", 1) for line in text.splitlines() if re.match(r"^[A-Z_]+=", line))
 
 
+# ── the cluster administrators' rules ────────────────────────────────────────
+# Clusters can publish rules for AI agents as skills: which partitions and accounts to
+# use, limits, what not to run on login nodes. The gate lists and reads them (read-only). They are
+# read before any cluster action, and they win over this agent's own defaults.
+
+def _rules_dir(cluster: str) -> Path:
+    return AGENT_DIR / "work" / "site-skills" / cluster
+
+
+def site_rules(cluster: Optional[str] = None, fresh: bool = False) -> Optional[list[dict]]:
+    """The cluster's published agent rules (name, description), cached for a day.
+    None when they cannot be listed (gate too old, cluster unreachable)."""
+    cluster = cluster or active_cluster()
+    if not cluster:
+        return None
+    index = _rules_dir(cluster) / "index.json"
+    if not fresh and index.exists() and time.time() - index.stat().st_mtime < 86400:
+        return json.loads(index.read_text())
+    try:
+        out = _gemi_hpc(["site-skills"], cluster, timeout=90)
+    except Exception:
+        return json.loads(index.read_text()) if index.exists() else None
+    rows = []
+    for line in out.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) == 3 and re.fullmatch(r"[A-Za-z0-9._-]+", parts[0].strip()):
+            rows.append({"name": parts[0].strip(), "where": parts[1].strip(), "description": parts[2].strip()})
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(json.dumps(rows))
+    return rows
+
+
+def cluster_rules(args: dict) -> dict:
+    """List the cluster's agent rules, or read one."""
+    cluster = args.get("cluster") or active_cluster()
+    if not cluster:
+        raise ValueError("no cluster configured yet")
+    rows = site_rules(cluster, fresh=bool(args.get("fresh")))
+    if rows is None:
+        return {"result": {"rules": None, "note": "the cluster's rules could not be listed (its gate predates this "
+                                                  "command: gemi-hpc sync, or the cluster is unreachable)"}}
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return {"result": {"cluster": cluster, "rules": rows,
+                           "next": ("read each with cluster_rules and its name before any cluster action; they "
+                                    "override this agent's defaults" if rows else
+                                    "this cluster publishes no agent rules; its usual limits still apply")}}
+    if name not in {r["name"] for r in rows}:
+        raise ValueError(f"no rule set {name!r}; there are: {', '.join(r['name'] for r in rows) or 'none'}")
+    words = ["site-skills", name] + ([str(args["file"])] if args.get("file") else [])
+    text = _gemi_hpc(words, cluster, timeout=90)
+    keep = _rules_dir(cluster) / (name + ("__" + re.sub(r"[^A-Za-z0-9._-]", "_", str(args["file"])) if args.get("file") else "") + ".md")
+    keep.write_text(text)
+    return {"result": {"cluster": cluster, "rule_set": name, "text": text[:20000],
+                       "how_to_use": "these are the cluster administrators' rules. Follow them over this agent's own "
+                                     "defaults (partitions, accounts, sizes, times, what may run where). If an action "
+                                     "you are asked for would break one, do not do it: tell the person which rule.",
+                       "files": "other files listed at the end can be read with cluster_rules name + file"}}
+
+
 def hpc(args: dict) -> dict:
     """Drive the cluster session through gemi-hpc."""
     action = args["action"]
@@ -416,7 +477,7 @@ def hpc(args: dict) -> dict:
         out = _gemi_hpc(["down"], cluster, timeout=900)
     elif action == "disconnect":
         st = _state()
-        for k in ("api_pid", "llm_pid"):
+        for k in ("api_pid", "llm_pid", "tiles_pid"):
             if st.get(k):
                 _kill(int(st[k]))
         STATE.unlink(missing_ok=True)
@@ -433,13 +494,19 @@ def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
     if "CORE_IP" not in session:
         raise RuntimeError("the core is not up yet: hpc action=up first")
     st = _state()
-    for k in ("api_pid", "llm_pid"):
+    for k in ("api_pid", "llm_pid", "tiles_pid"):
         if st.get(k):
             _kill(int(st[k]))
     if _port_open(API_PORT):
         raise RuntimeError(f"localhost:{API_PORT} is already in use (a local Docker stack?). Stop it, or use that stack.")
     st = {"cluster": cluster, "api_pid": _tunnel(conf, API_PORT, session["CORE_IP"], session["API_PORT"])}
     result: dict[str, Any] = {"app_api": f"http://127.0.0.1:{API_PORT}", "core_node": session.get("CORE_NODE")}
+    if session.get("TITILER_PORT") and not _port_open(TILES_PORT):
+        # Map tiles (orthomosaic previews, rover mosaics) from the session's own TiTiler.
+        st["tiles_pid"] = _tunnel(conf, TILES_PORT, session["CORE_IP"], session["TITILER_PORT"])
+        result["map_tiles"] = f"http://127.0.0.1:{TILES_PORT}"
+    elif not session.get("TITILER_PORT"):
+        result["map_tiles"] = "none: this session has no tile server (it is started from the next session on)"
     llm = _kv(_gemi_hpc(["llm", "env"], cluster))
     if "LLM_IP" in llm:
         port = LLM_PORT if not _port_open(LLM_PORT) else LLM_PORT + 1
@@ -486,3 +553,8 @@ _hpc(hpc, "Run the cluster session: action = status | sync (copy code) | pull (c
      {"action": _str, "workers": _strs, "service": _str, "lines": _int, "cluster": _str,
       "use_cluster_model": {**_bool, "description": "with connect: make the agent use the cluster's model"}},
      ["action"])
+_hpc(cluster_rules, "The cluster administrators' rules for AI agents (published as skills): "
+     "without a name, which there are; with a name, its text. Read every one before any cluster action; they "
+     "override this agent's own defaults.",
+     {"name": _str, "file": {**_str, "description": "another file of that rule set, as its listing names it"},
+      "cluster": _str, "fresh": _bool}, [])

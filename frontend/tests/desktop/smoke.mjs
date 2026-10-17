@@ -62,7 +62,7 @@ async function waitForShell(b, timeout) {
   // Anything the gate shows instead of the app is a failure worth reading.
   await b.waitUntil(
     async () => {
-      if (await b.$('[data-testid="user-menu"]').isExisting()) return true
+      if (await b.$('[data-onboarding="nav-files"]').isExisting()) return true
       const err = await b.$('[data-testid="stack-error"]')
       if (await err.isExisting())
         throw new Error(`stack failed to start:\n${await err.getText()}`)

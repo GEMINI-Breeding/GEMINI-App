@@ -4,6 +4,8 @@ agent runner all get them.
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -14,6 +16,8 @@ from .process_runs import JOB_STEP, SCOPE_KEYS, scope_from_path
 from .tools import TOOLS, _bool, _int, _ints, _str, _tool, client, process_tab
 
 _ = AGENT_DIR
+# What read_skill returns by default: "quick" = the steps only, "full" = the whole skill.
+SKILL_DETAIL = "quick"
 _strs = {"type": "array", "items": _str}
 _obj = {"type": "object"}
 JOB_KEEP = ("id", "job_type", "status", "progress", "progress_detail", "error_message", "worker_id",
@@ -52,7 +56,16 @@ def read_skill(args: dict) -> dict:
     text = path.read_text(encoding="utf-8")
     if text.startswith("---"):
         text = text.split("---", 2)[2].lstrip()
-    return {"result": text}
+    if args.get("full") or "## Quick path" not in text or SKILL_DETAIL == "full":
+        return {"result": text}
+    # The steps, in order, first: enough to do the stage. The rest (why, tuning,
+    # what to do when it goes wrong) is one more call away.
+    a = text.index("## Quick path")
+    b = text.find("\n## ", a + 5)
+    steps = text[a:b if b > 0 else len(text)].strip()
+    more = [line[3:].strip() for line in text[b:].splitlines() if line.startswith("## ")] if b > 0 else []
+    title = text[:a].strip().splitlines()[0] if text[:a].strip() else ""
+    return {"result": f"{title}\n\n{steps}\n\nMore in this skill (read_skill with \"full\": true): " + "; ".join(more) + "."}
 
 
 # ── what is there ────────────────────────────────────────────────────────────
@@ -69,7 +82,9 @@ def status(args: dict) -> dict:
     waiting = sorted({j["job_type"] for j in jobs if j["status"] == "PENDING"})
     return {"result": {
         "api": c.base, "user": c.me().get("email"),
-        "experiments": [e.get("experiment_name") for e in c.entities("experiments")],
+        # Names only, and few of them: a long list is read on every call and slows a small model down.
+        "experiments": (lambda names: names[:8] + ([f"… and {len(names) - 8} more (entities lists them)"] if len(names) > 8 else []))(
+            [str(e.get("experiment_name"))[:60] for e in c.entities("experiments")]),
         "jobs_recent": counts, "jobs_active": active[:30], "workers_busy": workers,
         "pending_job_types": waiting,
         "note": ("PENDING jobs with no worker for their type stay pending — start that worker"
@@ -80,8 +95,10 @@ def status(args: dict) -> dict:
 
 
 def entities(args: dict) -> dict:
-    kind = args["kind"]
+    kind = str(args.get("kind") or "experiments").strip().lower()
     c = client()
+    if kind not in c.ENTITY_NAME_KEY and kind + "s" in c.ENTITY_NAME_KEY:
+        kind += "s"                                           # "experiment" for "experiments"
     if kind not in c.ENTITY_NAME_KEY:
         raise ValueError(f"kind must be one of {', '.join(c.ENTITY_NAME_KEY)}")
     key = c.ENTITY_NAME_KEY[kind]
@@ -111,8 +128,25 @@ def browse(args: dict) -> dict:
     limit = int(args.get("limit") or 50)
     page = client().list_page(args["prefix"], limit, int(args.get("offset") or 0))
     files = page.get("files") or []
-    return {"result": {"total": page.get("total_count"), "shown": len(files),
-                       "objects": [{"name": f["object_name"], "size": f.get("size")} for f in files]}}
+    out: dict[str, Any] = {"total": page.get("total_count"), "shown": len(files),
+                           "objects": [{"name": f["object_name"], "size": f.get("size")} for f in files]}
+    # A listing shows that a file exists, not what is in it: name the tool that reads it.
+    names = [f["object_name"] for f in files]
+    if not files:
+        prefix = str(args["prefix"])
+        if re.match(r"^([A-Za-z]:[\\/]|/|~|\\\\)", prefix) or not prefix.startswith(("Raw/", "Processed/", "Models/", "Reference")):
+            out["note"] = ("browse lists the app's own storage (Raw/…, Processed/…), not folders on this computer. "
+                           "To bring files from this computer in: upload. To find a run's data: use the `run` words "
+                           "the pipeline tools take; do not guess prefixes.")
+        else:
+            out["note"] = ("nothing under this prefix. Do not guess prefixes: process_runs lists the runs, and the "
+                           "pipeline tools find a run's data from `run` words (site and date).")
+    found = next((n for n in names if "/predictions/" in n and n.endswith(".json")), None)
+    if found:
+        out["next"] = f"to see what a predictions file holds: inference_stats with predictions_path {found}"
+    elif any(n.endswith("stitch_manifest.json") for n in names):
+        out["next"] = "to see how a stitch went: stitch_stats"
+    return {"result": out}
 
 
 def reference_datasets(args: dict) -> dict:
@@ -123,30 +157,132 @@ def reference_datasets(args: dict) -> dict:
 
 # ── uploads ──────────────────────────────────────────────────────────────────
 
+def existing_names(args: dict) -> dict:
+    """Labels as the app already knows them. "sorghum trial" when the app has a
+    population "Sorghum", or "davis" for "Davis": the existing name is used, so
+    one field does not end up under two spellings. Returns what was changed."""
+    kinds = {"experiment": ("experiments", "experiment_name"), "site": ("sites", "site_name"),
+             "population": ("populations", "population_name")}
+    filler = {"trial", "experiment", "field", "site", "population", "the", "plots", "nursery", "study", "farm"}
+    changed = {}
+    for key, (kind, name_key) in kinds.items():
+        said = str(args.get(key) or "").strip()
+        if not said:
+            continue
+        try:
+            names = [str(e.get(name_key)) for e in client().entities(kind) if e.get(name_key)]
+        except Exception:
+            continue
+        exact = [n for n in names if n.lower() == said.lower()]
+        if exact:
+            hit = exact[0]
+        else:
+            core = " ".join(w for w in said.lower().split() if w not in filler)
+            near = [n for n in names if n.lower() == core] if core else []
+            hit = near[0] if len(near) == 1 else None
+        if hit and hit != said:
+            changed[key] = {"said": said, "used": hit}
+            args[key] = hit
+    return changed
+
+
+def check_platform(args: dict) -> None:
+    """Rover logs are Amiga data. For images the platform must be said: filing
+    drone photos as rover data (the old default) puts them in the wrong pipeline."""
+    if args.get("data_type") == "amiga_bin":
+        args.setdefault("platform", "Amiga")
+    elif not args.get("platform"):
+        raise ValueError("platform is needed for images: Drone for drone photos, or the rover's name (e.g. Amiga). "
+                         "Add platform and call upload again.")
+
+
 def upload(args: dict) -> dict:
     """Start a background upload batch."""
     kind = uploads.DATA_TYPES.get(args.get("data_type", ""))
     if kind is None:
         raise ValueError(f"data_type must be one of {', '.join(uploads.DATA_TYPES)}")
+    check_platform(args)
+    renamed = existing_names(args)
     files: list[Path] = []
-    for p in args["paths"] if isinstance(args["paths"], list) else [args["paths"]]:
+    folders: dict[str, list[Path]] = {}          # sub-folder (as given) -> its files, when a folder holds folders
+
+    def matching(d: Path) -> list[Path]:
+        return sorted(f for f in d.iterdir() if f.is_file() and f.suffix.lower() in kind["ext"])
+
+    given = args["paths"] if isinstance(args["paths"], list) else [args["paths"]]
+    for p in given:
         path = Path(p).expanduser()
         if path.is_dir():
-            files += sorted(f for f in path.iterdir() if f.is_file() and f.suffix.lower() in kind["ext"])
+            here = matching(path)
+            files += here
+            subs = {d.name: matching(d) for d in sorted(path.iterdir()) if d.is_dir()}
+            subs = {k: v for k, v in subs.items() if v}
+            if len(given) > 1 and here:
+                folders[path.name] = here            # several folders named: each is a part
+            elif subs and not here:
+                folders.update(subs)                 # one folder of folders
+                files += [f for v in subs.values() for f in v]
         elif path.is_file():
             files.append(path)
         else:
             raise ValueError(f"not found: {p}")
     if args.get("name_contains"):
         files = [f for f in files if str(args["name_contains"]) in f.name]
+        folders = {k: [f for f in v if str(args["name_contains"]) in f.name] for k, v in folders.items()}
+    run_of_day, treatment = str(args.get("run_of_day") or "").strip(), str(args.get("treatment") or "").strip()
+    meaning = str(args.get("folders_are") or "").strip().lower()
+    meaning = {"run": "runs", "runs of the day": "runs", "diurnal": "runs", "treatment": "treatments",
+               "one batch": "one", "nothing": "one", "ignore": "one"}.get(meaning, meaning)
+    parts: list[dict] = []
+    if len(folders) > 1 and meaning in ("runs", "treatments"):
+        for name, fs in folders.items():
+            m = re.match(r"^(?:run|flight|pass|rep|r)[\s_-]*0*(\d+)$", name, re.I)
+            parts.append({"folder": name, "files": fs,
+                          "run_of_day": (m.group(1) if m else name) if meaning == "runs" else run_of_day,
+                          "treatment": name if meaning == "treatments" else treatment})
+    elif len(folders) > 1 and meaning != "one":
+        # Several folders and nobody has said what they stand for: that is the person's to say.
+        return {"result": {"uploaded": 0, "state": "needs the person",
+                           "folders": {k: len(v) for k, v in folders.items()},
+                           "ask_person": ["what the folders stand for: different runs of the same day (diurnal data), "
+                                          "different treatments, or nothing (upload everything as one batch)"],
+                           "then": "call upload again with folders_are = runs, treatments or one",
+                           "tell_the_person": f"There are {len(folders)} folders ({', '.join(list(folders)[:6])}). Are they "
+                                              "runs of the same day, treatments, or should everything go in as one batch?"}}
+    else:
+        parts = [{"folder": "", "files": files, "run_of_day": run_of_day, "treatment": treatment}]
+    labels = [uploads.batch_label(p["run_of_day"], p["treatment"]) for p in parts]
+    if len(parts) > 1 and len(set(labels)) < len(labels):
+        raise ValueError("two folders would get the same labels: " + ", ".join(sorted({x for x in labels if labels.count(x) > 1})))
     if args.get("dry_run"):
-        return {"result": {"would_upload": len(files), "bytes": sum(f.stat().st_size for f in files),
-                           "first": [f.name for f in files[:5]]}}
-    return {"result": uploads.start(
-        client(), files, experiment=args["experiment"], site=args["site"], population=args["population"],
-        date=args["date"], platform=args.get("platform") or "Amiga", sensor=args.get("sensor") or "RGB",
-        data_type=args["data_type"], parallel=int(args.get("parallel") or 3),
-        dataset_id=args.get("dataset_id"), extract=args.get("extract"))}
+        out = {"would_upload": len(files), "bytes": sum(f.stat().st_size for f in files),
+               "first": [f.name for f in files[:5]],
+               "filed_under": {k: args.get(k) for k in ("experiment", "site", "population", "date")},
+               **({"existing_names_used": renamed} if renamed else {}),
+               "next": "tell the person this count, then call upload again with the same arguments "
+                       "but without dry_run"}
+        if len(parts) > 1 or labels[0]:
+            out["batches"] = [{"folder": p["folder"] or None, "files": len(p["files"]), "label": lab or None}
+                              for p, lab in zip(parts, labels)]
+            out["note"] = "each batch is kept as its own upload and gets its own pipeline run"
+        return {"result": out}
+    started_all = []
+    for p in parts:
+        if not p["files"]:
+            continue
+        started_all.append(uploads.start(
+            client(), p["files"], experiment=args["experiment"], site=args["site"], population=args["population"],
+            date=args["date"], platform=args.get("platform") or "Amiga", sensor=args.get("sensor") or "RGB",
+            data_type=args["data_type"], parallel=int(args.get("parallel") or 3),
+            dataset_id=args.get("dataset_id") if len(parts) == 1 else None, extract=args.get("extract"),
+            run_of_day=p["run_of_day"], treatment=p["treatment"], source_folder=p["folder"]))
+    if len(started_all) == 1:
+        started = started_all[0]
+        return {"result": {**started, **({"label": labels[0]} if labels[0] else {}),
+                           "next": f"wait_task with task_id {started.get('task_id')}; then report files done and failed"}}
+    return {"result": {"batches": [{"task_id": s.get("task_id"), "label": lab, "files": len(p["files"]), "target": s.get("target")}
+                                   for s, p, lab in zip(started_all, [p for p in parts if p["files"]], labels)],
+                       "next": "wait_task for each task_id in turn; then report files done and failed per batch"}}
 
 
 def tasks(args: dict) -> dict:
@@ -155,11 +291,27 @@ def tasks(args: dict) -> dict:
     return {"result": uploads.list_tasks()[: int(args.get("limit") or 10)]}
 
 
+def _task_id(args: dict) -> str:
+    """The task named, or the newest upload when none is: there is rarely more than one."""
+    latest = uploads.list_tasks()
+    given = str(args.get("task_id") or "")
+    if given and any(str(t.get("task_id")) == given for t in latest):
+        return given
+    if given and given.lower() not in ("latest", "last", "current", "newest"):
+        # Not an id that exists: models make ids up when no upload was started.
+        raise ValueError(f"there is no upload task {given!r}. Task ids come from the upload call's result. "
+                         + ("Known tasks: " + ", ".join(str(t.get("task_id")) for t in latest[:5]) if latest else
+                            "No upload has been started: nothing has been uploaded. Call upload first."))
+    if not latest:
+        raise ValueError("no upload has been started yet, so nothing has been uploaded: call upload first")
+    return str(max(latest, key=lambda t: t.get("created") or t.get("started") or 0)["task_id"])
+
+
 def wait_task(args: dict) -> dict:
     """Block until an upload finishes, or the timeout passes."""
     deadline = time.time() + min(int(args.get("timeout_s") or 300), 3600)
     while True:
-        s = uploads.summary(uploads.read(args["task_id"]))
+        s = uploads.summary(uploads.read(_task_id(args)))
         if s["status"] != "running" or time.time() >= deadline:
             return {"result": s}
         time.sleep(5)
@@ -257,6 +409,31 @@ def _runs_view(pr, limit: int) -> dict:
     adopted = _adopt(pr)
     pr.settle()
     out: dict = {"runs": pr.list()[:limit]}
+    try:
+        from . import guide
+
+        runs, pipelines = guide._state(pr)
+        rows = [guide._row(pr, r, pipelines) for r in runs[:limit]]
+        out["next_for_each_run"] = [{"run": r["run"], "next_step": r.get("step"), "state": r.get("state"),
+                                     **{k: r[k] for k in ("stitching_result", "how_a_finished_step_went",
+                                                          "measurable_now_without_a_model") if r.get(k)}} for r in rows]
+        def line(r: dict) -> str:
+            if not r.get("step"):
+                return f"{r['run']}: all steps done"
+            if r.get("state") == "failed":
+                why = r.get("error")
+                job = ((r.get("do") or {}).get("args") or {}).get("job_id")
+                if not why and job:
+                    try:
+                        why = client().job(job).get("error_message")
+                    except Exception:
+                        why = None
+                return f"{r['run']}: {r['step']} FAILED" + (f" because: {why}" if why else " (job_detail gives the reason)")
+            return f"{r['run']}: next step is {r['step']} ({r.get('state')})"
+
+        out["tell_the_person"] = "; ".join(line(r) for r in rows) or "there are no runs yet"
+    except Exception:
+        pass                                  # the plain list is still an answer
     if adopted:
         out["jobs_newly_attached"] = adopted
     return out
@@ -276,7 +453,14 @@ def submit_job(args: dict) -> dict:
 def wait_jobs(args: dict) -> dict:
     """Block until the given jobs finish (or the timeout passes)."""
     c = client()
-    ids = [str(i) for i in args["job_ids"]]
+    ids = [str(i) for i in args.get("job_ids") or []]
+    if not ids:
+        # "Wait for it": the jobs still open, else the one submitted last.
+        rows = c.jobs(None, None, 1000)
+        rows.sort(key=lambda j: j.get("created_at") or "", reverse=True)
+        ids = [str(j["id"]) for j in rows if j.get("status") in ("PENDING", "RUNNING")][:20] or [str(j["id"]) for j in rows[:1]]
+        if not ids:
+            raise ValueError("there are no jobs to wait for")
     deadline = time.time() + min(int(args.get("timeout_s") or 600), 3600)
     while True:
         rows = [c.job(i) for i in ids]
@@ -299,7 +483,22 @@ def _experiment_id(name: str) -> Optional[str]:
 
 def job_detail(args: dict) -> dict:
     process_tab(lambda pr: pr.settle())
-    return {"result": _slim(client().job(args["job_id"]), with_result=True)}
+    try:
+        return {"result": _slim(client().job(args["job_id"]), with_result=True)}
+    except Exception as e:
+        # Not a job id (models tend to build one from a run id and a step name). Job ids come
+        # from `jobs` or a run's steps: show the jobs this was most likely about.
+        rows = client().jobs(None, None, 1000)
+        rows.sort(key=lambda j: j.get("created_at") or "", reverse=True)
+        words = [w for w in re.split(r"[^a-z]+", str(args["job_id"]).lower()) if len(w) > 3]
+        near = [j for j in rows if any(w in str(j.get("job_type") or "").lower().replace("odm", "odm orthomosaic") for w in words)]
+        failed = [j for j in (near or rows) if j.get("status") == "FAILED"]
+        pick = (failed or near or rows)[:5]
+        if len(failed) == 1:
+            return {"result": {**_slim(client().job(failed[0]["id"]), with_result=True),
+                               "note": f"{args['job_id']!r} is not a job id; this is the one failed job it could mean"}}
+        raise ValueError(f"{args['job_id']!r} is not a job id ({type(e).__name__}). Job ids look like the `id` values here; "
+                         "call job_detail with one of them: " + json.dumps([_slim(j) for j in pick])[:1500])
 
 
 def cancel_job(args: dict) -> dict:
@@ -318,8 +517,99 @@ def run_orthomosaic(args: dict) -> dict:
     return {"result": {**_slim(job), "process_tab": _record(job, params, skipped)}}
 
 
+def _weights_in_app(ref: str) -> str:
+    """Where a weights file is in the app. A file on this computer is copied in
+    first (Models/weights/<its name>); a bare file name means that folder."""
+    local = Path(ref).expanduser()
+    if local.is_file():
+        target = f"Models/weights/{local.name}"
+        c = client()
+        data = local.read_bytes()
+        part = 8 * 1024 * 1024
+        total = max(1, -(-len(data) // part))
+        for i in range(total):
+            c.upload_chunk(data[i * part:(i + 1) * part], i, total, f"agent:{target}:{len(data)}", target)
+        return target
+    if "/" not in ref and "\\" not in ref:
+        return f"Models/weights/{ref}"
+    return ref
+
+
+def _model_spec(model: Any, task: Optional[str]) -> dict:
+    """The model as the worker wants it. Accepts the full object, or the short
+    form a person would say: "huggingface:facebook/detr-resnet-50",
+    "roboflow:plants-x1y2/3", "weights:Models/weights/cowpea.pt"."""
+    if isinstance(model, dict):
+        spec = dict(model)
+        if "source" not in spec and spec.get("model_source"):
+            spec["source"] = spec.pop("model_source")
+    elif isinstance(model, str) and ":" in model:
+        kind, ref = model.split(":", 1)
+        kind, ref = kind.strip().lower(), ref.strip()
+        if kind in ("huggingface", "hf"):
+            spec = {"source": "huggingface", "hf_model_id": ref}
+        elif kind == "roboflow":
+            spec = {"source": "roboflow", "model_id": ref}
+        elif kind in ("weights", "local_weights", "local"):
+            spec = {"source": "local_weights", "weights_path": _weights_in_app(ref)}
+        elif kind and ref and kind.replace("_", "").replace("-", "").isalnum():
+            # Another provider: passed on as named; the worker says if it cannot run it.
+            spec = {"source": kind, "model_id": ref}
+        else:
+            raise ValueError(f"model {model!r}: use huggingface:<id>, roboflow:<id>, weights:<path> or <provider>:<id>")
+    else:
+        raise ValueError('model: an object with "source", or short form like "huggingface:facebook/detr-resnet-50"')
+    if spec.get("source") in ("huggingface", "local_weights"):
+        spec.setdefault("task_type", task or "detection")
+    return spec
+
+
+def resolve_inference(args: dict) -> dict:
+    """Fill in what follows from the rest: `run` (words naming one pipeline run)
+    gives the plot-images folder and where the predictions go; the model may
+    be given in short form."""
+    args = dict(args)
+    args["model"] = _model_spec(args.get("model"), args.pop("task", None))
+    one = str(args.get("image_path") or "")
+    if one and not one.startswith(("Processed/", "Raw/")):
+        # "Davis 2026-08-21 plot images" is a description, not an image: the run words say the same.
+        args.pop("image_path")
+        if not args.get("run") and not args.get("images_prefix"):
+            args["run"] = " ".join(w for w in one.replace("/", " ").split() if w.lower() not in ("plot", "images", "plotimages"))
+    given = str(args.get("images_prefix") or "")
+    if given and not given.startswith(("Processed/", "Raw/")):
+        # Not a storage path: words naming the run ("Davis 2026-08-21/PlotImages") - use them as such.
+        args["run"] = " ".join(w for w in given.replace("/", " ").split() if w.lower() != "plotimages")
+        args.pop("images_prefix")
+    if args.get("run") and not (args.get("images_prefix") or args.get("image_path")):
+        from . import guide
+        from .process_runs import ProcessRuns
+
+        pr = ProcessRuns(client())
+        runs, pipelines = guide._state(pr)
+        found = guide._match(runs, str(args["run"]))
+        if len(found) != 1:
+            raise ValueError(f"`run` must pick exactly one run; it matches {len(found)}: " +
+                             ", ".join(guide._label(pr.describe(r, pipelines)) for r in (found or runs)[:8]))
+        up = found[0].get("uploadScope") or {}
+        args["images_prefix"] = "Processed/" + "/".join(str(up[k]) for k in SCOPE_KEYS) + "/PlotImages/"
+        args.setdefault("per_plot", True)
+    args.pop("run", None)
+    prefix = args.get("images_prefix") or ""
+    if not args.get("output_predictions_path") and prefix:
+        m = args["model"]
+        name = str(args.get("count_label") or m.get("hf_model_id") or m.get("model_id") or m.get("weights_path") or "model")
+        name = "".join(c if c.isalnum() else "-" for c in name.split("/")[-1].rsplit(".", 1)[0]).strip("-").lower()
+        base = prefix.rstrip("/").rsplit("/", 1)[0] if prefix.rstrip("/").endswith(("PlotImages",)) or "AgRowStitch_v" in prefix \
+            else prefix.rstrip("/")
+        args["output_predictions_path"] = f"{base}/predictions/{name}-v1.json"
+        args.setdefault("count_label", name)
+    return args
+
+
 def run_inference(args: dict) -> dict:
     """LOCATE_PLANTS: a detection / segmentation / classification model over images."""
+    args = resolve_inference(args)
     if bool(args.get("image_path")) == bool(args.get("images_prefix")):
         raise ValueError("give exactly one of image_path or images_prefix")
     params = {k: args[k] for k in ("image_path", "images_prefix", "output_predictions_path", "count_label",
@@ -339,7 +629,10 @@ def run_inference(args: dict) -> dict:
     job = client().submit_job("LOCATE_PLANTS", params, args.get("experiment_id") or
                               _experiment_id((scope_from_path(params.get("images_prefix") or params.get("image_path") or "")
                                               or {}).get("experiment", "")))
-    return {"result": {**_slim(job), "process_tab": _record(job, params)}}
+    return {"result": {**_slim(job), "predictions": params.get("output_predictions_path"),
+                       "process_tab": _record(job, params),
+                       "next": [{"tool": "wait_jobs", "args": {"job_ids": [str(job.get("id"))]}},
+                                {"tool": "inference_stats", "args": {"predictions_path": params.get("output_predictions_path")}}]}}
 
 
 def run_trait_extraction(args: dict) -> dict:
@@ -370,15 +663,44 @@ def _app(fn, description: str, props: dict, required: list[str], group: str, des
 
 
 _app(skills, "List the skills (written procedures for each stage of the app).", {}, [], "skills")
-_app(read_skill, "Read one skill. Do this before starting a stage you have not done in this session.",
-     {"name": _str}, ["name"], "skills")
+_app(read_skill, "Read one skill: the steps for a stage, in order. Do this before starting a stage you have not done "
+     "in this session. full=true adds the background (why, tuning, what to do when it fails).",
+     {"name": _str, "full": _bool}, ["name"], "skills")
 _app(status, "Overview of the stack: experiments, recent job counts, active jobs, busy workers, running uploads.",
      {}, [], "status")
 _app(process_runs, "Runs on the app's Process tab with every step's state (pending, running, completed, failed, "
      "skipped), the next step, and the page to open. Work done with the pipeline tools is recorded there "
      "automatically.", {"limit": _int}, [], "status")
-_app(entities, "List experiments, sites, populations, seasons, sensor_platforms, sensors or datasets.",
-     {"kind": _str}, ["kind"], "status")
+def regroup_runs(args: dict) -> dict:
+    from .process_runs import ProcessRuns
+
+    moved = ProcessRuns(client()).regroup(dry_run=bool(args.get("dry_run")))
+    return {"result": {"moved": moved, "dry_run": bool(args.get("dry_run")),
+                       "note": "only the Process tab's folders change; jobs and data are untouched"}}
+
+
+def register_models(args: dict) -> dict:
+    from .process_runs import ProcessRuns
+
+    pr = ProcessRuns(client())
+    added = []
+    for run in pr.state()["runs"]:
+        for m in pr.register_models_from_jobs(run):
+            added.append({"run": run.get("name"), "model": m.get("label") or m.get("hf_model_id")
+                          or m.get("roboflow_model_id") or m.get("weights_path") or m.get("source"),
+                          "source": m.get("source")})
+    return {"result": {"added": added, "note": "each model a run's inference jobs used is now in that run's "
+                                               "pipeline list (Inference tool), so it can be run again by hand"}}
+
+
+_app(regroup_runs, "Move runs out of the old 'Agent runs' workspace into their experiment's workspace on the "
+     "Process tab (agent runs keep a small agent icon). dry_run=true only lists the moves.",
+     {"dry_run": _bool}, [], "status")
+_app(register_models, "Add every model already run on a Process-tab run (its inference jobs) to that run's pipeline "
+     "model list, for runs where they are missing. New inference calls do this by themselves.", {}, [], "status")
+_app(entities, "List experiments (the default), sites, populations, seasons, sensor_platforms, sensors or datasets.",
+     {"kind": {**_str, "description": "experiments | sites | populations | seasons | sensor_platforms | sensors | datasets"}},
+     [], "status")
 _app(datasets, "An experiment's upload batches (datasets) with their storage location.",
      {"experiment": _str}, ["experiment"], "status")
 _app(browse, "List objects under a storage prefix (paged; listing is recursive, so use a narrow prefix).",
@@ -388,9 +710,17 @@ _app(reference_datasets, "Reference data loaded in the app (field designs, hand-
 _app(upload, "Start a background upload of local files or folders into the app; returns a task id to poll with "
      "`tasks`. Creates the experiment/site/population/season/platform/sensor if missing. data_type: amiga_bin "
      "(rover .bin logs; extraction is queued per file), images, orthomosaic.",
-     {"paths": _strs, "experiment": _str, "site": _str, "population": _str,
+     {"paths": {**_strs, "description": "folders or files on this computer"},
+      "experiment": {**_str, "description": "the experiment / project name"},
+      "site": {**_str, "description": "where the field is (the location)"},
+      "population": {**_str, "description": "the trial or crop: which set of plots, e.g. Sorghum"},
       "date": {**_str, "description": "collection date, YYYY-MM-DD"}, "platform": _str, "sensor": _str,
       "data_type": _str, "parallel": {**_int, "description": "files in flight at once, 1-8 (default 3)"},
+      "run_of_day": {**_str, "description": "only for diurnal data (the field covered more than once that day): "
+                                            "which run this is, e.g. 1, 2, morning"},
+      "treatment": {**_str, "description": "only if the data was collected separately per treatment: which one"},
+      "folders_are": {**_str, "description": "when the path holds several folders, what they stand for: runs "
+                                             "(of the same day) | treatments | one (ignore folders, one batch)"},
       "name_contains": _str, "dataset_id": {**_str, "description": "add to this existing batch instead of a new one"},
       "extract": _bool, "dry_run": _bool},
      ["paths", "experiment", "site", "population", "date", "data_type"], "upload")
@@ -398,13 +728,14 @@ _app(tasks, "Progress of background uploads: one task (task_id) or the latest on
      {"task_id": _str, "limit": _int}, [], "upload")
 _app(wait_task, "Wait for a background upload: returns when it finishes or after timeout_s (default 300, max "
      "3600) with its progress. Use this instead of calling `tasks` repeatedly.",
-     {"task_id": _str, "timeout_s": _int}, ["task_id"], "upload")
+     {"task_id": {**_str, "description": "omit for the upload started last"}, "timeout_s": _int}, [], "upload")
 _app(cancel_task, "Stop a background upload after the parts in flight.", {"task_id": _str}, ["task_id"], "upload")
 _app(jobs, "List jobs, newest first; filter by status (PENDING, RUNNING, COMPLETED, FAILED, CANCELLED) or job_type.",
      {"status": _str, "job_type": _str, "limit": _int}, [], "jobs")
 _app(job_detail, "One job with its parameters and result.", {"job_id": _str}, ["job_id"], "jobs")
-_app(wait_jobs, "Wait until the listed jobs finish (max 1 h per call); returns counts and failures.",
-     {"job_ids": _strs, "timeout_s": _int}, ["job_ids"], "jobs")
+_app(wait_jobs, "Wait until the listed jobs finish (max 1 h per call); returns counts and failures. Without "
+     "job_ids: the jobs still open, else the one submitted last.",
+     {"job_ids": _strs, "timeout_s": _int}, [], "jobs")
 _app(cancel_job, "Cancel a pending or running job.", {"job_id": _str}, ["job_id"], "jobs")
 _app(submit_job, "Submit any job type with raw parameters (see the pipeline skills for each type's parameters).",
      {"job_type": _str, "parameters": _obj, "experiment_id": _str}, ["job_type", "parameters"], "jobs")
@@ -412,12 +743,16 @@ _app(run_orthomosaic, "Aerial: build the orthomosaic (RUN_ODM) for one scope.",
      {"experiment": _str, "location": _str, "population": _str, "date": _str, "platform": _str, "sensor": _str,
       "dataset_short_ids": _strs, "reconstruction_quality": _str, "custom_options": _str, "skip_gcps": _bool,
       "experiment_id": _str}, ["experiment", "location", "population", "date", "platform", "sensor"], "aerial")
-_app(run_inference, "Run a model over one image (image_path) or a folder (images_prefix); model = "
-     "{source: roboflow|huggingface|local_weights, task_type, …} (keys in the inference skill). per_plot=true "
-     "on a PlotImages folder also stores each plot's count as a trait.",
-     {"image_path": _str, "images_prefix": _str, "output_predictions_path": _str, "model": _obj, "per_plot": _bool,
+_app(run_inference, "Run a detection / segmentation / classification model on plot images. Simplest: run = words "
+     "naming the pipeline run (its plot images are used, each plot's count is stored, the output path is chosen) "
+     "and model = 'huggingface:<model id>' | 'roboflow:<model id>' | 'weights:<path>'. Returns the job id and "
+     "the two calls to make next. Other images: image_path or images_prefix.",
+     {"run": {**_str, "description": "words that pick one run: its site and date as the person said them"},
+      "model": {"description": "'huggingface:<id>', 'roboflow:<id>', 'weights:<path>', or the full object from the skill"},
+      "task": {**_str, "description": "detection (default), segmentation or classification"},
+      "image_path": _str, "images_prefix": _str, "output_predictions_path": _str, "per_plot": _bool,
       "count_label": _str, "confidence_threshold": {"type": "number"}, "iou_threshold": {"type": "number"},
-      "experiment_id": _str}, ["output_predictions_path", "model"], "inference")
+      "experiment_id": _str}, ["model"], "inference")
 _app(run_trait_extraction, "Per-plot traits from an orthomosaic + plot boundaries (EXTRACT_TRAITS).",
      {"orthomosaic_path": _str, "boundary_geojson_path": _str, "output_traits_geojson_path": _str,
       "dem_path": _str, "thermal_path": _str, "exg_threshold": {"type": "number"}, "experiment_id": _str},

@@ -13,6 +13,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { agentApi } from "@/features/agent/lib/agentApi"
 import { getToken, login, onLogout } from "@/lib/auth"
 import { signInRequired } from "@/lib/autoSignIn"
 import { openUrl } from "@/lib/platform"
@@ -53,11 +54,13 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
   const [view, setView] = useState<View>({ kind: "checking" })
   const running = useRef(false)
 
-  const bringUp = useCallback(async () => {
+  // `quiet`: a background re-check. The page stays as it is unless the
+  // answer changes (otherwise it would blank to "Checking…" every few seconds).
+  const bringUp = useCallback(async (quiet = false) => {
     if (running.current) return
     running.current = true
     try {
-      setView({ kind: "checking" })
+      if (!quiet) setView({ kind: "checking" })
       let status = await stackStatus()
       if (status.docker.state !== "ready") {
         setView({ kind: "docker", status })
@@ -100,7 +103,7 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
   // Docker Desktop takes a while to start: re-check on its own.
   useEffect(() => {
     if (view.kind !== "docker") return
-    const t = setInterval(() => void bringUp(), 5_000)
+    const t = setInterval(() => void bringUp(true), 5_000)
     return () => clearInterval(t)
   }, [view.kind, bringUp])
 
@@ -125,7 +128,7 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
       <div className="w-full max-w-lg space-y-4">
         {view.kind === "checking" && <p>Checking GEMINI services…</p>}
         {view.kind === "docker" && (
-          <DockerNeeded status={view.status} onRetry={bringUp} />
+          <DockerNeeded status={view.status} onRetry={() => void bringUp()} />
         )}
         {view.kind === "first-run" && (
           <FirstRun
@@ -141,13 +144,61 @@ function ManagedStackGate({ children }: { children: ReactNode }) {
           />
         )}
         {(view.kind === "docker" || view.kind === "first-run") && (
+          <UseRunningStack />
+        )}
+        {(view.kind === "docker" || view.kind === "first-run") && (
           <UseCluster />
         )}
         {view.kind === "starting" && <Starting lines={view.lines} />}
         {view.kind === "error" && (
-          <StartError message={view.message} onRetry={bringUp} />
+          <StartError message={view.message} onRetry={() => void bringUp()} />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A GEMINI stack is already answering on this computer (started from a
+ * terminal, or by another copy of the app): use it as it is, instead of
+ * setting up a second one that would compete for the same ports. Asked of
+ * the agent service, which already checks the stack's health.
+ */
+function UseRunningStack() {
+  const [found, setFound] = useState(false)
+  useEffect(() => {
+    let live = true
+    agentApi
+      .mode()
+      .then((m) => live && setFound(Boolean(m.stack_reachable)))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  if (!found) return null
+  return (
+    <div
+      className="space-y-2 rounded-md border border-emerald-600/50 p-3"
+      data-testid="stack-use-running"
+    >
+      <p className="text-sm font-medium">
+        A GEMINI stack is already running on this computer
+      </p>
+      <p className="text-muted-foreground text-sm">
+        Use it as it is: nothing new is installed or started, and its data is
+        what you will see.
+      </p>
+      <Button
+        onClick={() => {
+          // Same as a cluster's tunnel: the app starts nothing and talks to
+          // the API that is already there.
+          setStackMode("cluster")
+          window.location.assign("/")
+        }}
+      >
+        Use the running stack
+      </Button>
     </div>
   )
 }
@@ -175,7 +226,7 @@ function UseCluster() {
         variant="outline"
         onClick={() => {
           setStackMode("cluster")
-          window.location.assign("/setup")
+          window.location.assign("/")
         }}
       >
         Set up on a cluster

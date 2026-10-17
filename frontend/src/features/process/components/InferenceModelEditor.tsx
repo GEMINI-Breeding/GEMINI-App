@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/select"
 import {
   type InferenceModel,
+  isKnownSource,
+  type KnownSource,
   type ModelSource,
   modelProblem,
   SOURCE_LABELS,
@@ -90,11 +92,16 @@ export function InferenceModelEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.keys(SOURCE_LABELS) as ModelSource[]).map((s) => (
+              {(Object.keys(SOURCE_LABELS) as KnownSource[]).map((s) => (
                 <SelectItem key={s} value={s}>
                   {SOURCE_LABELS[s]}
                 </SelectItem>
               ))}
+              {!isKnownSource(model.source) && (
+                <SelectItem value={model.source}>
+                  {model.source} (added by the agent)
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
         </div>

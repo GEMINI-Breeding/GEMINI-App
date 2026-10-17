@@ -14,6 +14,7 @@ import { HelpSidebar, OnboardingTour } from "@/components/Help"
 import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
+import { ConnectionNotice } from "@/components/System/ConnectionNotice"
 import {
   SidebarInset,
   SidebarProvider,
@@ -24,6 +25,7 @@ import { isLoggedIn } from "@/hooks/useAuth"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { onLogout } from "@/lib/auth"
 import { autoSignIn } from "@/lib/autoSignIn"
+import { checkBackend } from "@/lib/connection"
 import { openUrl } from "@/lib/platform"
 
 export const Route = createFileRoute("/_layout")({
@@ -38,8 +40,13 @@ export const Route = createFileRoute("/_layout")({
   // By default there is no login step: the app signs in with this
   // computer's own account (lib/autoSignIn.ts). The login page is only
   // reached when that is switched off in Settings, or is not available.
+  //
+  // With no processing stack reachable there is nothing to sign in to: the
+  // app opens anyway (home page, compute, model settings work) and the
+  // ConnectionNotice says what to do.
   beforeLoad: async () => {
     if (!isLoggedIn() && !(await autoSignIn())) {
+      if (!(await checkBackend())) return
       throw redirect({ to: "/login" })
     }
   },
@@ -66,9 +73,10 @@ function Layout() {
     const off = onLogout(() => {
       // An expired session signs straight back in; only a deliberate
       // sign-out (or required sign-in) shows the login page.
-      void autoSignIn().then((ok) => {
+      void autoSignIn().then(async (ok) => {
         if (ok) window.location.reload()
-        else navigate({ to: "/login" })
+        // Stack unreachable: there is no login to go to; stay, the notice explains.
+        else if (await checkBackend()) navigate({ to: "/login" })
       })
     })
     return off
@@ -125,7 +133,7 @@ function Layout() {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <header className="bg-background sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1 text-muted-foreground" />
           <div className="ml-auto">
@@ -148,8 +156,8 @@ function Layout() {
           // All other pages: standard padded + centered layout. The extra
           // bottom padding lets a page's last controls scroll clear of the
           // fixed process panel / its pill in the bottom-right corner.
-          <main className="flex-1 p-6 pb-24 md:p-8 md:pb-24">
-            <div className="mx-auto max-w-7xl">
+          <main className="min-w-0 flex-1 p-6 pb-24 md:p-8 md:pb-24">
+            <div className="mx-auto max-w-7xl min-w-0">
               <Outlet />
             </div>
           </main>
@@ -157,6 +165,7 @@ function Layout() {
         {!isFullHeight && <Footer />}
       </SidebarInset>
       <ProcessPanel />
+      <ConnectionNotice />
 
       <HelpSidebar
         open={helpOpen}
