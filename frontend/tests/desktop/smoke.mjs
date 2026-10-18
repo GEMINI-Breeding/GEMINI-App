@@ -139,9 +139,20 @@ log("signed in")
 
 // ── 2. Settings shows the folder; the data is really there ─────────────
 let panel = await openStackSettings(b)
-const text = await panel.getText()
-if (!text.includes(DATA_DIR))
+// The folder appears once the panel's status query has answered.
+let text = ""
+try {
+  await b.waitUntil(
+    async () => {
+      text = await panel.getText()
+      return text.includes(DATA_DIR)
+    },
+    { timeout: 60_000, interval: 1000 },
+  )
+} catch {
+  await diagnose(b, "settings-data-folder")
   throw new Error(`Settings doesn't show ${DATA_DIR}:\n${text}`)
+}
 // The running containers mount the chosen folder (asking Docker, because on
 // Linux the postgres folder belongs to the container's user and can't be
 // listed by the test)…
