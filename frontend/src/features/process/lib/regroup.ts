@@ -33,7 +33,8 @@ const norm = (s: unknown) =>
     .filter(Boolean)
     .join(" ")
 
-function workspaceFor(experiment: string): Workspace {
+/** The workspace an experiment's runs belong in (made when there is none). */
+export function workspaceForExperiment(experiment: string): Workspace {
   const st = getState()
   const spaces = st.workspaces.filter((w) => w.name !== LEGACY_WORKSPACE)
   const held = new Map<string, number>()
@@ -53,29 +54,48 @@ function workspaceFor(experiment: string): Workspace {
   )
 }
 
-function pipelineFor(ws: Workspace, run: Run, old?: Pipeline): Pipeline {
+/**
+ * A pipeline of this type in the workspace, preferring the one whose runs
+ * share this platform and sensor (same settings); else a new one.
+ */
+export function pipelineForKind(
+  ws: Workspace,
+  kit: {
+    type: Pipeline["type"]
+    platform?: string
+    sensor?: string
+    params: Record<string, unknown>
+  },
+): Pipeline {
   const st = getState()
-  const type = old?.type ?? "ground"
-  const kit = [norm(run.uploadScope?.platform), norm(run.uploadScope?.sensor)]
   const sameKit = (p: Pipeline) =>
     st.runs.filter(
       (r) =>
         r.pipelineId === p.id &&
-        norm(r.uploadScope?.platform) === kit[0] &&
-        norm(r.uploadScope?.sensor) === kit[1],
+        norm(r.uploadScope?.platform) === norm(kit.platform) &&
+        norm(r.uploadScope?.sensor) === norm(kit.sensor),
     ).length
   const pipes = st.pipelines
-    .filter((p) => p.workspaceId === ws.id && p.type === type)
+    .filter((p) => p.workspaceId === ws.id && p.type === kit.type)
     .sort((a, b) => sameKit(b) - sameKit(a))
   return (
     pipes[0] ??
     createPipeline({
       workspaceId: ws.id,
-      name: `${type === "ground" ? "Ground" : "Aerial"} · ${run.uploadScope?.platform ?? ""}/${run.uploadScope?.sensor ?? ""}`,
-      type,
-      params: old?.params ?? {},
+      name: `${kit.type === "ground" ? "Ground" : "Aerial"} · ${kit.platform ?? ""}/${kit.sensor ?? ""}`,
+      type: kit.type,
+      params: kit.params,
     })
   )
+}
+
+function pipelineFor(ws: Workspace, run: Run, old?: Pipeline): Pipeline {
+  return pipelineForKind(ws, {
+    type: old?.type ?? "ground",
+    platform: run.uploadScope?.platform,
+    sensor: run.uploadScope?.sensor,
+    params: old?.params ?? {},
+  })
 }
 
 export function legacyRunCount(): number {
@@ -95,7 +115,7 @@ export function regroupAgentRuns(): number {
   )
   let moved = 0
   for (const run of st.runs.filter((r) => ids.has(r.workspaceId))) {
-    const ws = workspaceFor(run.uploadScope?.experiment ?? "")
+    const ws = workspaceForExperiment(run.uploadScope?.experiment ?? "")
     const pipe = pipelineFor(ws, run, oldPipes.get(run.pipelineId))
     moveRun(run.id, pipe.id)
     moved++

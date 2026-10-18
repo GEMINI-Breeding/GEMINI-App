@@ -328,7 +328,7 @@ export interface InstallStep {
 }
 
 export interface InstallJob {
-  what: "ollama" | "docker"
+  what: "ollama" | "docker" | "git"
   state: "running" | "done" | "failed"
   steps: InstallStep[]
   error: string | null
@@ -336,13 +336,27 @@ export interface InstallJob {
   note: string | null
 }
 
+export interface DiskSpace {
+  data_free_gb: number | null
+  docker_free_gb: number | null
+  /** Where Docker usually keeps its images here. */
+  docker_dir: string
+  same_drive: boolean
+  /** What GEMI's services take on Docker's drive. */
+  needs_gb: number
+  /** Sentences for each drive that is short of room; empty when fine. */
+  problems: string[]
+}
+
 /** Ollama and Docker on this computer, and installs in flight. */
 export interface InstallOverview {
   ollama: "running" | "installed" | "missing"
   docker: "running" | "not_running" | "missing"
+  /** Windows: Git for Windows, whose bash the cluster tools run with. */
+  git: "installed" | "missing" | "not_needed"
   /** Linux: Docker is installed from a terminal with these commands. */
   docker_linux_steps: string[] | null
-  jobs: Partial<Record<"ollama" | "docker", InstallJob>>
+  jobs: Partial<Record<"ollama" | "docker" | "git", InstallJob>>
 }
 
 export interface AgentMode {
@@ -391,6 +405,7 @@ export const agentApi = {
   installOllama: () => call<InstallOverview>("/install/ollama", post()),
   installDocker: () => call<InstallOverview>("/install/docker", post()),
   startDocker: () => call<InstallOverview>("/install/docker/start", post()),
+  installGit: () => call<InstallOverview>("/install/git", post()),
   computeStart: (name: string, where?: string) =>
     call<{ started: boolean }>("/compute/start", post({ name, where })),
   computeStop: (name: string) =>
@@ -402,6 +417,9 @@ export const agentApi = {
       body: JSON.stringify(patch),
     }),
   onboarding: () => call<Onboarding>("/onboarding"),
+  /** Free space for a data folder and for Docker's images (data-folder screen). */
+  diskSpace: (path: string) =>
+    call<DiskSpace>(`/onboarding/disk?path=${encodeURIComponent(path)}`),
   modelSetup: () => call<ModelSetup>("/model_setup"),
   modelSetupLocal: (model: string) =>
     call<ModelSetup>("/model_setup/local", post({ model })),

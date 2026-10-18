@@ -21,6 +21,8 @@ The heavy processing (orthomosaics, stitching, models) runs in a **processing st
 
 Nothing has to be installed on the cluster beforehand: GEMI sets it up from this computer (see [Clusters](#clusters)).
 
+**On this computer, the first start** downloads GEMI's core services (about 2 GB) and opens; the processing workers (about 6 GB more) follow in the background, and a job started before its worker is up waits for it. Altogether the services take about 18 GB on the drive Docker keeps its programs on; the screen where you choose the data folder shows the free space on both drives. With an NVIDIA graphics card that Docker can use (Windows with WSL 2, or Linux with the NVIDIA container toolkit), models run on the card; otherwise on the processor.
+
 ### What GEMI installs for you
 
 The two programs a new computer may be missing can be installed from inside the app, where it asks for them (the first-run walkthrough, the Docker screen, the model setup):
@@ -28,9 +30,10 @@ The two programs a new computer may be missing can be installed from inside the 
 | Program | Needed for | What the button does |
 |---|---|---|
 | **Docker Desktop** | Processing on this computer | **Windows / macOS:** downloads the official installer and opens it; your system asks you to approve it (on Windows it may also ask to restart for WSL 2). **Install Docker Desktop** becomes **Start Docker** once it is installed, and GEMI carries on when Docker is up. **Linux:** Docker needs administrator rights to install, so GEMI shows the terminal commands to copy, then notices Docker by itself. |
+| **Git for Windows** | Windows only, for a cluster: the bash and ssh the cluster tools run with | Installs it for your user, silently, no administrator rights (the latest official release). Offered when you choose a cluster, and in Settings → Compute. |
 | **Ollama** | An open language model on this computer, for the agent | Installs it completely for your user, no administrator rights: **Windows** the official installer run silently; **macOS** the app unpacked into `~/Applications`; **Linux** the official archive unpacked into `~/.local/share/gemi/ollama` (needs the `zstd` program, present on standard Ubuntu installs). Then starts it. |
 
-Each step shows its progress and the time left. Downloads come only from docker.com and ollama.com, and installs are only started by the app on the same computer. Every screen keeps a "download it yourself" link.
+Each step shows its progress and the time left. Downloads come only from docker.com, ollama.com and the Git for Windows releases on GitHub, and installs are only started by the app on the same computer. Every screen keeps a "download it yourself" link.
 
 If macOS says the app cannot be opened, allow it under System Settings → Privacy & Security → Open Anyway.
 

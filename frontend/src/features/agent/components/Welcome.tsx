@@ -169,6 +169,11 @@ function ProcessingStep({
       {where === "local" && info.docker !== "running" && (
         <InstallHelper what="docker" />
       )}
+      {where === "cluster" && (
+        <div className="space-y-1 text-sm">
+          <InstallHelper what="git" />
+        </div>
+      )}
       <div>
         <Button
           disabled={!where}

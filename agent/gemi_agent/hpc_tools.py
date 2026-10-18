@@ -45,11 +45,15 @@ def _bash() -> str:
     # On Windows, Git for Windows' bash first: a bare `bash` on PATH can be WSL's
     # launcher (System32 or the WindowsApps alias), which sees neither /c/… paths
     # nor this computer's ssh keys.
-    git = [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe"] if os.name == "nt" else []
+    # (%LOCALAPPDATA%\Programs\Git is where the app's own installer puts it, for this user only.)
+    local = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Git"
+    git = [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe",
+           str(local / "bin" / "bash.exe"), str(local / "usr" / "bin" / "bash.exe")] if os.name == "nt" else []
     for cand in (*git, shutil.which("bash")):
         if cand and Path(cand).exists() and "System32" not in cand and "WindowsApps" not in cand:
             return cand
-    raise RuntimeError("bash not found (on Windows install Git for Windows)")
+    raise RuntimeError("bash not found. On Windows the cluster tools need Git for Windows: install it from the app "
+                       "(the walkthrough's cluster choice, or Settings > Compute), or from https://git-scm.com.")
 
 
 def _posix(p: Path) -> str:

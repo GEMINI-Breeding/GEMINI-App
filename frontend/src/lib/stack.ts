@@ -38,7 +38,15 @@ export interface StackStatus {
 }
 
 export interface StackProgress {
-  phase: "pull" | "start" | "ready" | "error"
+  phase:
+    | "pull"
+    | "start"
+    | "ready"
+    | "error"
+    // after "ready": the processing workers, in the background
+    | "workers"
+    | "workers_ready"
+    | "workers_error"
   message: string
 }
 

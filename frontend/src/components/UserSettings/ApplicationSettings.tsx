@@ -12,6 +12,7 @@ import { useCallback, useState } from "react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
 import { Button } from "@/components/ui/button"
 import { ComputePanel } from "@/features/agent/components/ComputePanel"
+import { InstallHelper } from "@/features/agent/components/InstallHelper"
 import { restartWalkthrough } from "@/features/agent/components/Welcome"
 import useAuth from "@/hooks/useAuth"
 import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
@@ -158,6 +159,7 @@ const ApplicationSettings = () => {
               Where processing runs: the stack, and the workers that start when
               a job needs them and stop when idle.
             </p>
+            <InstallHelper what="git" />
             <ComputePanel canManage={Boolean(user?.is_superuser)} wide />
           </div>
         )}

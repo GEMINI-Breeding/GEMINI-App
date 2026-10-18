@@ -48,6 +48,7 @@ impl StackConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct Paths {
     pub config_dir: PathBuf,
     pub compose_file: PathBuf,
@@ -402,17 +403,103 @@ fn compose(paths: &Paths) -> Result<Command, String> {
         .arg("-p")
         .arg(PROJECT)
         .arg("-f")
-        .arg(&paths.compose_file)
-        .arg("--env-file")
-        .arg(paths.env_file());
+        .arg(&paths.compose_file);
+    // A computer whose NVIDIA card Docker can reach runs the models on it.
+    let gpu = gpu_override_file(paths);
+    if gpu.is_file() {
+        cmd.arg("-f").arg(gpu);
+    }
+    cmd.arg("--env-file").arg(paths.env_file());
     Ok(cmd)
+}
+
+// ── Graphics card for the models ────────────────────────────────────────────
+
+/// The model worker built with CUDA PyTorch, given the NVIDIA card(s). Written
+/// next to the app's settings only when the card can be reached from Docker.
+const GPU_OVERRIDE: &str = "\
+# Written by GEMI: this computer has an NVIDIA graphics card Docker can use,
+# so the model worker runs its CUDA build with the card. Deleted when the
+# card can't be reached (the CPU build is used then).
+services:
+  geminibase-worker-ml:
+    image: ${GEMINI_IMAGE_REGISTRY:-ghcr.io/gemini-breeding}/geminibase-worker-ml-gpu:${GEMINI_VERSION:?}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+";
+
+fn gpu_override_file(paths: &Paths) -> PathBuf {
+    paths.config_dir.join("docker-compose.gpu.yaml")
+}
+
+/// An NVIDIA card with a working driver that Docker can hand to a container
+/// (Docker Desktop on Windows with WSL 2, or Linux with the NVIDIA container
+/// toolkit). macOS: Docker cannot use Apple graphics; always no.
+fn nvidia_gpu_usable() -> bool {
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+    let mut smi = Command::new("nvidia-smi");
+    smi.arg("-L");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        smi.creation_flags(0x0800_0000);
+    }
+    let has_card = smi
+        .output()
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false);
+    has_card
+        && docker()
+            .ok()
+            .and_then(|mut c| {
+                c.args(["run", "--rm", "--gpus", "all", &tools_image(), "true"])
+                    .output()
+                    .ok()
+            })
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+}
+
+/// Use the card when it can be reached and a GPU build exists for this
+/// version; otherwise make sure the CPU build is used. Says which.
+fn choose_model_worker(app: &AppHandle, paths: &Paths) {
+    let file = gpu_override_file(paths);
+    if !nvidia_gpu_usable() {
+        let _ = std::fs::remove_file(&file);
+        return;
+    }
+    if std::fs::write(&file, GPU_OVERRIDE).is_err() {
+        return;
+    }
+    emit(app, "workers", "Graphics card found: getting the model worker's GPU build…");
+    let pulled = compose(paths)
+        .ok()
+        .and_then(|mut c| c.args(["pull", "geminibase-worker-ml"]).output().ok())
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !pulled {
+        let _ = std::fs::remove_file(&file);
+        emit(
+            app,
+            "workers",
+            "No GPU build of the model worker for this version: models run on the processor.",
+        );
+    }
 }
 
 // ── Start / stop ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Progress {
-    /// "pull" | "start" | "ready" | "error"
+    /// "pull" | "start" | "ready" | "error", then in the background
+    /// "workers" | "workers_ready" | "workers_error"
     pub phase: &'static str,
     pub message: String,
 }
@@ -460,6 +547,25 @@ fn run_streaming(app: &AppHandle, mut cmd: Command, phase: &'static str) -> Resu
 /// Serializes starts: a second click while pulling must not run two pulls.
 pub struct StackLock(pub Mutex<()>);
 
+/// What the app needs to open: database, storage, the API and map tiles
+/// (about 2 GB to download the first time). The processing workers (rover,
+/// drone, models; about 6 GB more) follow in the background, so a new install
+/// opens in a third of the time and is usable while they arrive. Jobs
+/// submitted before a worker is up wait for it.
+pub const CORE_SERVICES: &[&str] = &[
+    "geminibase-db",
+    "geminibase-storage",
+    "storage-init",
+    "geminibase-logger",
+    "geminibase-rest-api",
+    "geminibase-titiler",
+];
+
+/// Set while the background worker start runs, so two starts don't overlap.
+static WORKERS_STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set by a stop: a worker start still downloading must not start them after it.
+static WORKERS_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn start(app: &AppHandle, paths: &Paths, config: &StackConfig) -> Result<(), String> {
     refresh_env(paths, config)?;
     // A port taken by something else fails compose with a cryptic error;
@@ -475,16 +581,51 @@ pub fn start(app: &AppHandle, paths: &Paths, config: &StackConfig) -> Result<(),
             }
         }
     }
-    emit(app, "pull", "Downloading GEMINI services…");
+    emit(app, "pull", "Downloading GEMINI's core services…");
     let mut pull = compose(paths)?;
-    pull.args(["pull", "--ignore-pull-failures"]);
+    pull.args(["pull", "--ignore-pull-failures"]).args(CORE_SERVICES);
     run_streaming(app, pull, "pull")?;
     emit(app, "start", "Starting GEMINI services…");
     let mut up = compose(paths)?;
-    up.args(["up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "600"]);
+    up.args(["up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "600"])
+        .args(CORE_SERVICES);
     run_streaming(app, up, "start")?;
     emit(app, "ready", "Ready");
+    WORKERS_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
+    start_workers(app.clone(), paths.clone());
     Ok(())
+}
+
+/// Download (first time) and start the processing workers, in the background.
+/// Takes the start lock, so it runs after the start that called it returns
+/// and a Stop or Restart waits for it.
+fn start_workers(app: AppHandle, paths: Paths) {
+    use std::sync::atomic::Ordering;
+    if WORKERS_STARTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let lock = app.state::<StackLock>();
+            let _guard = lock.0.lock().map_err(|e| e.to_string())?;
+            emit(&app, "workers", "Getting the processing workers ready (rover, drone, models)…");
+            choose_model_worker(&app, &paths);
+            let mut pull = compose(&paths)?;
+            pull.args(["pull", "--ignore-pull-failures"]);
+            run_streaming(&app, pull, "workers")?;
+            if WORKERS_CANCELLED.load(Ordering::SeqCst) {
+                return Err("stopped before the workers started".into());
+            }
+            let mut up = compose(&paths)?;
+            up.args(["up", "-d"]);
+            run_streaming(&app, up, "workers")
+        })();
+        match result {
+            Ok(()) => emit(&app, "workers_ready", "Processing workers are ready"),
+            Err(e) => emit(&app, "workers_error", e),
+        }
+        WORKERS_STARTING.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Whether one of this stack's containers publishes `port` (after a reboot,
@@ -526,6 +667,7 @@ pub fn api_healthy(config: &StackConfig) -> bool {
 }
 
 pub fn stop(paths: &Paths) -> Result<(), String> {
+    WORKERS_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
     let out = compose(paths)?.arg("stop").output().map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())

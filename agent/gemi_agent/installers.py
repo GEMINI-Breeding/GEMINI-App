@@ -6,6 +6,9 @@
     Windows  the official installer, run silently (it installs per user)
     macOS    the official app, unpacked into ~/Applications
     Linux    the official archive, unpacked into ~/.local/share/gemi/ollama
+- **Git for Windows** (Windows only: the bash and ssh the cluster tools run
+  with) installs for the current user, silently, without administrator
+  rights: the latest official release from its GitHub page.
 - **Docker Desktop** (runs the processing stack here) always needs an
   administrator's approval and, on Windows, often a restart. The installer is
   downloaded and opened; the system's own prompt asks the person to approve.
@@ -54,7 +57,7 @@ MAC_OLLAMA_APP = Path.home() / "Applications" / "Ollama.app"
 LINUX_OLLAMA_DIR = Path.home() / ".local" / "share" / "gemi" / "ollama"
 
 _lock = threading.Lock()
-_jobs: dict[str, dict] = {}          # "ollama" | "docker" -> the latest job
+_jobs: dict[str, dict] = {}          # "ollama" | "docker" | "git" -> the latest job
 
 
 def ollama_candidates() -> list[str]:
@@ -319,9 +322,113 @@ def install_docker() -> dict:
     return _run("docker", steps, work)
 
 
+# ── Git for Windows (the cluster tools' bash) ─────────────────────────────
+
+GIT_RELEASES = "https://api.github.com/repos/git-for-windows/git/releases/latest"
+
+
+def git_state() -> str:
+    """installed | missing | not_needed (only Windows lacks a bash)"""
+    if sys.platform != "win32":
+        return "not_needed"
+    from . import tools  # noqa: F401  (loads hpc_tools in its order)
+    from .hpc_tools import _bash
+
+    try:
+        _bash()
+        return "installed"
+    except RuntimeError:
+        return "missing"
+
+
+def _git_installer_url() -> str:
+    import json
+
+    req = urllib.request.Request(GIT_RELEASES, headers={"User-Agent": "GEMI", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        assets = json.load(r).get("assets") or []
+    arm = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper() == "ARM64"
+    want = "-arm64.exe" if arm else "-64-bit.exe"
+    for a in assets:
+        name = str(a.get("name") or "")
+        if name.startswith("Git-") and name.endswith(want):
+            return str(a["browser_download_url"])
+    raise RuntimeError("could not find the Git for Windows installer; get it from https://git-scm.com/download/win")
+
+
+def install_git() -> dict:
+    if git_state() != "missing":
+        raise RuntimeError("Git for Windows is not needed here, or is already installed")
+    steps = [_step("Download Git for Windows", 60), _step("Install", 90)]
+
+    def work(job: dict) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="gemi-git-"))
+        try:
+            with _Step(job, "Download Git for Windows") as s:
+                url = _git_installer_url()
+                pkg = _download(url, tmp / url.rsplit("/", 1)[-1], s)
+                s["detail"] = "downloaded"
+            with _Step(job, "Install") as s:
+                # Inno Setup, for this user only (no administrator prompt), default components.
+                subprocess.run([str(pkg), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL", "/SP-",
+                                "/CURRENTUSER"], check=True, timeout=900)
+                if git_state() != "installed":
+                    raise RuntimeError("the installer finished but its bash was not found; install Git for Windows "
+                                       "from https://git-scm.com/download/win instead")
+                s["detail"] = "installed"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    return _run("git", steps, work)
+
+
+# ── Disk space ──────────────────────────────────────────────────────────────
+
+# Unpacked size of the processing stack's images (about 8 GB to download):
+# core services and the workers. Measured on the pinned images; round up.
+STACK_IMAGES_GB = 18
+CORE_IMAGES_GB = 5
+
+
+def _docker_storage() -> Path:
+    """Where Docker keeps its images on this computer (its usual place)."""
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Docker"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Containers" / "com.docker.docker"
+    return Path("/var/lib/docker")
+
+
+def _free_gb(p: Path) -> Optional[float]:
+    p = Path(p)
+    while not p.exists() and p != p.parent:        # a folder not made yet: its drive
+        p = p.parent
+    try:
+        return round(shutil.disk_usage(p).free / 1e9, 1)
+    except OSError:
+        return None
+
+
+def disk_space(data_dir: str) -> dict[str, Any]:
+    """Free space where GEMI will put things, and whether it is enough."""
+    docker_dir = _docker_storage()
+    data_free = _free_gb(Path(data_dir)) if data_dir else None
+    docker_free = _free_gb(docker_dir)
+    same = data_dir and docker_free is not None and Path(data_dir).anchor.lower() == docker_dir.anchor.lower()
+    problems = []
+    if docker_free is not None and docker_free < STACK_IMAGES_GB + (10 if same else 0):
+        problems.append(f"The drive Docker keeps its programs on has {docker_free:.0f} GB free; GEMI's services take "
+                        f"about {STACK_IMAGES_GB} GB there" + (" plus room for your data." if same else "."))
+    if data_free is not None and data_free < 20:
+        problems.append(f"The data folder's drive has {data_free:.0f} GB free. A season of drone flights or rover runs "
+                        "can take hundreds of GB: pick a larger drive if you have one.")
+    return {"data_free_gb": data_free, "docker_free_gb": docker_free, "docker_dir": str(docker_dir),
+            "same_drive": bool(same), "needs_gb": STACK_IMAGES_GB, "problems": problems}
+
+
 def overview() -> dict[str, Any]:
     from . import model_setup
 
-    return {"ollama": model_setup.local_status()["ollama"], "docker": docker_state(),
+    return {"ollama": model_setup.local_status()["ollama"], "docker": docker_state(), "git": git_state(),
             "docker_linux_steps": LINUX_DOCKER_STEPS if sys.platform.startswith("linux") else None,
             "jobs": {k: v for k, v in _jobs.items()}}

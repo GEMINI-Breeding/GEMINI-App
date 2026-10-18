@@ -14,7 +14,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { InstallHelper } from "@/features/agent/components/InstallHelper"
-import { agentApi } from "@/features/agent/lib/agentApi"
+import { agentApi, type DiskSpace } from "@/features/agent/lib/agentApi"
 import { getToken, login, onLogout } from "@/lib/auth"
 import { signInRequired } from "@/lib/autoSignIn"
 import { openUrl } from "@/lib/platform"
@@ -304,6 +304,18 @@ function FirstRun({
 }) {
   const [dir, setDir] = useState(status.default_data_dir ?? "")
   const [busy, setBusy] = useState(false)
+  // Free space on the chosen drive and on Docker's (a warning, not a block).
+  const [disk, setDisk] = useState<DiskSpace | null>(null)
+  useEffect(() => {
+    if (!dir) return setDisk(null)
+    const t = setTimeout(() => {
+      agentApi
+        .diskSpace(dir)
+        .then(setDisk)
+        .catch(() => setDisk(null))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [dir])
   const choose = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog")
     const picked = await open({
@@ -332,6 +344,29 @@ function FirstRun({
           Choose…
         </Button>
       </div>
+      {disk && (
+        <div className="text-sm" data-testid="stack-disk">
+          {disk.data_free_gb != null && (
+            <p className="text-muted-foreground">
+              {disk.data_free_gb.toFixed(0)} GB free on this folder's drive.
+              GEMI's services also take about {disk.needs_gb} GB on the drive
+              Docker keeps its programs on
+              {disk.docker_free_gb != null && !disk.same_drive
+                ? ` (${disk.docker_free_gb.toFixed(0)} GB free there)`
+                : ""}
+              .
+            </p>
+          )}
+          {disk.problems.map((p) => (
+            <p
+              key={p}
+              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              {p}
+            </p>
+          ))}
+        </div>
+      )}
       {status.legacy_install && (
         <p className="text-muted-foreground text-sm">
           Your data from the previous GEMI version is kept exactly where it is
@@ -359,7 +394,8 @@ function Starting({ lines }: { lines: string[] }) {
     <div className="space-y-3" data-testid="stack-starting">
       <h1 className="text-xl font-semibold">Starting GEMINI…</h1>
       <p className="text-muted-foreground text-sm">
-        The first start downloads the processing services (a few GB); later
+        The first start downloads GEMI's core services (about 2 GB) and opens;
+        the processing workers (about 6 GB more) follow in the background. Later
         starts take seconds.
       </p>
       <pre className="bg-muted max-h-48 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">

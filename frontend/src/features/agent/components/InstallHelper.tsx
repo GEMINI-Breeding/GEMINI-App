@@ -5,7 +5,8 @@
  * Docker Desktop's installer is downloaded and opened; the system then asks
  * the person to approve it, and a "Start Docker" button starts it once it is
  * installed. On Linux, Docker is installed from a terminal; the commands are
- * shown to copy. Without the agent service (a plain browser build) it falls
+ * shown to copy. Git for Windows (the cluster tools' bash, Windows only) is
+ * installed for this user, silently. Without the agent service (a plain browser build) it falls
  * back to the download page.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -23,7 +24,10 @@ import { openUrl } from "@/lib/platform"
 const PAGES = {
   ollama: "https://ollama.com/download",
   docker: "https://www.docker.com/products/docker-desktop/",
+  git: "https://git-scm.com/download/win",
 }
+
+const NAMES = { ollama: "Ollama", docker: "Docker", git: "Git for Windows" }
 
 function duration(s: number): string {
   return s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`
@@ -64,7 +68,7 @@ export function InstallHelper({
   what,
   onReady,
 }: {
-  what: "ollama" | "docker"
+  what: "ollama" | "docker" | "git"
   /** Called once the program is installed and running. */
   onReady?: () => void
 }) {
@@ -82,7 +86,11 @@ export function InstallHelper({
     queryClient.setQueryData(["agent", "install"], d)
   const install = useMutation({
     mutationFn: () =>
-      what === "ollama" ? agentApi.installOllama() : agentApi.installDocker(),
+      what === "ollama"
+        ? agentApi.installOllama()
+        : what === "git"
+          ? agentApi.installGit()
+          : agentApi.installDocker(),
     onSuccess: refresh,
   })
   const start = useMutation({
@@ -93,7 +101,7 @@ export function InstallHelper({
   const d = status.data
   const state = d?.[what]
   const job = d?.jobs?.[what]
-  const ready = state === "running"
+  const ready = state === "running" || state === "installed"
 
   const told = useRef(false)
   useEffect(() => {
@@ -108,13 +116,15 @@ export function InstallHelper({
     return (
       <Button variant="outline" onClick={() => void openUrl(PAGES[what])}>
         <Download className="h-4 w-4" />
-        {what === "ollama" ? "Get Ollama" : "Get Docker Desktop"}
+        Get {what === "docker" ? "Docker Desktop" : NAMES[what]}
       </Button>
     )
+  // Git is only for Windows, and only worth a line while it is missing.
+  if (what === "git" && (state === "not_needed" || (ready && !job))) return null
   if (!d)
     return <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
 
-  const name = what === "ollama" ? "Ollama" : "Docker"
+  const name = NAMES[what]
   const busy = job?.state === "running" || install.isPending || start.isPending
   const error =
     (install.error instanceof Error && install.error.message) ||
@@ -125,7 +135,8 @@ export function InstallHelper({
     <div className="space-y-2" data-testid={`install-${what}`}>
       {ready ? (
         <p className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400">
-          <Check className="h-4 w-4" /> {name} is installed and running.
+          <Check className="h-4 w-4" /> {name} is installed
+          {what === "git" ? "." : " and running."}
         </p>
       ) : what === "docker" && state === "missing" && d.docker_linux_steps ? (
         <div className="space-y-1.5 text-sm">
@@ -161,7 +172,7 @@ export function InstallHelper({
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              {what === "ollama" ? "Install Ollama" : "Install Docker Desktop"}
+              {what === "docker" ? "Install Docker Desktop" : `Install ${name}`}
             </Button>
           ) : what === "docker" ? (
             <Button

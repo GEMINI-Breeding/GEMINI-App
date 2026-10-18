@@ -15,6 +15,7 @@ import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
 import { ConnectionNotice } from "@/components/System/ConnectionNotice"
+import { WorkersNotice } from "@/components/System/WorkersNotice"
 import {
   SidebarInset,
   SidebarProvider,
@@ -166,6 +167,7 @@ function Layout() {
       </SidebarInset>
       <ProcessPanel />
       <ConnectionNotice />
+      <WorkersNotice />
 
       <HelpSidebar
         open={helpOpen}

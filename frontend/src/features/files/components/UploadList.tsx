@@ -1,5 +1,7 @@
+import { useNavigate } from "@tanstack/react-router"
 import { ChevronDown, ChevronUp, File, X } from "lucide-react"
 import { useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import { DatasetsService, type FileMetadata, FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -51,6 +53,8 @@ import type {
   ThermalCalibration,
   ThermalCalibrationMode,
 } from "@/features/import/lib/types"
+import { fileUploadAsRun } from "@/features/process/lib/fileUpload"
+import type { Run } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
 import { probeFilesForThermal } from "@/lib/thermalProbe"
@@ -239,6 +243,7 @@ export function UploadList({
   const labelClashes =
     batches.length > 1 ? duplicateLabels(batches) : ([] as string[])
   const { showErrorToastWithCopy, showSuccessToast } = useCustomToast()
+  const navigate = useNavigate()
   const { run } = useUploadQueue()
   const { resolveScope } = useResolveScope()
 
@@ -434,6 +439,8 @@ export function UploadList({
       // in Manage Data, and two uploads at the same scope no longer
       // commingle on disk.
       const allUploaded: string[] = []
+      // Field data (rover logs, images) becomes a run on the Process tab.
+      const filedRuns: { run: Run; created: boolean }[] = []
       for (const batch of batches.filter(
         (b) => b.include && b.files.length > 0,
       )) {
@@ -598,6 +605,51 @@ export function UploadList({
         // failure anyway, but explicit is better than implicit.
         createdDatasetIdForCleanup = undefined
         allUploaded.push(...result.uploaded.map((u) => u.objectPath))
+        if (result.uploaded.length > 0) {
+          try {
+            const filed = fileUploadAsRun({
+              path: targetRootDir,
+              experimentId:
+                resolved.experiment?.id != null
+                  ? String(resolved.experiment.id)
+                  : undefined,
+              batchLabel,
+            })
+            if (filed) filedRuns.push(filed)
+          } catch (e) {
+            // The upload itself is done; only the Process-tab entry is missing.
+            console.warn("[UploadList] could not file the upload as a run", e)
+          }
+        }
+      }
+      if (filedRuns.length > 0) {
+        const first = filedRuns[0].run
+        const fresh = filedRuns.filter((f) => f.created).length
+        toast.success(
+          filedRuns.length === 1
+            ? fresh
+              ? `Ready to process: ${first.name ?? "new run"}`
+              : `Added to the run ${first.name ?? ""}`
+            : `${filedRuns.length} uploads ready to process (${fresh} new run${fresh === 1 ? "" : "s"})`,
+          {
+            description:
+              "Process lists it under its experiment; open it to start the first step.",
+            duration: 15_000,
+            action: {
+              label: filedRuns.length === 1 ? "Open the run" : "Open Process",
+              onClick: () =>
+                filedRuns.length === 1
+                  ? navigate({
+                      to: "/process/$workspaceId/run/$runId",
+                      params: {
+                        workspaceId: first.workspaceId,
+                        runId: first.id,
+                      },
+                    })
+                  : navigate({ to: "/process" }),
+            },
+          },
+        )
       }
       onUploadComplete?.(allUploaded)
       setSelected([])

@@ -13,6 +13,7 @@ token (checked against the REST API):
     GET  /agent/health                 (no auth)
     GET  /agent/onboarding             (no auth; this computer only) what this computer can run, and which
                                        set-up questions (processing, model) are already answered
+    GET  /agent/onboarding/disk?path=  (no auth; this computer only) free space for the data folder and Docker
     GET  /agent/auto_login             (no auth; this computer only) a session for the stack's owner
                                        account, so the app opens without a login screen
     PUT  /agent/auto_login             {require_sign_in: bool}  (administrators)
@@ -36,6 +37,7 @@ token (checked against the REST API):
     POST /agent/install/ollama         download, install (per user) and start Ollama
     POST /agent/install/docker         download Docker Desktop's installer and open it (the system asks for approval)
     POST /agent/install/docker/start   start an installed Docker
+    POST /agent/install/git            Windows: Git for Windows (the cluster tools' bash), for this user
     POST /agent/model_setup/local      {model}          download with Ollama on this computer and use it
     POST /agent/model_setup/cluster/plan {ssh?}         survey a cluster: where the model would run
     POST /agent/model_setup/cluster    {model, plan}    install, start on a GPU, connect
@@ -274,6 +276,13 @@ class Handler(BaseHTTPRequestHandler):
                 from . import onboarding
 
                 return self._send(200, onboarding.overview(_api_up()))
+            if route == ["onboarding", "disk"] and method == "GET":
+                # Before any stack exists (the data-folder screen); facts about this computer only.
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    raise HttpError(403, "only available on the computer running the app")
+                from . import installers
+
+                return self._send(200, installers.disk_space((query.get("path") or [""])[0]))
             if route == ["auto_login"] and method == "GET":
                 # Hands out the owner's session, so: this computer only (also by Host
                 # header, against DNS rebinding), and never when sign-in is required.
@@ -355,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
                     installers.install_docker()
                 elif route == ["install", "docker", "start"] and method == "POST":
                     installers.start_docker()
+                elif route == ["install", "git"] and method == "POST":
+                    installers.install_git()
                 else:
                     raise HttpError(404, "not found")
             except RuntimeError as e:
