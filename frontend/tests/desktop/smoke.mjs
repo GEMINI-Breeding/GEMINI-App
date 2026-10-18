@@ -108,7 +108,25 @@ function geminiContainersRunning() {
 
 // ── 1. First run ────────────────────────────────────────────────────────
 let b = await launch()
-log("first launch: expecting the data-folder screen")
+log("first launch: the walkthrough, then the data-folder screen")
+// A fresh install opens on the walkthrough: processing on this computer, and
+// by hand (no language model to set up on a CI runner).
+await b.waitUntil(
+  async () =>
+    (await b.$('[data-testid="welcome"]').isExisting()) ||
+    (await b.$('[data-testid="stack-first-run"]').isExisting()),
+  {
+    timeout: 60_000,
+    timeoutMsg: "neither the walkthrough nor the data-folder screen appeared",
+  },
+)
+if (await b.$('[data-testid="welcome"]').isExisting()) {
+  await click(b, '[data-testid="welcome-processing-local"]')
+  await click(b, '[data-testid="welcome-processing-next"]')
+  await click(b, '[data-testid="welcome-style-hand"]')
+  await click(b, '[data-testid="welcome-style-next"]')
+  log("walkthrough answered: this computer, by hand")
+}
 const firstRun = await b.$('[data-testid="stack-first-run"]')
 await firstRun.waitForDisplayed({ timeout: 60_000 })
 const folder = await b.$('input[aria-label="Data folder"]')

@@ -2,296 +2,192 @@
 
 ![GEMINI Logo](assets/gemini_logo.png)
 
----
+**GxExMINI** (GEMI for short) turns drone flights, rover runs and plot photos into per-plot images and trait measurements, and analyses them alongside field designs and genotype data. It is a desktop app for Windows, macOS and Linux, with an optional AI agent that can do the processing for you on request.
 
-## 🔗 Overview
-
-**GxExMINI** (GEMI for short) is a high-throughput phenotyping platform designed to accelerate the development of nutritious, stress-resistant staple crops. The platform includes:
-
-- **Desktop Application:** Built with [Tauri v2](https://tauri.app) (Rust), React, and the [GEMINIbase](https://github.com/GEMINI-Breeding/GEMINIbase) (Litestar + Postgres + MinIO) backend.
-- **Automated Processing Pipelines:** Support for both aerial and ground-based data.
-- **Advanced Analytics:** Feature-rich interface for mapping, trait extraction, and data querying.
-
-For more information about the project and our research, visit: [https://projectgemini.ucdavis.edu/](https://projectgemini.ucdavis.edu/)
+More about the project: [projectgemini.ucdavis.edu](https://projectgemini.ucdavis.edu/) · [Documentation and user guides](https://gemini-breeding.github.io/) · [Example data](https://ucdavis.box.com/s/ts802xlcddyufixfjmeayxwiiz2mxrb9)
 
 ---
 
-## 📚 Resources
+## Install
 
-- 📝 [**Full Documentation & User Guides**](https://gemini-breeding.github.io/)  
-- 📂 [**Example Data**](https://ucdavis.box.com/s/ts802xlcddyufixfjmeayxwiiz2mxrb9)
+Download the installer for your system from the [releases page](https://github.com/GEMINI-Breeding/GEMINI-App/releases) and open GEMI.
+
+The heavy processing (orthomosaics, stitching, models) runs in a **processing stack**: a database, file storage and workers. GEMI needs one of these:
+
+| Where the processing runs | What you need | Good for |
+|---|---|---|
+| **This computer** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), running | Small data sets, trying things out |
+| **A cluster (HPC)** | A Slurm cluster with Apptainer that you can log in to with an SSH key (no password or two-factor prompt) | Whole fields and seasons |
+
+Nothing has to be installed on the cluster beforehand: GEMI sets it up from this computer (see [Clusters](#clusters)).
+
+If macOS says the app cannot be opened, allow it under System Settings → Privacy & Security → Open Anyway.
+
+## First run
+
+A short walkthrough asks three things, each changeable later in Settings:
+
+1. **Where the processing runs**: this computer or a cluster.
+2. **How you want to work**: with the agent, or by hand. By hand needs no language model; every step can be done in the app.
+3. **Which model the agent uses** (only with the agent; see [Setting up the agent](#setting-up-the-agent)).
+
+The app signs in by itself with the account of its own stack. To require a login (shared computers, several people), turn it on under Settings → Sign-in.
+
+## Using the app
+
+| Page | What it is for |
+|---|---|
+| **Home** | Two tabs. **Dashboard**: an overview built from your trait data (traits over the season, which traits move together, heritability, the latest field map, where processing stands), plus tabs of your own; pin any view to keep it. **Agent**: ask for work in plain words. Either tab can be turned off (Settings → Home). |
+| **Files** | Upload rover logs (`.bin`), drone images, orthomosaics, plot photos, field designs and trait tables. Optional: a treatment, and a run number for fields covered more than once a day; when uploading many folders, say which folder is which run or treatment. |
+| **Process** | Every run by experiment and date, with where it stands (running, waiting for its next step, failed, complete). Rovers and hand-held cameras go through the **ground** pipeline (plot marking, stitching, plot boundaries, plot images, inference); drones through the **aerial** pipeline (orthomosaic, plot boundaries, plot images, trait extraction, inference). Runs the agent started carry a small agent mark. |
+| **Analyze** | Tables, maps and charts of traits; correlation, ANOVA, heritability, PCA, GGE biplots, field maps. |
+| **Genotyping** | Marker data (HapMap, VCF, CSV) per experiment, and genome-wide association of measured traits. |
+| **Settings** | Home, data and services, Compute (what runs on the cluster, start and stop), sign-in. |
+
+Inference models can come from Roboflow, Hugging Face, or your own YOLO weights (`.pt` / `.onnx`); each pipeline keeps a list of models, and the Inference step shows the results of every model run on a run.
 
 ---
 
-## ⚙️ Installation & Setup
+## Setting up the agent
 
-### Local Development
+The agent works the app through the same steps you would: upload, mark plots, stitch, run models, analyse, start and stop cluster work. It asks before anything that changes the cluster session or deletes data, and asks you for facts only you know (plots per bed, the field design, where the rover started).
 
-Local development has two parts: the **backend**, which runs in Docker, and the **frontend**, which runs on your machine and talks to the backend. You can open the frontend in a web browser or in the Tauri desktop window.
+It needs a **language model**. Choose one in the walkthrough, or later on the Agent tab (gear icon):
 
-For deeper background on the stack, see the **[Developer Guide](https://gemini-breeding.github.io/start_guide/developer_guide/)** in the official documentation.
+| Option | What you need | Notes |
+|---|---|---|
+| **A free open model on this computer** | [Ollama](https://ollama.com/download) installed; a graphics card helps a lot | GEMI downloads and serves the model. The small Gemma 4 models (E2B, E4B) run on a laptop GPU with 6 GB; larger ones are slow there. |
+| **A free open model on your cluster** | A GPU partition you can use | GEMI looks at the cluster, picks a GPU queue, installs the model server and weights (20 to 60 minutes the first time) and connects. Gemma 4 31B on a 48 GB GPU is the best tested model. |
+| **A hosted model** | An API key (Anthropic Claude, OpenAI, or any OpenAI-compatible service) | Quickest to start; your requests and data go to that provider. |
 
-#### Prerequisites
+Models that read images are needed for steps that look at pictures (plot photos, checking markings). If the app finds a model already running on this computer (Ollama, vLLM), it offers that one first.
+
+How well each model does on the app's tasks, and what was changed to get small models through every step: [agent/EVALUATION.md](agent/EVALUATION.md). Full agent guide: [agent/SETUP.md](agent/SETUP.md).
+
+### Driving GEMI from a coding agent instead
+
+The installed app contains `gemi-agent`, one executable with every tool the in-app agent has. A coding agent (Claude Code, Codex, Gemini CLI, any MCP client) can use it with its own model, so no model has to be set up in the app.
+
+| System | Path |
+|---|---|
+| macOS | `/Applications/GEMI.app/Contents/MacOS/gemi-agent` |
+| Windows | `gemi-agent.exe` in the folder GEMI was installed to |
+| Linux (.deb) | `/usr/bin/gemi-agent` |
+
+Register it as an MCP server, for example in Claude Code:
+
+```bash
+claude mcp add gemi -- /Applications/GEMI.app/Contents/MacOS/gemi-agent mcp
+```
+
+Then ask in plain words: *"Use the gemi tools. Read the skill connect-hpc and set GEMI up on my cluster; my login is `ssh you@login.cluster.edu`."* The terminal and the app share their settings and state, so what one sets up appears in the other. By hand: `gemi-agent tools`, `gemi-agent status`, `gemi-agent chat "what is running?"`.
+
+The procedures the agent follows are plain Markdown in [agent/skills/](agent/skills/), one per stage; edit them to change how it works.
+
+---
+
+## Clusters
+
+With a cluster, the whole stack runs as Slurm jobs, driven from this computer over SSH. In the app, give the agent your SSH login command and it sets things up with you; each step that changes something on the cluster asks first.
+
+- **One gate.** Every action on the cluster goes through one script there (`hpc/remote/gemi-gate`): a fixed menu confined to GEMI's own folder, with job size limits and a log of every call.
+- **No idle jobs.** Workers stop themselves when no job needs them (GPU workers after 5 minutes, others after 20) and the cluster model after 30 minutes without a request; they start again when work arrives. Set per cluster in its `launch.conf`.
+- **The cluster's own rules.** Where the administrators publish rules for AI agents, the agent reads them before any cluster action and follows them over its own defaults.
+
+The same from a terminal, with the repository checked out:
+
+```bash
+# once: copy hpc/clusters/launch.conf.example to hpc/clusters/<name>/launch.conf and edit it
+bash hpc/gemi-hpc sync && bash hpc/gemi-hpc pull     # code and container images
+bash hpc/gemi-hpc up          # start a session (database, storage, API)
+bash hpc/gemi-hpc app         # tunnels + agent + app on this computer; prints the address
+bash hpc/gemi-hpc llm up      # optional: an open model on a GPU
+bash hpc/gemi-hpc down        # end the session
+bash hpc/gemi-hpc doctor      # check the connection, the gate and the limits
+```
+
+Details: [agent/SETUP.md](agent/SETUP.md), sections 5 and 6.
+
+---
+
+## Key dependencies
+
+- **[GEMINIbase](https://github.com/GEMINI-Breeding/GEMINIbase)**: the processing stack (Litestar API, Postgres, MinIO, Redis, TiTiler and the workers), included at `backend/`.
+- **[OpenDroneMap](https://opendronemap.org/)**: drone images to georeferenced orthomosaics and elevation models (aerial pipeline).
+- **[AgRowStitch](https://github.com/GEMINI-Breeding/AgRowStitch)**: rover row images to plot mosaics (ground pipeline).
+  Uyehara, I. K. et al. *AgRowStitch: A High-fidelity Image Stitching Pipeline for Ground-based Agricultural Images.* arXiv, 2025. [arxiv.org/pdf/2503.21990](https://arxiv.org/pdf/2503.21990)
+- **[farm-ng Amiga SDK](https://github.com/farm-ng/farm-ng-amiga)**: reads Amiga rover logs (`.bin`).
+- **[Tauri](https://tauri.app)** and React: the desktop app.
+
+![Sensing Pipeline](assets/sensing_pipeline.png)
+
+---
+
+## Development
+
+<details>
+<summary>Running from source: backend in Docker, frontend in a browser or the desktop window</summary>
+
+Development has two parts: the **backend** (GEMINIbase), which runs in Docker, and the **frontend**, which runs on your machine. On Windows, run the commands in **Git Bash**. More background: the [Developer Guide](https://gemini-breeding.github.io/start_guide/developer_guide/) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+**Prerequisites**
 
 | Tool | Version | Needed for |
-|------|---------|------------|
-| Git | 2.46 or newer on Windows (see [Troubleshooting](#troubleshooting-local-development)) | Cloning the repo and the backend submodule |
-| [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine with Compose v2) | Current | Running the backend |
-| [Node.js](https://nodejs.org) | 22 or newer | Running the frontend |
-| [Rust](https://rustup.rs) (stable), plus the platform build tools listed in [`docs/BUILDING.md`](./docs/BUILDING.md) | 1.77 or newer | The desktop window only; not needed for the browser |
+|---|---|---|
+| Git | 2.46 or newer on Windows | Cloning the repo and the backend submodule |
+| Docker Desktop (or Docker Engine with Compose v2) | Current | The backend |
+| [Node.js](https://nodejs.org) | 22 or newer | The frontend |
+| [Rust](https://rustup.rs) (stable) and the build tools in [docs/BUILDING.md](docs/BUILDING.md) | 1.77 or newer | The desktop window only |
+| Python | 3.11 or newer | The agent from source |
 
-On Windows, run the commands below in **Git Bash**. The setup scripts are bash scripts.
-
-#### 1. Clone the repo with its submodules
+**Set up and run**
 
 ```bash
 git clone --recurse-submodules https://github.com/GEMINI-Breeding/GEMINI-App.git
 cd GEMINI-App
+./scripts/setup-backend.sh       # fetches backend/ and creates its .env files
+docker compose up -d --build     # first build takes 10 minutes or more
+docker compose ps                # rest-api and logger should show "healthy"
+
+cd frontend && npm install
+npm run dev                      # browser: http://localhost:5173
+# or: npm run tauri:dev          # desktop window (first Rust build takes several minutes)
+# or: npm run dev:full           # starts the backend containers first
 ```
 
-#### 2. Start the backend (one-time setup)
+Run only one of `npm run dev` and `npm run tauri:dev` at a time (both use port 5173). The development admin account is in `backend/gemini/pipeline/.env` (`GEMINI_FIRST_SUPERUSER_EMAIL` / `GEMINI_FIRST_SUPERUSER_PASSWORD`).
 
-The backend is [GEMINIbase](https://github.com/GEMINI-Breeding/GEMINIbase), included as a git submodule at `backend/`. It runs as a Docker Compose stack: Postgres, MinIO, Redis, a Litestar REST API, TiTiler, NodeODM and the processing workers.
+The agent from source: `cd agent && python -m gemi_agent serve` (the app's Agent tab), or `python -m gemi_agent chat` in the terminal; see [agent/SETUP.md](agent/SETUP.md), "Quick start: a terminal".
 
-```bash
-./scripts/setup-backend.sh     # fetches backend/ and creates its .env files
-docker compose up -d --build   # builds the images and starts the stack
-```
+**Day to day** (from the repo root)
 
-The first build downloads and builds several large images and can take 10 minutes or more. When it finishes, check that the API is up:
-
-```bash
-docker compose ps              # rest-api and logger should show "healthy"
-curl http://localhost:7777/    # should respond with HTTP 200
-```
-
-#### 3. Install frontend dependencies (one-time setup)
-
-```bash
-cd frontend
-npm install
-```
-
-#### 4. Run the frontend
-
-Run **one** of the following from `frontend/`. Both serve the frontend on port 5173, so don't run them at the same time.
-
-| Goal | Command | Result |
-|------|---------|--------|
-| Work in a web browser (fastest) | `npm run dev` | Open http://localhost:5173 |
-| Work in the desktop window | `npm run tauri:dev` | Tauri starts the dev server itself, then opens the GEMI window. The first Rust build takes several minutes. |
-
-In both modes, frontend changes reload automatically. In the desktop window, changes under `frontend/src-tauri/` trigger a Rust rebuild and restart the app.
-
-Shortcut: `npm run dev:full` starts the backend containers, waits until they are healthy, and then runs `npm run dev`.
-
-#### 5. Log in
-
-A development admin account is created on first start. Its credentials are in `backend/gemini/pipeline/.env`:
-
-```
-Email:    admin@gemini.example.com     (GEMINI_FIRST_SUPERUSER_EMAIL)
-Password: gemini-admin-dev             (GEMINI_FIRST_SUPERUSER_PASSWORD)
-```
-
-#### Day-to-day
-
-| Task | Command (from the repo root) |
-|------|------------------------------|
+| Task | Command |
+|---|---|
 | Start the backend | `docker compose up -d` |
-| Rebuild after pulling or after changing backend code or Dockerfiles | `docker compose up -d --build` |
-| Develop the backend with live sync and automatic rebuilds | `docker compose watch` (configured in `docker-compose.override.yaml`) |
+| Rebuild after pulling or changing backend code | `docker compose up -d --build` |
+| Live sync and rebuilds while developing the backend | `docker compose watch` |
 | Stop the backend | `docker compose down` |
-| View a service's logs | `docker compose logs -f <service>` (for example `rest-api` or `storage-init`) |
+| A service's logs | `docker compose logs -f <service>` (e.g. `rest-api`) |
 
-`npm run dev` warns you when the worker images are older than the backend source. When that happens, rebuild with `--build`.
+`npm run dev` warns when the worker images are older than the backend source; rebuild with `--build`.
 
-#### Ports
+**Ports**: frontend dev server 5173 · REST API 7777 (the dev server forwards `/api/*`) · TiTiler 8091 · NodeODM 13000 · MinIO 9000 / 9001 (console) · Postgres 5432 · Redis 6379. GEMINIbase's reference UI is off by default: `docker compose --profile geminibase-ui up -d`.
 
-| Service | Port |
-|---------|------|
-| Frontend dev server (Vite) | 5173 |
-| REST API | 7777 (the dev server forwards `/api/*` requests to it) |
-| TiTiler | 8091 |
-| NodeODM | 13000 |
-| MinIO | 9000 (API), 9001 (console) |
-| Postgres | 5432 |
-| Redis | 6379 |
+**Building installers**: [docs/BUILDING.md](docs/BUILDING.md). Pushes to `main` and `v*` tags build every platform on GitHub Actions; tags also draft a release.
 
-GEMINIbase's reference UI (`geminibase-ui`) is off by default. Start it with `docker compose --profile geminibase-ui up -d`.
+**Troubleshooting**
 
-#### Troubleshooting local development
-
-- **`$'\r': command not found`, `can't cd to ...`, or `Malformed input to a URL function` during `docker compose` builds.** Your checkout has Windows (CRLF) line endings, which break the shell scripts that are copied into the Linux containers. Fix the line endings in the root repo and the `backend` submodule, then rebuild. The commands below discard changes to tracked files, so commit or stash any changes first:
+- **`$'\r': command not found` or `Malformed input to a URL function` during `docker compose` builds.** The checkout has Windows (CRLF) line endings. Commit or stash your changes first (this discards changes to tracked files), then:
   ```bash
   git config core.autocrlf false
   git -C backend config core.autocrlf false
   for r in . backend; do git -C "$r" rm -rq --cached . && git -C "$r" reset -q --hard; done
   docker compose up -d --build
   ```
-  To avoid this in future clones, run `git config --global core.autocrlf input` before cloning.
-- **`'..' is not recognized as an internal or external command` from `npm run dev` on Windows.** npm is running scripts with `cmd.exe`, which can't run the bash script that `npm run dev` runs first. Point npm at Git Bash:
-  ```bash
-  npm config set script-shell "C:\\Program Files\\Git\\bin\\bash.exe"
-  ```
-- **`detected dubious ownership`, or `not a git repository` during `setup-backend.sh`.** This happens when the repo is on a drive that doesn't record file owners, such as an exFAT or FAT32 external drive. With Git 2.46 or newer, mark the drive as trusted, then remove the partial clone and run the script again:
-  ```bash
-  git config --global --add safe.directory 'G:/*'   # use your drive letter
-  rm -rf backend .git/modules/backend
-  ./scripts/setup-backend.sh
-  ```
-- **The desktop app exits with `STATUS_IN_PAGE_ERROR` (0xc0000006).** Windows could not read the app's executable from disk. This usually means the repo is on a USB drive that disconnected or went to sleep. Keep the Rust build output on an internal drive, for example `export CARGO_TARGET_DIR="$HOME/.cargo-target/gemi"` before running `npm run tauri:dev`.
-- **Port 5173 is already in use.** A dev server is already running, from `npm run dev` or from an earlier `tauri:dev`. Stop it before starting another one.
+  To avoid it in future clones: `git config --global core.autocrlf input` before cloning.
+- **`'..' is not recognized as an internal or external command` from `npm run dev` on Windows.** Point npm at Git Bash: `npm config set script-shell "C:\\Program Files\\Git\\bin\\bash.exe"`.
+- **`detected dubious ownership` during `setup-backend.sh`** (repo on an exFAT or FAT32 drive). With Git 2.46 or newer: `git config --global --add safe.directory 'G:/*'` (your drive letter), then `rm -rf backend .git/modules/backend` and run the script again.
+- **The desktop app exits with `STATUS_IN_PAGE_ERROR` (0xc0000006).** The repo is on a drive that went to sleep or disconnected. Keep the Rust build output on an internal drive: `export CARGO_TARGET_DIR="$HOME/.cargo-target/gemi"`.
+- **Port 5173 is already in use.** A dev server is already running; stop it first.
 
-### Building for Production
-See [`docs/BUILDING.md`](./docs/BUILDING.md) for platform-specific build instructions (Linux, macOS, Windows).
-
-> **Note on Windows:** **Docker Desktop** is required for certain data processing features in the application. Ensure it is running when performing these tasks.
-
----
-
-### AI Agent, Models and HPC
-
-The app's home page is an **agent**: tell it what to do (upload data, check
-jobs, mark plots, stitch) and it works the app through the same API you do.
-The same agent runs from a terminal, and its tools plug into clients such as
-Claude Code. Full guide: [agent/SETUP.md](agent/SETUP.md).
-
-Quick start, local stack:
-
-```bash
-pip install pillow numpy
-cd agent
-# agent/.env: GEMI_API, GEMI_EMAIL, GEMI_PASSWORD   — agent/config.json: the model (below)
-python -m gemi_agent serve          # then open the app's home page
-python -m gemi_agent chat           # or talk to it in the terminal
-```
-
-**Choosing a model.** Any OpenAI-compatible chat endpoint works; set
-`base_url`, `model` and (if needed) `api_key` in `agent/config.json` or on
-the home page (gear icon).
-
-| | Example `base_url` | Good for |
-|---|---|---|
-| Hosted API (Anthropic, OpenAI, OpenRouter, …) | `https://api.anthropic.com/v1` | quickest start; best at long procedures; data goes to the provider |
-| Local on your cluster (vLLM, e.g. Gemma 4) | from `gemi-hpc llm tunnel` | data stays in-house; needs a GPU node |
-| Local on this computer (Ollama, LM Studio) | `http://localhost:11434/v1` | small tasks; needs a capable GPU |
-
-Marking plots needs a model that accepts images.
-
-**Using your HPC cluster for compute.** With Slurm and Apptainer the whole
-stack — database, storage, workers and optionally the model — runs as
-cluster jobs, driven from this computer:
-
-```bash
-# once: copy hpc/clusters/launch.conf.example to hpc/clusters/<yours>/launch.conf, edit it, then
-bash hpc/gemi-hpc sync && bash hpc/gemi-hpc pull && bash hpc/gemi-hpc llm pull
-# each session
-bash hpc/gemi-hpc up                    # core services
-bash hpc/gemi-hpc worker amiga stitch   # workers for the steps you will run
-bash hpc/gemi-hpc llm up                # optional local model on a GPU
-bash hpc/gemi-hpc app                   # tunnels + agent + app; prints the URL and login
-bash hpc/gemi-hpc down                  # when done
-```
-
-Procedures the agent follows are plain Markdown in
-[agent/skills/](agent/skills/) — one per stage (upload, ground pipeline,
-plot marking, stitching, aerial pipeline, inference, monitoring, HPC). Edit
-them to change how the agent works; any model can read them.
-
-Planned: a first-run setup on the home page that connects a cluster, cloud
-GPU or this computer and picks a model with the agent's help.
-
-#### Install the app, then drive it from a coding agent's terminal
-
-The installed app contains `gemi-agent`, one executable with every tool the
-in-app agent has. A coding agent (Claude Code, Codex, Gemini CLI, any MCP
-client) can use it directly, with its own model: no model has to be set up
-in the app at all.
-
-1. Install GEMI for your system from the
-   [releases page](https://github.com/GEMINI-Breeding/GEMINI-App/releases)
-   and open it once (macOS: the build is not notarized yet; allow it under
-   System Settings → Privacy & Security → Open Anyway).
-2. Find the executable:
-
-   | System | Path |
-   |---|---|
-   | macOS | `/Applications/GEMI.app/Contents/MacOS/gemi-agent` |
-   | Windows | `gemi-agent.exe` in the folder GEMI was installed to |
-   | Linux (.deb) | `/usr/bin/gemi-agent` |
-
-3. Register it as an MCP server. Claude Code:
-
-   ```bash
-   claude mcp add gemi -- /Applications/GEMI.app/Contents/MacOS/gemi-agent mcp
-   ```
-
-   Other clients: a stdio MCP server whose command is that path and whose
-   one argument is `mcp`.
-4. Ask the coding agent in plain words, for example: *"Use the gemi tools.
-   Read the skill connect-hpc and set GEMI up on my cluster; my login is
-   `ssh you@login.cluster.edu`."* Then: *"upload the photos in
-   ~/flights/2026-08-21 as a drone flight for Davis / Sorghum and continue
-   that run."*
-
-The terminal and the app share one set of settings and state (the app's data
-folder), so what the coding agent sets up appears in the app, and the other
-way round. The same executable also works by hand:
-`gemi-agent tools`, `gemi-agent status`, `gemi-agent processes`,
-`gemi-agent chat "what is running?"` (that last one needs a model set in the
-app).
-
-Working from a source checkout instead: see
-[agent/SETUP.md](agent/SETUP.md), "Quick start: a terminal". There the skills
-and the cluster guard for Claude Code come with the repository.
-
-#### An open model without an agent
-
-The home page's setup offers **Set up a free open model**: pick Gemma 4 or
-another open model, and where it runs. On this computer GEMI uses
-[Ollama](https://ollama.com) to download and serve it. On a cluster it looks
-at the cluster over SSH, chooses a GPU queue, installs the model server and
-the weights, starts it and connects. Each step shows its expected and actual
-time.
-
-#### Compute panel and cluster safety
-
-The home page's **Compute** panel lists the core, each worker and the agent
-model with its state, how many jobs wait for it, Start / Stop, and which
-partition to run on (from the placements in the cluster's `launch.conf`).
-
-Every action on the cluster goes through one script there,
-`hpc/remote/gemi-gate`: a fixed menu confined to the GEMI directory, with job
-size limits and a log of every call. Agents may read and run routine pipeline
-work freely; starting or ending the session, changing its configuration and
-deleting data ask first. Check a cluster with `bash hpc/gemi-hpc doctor`.
-Details: [agent/SETUP.md](agent/SETUP.md), section 6.
-
-## 📦 Key Dependencies
-
-GEMI integrates several open-source tools and packages as core components of its processing pipelines:
-
-### [OpenDroneMap (ODM)](https://opendronemap.org/)
-Used in the **aerial pipeline** for photogrammetric reconstruction — processing drone imagery into georeferenced orthomosaics and digital elevation models (DEMs). GEMI orchestrates ODM as a sidecar process and consumes its outputs for downstream trait extraction.
-
-### [AgRowStitch](https://github.com/GEMINI-Breeding/AgRowStitch)
-Used in the **ground pipeline** for stitching rover-captured (Amiga) row images into plot-level mosaics. AgRowStitch runs inside the GEMINIbase stitch worker when a `RUN_STITCH` job is submitted.
-
-> Uyehara, I. K. et al. *AgRowStitch: A High-fidelity Image Stitching Pipeline for Ground-based Agricultural Images* arXiv, 2025. [arxiv.org/pdf/2503.21990](https://arxiv.org/pdf/2503.21990)
-
-### [farm-ng Amiga SDK](https://github.com/farm-ng/farm-ng-amiga)
-Used for decoding and extracting data from **farm-ng Amiga** ground rover logs (`.bin` files). The SDK provides the tools needed to parse platform telemetry and camera data recorded during field operations.
-
----
-
-## 🔍 Pipeline Overview
-
-![Sensing Pipeline](assets/sensing_pipeline.png)
-
-- **File Management System** – Effortlessly organize, verify, and sync metadata for raw and processed data.
-- **Aerial Pipeline** – Full workflow for drone imagery, from GPS sync and GCP alignment to orthomosaic generation and trait extraction.
-- **Ground Pipeline** – Purpose-built pipeline for rover-based (Amiga) data, featuring custom plot marking, image stitching, and inference model execution.
-- **Linked Data Visualization** – Visualize data with direct links to field design layouts via the **Analyze** tab.
-- **AI-Enabled Analysis** – Integration with RoboFlow for computer vision tasks (object detection and segmentation).
-- **Trait Extraction & Export** – Compute and export key plant traits (e.g., height, vegetation fraction) for downstream research.
+</details>
