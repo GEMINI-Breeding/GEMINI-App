@@ -591,7 +591,10 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   const prefs = getHomePrefs()
   // Asked of new installs and on "run it again"; someone already set up is
   // not stopped for it (Settings → Home has the same choice).
-  const styleAnswered = !forced && (prefs.chosen || processingAnswered)
+  // (Answering the processing question in this walkthrough makes it count as
+  // answered; that must not skip this one.)
+  const styleAnswered =
+    !forced && (prefs.chosen || (processingAnswered && !processingDone))
   const modelAnswered =
     !prefs.agent ||
     info.data.model.answered ||
