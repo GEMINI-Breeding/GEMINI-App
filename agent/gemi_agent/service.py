@@ -32,6 +32,10 @@ token (checked against the REST API):
     GET  /agent/facts/<run id>         what the person has said about a run; PUT {fact: value} to change
     POST /agent/automark               {run}  mark the run's rover track automatically (as the agent would)
     GET  /agent/model_setup            open models to choose from, and the setup in flight (steps, estimates)
+    GET  /agent/install                Ollama and Docker on this computer: installed / running, installs in flight
+    POST /agent/install/ollama         download, install (per user) and start Ollama
+    POST /agent/install/docker         download Docker Desktop's installer and open it (the system asks for approval)
+    POST /agent/install/docker/start   start an installed Docker
     POST /agent/model_setup/local      {model}          download with Ollama on this computer and use it
     POST /agent/model_setup/cluster/plan {ssh?}         survey a cluster: where the model would run
     POST /agent/model_setup/cluster    {model, plan}    install, start on a GPU, connect
@@ -279,6 +283,8 @@ class Handler(BaseHTTPRequestHandler):
                 if _require_sign_in():
                     return self._send(200, {"enabled": False})
                 return self._send(200, {"enabled": True, "token": _owner_token()})
+            if route[:1] == ["install"] and self.client_address[0] not in ("127.0.0.1", "::1"):
+                raise HttpError(403, "programs are installed by the app on the computer they go on")
             token = self._token(query)
             user = _user(token, local=self.client_address[0] in ("127.0.0.1", "::1"))
             if user.get("setup"):
@@ -333,6 +339,27 @@ class Handler(BaseHTTPRequestHandler):
                         "note": "No processing stack is connected yet."}
             use_client(Client(token=token))
             return TOOLS["status"]["fn"]({})["result"]
+        if route[:1] == ["install"]:
+            # Ollama / Docker for a new install: an administrator's (or, before any stack exists,
+            # the first-run) click in the app is the consent.
+            from . import installers
+
+            if route == ["install"] and method == "GET":
+                return installers.overview()
+            if not user.get("is_superuser"):
+                raise HttpError(403, "only an administrator can install programs for GEMI")
+            try:
+                if route == ["install", "ollama"] and method == "POST":
+                    installers.install_ollama()
+                elif route == ["install", "docker"] and method == "POST":
+                    installers.install_docker()
+                elif route == ["install", "docker", "start"] and method == "POST":
+                    installers.start_docker()
+                else:
+                    raise HttpError(404, "not found")
+            except RuntimeError as e:
+                raise HttpError(400, str(e)) from None
+            return installers.overview()
         if route[:1] == ["model_setup"]:
             # Setting the agent's model up without an agent: an administrator's (or, before any
             # stack exists, this computer's) click in the app is the consent for each of these.

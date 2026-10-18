@@ -132,6 +132,9 @@ def _ollama_exe() -> Optional[str]:
     cands = [shutil.which("ollama"),
              str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"),
              "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama", "/Applications/Ollama.app/Contents/Resources/ollama"]
+    from .installers import ollama_candidates
+
+    cands += ollama_candidates()                      # where the app's own installer puts it
     return next((c for c in cands if c and Path(c).is_file()), None)
 
 
@@ -154,8 +157,8 @@ def local_status() -> dict:
 def _start_ollama() -> None:
     exe = _ollama_exe()
     if exe is None:
-        raise RuntimeError("Ollama is not installed on this computer. Get it from https://ollama.com/download, "
-                           "open it once, then try again.")
+        raise RuntimeError("Ollama is not installed on this computer. Use Install Ollama in the app, or get it "
+                           "from https://ollama.com/download and open it once, then try again.")
     flags = (subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000) if os.name == "nt" else 0
     subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      creationflags=flags, start_new_session=os.name != "nt")

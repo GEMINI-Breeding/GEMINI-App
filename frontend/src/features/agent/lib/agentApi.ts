@@ -318,6 +318,33 @@ const post = (body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 })
 
+export interface InstallStep {
+  name: string
+  status: "waiting" | "running" | "done" | "failed"
+  detail: string
+  percent?: number
+  remaining_s?: number | null
+  estimate_s: number
+}
+
+export interface InstallJob {
+  what: "ollama" | "docker"
+  state: "running" | "done" | "failed"
+  steps: InstallStep[]
+  error: string | null
+  /** What the person does next (approve the system prompt, restart, …). */
+  note: string | null
+}
+
+/** Ollama and Docker on this computer, and installs in flight. */
+export interface InstallOverview {
+  ollama: "running" | "installed" | "missing"
+  docker: "running" | "not_running" | "missing"
+  /** Linux: Docker is installed from a terminal with these commands. */
+  docker_linux_steps: string[] | null
+  jobs: Partial<Record<"ollama" | "docker", InstallJob>>
+}
+
 export interface AgentMode {
   /** "setup": no processing stack reachable yet; "ready": it answers. */
   mode: "setup" | "ready"
@@ -360,6 +387,10 @@ export const agentApi = {
   cancel: (id: string) => call<{ ok: boolean }>(`/runs/${id}/cancel`, post()),
   compute: (fresh = false) =>
     call<ComputeOverview>(`/compute${fresh ? "?fresh=1" : ""}`),
+  install: () => call<InstallOverview>("/install"),
+  installOllama: () => call<InstallOverview>("/install/ollama", post()),
+  installDocker: () => call<InstallOverview>("/install/docker", post()),
+  startDocker: () => call<InstallOverview>("/install/docker/start", post()),
   computeStart: (name: string, where?: string) =>
     call<{ started: boolean }>("/compute/start", post({ name, where })),
   computeStop: (name: string) =>

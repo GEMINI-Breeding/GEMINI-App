@@ -17,6 +17,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { InstallHelper } from "@/features/agent/components/InstallHelper"
 import { ModelSetupPanel } from "@/features/agent/components/ModelSetupDialog"
 import {
   agentApi,
@@ -165,15 +166,8 @@ function ProcessingStep({
         with an SSH key (no password prompt). Nothing is installed on this
         computer; the agent sets the cluster up with you in the next minutes.
       </Choice>
-      {where === "local" && info.docker === "missing" && (
-        <Button
-          variant="outline"
-          onClick={() =>
-            openUrl("https://www.docker.com/products/docker-desktop/")
-          }
-        >
-          Get Docker Desktop
-        </Button>
+      {where === "local" && info.docker !== "running" && (
+        <InstallHelper what="docker" />
       )}
       <div>
         <Button

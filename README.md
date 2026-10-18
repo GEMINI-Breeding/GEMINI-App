@@ -16,10 +16,21 @@ The heavy processing (orthomosaics, stitching, models) runs in a **processing st
 
 | Where the processing runs | What you need | Good for |
 |---|---|---|
-| **This computer** | [Docker Desktop](https://www.docker.com/products/docker-desktop/), running | Small data sets, trying things out |
+| **This computer** | [Docker Desktop](https://www.docker.com/products/docker-desktop/). GEMI downloads it and opens its installer for you (your system asks you to approve it), and starts it when it is installed but not running. On Linux it shows the terminal commands instead. | Small data sets, trying things out |
 | **A cluster (HPC)** | A Slurm cluster with Apptainer that you can log in to with an SSH key (no password or two-factor prompt) | Whole fields and seasons |
 
 Nothing has to be installed on the cluster beforehand: GEMI sets it up from this computer (see [Clusters](#clusters)).
+
+### What GEMI installs for you
+
+The two programs a new computer may be missing can be installed from inside the app, where it asks for them (the first-run walkthrough, the Docker screen, the model setup):
+
+| Program | Needed for | What the button does |
+|---|---|---|
+| **Docker Desktop** | Processing on this computer | **Windows / macOS:** downloads the official installer and opens it; your system asks you to approve it (on Windows it may also ask to restart for WSL 2). **Install Docker Desktop** becomes **Start Docker** once it is installed, and GEMI carries on when Docker is up. **Linux:** Docker needs administrator rights to install, so GEMI shows the terminal commands to copy, then notices Docker by itself. |
+| **Ollama** | An open language model on this computer, for the agent | Installs it completely for your user, no administrator rights: **Windows** the official installer run silently; **macOS** the app unpacked into `~/Applications`; **Linux** the official archive unpacked into `~/.local/share/gemi/ollama` (needs the `zstd` program, present on standard Ubuntu installs). Then starts it. |
+
+Each step shows its progress and the time left. Downloads come only from docker.com and ollama.com, and installs are only started by the app on the same computer. Every screen keeps a "download it yourself" link.
 
 If macOS says the app cannot be opened, allow it under System Settings → Privacy & Security → Open Anyway.
 
@@ -56,7 +67,7 @@ It needs a **language model**. Choose one in the walkthrough, or later on the Ag
 
 | Option | What you need | Notes |
 |---|---|---|
-| **A free open model on this computer** | [Ollama](https://ollama.com/download) installed; a graphics card helps a lot | GEMI downloads and serves the model. The small Gemma 4 models (E2B, E4B) run on a laptop GPU with 6 GB; larger ones are slow there. |
+| **A free open model on this computer** | [Ollama](https://ollama.com/download): GEMI installs it for you, no administrator rights needed. A graphics card helps a lot. | GEMI downloads and serves the model. The small Gemma 4 models (E2B, E4B) run on a laptop GPU with 6 GB; larger ones are slow there. |
 | **A free open model on your cluster** | A GPU partition you can use | GEMI looks at the cluster, picks a GPU queue, installs the model server and weights (20 to 60 minutes the first time) and connects. Gemma 4 31B on a 48 GB GPU is the best tested model. |
 | **A hosted model** | An API key (Anthropic Claude, OpenAI, or any OpenAI-compatible service) | Quickest to start; your requests and data go to that provider. |
 

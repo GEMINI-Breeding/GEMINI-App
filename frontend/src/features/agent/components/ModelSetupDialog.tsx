@@ -11,10 +11,10 @@
  * Both are fixed sequences the agent service runs; this dialog shows each
  * step with its expected and actual time.
  */
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, Circle, Loader2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -25,13 +25,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { InstallHelper } from "@/features/agent/components/InstallHelper"
 import {
   agentApi,
   type ClusterModelPlan,
   type ModelSetupJob,
   type OpenModel,
 } from "@/features/agent/lib/agentApi"
-import { openUrl } from "@/lib/platform"
 
 function duration(seconds: number): string {
   if (seconds < 50) return `${Math.max(1, Math.round(seconds / 5) * 5)} s`
@@ -297,15 +297,17 @@ export function ModelSetupPanel({
                 <>
                   <p>
                     Running a model here uses Ollama, a free program that
-                    downloads and serves models. Install it, open it once, then
-                    come back.
+                    downloads and serves models. GEMI installs it for you (no
+                    administrator rights needed), then you choose the model.
                   </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => openUrl("https://ollama.com/download")}
-                  >
-                    Get Ollama
-                  </Button>
+                  <InstallHelper
+                    what="ollama"
+                    onReady={() =>
+                      queryClient.invalidateQueries({
+                        queryKey: ["agent", "model_setup"],
+                      })
+                    }
+                  />
                 </>
               ) : (
                 <>

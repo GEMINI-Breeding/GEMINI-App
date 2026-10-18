@@ -13,6 +13,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { InstallHelper } from "@/features/agent/components/InstallHelper"
 import { agentApi } from "@/features/agent/lib/agentApi"
 import { getToken, login, onLogout } from "@/lib/auth"
 import { signInRequired } from "@/lib/autoSignIn"
@@ -255,9 +256,9 @@ function DockerNeeded({
       </h1>
       {d.state === "missing" && (
         <p>
-          GEMINI runs its processing services in Docker. Install Docker Desktop
-          (free for personal, education and small-business use), start it once,
-          then come back here.
+          GEMINI runs its processing services in Docker. GEMI can download
+          Docker Desktop (free for personal, education and small-business use)
+          and open its installer; your system then asks you to approve it.
           {isWindows &&
             " On Windows, Docker Desktop's installer also sets up WSL 2 — accept that step and restart if it asks."}
         </p>
@@ -270,8 +271,8 @@ function DockerNeeded({
       {d.state === "not_running" && (
         <>
           <p>
-            Docker Desktop is installed but not running. Open it and wait until
-            it says “Engine running” — this page continues by itself.
+            Docker Desktop is installed but not running. Start it here (or open
+            it yourself); this page continues by itself once it is up.
           </p>
           {d.detail && (
             <pre className="text-muted-foreground max-h-32 overflow-auto text-xs whitespace-pre-wrap">
@@ -280,16 +281,16 @@ function DockerNeeded({
           )}
         </>
       )}
-      <div className="flex gap-2">
-        {d.state !== "not_running" && (
-          <Button onClick={() => void openUrl(DOCKER_URL)}>
-            Get Docker Desktop
-          </Button>
-        )}
-        <Button variant="outline" onClick={onRetry}>
-          Check again
+      {d.state === "no_compose" ? (
+        <Button onClick={() => void openUrl(DOCKER_URL)}>
+          Get Docker Desktop
         </Button>
-      </div>
+      ) : (
+        <InstallHelper what="docker" onReady={onRetry} />
+      )}
+      <Button variant="outline" onClick={onRetry}>
+        Check again
+      </Button>
     </div>
   )
 }

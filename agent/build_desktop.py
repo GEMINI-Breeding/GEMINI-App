@@ -87,7 +87,7 @@ def binary() -> None:
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--name", name,
            "--distpath", str(OUT_BIN), "--workpath", str(work / "build"), "--specpath", str(work),
            "--paths", str(AGENT), "--add-data", f"{AGENT / 'skills'}{sep}skills",
-           "--hidden-import", "openpyxl", "--hidden-import", "PIL.ImageDraw", "--hidden-import", "PIL.ImageFont",
+           "--collect-submodules", "gemi_agent", "--hidden-import", "openpyxl", "--hidden-import", "PIL.ImageDraw", "--hidden-import", "PIL.ImageFont",
            # Not needed by the agent; keeps the executable small and its start quick.
            "--exclude-module", "tkinter", "--exclude-module", "matplotlib", "--exclude-module", "scipy",
            "--exclude-module", "pandas", "--exclude-module", "torch", "--exclude-module", "cv2",
