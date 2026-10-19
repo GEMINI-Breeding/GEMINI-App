@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useProcess } from "@/contexts/ProcessContext"
 import { type RunTag, runState } from "@/features/process/lib/runStatus"
 import { useAllPipelines, useAllRuns } from "@/features/process/lib/runStore"
 import { useTraitRecords } from "../hooks/useTraitData"
@@ -54,15 +55,17 @@ function readPick(): string | null {
 function Processing() {
   const runs = useAllRuns()
   const pipelines = useAllPipelines()
+  const { queuedJobIds } = useProcess()
   const type = (r: (typeof runs)[number]) =>
     pipelines.find((p) => p.id === r.pipelineId)?.type === "ground"
       ? "ground"
       : "aerial"
   const count = (t: RunTag) =>
-    runs.filter((r) => runState(r, type(r)).tag === t).length
+    runs.filter((r) => runState(r, type(r), queuedJobIds).tag === t).length
   if (runs.length === 0) return null
   const parts = [
     count("running") && `${count("running")} processing now`,
+    count("queued") && `${count("queued")} queued for a worker`,
     count("failed") && `${count("failed")} stopped with an error`,
     count("waiting") && `${count("waiting")} waiting for their next step`,
     count("new") && `${count("new")} not started`,

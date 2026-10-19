@@ -25,6 +25,9 @@ WORKER_RES_stitch="cpus=16 mem=56G gpus=0"
 WORKER_RES_odm="cpus=16 mem=56G gpus=0"
 WORKER_RES_geo="cpus=4 mem=16G gpus=0"
 WORKER_RES_ml="cpus=8 mem=32G gpus=0"
+# More than one copy of a worker at once (they share the waiting jobs). A copy beyond the first is
+# submitted only when the cluster could start it now. Default 1.
+# WORKER_MAX_odm=3
 
 LOCAL_API_PORT=auto
 
@@ -58,5 +61,8 @@ LLM_IDLE_MINUTES=30
 # comma separated. When set (or found by `gemi-hpc site-skills`), those rules govern:
 # the Claude Code guard asks before raw ssh/Slurm commands instead of denying them.
 # SITE_RULES=<skill name>
+# Folders data already on the cluster may be uploaded from (`gemi-hpc ingest <folder>`); the person
+# names the folder, nothing is searched. Space separated.
+# GEMI_DATA_ROOTS="/group/yourlab/data"
 # Where the gate looks for them on the cluster (default: common system skill folders).
 # SITE_SKILL_DIRS="/share/claude/skills $HOME/.claude/skills"

@@ -19,7 +19,6 @@ import {
   Trash2,
 } from "lucide-react"
 import { useState } from "react"
-
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -43,6 +42,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useProcess } from "@/contexts/ProcessContext"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { NewRunDialog } from "@/features/process/components/NewRunDialog"
 import {
@@ -71,6 +71,7 @@ function PipelineCard({
 }) {
   const navigate = useNavigate()
   const runs = useRuns(pipeline.id)
+  const { queuedJobIds } = useProcess()
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false)
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<Run | null>(null)
   const [newRunOpen, setNewRunOpen] = useState(false)
@@ -174,11 +175,21 @@ function PipelineCard({
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge
-                      className={TAG_CLASS[runState(run, pipeline.type).tag]}
-                      title={TAG_HINT[runState(run, pipeline.type).tag]}
+                      className={
+                        TAG_CLASS[
+                          runState(run, pipeline.type, queuedJobIds).tag
+                        ]
+                      }
+                      title={
+                        TAG_HINT[runState(run, pipeline.type, queuedJobIds).tag]
+                      }
                       variant="secondary"
                     >
-                      {TAG_LABEL[runState(run, pipeline.type).tag]}
+                      {
+                        TAG_LABEL[
+                          runState(run, pipeline.type, queuedJobIds).tag
+                        ]
+                      }
                     </Badge>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

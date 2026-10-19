@@ -557,6 +557,48 @@ _hpc(hpc, "Run the cluster session: action = status | sync (copy code) | pull (c
      {"action": _str, "workers": _strs, "service": _str, "lines": _int, "cluster": _str,
       "use_cluster_model": {**_bool, "description": "with connect: make the agent use the cluster's model"}},
      ["action"])
+_INGEST_KEYS = ("experiment", "site", "population", "date", "platform", "sensor", "data_type", "name_ends",
+                "run_of_day", "treatment")
+
+
+def cluster_folder(args: dict) -> dict:
+    """Data already on the cluster, in a folder the person named: look at it,
+    or upload it into the session from a cluster job (nothing is copied to
+    this computer). The folder is never searched for."""
+    folder = str(args.get("folder") or "").strip()
+    if not folder.startswith("/"):
+        raise ValueError("give the folder's full path on the cluster, as the person named it "
+                         "(the agent does not search the cluster's storage)")
+    cluster = args.get("cluster") or active_cluster()
+    if not cluster:
+        raise ValueError("no cluster configured yet")
+    if not args.get("upload"):
+        return {"result": _gemi_hpc(["folder-peek", folder], cluster, timeout=120),
+                "next": "to upload it: cluster_folder upload=true with experiment, site, population, date, "
+                        "platform, sensor, data_type (and name_ends to keep only some files)"}
+    words = []
+    for k in _INGEST_KEYS:
+        v = str(args.get(k) or "").strip()
+        if v:
+            if not re.fullmatch(r"[A-Za-z0-9_.,:@%+-]{1,80}", v):
+                raise ValueError(f"{k}={v!r}: letters, digits and _ . , : @ % + - only (no spaces)")
+            words.append(f"{k}={v}")
+    missing = [k for k in _INGEST_KEYS[:7] if not args.get(k)]
+    if missing:
+        raise ValueError(f"missing {', '.join(missing)}")
+    out = _gemi_hpc(["ingest", folder, *words], cluster, timeout=180)
+    return {"result": out, "next": "a cluster job uploads the folder; follow it with hpc action=logs service=upload, "
+                                   "then the run appears on the Process tab"}
+
+
+_hpc(cluster_folder, "Data that is already on the cluster: folder = the full path the person named (never search "
+     "for one). Without upload: what is in it (two levels). With upload=true and the run's settings: a cluster job "
+     "uploads it into the session as one batch, like an upload from the app (asks first).",
+     {"folder": _str, "upload": _bool, "experiment": _str, "site": _str, "population": _str,
+      "date": {**_str, "description": "YYYY-MM-DD"}, "platform": _str, "sensor": _str,
+      "data_type": {**_str, "description": "images | amiga_bin | orthomosaic"},
+      "name_ends": {**_str, "description": "keep only files whose names end so, comma separated, e.g. _V.JPG"},
+      "run_of_day": _str, "treatment": _str, "cluster": _str}, ["folder"])
 _hpc(cluster_rules, "The cluster administrators' rules for AI agents (published as skills): "
      "without a name, which there are; with a name, its text. Read every one before any cluster action; they "
      "override this agent's own defaults.",

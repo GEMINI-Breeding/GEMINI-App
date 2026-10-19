@@ -122,6 +122,44 @@ bash hpc/gemi-hpc doctor      # check the connection, the gate and the limits
 
 Details: [agent/SETUP.md](agent/SETUP.md), sections 5 and 6.
 
+### From another computer (development launch)
+
+Nothing of the stack needs to be installed on a second computer (a laptop, say): it only needs this repository, Node.js, Python 3 and an SSH key the other machine accepts.
+
+- **A cluster already set up from another computer.** Copy its settings (from the cluster's last sync), then open the app as usual:
+
+  ```bash
+  bash hpc/gemi-hpc join you@cluster.example.edu /path/to/GEMI/folder/on/the/cluster [name] [keyfile]
+  bash hpc/gemi-hpc status && bash hpc/gemi-hpc app
+  ```
+
+- **A stack running on another computer** (Docker there, or the desktop app): forward its ports over SSH and open the app here. That computer keeps its ports on 127.0.0.1; it needs an SSH server (Remote Login on macOS, `sshd` on Linux, "OpenSSH Server" on Windows).
+
+  ```bash
+  bash scripts/dev-remote.sh you@other-computer [api_port=7777] [tiles_port=8091]
+  ```
+
+In both cases the agent service runs on the second computer, so the agent can upload files from it.
+
+### From a second computer
+
+A laptop can use a stack that already runs elsewhere without installing Docker, images or a model. It needs the repository, Node.js (`npm install` in `frontend/`), Python 3, and an SSH key the other machine accepts.
+
+- **A cluster set up from another computer:** copy its settings once, then open the app as above.
+
+  ```bash
+  bash hpc/gemi-hpc join user@cluster.example.edu /path/to/GEMI/folder   # reads the settings the last sync left there
+  bash hpc/gemi-hpc app
+  ```
+
+- **The Docker stack on another computer** (it keeps its ports on 127.0.0.1; they are forwarded over SSH, so that computer needs an SSH server: Remote Login on macOS, `sshd` on Linux, OpenSSH Server on Windows):
+
+  ```bash
+  bash scripts/dev-remote.sh user@other-computer [api_port] [tiles_port]   # defaults 7777 and 8091
+  ```
+
+Either way the agent service runs on the laptop, so the agent can upload files from it.
+
 ---
 
 ## Key dependencies

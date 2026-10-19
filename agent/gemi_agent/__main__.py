@@ -21,6 +21,38 @@ import sys
 from .tools import TOOLS
 
 
+def _ingest(argv: list[str]) -> int:
+    """`ingest <folder> key=value ...`: every file of the data type in that folder
+    (and below it), uploaded to the app as one batch, in the foreground. The
+    folder is the one the person named; nothing else is looked at."""
+    from pathlib import Path
+
+    from . import uploads
+    from .client import Client
+
+    if not argv:
+        print("usage: ingest <folder> experiment=… site=… population=… date=YYYY-MM-DD platform=… sensor=… "
+              "data_type=images|amiga_bin|orthomosaic [name_ends=_V.JPG] [run_of_day=…] [treatment=…]")
+        return 2
+    folder = Path(argv[0])
+    opts = dict(a.split("=", 1) for a in argv[1:] if "=" in a)
+    kind = uploads.DATA_TYPES.get(opts.get("data_type", ""))
+    if kind is None:
+        raise SystemExit(f"data_type must be one of {', '.join(uploads.DATA_TYPES)}")
+    ends = [e.lower() for e in (opts.get("name_ends") or "").split(",") if e]
+    files = sorted(p for p in folder.rglob("*")
+                   if p.is_file() and p.suffix.lower() in kind["ext"] and not p.name.startswith(".")
+                   and (not ends or p.name.lower().endswith(tuple(ends))))
+    print(f"{len(files)} files in {folder} ({sum(p.stat().st_size for p in files) / 1e9:.1f} GB)", flush=True)
+    out = uploads.start(Client(), files, experiment=opts["experiment"], site=opts["site"],
+                        population=opts["population"], date=opts["date"], platform=opts["platform"],
+                        sensor=opts["sensor"], data_type=opts["data_type"], parallel=int(opts.get("parallel", 4)),
+                        run_of_day=opts.get("run_of_day", ""), treatment=opts.get("treatment", ""),
+                        source_folder=str(folder), foreground=True)
+    print(json.dumps(out, default=str), flush=True)
+    return 0 if out.get("status") in ("done", "completed") else 1
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
@@ -30,6 +62,8 @@ def main(argv: list[str]) -> int:
             args = ", ".join(k for k in t["schema"]["properties"] if k != "track")
             print(f"{name}({args})\n    {t['description']}")
         return 0
+    if argv[0] == "ingest":         # a cluster job: upload a folder that is on the cluster (gemi-gate ingest)
+        return _ingest(argv[1:])
     if argv[0] == "_task":          # background upload batch (started by the `upload` tool)
         from . import uploads
 

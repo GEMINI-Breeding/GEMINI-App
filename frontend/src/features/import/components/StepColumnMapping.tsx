@@ -438,6 +438,12 @@ export function StepColumnMapping({
             onUpdate={updateCurrentConfig}
           />
 
+          <PopulationModeSection
+            headers={headers}
+            config={currentConfig}
+            rows={currentSheet?.rows ?? []}
+            onUpdate={updateCurrentConfig}
+          />
           <PopulationField
             value={currentConfig.populationName}
             onChange={(v) => updateCurrentConfig({ populationName: v })}
@@ -1032,6 +1038,97 @@ function CollectionDateSection({
           />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Whether the sheet's rows belong to one population (the field below) or
+ * each row says its own (a crop or population column of a master table that
+ * covers several crops). In column mode the field below is the fallback for
+ * rows with an empty cell.
+ */
+function PopulationModeSection({
+  headers,
+  config,
+  rows,
+  onUpdate,
+}: {
+  headers: string[]
+  config: SheetMapping
+  rows: Record<string, unknown>[]
+  onUpdate: (u: Partial<SheetMapping>) => void
+}) {
+  const mode = config.populationMode ?? "fixed"
+  const values =
+    mode === "column" && config.populationColumn
+      ? [
+          ...new Set(
+            rows
+              .map((r) => {
+                const v = r[config.populationColumn as string]
+                return v == null ? "" : String(v).trim()
+              })
+              .filter(Boolean),
+          ),
+        ]
+      : []
+  return (
+    <div
+      className="space-y-3 rounded-lg border p-4"
+      data-testid="population-mode-section"
+    >
+      <h3 className="font-medium">Population per row?</h3>
+      <p className="text-muted-foreground text-sm">
+        A table covering several crops or populations (a master sheet across
+        trials) can say each row's population in a column; its records are then
+        filed under that population, as season and site columns file them by
+        season and site.
+      </p>
+      <div className="flex items-center gap-3">
+        <Select
+          value={mode}
+          onValueChange={(v) => {
+            const next = v as "fixed" | "column"
+            onUpdate({
+              populationMode: next,
+              ...(next === "fixed" ? { populationColumn: null } : {}),
+            })
+          }}
+        >
+          <SelectTrigger
+            className="w-44 shrink-0"
+            data-testid="population-mode"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fixed">One for the sheet</SelectItem>
+            <SelectItem value="column">From column</SelectItem>
+          </SelectContent>
+        </Select>
+        {mode === "column" && (
+          <ColumnSelect
+            testId="population-column"
+            value={config.populationColumn ?? null}
+            onChange={(next) => onUpdate({ populationColumn: next })}
+            headers={headers}
+            placeholder="-- Select a column --"
+            className="flex-1"
+          />
+        )}
+      </div>
+      {values.length > 0 && (
+        <p
+          className="text-muted-foreground text-xs"
+          data-testid="population-values"
+        >
+          {values.length} population{values.length === 1 ? "" : "s"}:{" "}
+          {values.slice(0, 8).join(", ")}
+          {values.length > 8 ? ", …" : ""}. Rows with an empty cell use the
+          population below.
+        </p>
+      )}
     </div>
   )
 }

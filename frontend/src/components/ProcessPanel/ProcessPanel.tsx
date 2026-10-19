@@ -168,6 +168,14 @@ function ProcessItem({
 
 export const AUTO_DISMISS_MS = 10_000
 
+/** "2 running · 3 queued": jobs waiting their turn are not said to run. */
+function activeLabel(active: number, queued: number): string {
+  const running = active - queued
+  return [running > 0 && `${running} running`, queued > 0 && `${queued} queued`]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 export function ProcessPanel() {
   const {
     processes,
@@ -176,12 +184,17 @@ export function ProcessPanel() {
     clearCompleted,
     updateProcess,
   } = useProcess()
-  const [isOpen, setIsOpen] = useState(true)
+  // Jobs started here open the panel; jobs found running elsewhere (the
+  // agent's, another tab's) only show the pill, so the panel does not cover
+  // the page the person is on.
+  const startedHere = processes.filter((p) => !p.background).length
+  const [isOpen, setIsOpen] = useState(startedHere > 0)
 
   useEffect(() => {
-    if (processes.length > 0) setIsOpen(true)
-  }, [processes.length])
+    if (startedHere > 0) setIsOpen(true)
+  }, [startedHere])
 
+  const queuedCount = processes.filter((p) => p.status === "pending").length
   const runningCount = processes.filter(
     (p) => p.status === "running" || p.status === "pending",
   ).length
@@ -216,7 +229,7 @@ export function ProcessPanel() {
         >
           <ChevronUp className="mr-1.5 h-4 w-4" />
           {runningCount > 0
-            ? `${runningCount} running`
+            ? activeLabel(runningCount, queuedCount)
             : `${processes.length} processes`}
         </Button>
       </div>
@@ -229,7 +242,9 @@ export function ProcessPanel() {
         <CardHeader className="p-3">
           <div className="flex items-center gap-1">
             <p className="text-foreground flex-1 text-sm font-medium">
-              {runningCount > 0 ? `${runningCount} running` : "Processes"}
+              {runningCount > 0
+                ? activeLabel(runningCount, queuedCount)
+                : "Processes"}
             </p>
             {processes.some(
               (p) => p.status === "completed" || p.status === "error",

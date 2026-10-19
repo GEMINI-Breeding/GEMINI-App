@@ -20,7 +20,10 @@ WTMP=/tmp/gemi-$USER-$SLURM_JOB_ID
 trap 'rm -rf "$WTMP"' EXIT
 # --pwd /app: Apptainer ignores the image's WORKDIR, and the worker is started
 # as `python -m gemini.workers.<name>.worker` relative to it.
+# Named after this Slurm job, so a copy can tell its own jobs from another copy's.
+WORKER_ID="$W-$SLURM_JOB_ID"
 ARGS=(run --cleanenv --no-home --writable-tmpfs --pwd /app $(private_ipc "$WTMP/shm") --env-file "$RUN/stack.env"
+      --env "GEMINI_WORKER_ID=$WORKER_ID"
       -B "$SRC/gemini/workers:/app/gemini/workers" -B "$SRC/gemini/__init__.py:/app/gemini/__init__.py")
 if [ "$W" = ml ]; then
   mkdir -p "$DATA/models"
@@ -60,7 +63,7 @@ PID=$!
 # not hold a node, least of all a GPU, between batches of work. launch.conf sets the minutes.
 source "$HPC/clusters/current/launch.conf" 2>/dev/null
 if [ "${GEMI_GPUS:-0}" -gt 0 ]; then IDLE=${WORKER_IDLE_MINUTES_GPU:-5}; else IDLE=${WORKER_IDLE_MINUTES:-20}; fi
-worker_idle_watch "$PID" "$IDLE" $(worker_job_types "$W")
+GEMI_SELF="$WORKER_ID" worker_idle_watch "$PID" "$IDLE" $(worker_job_types "$W")
 log "worker $W stops itself after $IDLE min with no work"
 # SIGTERM (preemption, scancel, time limit): the worker stops claiming and exits.
 trap 'log "worker $W: stop signal"; kill -TERM $PID 2>/dev/null; wait $PID; exit 0' TERM INT

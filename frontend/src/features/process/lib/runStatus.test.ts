@@ -32,6 +32,15 @@ describe("runState", () => {
         .tag,
     ).toBe("running")
   })
+  it("says queued while the running step's job waits its turn", () => {
+    const r = run({ data_sync: "completed", orthomosaic: "running" })
+    r.steps.orthomosaic.jobIds = ["old", "j1"]
+    expect(runState(r, "aerial", new Set(["j1"]))).toEqual({
+      tag: "queued",
+      detail: "Orthomosaic queued",
+    })
+    expect(runState(r, "aerial", new Set(["old"])).tag).toBe("running")
+  })
   it("says failed, complete and new", () => {
     expect(runState(run({ orthomosaic: "failed" }), "aerial").detail).toBe(
       "Orthomosaic failed",

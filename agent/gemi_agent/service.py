@@ -47,6 +47,8 @@ token (checked against the REST API):
     POST /agent/compute/stop           {name}
     POST /agent/compute/reconnect      reopen the tunnels to the cluster
     PUT  /agent/compute/prefs          {auto_start?, idle_stop_minutes?}
+    POST /agent/compute/folder         {folder}         what is in a folder on the cluster (two levels; administrators)
+    POST /agent/compute/ingest         {folder, experiment, site, …}  a cluster job uploads it (administrators)
 """
 from __future__ import annotations
 
@@ -409,6 +411,15 @@ class Handler(BaseHTTPRequestHandler):
                     return compute.start(str(body.get("name")), body.get("where"))
                 if route == ["compute", "stop"] and method == "POST":
                     return compute.stop(str(body.get("name")))
+                # Data already on the cluster, in a folder the person typed (never searched for).
+                if route == ["compute", "folder"] and method == "POST":
+                    from .hpc_tools import cluster_folder
+
+                    return cluster_folder({"folder": str(body.get("folder") or "")})
+                if route == ["compute", "ingest"] and method == "POST":
+                    from .hpc_tools import cluster_folder
+
+                    return cluster_folder({**{k: v for k, v in body.items() if isinstance(v, str)}, "upload": True})
                 if route == ["compute", "reconnect"] and method == "POST":
                     return compute.reconnect()
                 if route == ["compute", "prefs"] and method == "PUT":

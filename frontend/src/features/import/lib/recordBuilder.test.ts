@@ -460,3 +460,55 @@ describe("nonNumericPlotRows", () => {
     expect(nonNumericPlotRows(rows, null)).toEqual({ count: 0, examples: [] })
   })
 })
+
+describe("population read per row (a master table of several crops)", () => {
+  const rows = [
+    { plot: "1", ndvi: "0.5", Crop: "Cowpea", Year: "2022" },
+    { plot: "1", ndvi: "0.6", Crop: "Sorghum", Year: "2022" },
+    { plot: "2", ndvi: "0.7", Crop: "", Year: "2023" },
+  ]
+  const mapping: ColumnMapping = {
+    recordType: "trait",
+    sheets: [{ name: "S1", headers: ["plot", "ndvi", "Crop", "Year"], rows }],
+    sheetConfigs: [
+      cfg({
+        populationName: "Mixed",
+        populationMode: "column",
+        populationColumn: "Crop",
+        seasonMode: "column",
+        seasonName: "",
+        seasonColumn: "Year",
+      }),
+    ],
+  } as unknown as ColumnMapping
+
+  it("names every population the rows use, with the sheet's as fallback", () => {
+    expect([...collectPopulationNames(mapping)].sort()).toEqual([
+      "Cowpea",
+      "Mixed",
+      "Sorghum",
+    ])
+  })
+
+  it("keeps plots of different populations apart even with the same number", () => {
+    const { plotSpecs } = collectPlotSpecs(mapping, null)
+    expect(
+      plotSpecs.map((p) => `${p.season}/${p.population}/${p.plotNumber}`),
+    ).toEqual(["2022/Cowpea/1", "2022/Sorghum/1", "2023/Mixed/2"])
+  })
+
+  it("posts one group per population", () => {
+    const { groups, grandTotal } = buildTraitRecords(mapping, {
+      now: FIXED_NOW,
+    })
+    expect(grandTotal).toBe(3)
+    expect(groups.map((g) => g.population).sort()).toEqual([
+      "Cowpea",
+      "Mixed",
+      "Sorghum",
+    ])
+    const cowpea = groups.find((g) => g.population === "Cowpea")
+    const recs = [...(cowpea?.bySeasonSite.values() ?? [])].flat()
+    expect(recs.map((r) => r.record_info.population)).toEqual(["Cowpea"])
+  })
+})

@@ -46,7 +46,7 @@ DEFAULTS = {"base_url": "http://127.0.0.1:8000/v1", "model": "gemma4", "api_key"
 CORE_TOOLS = ("next_step", "continue_run", "run_facts", "read_skill", "status", "process_runs", "processes", "start_process", "stop_process",
               "hpc", "jobs", "job_detail", "wait_jobs", "cancel_job", "tasks", "wait_task", "browse", "datasets",
               "entities", "inference_stats", "stitch_stats", "canopy_cover", "traits_available", "analyze",
-              "genotype_studies", "gwas", "gwas_result", "cluster_rules", "field_layout")
+              "genotype_studies", "gwas", "gwas_result", "cluster_rules", "field_layout", "cluster_folder")
 _SKILL_TOOLS: dict[str, list[str]] = {}
 
 
@@ -246,6 +246,7 @@ _ASKS_PATH = re.compile(r"\b(provide|give me|specify|tell me|what is|share)\b[^.
                         re.I)
 # Calls that act on a cluster: they wait until its administrators' rules have been read.
 _CLUSTER_ACTS = {"start_process", "stop_process", "hpc_configure"}
+_ACTS_IF = {"cluster_folder": "upload"}                    # tools that act only with this argument set
 _CLUSTER_LOOKS = {"status", "logs", "llm_status"}          # hpc actions that only look
 # The tool behind a thing said to be done (word in the reply -> tool).
 _DOES = {"upload": "upload", "stitch": "stitch", "stop": "stop_process", "shut down": "hpc", "cancel": "cancel_job",
@@ -770,7 +771,8 @@ class Run:
 
     def _rules_unread(self, name: str, args: dict) -> list[str]:
         """Rule sets of the active cluster not yet read here, when `name` acts on the cluster."""
-        acts = name in _CLUSTER_ACTS or (name == "hpc" and str(args.get("action")) not in _CLUSTER_LOOKS)
+        acts = (name in _CLUSTER_ACTS or (name == "hpc" and str(args.get("action")) not in _CLUSTER_LOOKS)
+                or bool(name in _ACTS_IF and args.get(_ACTS_IF[name])))
         if not acts:
             return []
         try:

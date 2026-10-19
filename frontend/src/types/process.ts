@@ -35,6 +35,8 @@ export interface Process {
   message?: string
   /** TanStack Router path to navigate to when the user clicks "View" in the panel */
   link?: string
+  /** Found on the server (started by the agent, another tab or before a reload), not started here. */
+  background?: boolean
   /** Call to abort an in-progress upload */
   cancel?: () => void
   /** Pipeline run ID — if set, ProcessContext opens its own SSE to track progress */

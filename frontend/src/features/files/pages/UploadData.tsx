@@ -13,6 +13,7 @@ import {
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
+import { ClusterFolderUpload } from "../components/ClusterFolderUpload"
 import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
 import {
@@ -269,78 +270,87 @@ export function UploadData() {
             />
           </div>
 
-          {selectedFileType === "Orthomosaic" ? (
-            <div className="space-y-6">
-              <div>
-                <UploadList
-                  dataType={selectedFileType}
-                  formValues={formValues}
-                  scope={scope}
-                  onFilesSelected={handleFilesSelected}
-                  onUploadComplete={handleRgbUploadComplete}
-                  label="RGB Orthomosaic (.tif) — required"
+          <div className="space-y-6">
+            {selectedFileType === "Orthomosaic" ? (
+              <div className="space-y-6">
+                <div>
+                  <UploadList
+                    dataType={selectedFileType}
+                    formValues={formValues}
+                    scope={scope}
+                    onFilesSelected={handleFilesSelected}
+                    onUploadComplete={handleRgbUploadComplete}
+                    label="RGB Orthomosaic (.tif) — required"
+                    disabled={uploadDisabled}
+                    disabledReason={uploadDisabledReason}
+                  />
+                  {rgbTifPath && (
+                    <GeoTiffValidationCard
+                      key={rgbTifPath}
+                      destPath={rgbTifPath}
+                    />
+                  )}
+                </div>
+                <div className="border-t pt-6">
+                  <UploadList
+                    dataType="Orthomosaic DEM"
+                    formValues={formValues}
+                    scope={scope}
+                    onUploadComplete={handleDemUploadComplete}
+                    label="DEM (.tif) — optional (required for plant height)"
+                    disabled={uploadDisabled}
+                    disabledReason={uploadDisabledReason}
+                  />
+                  {demTifPath && (
+                    <GeoTiffValidationCard
+                      key={demTifPath}
+                      destPath={demTifPath}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : wizardKind ? (
+              <div className="space-y-3" data-testid="import-wizard-dropzone">
+                <p className="text-muted-foreground text-sm">
+                  Drop a file to launch the import wizard.
+                </p>
+                <UploadZone
+                  onFilesAdded={handleWizardFilesDropped}
                   disabled={uploadDisabled}
                   disabledReason={uploadDisabledReason}
                 />
-                {rgbTifPath && (
-                  <GeoTiffValidationCard
-                    key={rgbTifPath}
-                    destPath={rgbTifPath}
-                  />
+                {wizardScopeError && (
+                  <p
+                    className="text-destructive text-sm"
+                    data-testid="wizard-scope-error"
+                  >
+                    {wizardScopeError}
+                  </p>
                 )}
               </div>
-              <div className="border-t pt-6">
-                <UploadList
-                  dataType="Orthomosaic DEM"
-                  formValues={formValues}
-                  scope={scope}
-                  onUploadComplete={handleDemUploadComplete}
-                  label="DEM (.tif) — optional (required for plant height)"
-                  disabled={uploadDisabled}
-                  disabledReason={uploadDisabledReason}
-                />
-                {demTifPath && (
-                  <GeoTiffValidationCard
-                    key={demTifPath}
-                    destPath={demTifPath}
-                  />
-                )}
-              </div>
-            </div>
-          ) : wizardKind ? (
-            <div className="space-y-3" data-testid="import-wizard-dropzone">
-              <p className="text-muted-foreground text-sm">
-                Drop a file to launch the import wizard.
-              </p>
-              <UploadZone
-                onFilesAdded={handleWizardFilesDropped}
+            ) : (
+              // Thermal-data detection + calibration picker now lives
+              // INSIDE UploadList — it probes file bytes after the user
+              // drops a batch, so we don't depend on a manual "this is
+              // thermal" toggle here. See UploadList.addFiles().
+              <UploadList
+                dataType={selectedFileType}
+                formValues={formValues}
+                scope={scope}
+                onFilesSelected={handleFilesSelected}
+                onUploadComplete={handleUploadComplete}
                 disabled={uploadDisabled}
                 disabledReason={uploadDisabledReason}
               />
-              {wizardScopeError && (
-                <p
-                  className="text-destructive text-sm"
-                  data-testid="wizard-scope-error"
-                >
-                  {wizardScopeError}
-                </p>
-              )}
-            </div>
-          ) : (
-            // Thermal-data detection + calibration picker now lives
-            // INSIDE UploadList — it probes file bytes after the user
-            // drops a batch, so we don't depend on a manual "this is
-            // thermal" toggle here. See UploadList.addFiles().
-            <UploadList
+            )}
+            <ClusterFolderUpload
               dataType={selectedFileType}
               formValues={formValues}
               scope={scope}
-              onFilesSelected={handleFilesSelected}
-              onUploadComplete={handleUploadComplete}
               disabled={uploadDisabled}
               disabledReason={uploadDisabledReason}
             />
-          )}
+          </div>
         </div>
       </div>
 

@@ -39,7 +39,7 @@ def _norm(h: Any) -> str:
 
 # In order of preference within each kind.
 ALIASES: dict[str, tuple[str, ...]] = {
-    "plot": ("field plot number", "field plot", "field plots", "plot number", "plotno", "plot no", "plot id",
+    "plot": ("field plot number", "plotid field", "plot id field", "field plot", "field plots", "plot number", "plotno", "plot no", "plot id",
              "plotid", "plot", "plots"),
     "tier": ("tier", "row", "range", "tier number", "row number"),
     "bed": ("bed", "col", "column", "bed number", "column number"),
@@ -366,7 +366,10 @@ def read_layout(paths: list[str] | str, sheet: Optional[str] = None, year: Optio
     plots: dict[tuple, dict] = {}
     unnumbered: list[dict] = []
     conflicts: list[dict] = []
-    tables = [x for x in parts if x["kind"] == "table"]
+    # Where files disagree on a plot's position, a field design (by its name) wins over other tables
+    # (lab sheets, master tables), which come after it.
+    tables = sorted((x for x in parts if x["kind"] == "table"),
+                    key=lambda x: 0 if re.search(r"design|layout|field ?map|plot ?map", x["file"], re.I) else 1)
     maps = [x for x in parts if x["kind"] != "table"]
     sheets_per_file: dict[str, int] = {}
     for part in tables:

@@ -145,6 +145,49 @@ main() {
         true
       fi
       ;;
+    conf)
+      # This cluster's settings as the last sync left them, for another computer of the same
+      # person joining the setup (`gemi-hpc join`). No secrets live in launch.conf; the lines
+      # naming the sending computer's own login, key and known-hosts file are left out.
+      nwords 0 0; audit ALLOW
+      [ -f "$HPC/clusters/current/launch.conf" ] || refuse "nothing synced yet"
+      grep -vE '^(HPC_HOST|HPC_KEY|HPC_KNOWN_HOSTS|GEMI_HPC_ROOT)=' "$HPC/clusters/current/launch.conf"
+      ;;
+    folder-peek|ingest)
+      # Data already on the cluster, in a folder the person named (never searched for).
+      # GEMI_DATA_ROOTS in launch.conf lists the folders such data may come from.
+      [ "${#words[@]}" -ge 1 ] || refuse "name the folder"
+      local src="${words[0]}" root ok=""
+      [[ "$src" == /* ]] || refuse "the folder must be an absolute path"
+      [ -n "${GEMI_DATA_ROOTS:-}" ] || refuse "no GEMI_DATA_ROOTS in launch.conf: name the folders data may be read from"
+      for root in $GEMI_DATA_ROOTS; do case "$src/" in "${root%/}"/*) ok=1 ;; esac; done
+      [ -n "$ok" ] || refuse "not under GEMI_DATA_ROOTS"
+      [ -d "$src" ] || refuse "no such folder"
+      if [ "$first" = folder-peek ]; then
+        nwords 1 1; audit ALLOW
+        # The cluster's rules: at most two levels on a login node.
+        echo "folder: $src"
+        echo "entries: $(ls -1 "$src" | wc -l)"; ls -1 "$src" | head -20
+        echo "files by type (two levels):"
+        find "$src" -maxdepth 2 -type f -printf '%f\n' | sed -n 's/.*\.\([A-Za-z0-9]*\)$/\1/p' | tr 'A-Z' 'a-z' \
+          | sort | uniq -c | sort -rn | head -12
+      else
+        [ "${#words[@]}" -ge 3 ] || refuse "ingest <folder> experiment=… site=… …"
+        local kv
+        for kv in "${words[@]:1}"; do
+          [[ "$kv" =~ ^(experiment|site|population|date|platform|sensor|data_type|name_ends|run_of_day|treatment|parallel)=[A-Za-z0-9_.,:@%+-]{1,80}$ ]] \
+            || refuse "bad setting $kv"
+        done
+        [ -s "$RUN/session.env" ] || refuse "no session up"
+        check_job 4 8G 0 "${INGEST_TIME:-12:00:00}" || refuse "over the job limits"
+        audit SUBMIT
+        local args="$RUN/ingest-$(date +%s%N).args"
+        printf '%s\n' "${words[@]:1}" > "$args"; chmod 600 "$args"
+        sbatch --partition="$CORE_PARTITION" --account="$CORE_ACCOUNT" --cpus-per-task=4 --mem=8G \
+          --time="${INGEST_TIME:-12:00:00}" --job-name="$JOB_PREFIX-ingest" --output="$LOGS/ingest-%j.log" \
+          --export=ALL,GEMI_HPC_ROOT="$ROOT",GEMI_INGEST_DIR="$src",GEMI_INGEST_ARGS="$args" "$HPC/remote/ingest.sbatch"
+      fi
+      ;;
     logs)
       nwords 1 2
       local what="${words[0]}" n="${words[1]:-40}" f

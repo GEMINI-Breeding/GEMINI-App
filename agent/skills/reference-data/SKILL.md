@@ -16,6 +16,8 @@ with several sheets, a map in one file and the plot list in another): `field_lay
 at once; they are joined by plot number). It says which crop is on which beds and saves one clean CSV (`saved_as`)
 to use as `design_path` everywhere. Tell the person its `tell_the_person`. Asked whether two files agree (a design and a lab sheet, two years' maps): `field_layout` with both; its `position_conflicts` and `bed_tier_swapped` answer it. Reading files is not uploading them.
 
+**Measurements per plot from the lab or the breeding team** (cook time, protein, yield, master tables covering several seasons, sites and crops): `plot_tables` with `paths` lists which traits each season, site and crop has and writes one table per group. To compare them with what the pipelines measure, `plot_tables` again with `upload: true` and `experiment` (and the filters `year`, `location`, `crop` to send only what was asked for): each group becomes reference data; report each upload's match numbers.
+
 **Several crops in one field** (a drone flight, or a whole day's rover logs, over neighbouring trials): upload it
 once (population e.g. `Mixed`), then use the design: every plot keeps its crop, and results are stored per crop
 automatically, so Analyze shows each crop on its own. To process one crop's beds only, `field_layout` with `crop`.

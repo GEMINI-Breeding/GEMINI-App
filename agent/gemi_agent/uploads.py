@@ -84,7 +84,8 @@ def summary(t: dict) -> dict:
 
 def start(client: Client, files: list[Path], *, experiment: str, site: str, population: str, date: str,
           platform: str, sensor: str, data_type: str, parallel: int = 3, dataset_id: Optional[str] = None,
-          extract: Optional[bool] = None, run_of_day: str = "", treatment: str = "", source_folder: str = "") -> dict:
+          extract: Optional[bool] = None, run_of_day: str = "", treatment: str = "", source_folder: str = "",
+          foreground: bool = False) -> dict:
     """Create what the upload needs in the app (experiment, site, population,
     season of that year, platform, sensor, a dataset) and start the batch."""
     kind = DATA_TYPES.get(data_type)
@@ -132,6 +133,9 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
     }
     TASKS.mkdir(parents=True, exist_ok=True)
     _path(task_id).write_text(json.dumps(task))
+    if foreground:                          # a cluster job uploading data that is already on the cluster
+        run(task_id)
+        return summary(read(task_id))
     env = dict(os.environ, GEMI_API=client.base, GEMI_TOKEN=client.token())
     log = open(TASKS / f"{task_id}.log", "ab")
     flags = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0) if os.name == "nt" else 0

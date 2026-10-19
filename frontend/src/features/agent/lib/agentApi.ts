@@ -267,6 +267,10 @@ export interface ComputePart {
   resources: string
   jobs_waiting: number
   jobs_running: number
+  /** Cluster jobs running this worker (several copies share the waiting jobs). */
+  copies?: number
+  /** How many copies the cluster's settings allow at once. */
+  max_copies?: number
   /** Minutes with nothing to do; null when the job list could not be read. */
   idle_minutes?: number | null
   busy: { action: string; since: number } | null
@@ -410,6 +414,12 @@ export const agentApi = {
   cancel: (id: string) => call<{ ok: boolean }>(`/runs/${id}/cancel`, post()),
   compute: (fresh = false) =>
     call<ComputeOverview>(`/compute${fresh ? "?fresh=1" : ""}`),
+  /** What is in a folder on the cluster the person named (two levels). */
+  clusterFolder: (folder: string) =>
+    call<{ result: string }>("/compute/folder", post({ folder })),
+  /** A cluster job uploads that folder into the session, as one batch. */
+  clusterIngest: (settings: Record<string, string>) =>
+    call<{ result: string }>("/compute/ingest", post(settings)),
   install: () => call<InstallOverview>("/install"),
   installOllama: () => call<InstallOverview>("/install/ollama", post()),
   installDocker: () => call<InstallOverview>("/install/docker", post()),

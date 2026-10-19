@@ -112,6 +112,13 @@ export interface SheetMapping {
   plotColumnColumn: string | null
   traitColumns: TraitColumn[]
   populationName: string
+  /**
+   * "column": each row's population from `populationColumn` (a crop or
+   * population column of a master table covering several crops); rows with
+   * an empty cell fall back to `populationName`. Absent = "fixed".
+   */
+  populationMode?: "fixed" | "column"
+  populationColumn?: string | null
   accessionNameColumn: string | null
   lineNameColumn: string | null
   aliasColumn: string | null

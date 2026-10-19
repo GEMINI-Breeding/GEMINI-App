@@ -159,6 +159,15 @@ function Row({
           aria-hidden
         />
         <span className="text-sm font-medium">{part.label}</span>
+        {(part.copies ?? 0) > 1 && (
+          <span
+            className="text-muted-foreground text-xs"
+            title={`${part.copies} copies share the waiting jobs (at most ${part.max_copies ?? part.copies}). Stop stops all of them.`}
+            data-testid={`compute-${part.name}-copies`}
+          >
+            ×{part.copies}
+          </span>
+        )}
         <div className="ml-auto">
           {working ? (
             <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />

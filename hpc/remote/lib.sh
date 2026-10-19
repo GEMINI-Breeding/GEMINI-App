@@ -123,7 +123,7 @@ worker_job_types() {
 # those types, or "?" when the API cannot be asked (then nothing is stopped).
 open_jobs() {
   local base=$1; shift
-  GEMI_BASE="$base" GEMI_TYPES="$*" python3 - <<'PY' 2>/dev/null || echo "?"
+  GEMI_BASE="$base" GEMI_TYPES="$*" GEMI_SELF="${GEMI_SELF:-}" python3 - <<'PY' 2>/dev/null || echo "?"
 import json, os, urllib.request
 base, types = os.environ["GEMI_BASE"], os.environ["GEMI_TYPES"].split()
 def call(path, body=None, token=None):
@@ -134,10 +134,15 @@ def call(path, body=None, token=None):
         return json.load(r)
 tok = call("/api/users/login/access-token", {"email": os.environ["GEMINI_FIRST_SUPERUSER_EMAIL"],
                                              "password": os.environ["GEMINI_FIRST_SUPERUSER_PASSWORD"]})["access_token"]
+# With GEMI_SELF (one of several copies of a worker): only waiting jobs and
+# this copy's own running ones count, so a spare copy stops while another
+# copy is still busy.
+me = os.environ.get("GEMI_SELF", "")
 n = 0
 for status in ("PENDING", "RUNNING"):
     for t in types:
-        n += len(call(f"/api/jobs/all?limit=1000&status={status}&job_type={t}", token=tok) or [])
+        rows = call(f"/api/jobs/all?limit=1000&status={status}&job_type={t}", token=tok) or []
+        n += sum(1 for j in rows if status == "PENDING" or not me or j.get("worker_id") in (me, None))
 print(n)
 PY
 }

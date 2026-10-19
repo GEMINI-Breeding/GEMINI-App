@@ -158,7 +158,17 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
 
     # Across the field: the planted blocks are the wide stretches of vegetation.
     across = _smooth(v.mean(axis=0), 0.3 / m)
-    blocks = [r for r in _runs(across > 0.35 * across.max()) if (r[1] - r[0]) * m > 2.0]
+    # Low cut, near bare soil: a field of several crops has sparse stretches (young
+    # beans beside closed cowpea) that are still planted beds, not alleys.
+    runs = _runs(across > 0.15 * across.max())
+    # A thin dip (a weak bed) does not split a block either: join pieces under 0.8 m apart.
+    joined: list = []
+    for r in runs:
+        if joined and (r[0] - joined[-1][1]) * m < 0.8:
+            joined[-1] = (joined[-1][0], r[1])
+        else:
+            joined.append(tuple(r))
+    blocks = [r for r in joined if (r[1] - r[0]) * m > 2.0]
     if not blocks:
         raise ValueError("no planted block found on this orthomosaic (is it mostly bare soil?)")
     blocks.sort(key=lambda r: -(r[1] - r[0]))
@@ -169,6 +179,20 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
     # Along the field, inside that block: strips of plants separated by alleys.
     along = _smooth(v[:, u0:u1].mean(axis=1), 0.25 / m)
     strips = [r for r in _runs(along > 0.30 * along.max()) if (r[1] - r[0]) * m > 0.8]
+    if len(strips) < 4:
+        # Closed or uneven canopy: the alleys never fall near bare soil, but they
+        # are still dips against the canopy around them.
+        planted = along > 0.1 * along.max()
+        dips = along - _smooth(along, 6.0 / m)
+        strips = [r for r in _runs((dips > 0) & planted) if (r[1] - r[0]) * m > 0.8]
+        # Those runs are only each tier's densest middle: a tier reaches from alley to
+        # alley (the low point between two runs), less a margin for the alley itself.
+        if len(strips) >= 2:
+            lows = [a_ + int(np.argmin(along[a_:b_])) for (_, a_), (b_, _) in zip(strips[:-1], strips[1:])]
+            pitch = float(np.median(np.diff(lows))) if len(lows) >= 2 else 0.0
+            half = int(0.3 / m)
+            cuts = ([lows[0] - int(pitch)] if pitch else [strips[0][0]]) + lows +                    ([lows[-1] + int(pitch)] if pitch else [strips[-1][1]])
+            strips = [(max(c0 + half, 0), min(c1 - half, len(along))) for c0, c1 in zip(cuts[:-1], cuts[1:])]
     # Where canopies have closed over an alley, several strips come out as
     # one long run: cut such runs into equal parts at the usual pitch.
     if len(strips) >= 4:
@@ -186,6 +210,12 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
         strips = split
     found = len(strips)
     note = ""
+    if border_tiers is None and found == tiers + 1:
+        # One strip too many: the shorter end one is a border or the flight's edge cutting a strip.
+        cut = 0 if strips[0][1] - strips[0][0] < strips[-1][1] - strips[-1][0] else -1
+        strips = strips[1:] if cut == 0 else strips[:-1]
+        note = f"{found} strips found; the shorter one at the {'first' if cut == 0 else 'last'} end left out"
+        found -= 1
     if border_tiers is None:
         border_tiers = (found - tiers) // 2 if found > tiers and (found - tiers) % 2 == 0 else 0
     if found - 2 * border_tiers == tiers:
@@ -200,6 +230,11 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
         note = (f"WARNING: {found} strips found but the design has {tiers} tiers "
                 f"(with border_tiers={border_tiers}); evenly spaced cells were used instead - check the overlay")
     bed_w = (u1 - u0) / beds
+    if not 0.6 <= bed_w * m <= 2.5:
+        note = (note + "; " if note else "") + (
+            f"WARNING: {beds} beds across a {(u1 - u0) * m:.0f} m block makes beds {bed_w * m:.2f} m wide, "
+            "not a usual bed width: the block found may be part of the field, or the flight covers fewer beds "
+            "(record `beds`)")
     return {"long_is_rows": long_is_rows, "block": [int(u0), int(u1)], "tiers": [list(map(int, s)) for s in used],
             "bed_width_px": bed_w, "strips_found": found, "blocks_found": len(blocks), "note": note,
             "block_width_m": round((u1 - u0) * m, 2), "field_length_m": round((used[-1][1] - used[0][0]) * m, 1),
@@ -504,6 +539,86 @@ _field(field_layout, "Read field designs and plot lists in any shape breeders ke
        "nothing is uploaded.",
        {"paths": {"type": "array", "items": _str, "description": "the file(s) on this computer (.xlsx / .csv)"},
         "sheet": _str, "crop": {**_str, "description": "keep only this crop (or trial label)"}}, ["paths"])
+# Columns that identify or place a plot, not traits measured on it.
+_ID_COLUMNS = re.compile(r"^(project|year|season|location|site|loc|environment|experiment|crop|population.*|species|"
+                         r"genotype|line ?id|line|entry.*|codes?|variety.*|accession|plots?|plot.*|field ?plot.*|rep.*|"
+                         r"block|bed|tier|row|col|column|range|check.*|experimental|locyearcropplot|.*number|.*id|"
+                         r"order.*|work ?req|.*sample.*|notes?|comments?)$", re.I)
+
+
+def plot_tables(args: dict) -> dict:
+    """Plot-level measurement tables (lab sheets, master tables of several
+    seasons, sites and crops) split into one table per season, site and crop,
+    with the traits each has; optionally uploaded as reference data to compare
+    with what the pipelines measure."""
+    import csv as _csv
+
+    from .client import AGENT_DIR
+    from .field_layout import _norm, _num, read_layout
+
+    paths = args.get("paths") or args.get("path")
+    if isinstance(paths, str):
+        paths = [paths]
+    if not paths:
+        raise ValueError("give `paths`: the table file(s) on this computer")
+    layout = read_layout(paths, args.get("sheet") or None, year=args.get("year"), location=args.get("location"))
+    want_crop = str(args.get("crop") or "").strip().lower()
+    groups: dict[tuple, list[dict]] = {}
+    for p in layout["plots"]:
+        if p.get("border") or not p.get("columns"):
+            continue
+        if want_crop and want_crop not in str(p.get("crop") or "").lower():
+            continue
+        groups.setdefault((p.get("year") or "", p.get("location") or "", p.get("crop") or ""), []).append(p)
+    if not groups:
+        raise ValueError("no plot rows with measurements" + (f" for {want_crop!r}" if want_crop else ""))
+    out_dir = AGENT_DIR / "work" / "plot_tables"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report, uploads = [], []
+    for (year, loc, crop), rows in sorted(groups.items()):
+        cols: dict[str, int] = {}
+        for r in rows:
+            for k, v in (r.get("columns") or {}).items():
+                if _num(v) is not None and not _ID_COLUMNS.match(_norm(k)):
+                    cols[k] = cols.get(k, 0) + 1
+        traits = [k for k, n in cols.items() if n >= max(3, len(rows) * 0.1)]
+        name = "_".join(x for x in (loc, year, crop) if x).replace(" ", "-").replace("/", "-") or "table"
+        out = out_dir / f"{name}.csv"
+        with open(out, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            w.writerow(["plot", "row", "col", "accession", *traits])
+            for r in rows:
+                c = r.get("columns") or {}
+                w.writerow([r.get("plot") or "", r.get("tier") if r.get("tier") is not None else "",
+                            r.get("bed") if r.get("bed") is not None else "", r.get("genotype") or "",
+                            *[c.get(t, "") for t in traits]])
+        entry = {"season": year, "site": loc, "crop": crop, "plots": len(rows), "traits": traits[:30],
+                 "more_traits": max(0, len(traits) - 30) or None, "saved_as": str(out)}
+        if args.get("upload") and traits:
+            from .app_tools import reference_upload
+
+            mapping = {"plot": "plot_id", "accession": "accession", **{t: t for t in traits}}
+            if any(r.get("tier") is not None for r in rows):
+                mapping.update({"row": "row", "col": "col"})
+            got = reference_upload({"path": str(out), "mapping": mapping, "name": f"{name} (lab / measured)",
+                                    "experiment": args.get("experiment"), "location": loc or args.get("location"),
+                                    "population": crop or args.get("population"), "date": args.get("date")})
+            entry["uploaded"] = {k: got["result"].get(k) for k in ("id", "plot_count", "match_report")}
+            uploads.append(name)
+        report.append(entry)
+    return {"result": {"tables": report, "groups": len(report),
+                       "how_to_use": "Each table is one season, site and crop. To compare with the pipelines' "
+                                     "results, upload it as reference data (upload=true with `experiment`), then "
+                                     "Analyze shows both per plot. Report the match numbers of each upload.",
+                       "tell_the_person": "; ".join(f"{e['site']} {e['season']} {e['crop']}: {e['plots']} plots, "
+                                                    f"{len(e['traits'])} traits" for e in report[:8])}}
+
+
+_field(plot_tables, "Measurement tables per plot (lab sheets like cook time or protein, master tables covering several "
+       "seasons, sites and crops): which traits each season, site and crop has, one clean table per group, and with "
+       "upload=true each uploaded as reference data for comparing with pipeline results. Filters: year, location, "
+       "crop.", {"paths": {"type": "array", "items": _str}, "sheet": _str, "year": _str, "location": _str,
+                 "crop": _str, "upload": _bool, "experiment": _str, "date": _str}, ["paths"])
 _field(field_design, "Read a field design file (.xlsx / .csv) on this computer: plots, beds, tiers, bed blocks, "
        "which plot is at each corner of the design.", {"path": _str}, ["path"])
 _field(plot_boundaries, "Find the plots on an orthomosaic from its vegetation (tier strips along the field, beds "

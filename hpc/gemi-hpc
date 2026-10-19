@@ -10,6 +10,9 @@
 #   gemi-hpc stop <name>...    stop worker jobs
 #   gemi-hpc status            jobs of this tooling + where the core is
 #   gemi-hpc ps                the same, one machine-readable line per job (for the app's Compute panel)
+#   gemi-hpc join user@host /gemi/folder [name] [keyfile]
+#                            another computer of yours: copy the settings of a cluster already set up
+#                            (from its last sync) so `gemi-hpc app` works here too
 #   gemi-hpc app               open the app against the cluster: tunnel + frontend on free local ports
 #   gemi-hpc tunnel [port]     only the API tunnel (default: any free port); Ctrl-C to close
 #   gemi-hpc login             print the HPC stack's app login
@@ -39,6 +42,35 @@ REPO=$(cd "$HERE/.." && pwd)
 # person's app data when this script ships inside the desktop app (read-only).
 CLUSTERS=${GEMI_CLUSTERS_DIR:-$HERE/clusters}
 BACKEND=${GEMI_BACKEND_DIR:-$REPO/backend}
+# join: before any settings exist here, so it comes before they are read.
+if [ "${1:-}" = join ]; then
+  login=${2:-} root=${3:-} name=${4:-} key=${5:-}
+  usage="usage: gemi-hpc join user@host /gemi/folder/on/the/cluster [name] [keyfile]"
+  [[ "$login" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$ ]] || { echo "$usage" >&2; exit 2; }
+  [[ "$root" =~ ^/[A-Za-z0-9_./-]+$ && "$root" != *..* && "$root" == /*/*/* ]] \
+    || { echo "the GEMI folder on the cluster: an absolute path at least three levels deep (GEMI_HPC_ROOT)" >&2; exit 2; }
+  name=${name:-$(echo "${login#*@}" | cut -d. -f1 | tr 'A-Z' 'a-z')}
+  [[ "$name" =~ ^[a-z0-9_-]+$ ]] || { echo "bad name: $name" >&2; exit 2; }
+  if [ -z "$key" ]; then
+    for k in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ecdsa"; do [ -f "$k" ] && { key=$k; break; }; done
+  fi
+  [ -n "$key" ] && [ -f "$key" ] || { echo "no SSH key found: give its file as the 5th word" >&2; exit 2; }
+  known="$HOME/.ssh/known_hosts"
+  # The first login to this host records its key (accept-new); after that a changed key is refused.
+  conf=$(ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new \
+           -o UserKnownHostsFile="$known" "$login" "$root/hpc/remote/gemi-gate conf" 2>&1 | sed -n '/^@@gemi@@$/,$p' | sed 1d)
+  printf '%s\n' "$conf" | grep -q '^CORE_PARTITION=' || {
+    echo "could not read the settings from $login:$root (is the folder right, and was it synced from the other computer?)" >&2
+    printf '%s\n' "$conf" | tail -3 >&2; exit 1; }
+  mkdir -p "$CLUSTERS/$name"
+  [ -f "$CLUSTERS/$name/launch.conf" ] && cp "$CLUSTERS/$name/launch.conf" "$CLUSTERS/$name/launch.conf.bak"
+  { echo "# Joined $(date +%Y-%m-%d) from the settings on $login (gemi-hpc join); this computer's own login below."
+    echo "HPC_HOST=$login"; echo "HPC_KEY=$key"; echo "HPC_KNOWN_HOSTS=$known"; echo "GEMI_HPC_ROOT=$root"; echo
+    printf '%s\n' "$conf"; } > "$CLUSTERS/$name/launch.conf"
+  echo "$name" > "$CLUSTERS/active"
+  echo "joined: cluster '$name' ($login, $root) is active here. Next: gemi-hpc status, then gemi-hpc app"
+  exit 0
+fi
 CLUSTER=${GEMI_CLUSTER:-$(cat "$CLUSTERS/active" 2>/dev/null || true)}
 [ -n "$CLUSTER" ] || { echo "no cluster is configured: copy hpc/clusters/launch.conf.example to hpc/clusters/<name>/launch.conf, fill it in, and put <name> in hpc/clusters/active (or set GEMI_CLUSTER)" >&2; exit 2; }
 [[ "$CLUSTER" =~ ^[a-z0-9_-]+$ ]] || { echo "bad cluster name: $CLUSTER" >&2; exit 2; }
@@ -107,7 +139,9 @@ case "$cmd" in
         | gate_in recv backend
     fi
     # Only this cluster's settings go up (not other clusters', not the `active` marker).
-    tar -czf - -C "$HERE" remote tools -C "$(dirname "$CLUSTERS")" "$(basename "$CLUSTERS")/$CLUSTER" \
+    # The agent's uploader goes too: `ingest` runs it in a cluster job.
+    tar -czf - --exclude='__pycache__' --exclude='*.pyc' -C "$HERE" remote tools \
+      -C "$(dirname "$CLUSTERS")" "$(basename "$CLUSTERS")/$CLUSTER" -C "$REPO/agent" gemi_agent \
       | gate_in recv hpc
     # In a checkout the revision is the backend's commit; in the packaged app, the file shipped with it.
     if [ -n "${GEMI_BACKEND_TGZ:-}" ]; then
@@ -150,6 +184,14 @@ case "$cmd" in
     ;;
   ps)
     gate ps
+    ;;
+  folder-peek)
+    # A folder on the cluster the person named: what is in it (two levels at most).
+    gate folder-peek "$@"
+    ;;
+  ingest)
+    # Upload that folder into the session from a cluster job: ingest <folder> experiment=… site=… …
+    gate ingest "$@"
     ;;
   status)
     gate status

@@ -16,6 +16,8 @@ export const NOT_MAPPED = "__not_mapped__"
 /** A fresh, empty config for one sheet — every field defaulted, nothing
  *  selected. */
 export function emptySheetConfig(sheet: ParsedSheet): SheetMapping {
+  // A master table holding several crops: read each row's population.
+  const perRow = detectPopulationColumn(sheet)
   return {
     sheetName: sheet.name,
     skipped: false,
@@ -23,6 +25,8 @@ export function emptySheetConfig(sheet: ParsedSheet): SheetMapping {
     plotRowColumn: null,
     plotColumnColumn: null,
     populationName: "",
+    populationMode: perRow ? "column" : "fixed",
+    populationColumn: perRow,
     traitColumns: [],
     accessionNameColumn: null,
     lineNameColumn: null,
@@ -62,6 +66,18 @@ export function seedSheetConfig(
     plotRowColumn: copyIfPresent(prev.plotRowColumn),
     plotColumnColumn: copyIfPresent(prev.plotColumnColumn),
     populationName: prev.populationName,
+    ...(prev.populationMode === "column" &&
+    copyIfPresent(prev.populationColumn ?? null)
+      ? {
+          populationMode: "column" as const,
+          populationColumn: prev.populationColumn ?? null,
+        }
+      : detectPopulationColumn(sheet)
+        ? {
+            populationMode: "column" as const,
+            populationColumn: detectPopulationColumn(sheet),
+          }
+        : { populationMode: "fixed" as const, populationColumn: null }),
     traitColumns: prev.traitColumns
       .filter((tc) => headerSet.has(tc.columnHeader))
       .map((tc) => ({ ...tc })),
@@ -159,4 +175,35 @@ export function reservedColumnSet(config: SheetMapping): Set<string> {
   if (config.timestampColumn) s.add(config.timestampColumn)
   for (const mc of config.metadataColumns) s.add(mc.columnHeader)
   return s
+}
+
+/** Header names that hold each row's crop or population. */
+const POPULATION_HEADERS = [
+  "population",
+  "population_exact",
+  "population exact",
+  "population_general",
+  "population general",
+  "crop",
+  "species",
+]
+
+/**
+ * A column naming each row's crop or population, when the sheet has one
+ * with more than one value (a master table covering several crops). The
+ * mapping step then reads the population per row instead of one value for
+ * the whole sheet.
+ */
+export function detectPopulationColumn(sheet: ParsedSheet): string | null {
+  for (const want of POPULATION_HEADERS) {
+    const h = sheet.headers.find((x) => x.trim().toLowerCase() === want)
+    if (!h) continue
+    const values = new Set(
+      sheet.rows
+        .map((r) => (r[h] == null ? "" : String(r[h]).trim()))
+        .filter(Boolean),
+    )
+    if (values.size > 1) return h
+  }
+  return null
 }

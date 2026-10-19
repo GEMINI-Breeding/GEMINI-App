@@ -4,13 +4,17 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
 import { useProcessScope } from "@/features/process/lib/processScope"
-import { findRunByJobId } from "@/features/process/lib/runStore"
+import {
+  findRunByJobId,
+  useRunStoreReady,
+} from "@/features/process/lib/runStore"
 import useAuth from "@/hooks/useAuth"
 import type { JobProgressEvent } from "@/lib/wsManager"
 // Phase 6: ProcessContext subscribes over the new WebSocket-based manager
@@ -36,6 +40,8 @@ type ProcessContextState = {
   removeProcess: (id: string) => void
   clearCompleted: () => void
   clearHistory: () => void
+  /** Jobs submitted but not yet started (waiting for a worker or the cluster's queue). */
+  queuedJobIds: ReadonlySet<string>
 }
 
 const ProcessContext = createContext<ProcessContextState | undefined>(undefined)
@@ -133,13 +139,14 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
   const { data: liveBackendJobs } = useQuery<JobOutput[], Error>({
     queryKey: ["process-rehydrate", "running-jobs", experimentId],
     queryFn: async () => {
-      const all = (await JobsService.apiJobsAllGetAllJobs({})) as
-        | JobOutput[]
-        | null
-      const list = all ?? []
-      const live = list.filter(
-        (j) => j.status === "RUNNING" || j.status === "PENDING",
-      )
+      // By status: the unfiltered list stops at 100 jobs, which can leave
+      // out live ones on a busy stack.
+      const [running, pending] = (await Promise.all(
+        ["RUNNING", "PENDING"].map((status) =>
+          JobsService.apiJobsAllGetAllJobs({ status }),
+        ),
+      )) as (JobOutput[] | null)[]
+      const live = [...(running ?? []), ...(pending ?? [])]
       if (!experimentId) return live
       return live.filter(
         (j) => (j as { experiment_id?: string }).experiment_id === experimentId,
@@ -148,11 +155,25 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
     enabled: Boolean(user),
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
+    // Jobs started elsewhere (the agent, another browser, the cluster) show
+    // up without a reload.
+    refetchInterval: 20_000,
     staleTime: 0,
   })
+  // A job is shown once its run is known; the runs may load after the jobs.
+  const runsLoaded = useRunStoreReady()
+  const queuedJobIds = useMemo(
+    () =>
+      new Set(
+        (liveBackendJobs ?? [])
+          .filter((j) => j.status === "PENDING")
+          .map((j) => String(j.id ?? "")),
+      ),
+    [liveBackendJobs],
+  )
 
   useEffect(() => {
-    if (!liveBackendJobs || liveBackendJobs.length === 0) return
+    if (!runsLoaded || !liveBackendJobs || liveBackendJobs.length === 0) return
     setProcesses((prev) => {
       const known = new Set(prev.filter((p) => p.runId).map((p) => p.runId!))
       const additions: Process[] = []
@@ -167,24 +188,27 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         // silently dropped from rehydration.
         const owningRun = findRunByJobId(runId)
         if (!owningRun) continue
+        known.add(runId)
+        const queued = j.status === "PENDING"
         additions.push({
           id: crypto.randomUUID(),
           type: "processing",
-          status: "running",
-          title: `${j.job_type} job ${runId.slice(0, 8)}`,
+          status: queued ? "pending" : "running",
+          title: `${j.job_type} job ${runId.slice(0, 8)}${queued ? " (queued)" : ""}`,
           items: [],
           createdAt: new Date(),
           runId,
           progress: typeof j.progress === "number" ? Math.round(j.progress) : 0,
           message: detail?.stage,
           link: `/process/${owningRun.workspaceId}/run/${owningRun.id}`,
+          background: true,
         })
       }
       if (additions.length === 0) return prev
       setHasBeenActive(true)
       return [...prev, ...additions]
     })
-  }, [liveBackendJobs])
+  }, [liveBackendJobs, runsLoaded])
 
   // Subscribe via wsManager for every running process that carries a runId
   // (GEMINIbase Job UUID). The WebSocket stays open across navigation thanks
@@ -246,6 +270,9 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
               }
             }
 
+            // Still waiting its turn: stays queued.
+            if (evt.status === "PENDING") return p
+
             // Non-terminal progress update — derive a status message from
             // progress_detail.stage when present, otherwise leave unchanged.
             const stage =
@@ -254,6 +281,7 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
             return {
               ...p,
               status: "running",
+              title: p.title.replace(/ \(queued\)$/, ""),
               ...(typeof evt.progress === "number"
                 ? { progress: evt.progress }
                 : {}),
@@ -289,6 +317,7 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         removeProcess,
         clearCompleted,
         clearHistory,
+        queuedJobIds,
       }}
     >
       {children}

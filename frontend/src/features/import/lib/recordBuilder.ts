@@ -57,13 +57,35 @@ export function collectTraitUnits(mapping: ColumnMapping): Map<string, string> {
   return m
 }
 
+/** The population of one row: its cell in the population column (when the
+ *  sheet reads it per row), else the sheet's fixed population. */
+export function rowPopulation(
+  row: Record<string, unknown>,
+  config: SheetMapping,
+): string | undefined {
+  if (config.populationMode === "column" && config.populationColumn) {
+    const v = row[config.populationColumn]
+    const t = v == null ? "" : String(v).trim()
+    if (t) return t
+  }
+  return config.populationName.trim() || undefined
+}
+
 /** Set of population names referenced by any unskipped sheet (trimmed,
- *  blanks dropped). */
+ *  blanks dropped), fixed or read per row. */
 export function collectPopulationNames(mapping: ColumnMapping): Set<string> {
   const s = new Set<string>()
-  for (const config of mapping.sheetConfigs) {
+  for (let i = 0; i < mapping.sheetConfigs.length; i++) {
+    const config = mapping.sheetConfigs[i]
     if (!config || config.skipped) continue
-    if (config.populationName.trim()) s.add(config.populationName.trim())
+    if (config.populationMode === "column" && config.populationColumn) {
+      for (const row of mapping.sheets[i]?.rows ?? []) {
+        const p = rowPopulation(row, config)
+        if (p) s.add(p)
+      }
+    } else if (config.populationName.trim()) {
+      s.add(config.populationName.trim())
+    }
   }
   return s
 }
@@ -154,7 +176,6 @@ export function collectPlotSpecs(
     const sheet = mapping.sheets[si]
     const config = mapping.sheetConfigs[si]
     if (!config || config.skipped || !config.plotNumberColumn) continue
-    const populationName = config.populationName.trim() || undefined
 
     for (const row of sheet.rows) {
       const plotRaw = row[config.plotNumberColumn]
@@ -203,7 +224,9 @@ export function collectPlotSpecs(
         }
       }
 
-      const key = `${rowSeason}::${rowSite}::${plotNumber}::${plotRow}::${plotCol}`
+      // plot numbers repeat between populations (and seasons, sites)
+      const populationName = rowPopulation(row, config)
+      const key = `${rowSeason}::${rowSite}::${populationName ?? ""}::${plotNumber}::${plotRow}::${plotCol}`
       if (seen.has(key)) continue
       seen.add(key)
       plotSpecs.push({
@@ -361,7 +384,9 @@ export function buildTraitRecords(
         : undefined
 
     for (const trait of enabledTraits) {
-      const bySeasonSite = new Map<string, TraitRecord[]>()
+      // One group per population (a master table may hold several crops);
+      // within it, records by season + site.
+      const byPopulation = new Map<string, Map<string, TraitRecord[]>>()
       const traitKey = `${sheet.name}::${trait.traitName}`
       let count = 0
 
@@ -396,9 +421,8 @@ export function buildTraitRecords(
           sheet: sheet.name,
           source_column: trait.columnHeader,
         }
-        if (config.populationName.trim()) {
-          recordInfo.population = config.populationName.trim()
-        }
+        const population = rowPopulation(row, config)
+        if (population) recordInfo.population = population
         if (config.accessionNameColumn) {
           const v = row[config.accessionNameColumn]
           recordInfo.accession_name = v != null ? String(v).trim() : null
@@ -477,6 +501,11 @@ export function buildTraitRecords(
         // reach it.
         const germplasm = pickGermplasmFromRow(row, config)
         if (germplasm) record.accession_name = germplasm
+        let bySeasonSite = byPopulation.get(population ?? "")
+        if (!bySeasonSite) {
+          bySeasonSite = new Map<string, TraitRecord[]>()
+          byPopulation.set(population ?? "", bySeasonSite)
+        }
         let bucket = bySeasonSite.get(key)
         if (!bucket) {
           bucket = []
@@ -487,14 +516,16 @@ export function buildTraitRecords(
       }
 
       if (count > 0) {
-        groups.push({
-          sheetName: sheet.name,
-          traitName: trait.traitName,
-          traitColumnHeader: trait.columnHeader,
-          bySeasonSite,
-          collectionDate: sheetCollectionDate,
-          population: config.populationName.trim() || undefined,
-        })
+        for (const [population, bySeasonSite] of byPopulation) {
+          groups.push({
+            sheetName: sheet.name,
+            traitName: trait.traitName,
+            traitColumnHeader: trait.columnHeader,
+            bySeasonSite,
+            collectionDate: sheetCollectionDate,
+            population: population || undefined,
+          })
+        }
         perTraitTotal.set(traitKey, count)
         grandTotal += count
       }

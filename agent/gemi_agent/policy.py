@@ -52,6 +52,8 @@ def tool_approval(name: str, args: Optional[dict] = None) -> Optional[str]:
         if action in HPC_FREE:
             return None
         return HPC_ASK.get(action, f"runs the cluster action {action!r}")
+    if name == "cluster_folder" and args.get("upload") not in (None, False, "false", ""):
+        return "submits a cluster job that uploads that folder into the session"
     if name == "hpc_configure":
         return "writes the cluster's settings (where the core, workers and model run) and makes it the active cluster"
     if name == "start_process" and str(args.get("name")) == "llm":
@@ -66,8 +68,9 @@ def tool_approval(name: str, args: Optional[dict] = None) -> Optional[str]:
 
 # ── shell commands (for a harness with a shell, e.g. Claude Code) ────────────
 
-GEMI_HPC_FREE = {"status", "ps", "logs", "doctor", "help", "site-skills"}
-GEMI_HPC_ASK = {"sync", "pull", "up", "worker", "stop", "down", "app", "tunnel", "login", "llm"}
+GEMI_HPC_FREE = {"status", "ps", "logs", "doctor", "help", "site-skills", "folder-peek"}
+# (join writes this computer's settings for a cluster: asks, like hpc_configure.)
+GEMI_HPC_ASK = {"sync", "pull", "up", "worker", "stop", "down", "app", "tunnel", "login", "llm", "ingest", "join"}
 _ENV = r"(?:[A-Z_][A-Z0-9_]*=[^\s;&|<>`$()]*\s+)*"
 _GEMI_HPC = re.compile(
     r"^\s*(?:cd\s+\S+\s*&&\s*)?" + _ENV + r"(?:bash\s+)?(?:\S*/)?hpc/gemi-hpc(?:\s+(?P<sub>[a-z-]+))?(?P<args>(?:\s[^;&|<>`$()]*)?)\s*$")

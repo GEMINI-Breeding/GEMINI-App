@@ -128,9 +128,19 @@ def _ps(cluster: str) -> tuple[dict[str, dict], set[str]]:
             continue
         row = {"job_id": f[1], "partition": f[3], "slurm_state": f[4], "elapsed": f[5], "time_limit": f[6],
                "node": f[7] or None, "reason": None if f[8] in ("None", "") else f[8]}
+        copies = (jobs.get(name) or {}).get("copies", 0) + 1
         if name not in jobs or row["slurm_state"] == "RUNNING":       # a running one wins over a queued twin
             jobs[name] = row
+        jobs[name]["copies"] = copies
     return jobs, up
+
+
+def _max_copies(name: str, conf: dict) -> int:
+    """How many copies of a worker the cluster's launch.conf allows at once (WORKER_MAX_<name>)."""
+    try:
+        return max(1, int(str(conf.get(f"WORKER_MAX_{name}", "1")).split()[0]))
+    except ValueError:
+        return 1
 
 
 def _state_of(name: str, job: Optional[dict], up: set[str]) -> str:
@@ -201,7 +211,9 @@ def overview(fresh: bool = False, with_jobs: bool = True) -> dict:
                "where": p["where"].get(name, AUTO), "options": _options(name, conf),
                "resources": _resources(name, conf), "jobs_waiting": waiting.get(name, 0),
                "jobs_running": running.get(name, 0), "busy": _busy.get(name), "last": _last.get(name),
-               **(job or {})}
+               "copies": 0, **(job or {})}
+        if name in WORKERS:
+            row["max_copies"] = _max_copies(name, conf)
         if name in WORKERS and counts is None:
             row["idle_minutes"] = None        # job list unreadable: unknown, never acted on
         elif name in WORKERS and row["state"] == "running":
@@ -226,6 +238,7 @@ def _part(name: str) -> dict:
 
 
 _idle_since: dict[str, float] = {}      # worker -> when it was last seen with nothing to do
+_scaled: dict[str, float] = {}          # worker -> when another copy was last asked for
 
 
 def watch(period_s: int = 45) -> None:
@@ -260,6 +273,14 @@ def watch(period_s: int = 45) -> None:
                     out = start(row["name"], background=False)
                     _last[row["name"]] = {**out, "message": (f"started for {row['jobs_waiting']} waiting job(s)"
                                                               if out["ok"] else out["message"])}
+                elif (p["auto_start"] and core_up and row["state"] == "running" and row["jobs_waiting"]
+                      and row.get("copies", 1) < row.get("max_copies", 1)
+                      and time.time() - _scaled.get(row["name"], 0) > 300):
+                    # Jobs wait behind a busy worker and the cluster allows more copies: ask for one
+                    # more. The gate submits it only if the cluster can start it now.
+                    _scaled[row["name"]] = time.time()
+                    out = start(row["name"], background=False)
+                    _last[row["name"]] = {**out, "message": (out.get("message") or "")[:200]}
                 elif p["idle_stop_minutes"] and (row.get("idle_minutes") or 0) >= p["idle_stop_minutes"]:
                     out = stop(row["name"], background=False)
                     _last[row["name"]] = {**out, "message": f"stopped after {p['idle_stop_minutes']} min with no jobs"}

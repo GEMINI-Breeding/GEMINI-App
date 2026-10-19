@@ -38,6 +38,7 @@ vi.mock("@/client", () => ({
 const findRunByJobIdMock = vi.fn()
 vi.mock("@/features/process/lib/runStore", () => ({
   findRunByJobId: (jobId: string) => findRunByJobIdMock(jobId),
+  useRunStoreReady: () => true,
 }))
 
 import type { JobProgressEvent } from "@/lib/wsManager"

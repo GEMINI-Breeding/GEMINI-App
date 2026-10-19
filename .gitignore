@@ -55,3 +55,6 @@ __pycache__/
 
 # Demo dataset notes: kept locally, not shared
 /agent/DEMO_DATASETS.md
+
+# Demo screenshots (show breeding data)
+/demo_*/

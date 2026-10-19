@@ -8,6 +8,7 @@
  */
 
 import { normalizeGermplasmName } from "./germplasmResolve"
+import { rowPopulation } from "./recordBuilder"
 import type { ColumnMapping, SheetMapping } from "./types"
 
 /**
@@ -58,8 +59,6 @@ export function collectPopulationForGermplasm(
     const sheet = mapping.sheets[i]
     const config: SheetMapping | undefined = mapping.sheetConfigs[i]
     if (!config || config.skipped) continue
-    const populationName = config.populationName?.trim()
-    if (!populationName) continue
     const cols = [
       config.accessionNameColumn,
       config.lineNameColumn,
@@ -67,6 +66,9 @@ export function collectPopulationForGermplasm(
     ].filter((c): c is string => Boolean(c))
     if (cols.length === 0) continue
     for (const row of sheet.rows) {
+      // the row's own population when the sheet reads it per row
+      const populationName = rowPopulation(row, config)
+      if (!populationName) continue
       for (const col of cols) {
         const v = row[col]
         if (v == null) continue

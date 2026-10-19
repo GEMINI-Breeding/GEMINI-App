@@ -9,8 +9,8 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Navigation, Plane } from "lucide-react"
 import { useMemo } from "react"
-
 import { Badge } from "@/components/ui/badge"
+import { useProcess } from "@/contexts/ProcessContext"
 import {
   runState,
   TAG_CLASS,
@@ -29,6 +29,7 @@ export function ExperimentRuns() {
   const navigate = useNavigate()
   const runs = useAllRuns()
   const pipelines = useAllPipelines()
+  const { queuedJobIds } = useProcess()
   const byId = useMemo(
     () => new Map<string, Pipeline>(pipelines.map((p) => [p.id, p])),
     [pipelines],
@@ -76,7 +77,7 @@ export function ExperimentRuns() {
                     const type = pipe?.type === "ground" ? "ground" : "aerial"
                     const Icon = type === "ground" ? Navigation : Plane
                     const scope = run.uploadScope
-                    const state = runState(run, type)
+                    const state = runState(run, type, queuedJobIds)
                     return (
                       <button
                         type="button"

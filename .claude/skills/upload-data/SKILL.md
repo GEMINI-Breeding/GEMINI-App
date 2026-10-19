@@ -14,6 +14,16 @@ description: Upload local files or folders (rover .bin logs, images, orthomosaic
 3. It returns a file count: tell the person the count and where the files will be filed, ask them to confirm, and stop.
 4. On their yes: the same `upload` call without `dry_run`, then `wait_task` with the `task_id` it returns. Report files done and failed as numbers.
 
+## Data already on the cluster
+
+When the files sit on the cluster's storage (a session runs there), do not copy them here. Ask the person for the folder's full path on the cluster (or its parent): never search the cluster's storage for data. Then:
+
+1. `{"tool": "cluster_folder", "args": {"folder": "<the path they named>"}}` shows what is in it (two levels).
+2. `{"tool": "cluster_folder", "args": {"folder": "<path>", "upload": true, "experiment": "…", "site": "…", "population": "…", "date": "YYYY-MM-DD", "platform": "Drone", "sensor": "RGB", "data_type": "images"}}` submits a cluster job that uploads it as one batch (asks the person first). Add `"name_ends": "_V.JPG"` to keep only some files. Values have no spaces.
+3. Follow it with `hpc` action=logs service=upload; the run then shows on the Process tab.
+
+Only folders under the cluster's data roots (`GEMI_DATA_ROOTS` in its launch.conf) are accepted.
+
 ## One day, several parts: runs of the day and treatments
 
 Data for the same experiment, site, population, date, platform and sensor sometimes comes in parts. Each part is kept as its own upload and gets its own pipeline run, told apart by two optional labels:
