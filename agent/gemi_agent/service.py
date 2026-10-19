@@ -47,6 +47,7 @@ token (checked against the REST API):
     POST /agent/compute/stop           {name}
     POST /agent/compute/reconnect      reopen the tunnels to the cluster
     PUT  /agent/compute/prefs          {auto_start?, idle_stop_minutes?}
+    PUT  /agent/compute/ssh_key        {key}            the identity file for the cluster's SSH login (checked first)
     POST /agent/compute/folder         {folder}         what is in a folder on the cluster (two levels; administrators)
     POST /agent/compute/ingest         {folder, experiment, site, …}  a cluster job uploads it (administrators)
 """
@@ -424,6 +425,12 @@ class Handler(BaseHTTPRequestHandler):
                     return compute.reconnect()
                 if route == ["compute", "prefs"] and method == "PUT":
                     return compute.set_prefs(body)
+                if route == ["compute", "ssh_key"] and method == "PUT":
+                    from .hpc_tools import set_ssh_key
+
+                    out = set_ssh_key(str(body.get("key") or ""))
+                    compute._cache["t"] = 0.0
+                    return out
             except (ValueError, RuntimeError) as e:
                 raise HttpError(400, str(e)) from None
         if route == ["next_step"] and method == "GET" and not user.get("setup"):

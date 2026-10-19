@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -266,6 +267,59 @@ function Row({
   )
 }
 
+/** The identity file (ssh -i) this computer logs in to the cluster with. */
+function SshKeyRow({
+  login,
+  current,
+  canManage,
+  onSaved,
+  onError,
+}: {
+  login?: string
+  current?: string
+  canManage: boolean
+  onSaved: () => void
+  onError: (e: string | null) => void
+}) {
+  const [key, setKey] = useState("")
+  const save = useMutation({
+    mutationFn: () => agentApi.computeSshKey(key.trim()),
+    onSuccess: () => {
+      setKey("")
+      onError(null)
+      onSaved()
+    },
+    onError: (e) => onError(e instanceof Error ? e.message : String(e)),
+  })
+  return (
+    <div className="space-y-1" data-testid="compute-ssh-key">
+      <p className="text-muted-foreground">
+        SSH login {login ?? "?"} with key{" "}
+        <span className="font-mono">{current ?? "(default)"}</span>
+      </p>
+      {canManage && (
+        <div className="flex gap-1.5">
+          <Input
+            className="h-7 text-xs"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="Another key file, e.g. ~/.ssh/id_ed25519_cluster"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2"
+            disabled={!key.trim() || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Checking…" : "Use"}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ComputePanel({
   canManage,
   wide = false,
@@ -401,6 +455,13 @@ export function ComputePanel({
 
         {data?.cluster && (
           <div className="mt-2 space-y-1.5 border-t pt-2 text-xs">
+            <SshKeyRow
+              login={data.login}
+              current={data.ssh_key}
+              canManage={canManage}
+              onSaved={refresh}
+              onError={setError}
+            />
             <div className="flex items-start gap-2">
               <Checkbox
                 id="compute-auto-start"

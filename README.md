@@ -129,7 +129,7 @@ Nothing of the stack needs to be installed on a second computer (a laptop, say):
 - **A cluster already set up from another computer.** Copy its settings (from the cluster's last sync), then open the app as usual:
 
   ```bash
-  bash hpc/gemi-hpc join you@cluster.example.edu /path/to/GEMI/folder/on/the/cluster [name] [keyfile]
+  bash hpc/gemi-hpc join [-i ~/.ssh/your_key] you@cluster.example.edu /path/to/GEMI/folder/on/the/cluster [name]
   bash hpc/gemi-hpc status && bash hpc/gemi-hpc app
   ```
 
@@ -139,7 +139,7 @@ Nothing of the stack needs to be installed on a second computer (a laptop, say):
   bash scripts/dev-remote.sh you@other-computer [api_port=7777] [tiles_port=8091]
   ```
 
-In both cases the agent service runs on the second computer, so the agent can upload files from it.
+Without `-i`, `join` uses the first of `~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa`. The key can be changed later in Settings → Compute (it is checked against the login before it is saved). In both cases the agent service runs on the second computer, so the agent can upload files from it.
 
 ### From a second computer
 

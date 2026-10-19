@@ -10,7 +10,7 @@
 #   gemi-hpc stop <name>...    stop worker jobs
 #   gemi-hpc status            jobs of this tooling + where the core is
 #   gemi-hpc ps                the same, one machine-readable line per job (for the app's Compute panel)
-#   gemi-hpc join user@host /gemi/folder [name] [keyfile]
+#   gemi-hpc join [-i keyfile] user@host /gemi/folder [name]
 #                            another computer of yours: copy the settings of a cluster already set up
 #                            (from its last sync) so `gemi-hpc app` works here too
 #   gemi-hpc app               open the app against the cluster: tunnel + frontend on free local ports
@@ -44,8 +44,19 @@ CLUSTERS=${GEMI_CLUSTERS_DIR:-$HERE/clusters}
 BACKEND=${GEMI_BACKEND_DIR:-$REPO/backend}
 # join: before any settings exist here, so it comes before they are read.
 if [ "${1:-}" = join ]; then
-  login=${2:-} root=${3:-} name=${4:-} key=${5:-}
-  usage="usage: gemi-hpc join user@host /gemi/folder/on/the/cluster [name] [keyfile]"
+  shift
+  key="" pos=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -i) key=${2:-}; shift 2 ;;
+      -i*) key=${1#-i}; shift ;;
+      *) pos+=("$1"); shift ;;
+    esac
+  done
+  login=${pos[0]:-} root=${pos[1]:-} name=${pos[2]:-}
+  key=${key:-${pos[3]:-}}       # (the key as a 4th word, as before, still works)
+  key=${key/#\~/$HOME}
+  usage="usage: gemi-hpc join [-i keyfile] user@host /gemi/folder/on/the/cluster [name]"
   [[ "$login" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$ ]] || { echo "$usage" >&2; exit 2; }
   [[ "$root" =~ ^/[A-Za-z0-9_./-]+$ && "$root" != *..* && "$root" == /*/*/* ]] \
     || { echo "the GEMI folder on the cluster: an absolute path at least three levels deep (GEMI_HPC_ROOT)" >&2; exit 2; }
@@ -54,7 +65,7 @@ if [ "${1:-}" = join ]; then
   if [ -z "$key" ]; then
     for k in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ecdsa"; do [ -f "$k" ] && { key=$k; break; }; done
   fi
-  [ -n "$key" ] && [ -f "$key" ] || { echo "no SSH key found: give its file as the 5th word" >&2; exit 2; }
+  [ -n "$key" ] && [ -f "$key" ] || { echo "no SSH key found${key:+ at $key}: give it with -i keyfile" >&2; exit 2; }
   known="$HOME/.ssh/known_hosts"
   # The first login to this host records its key (accept-new); after that a changed key is refused.
   conf=$(ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new \

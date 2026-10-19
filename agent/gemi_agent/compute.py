@@ -225,6 +225,7 @@ def overview(fresh: bool = False, with_jobs: bool = True) -> dict:
             _idle_since.pop(name, None)
         parts.append(row)
     return {"cluster": cluster, "host": conf.get("HPC_HOST", "").split("@")[-1], "parts": parts,
+            "login": conf.get("HPC_HOST"), "ssh_key": conf.get("HPC_KEY"),
             "auto_start": p["auto_start"], "idle_stop_minutes": p["idle_stop_minutes"], "error": snap["error"], "checked": round(_cache["t"]),
             "connection": {"api": _port_open(API_PORT) and st.get("api_pid") is not None,
                            "model": bool(st.get("llm_pid")) and _port_open(int(st.get("llm_port") or 0) or 1)}}

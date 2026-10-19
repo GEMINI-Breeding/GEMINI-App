@@ -285,6 +285,9 @@ export interface ComputePart {
 export interface ComputeOverview {
   cluster: string | null
   host?: string
+  /** The SSH login and identity file this computer uses for the cluster. */
+  login?: string
+  ssh_key?: string
   parts: ComputePart[]
   auto_start: boolean
   idle_stop_minutes?: number
@@ -430,6 +433,12 @@ export const agentApi = {
   computeStop: (name: string) =>
     call<{ started: boolean }>("/compute/stop", post({ name })),
   computeReconnect: () => call<unknown>("/compute/reconnect", post({})),
+  /** Another identity file for the cluster's SSH login; checked before it is saved. */
+  computeSshKey: (key: string) =>
+    call<{ ssh_key: string; login: string }>("/compute/ssh_key", {
+      method: "PUT",
+      body: JSON.stringify({ key }),
+    }),
   computePrefs: (patch: { auto_start?: boolean; idle_stop_minutes?: number }) =>
     call<unknown>("/compute/prefs", {
       method: "PUT",

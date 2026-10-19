@@ -154,6 +154,31 @@ def _conf(cluster: str) -> dict:
     return out
 
 
+def set_ssh_key(key: str, cluster: Optional[str] = None) -> dict:
+    """Use another SSH identity file for the cluster's login (this computer's
+    launch.conf, HPC_KEY), after checking it logs in without a password."""
+    cluster = cluster or active_cluster()
+    if not cluster:
+        raise ValueError("no cluster is configured")
+    text = str(key).strip()
+    m = re.match(r"^/([A-Za-z])/(.*)$", text)
+    if os.name == "nt" and m:                 # Git Bash's /c/Users/… as Windows reads it
+        text = f"{m.group(1).upper()}:/{m.group(2)}"
+    path = Path(text).expanduser()
+    if not text or not path.is_file():
+        raise ValueError(f"no key file at {key!r}")
+    conf = _conf(cluster)
+    _find_key(conf["HPC_HOST"], str(path), None)          # raises with ssh's reason if it cannot log in
+    file = CLUSTERS / cluster / "launch.conf"
+    lines = file.read_text().splitlines()
+    new = f"HPC_KEY={_posix(path)}"
+    lines = [new if re.match(r"^HPC_KEY=", ln) else ln for ln in lines]
+    if new not in lines:
+        lines.insert(0, new)
+    file.write_text("\n".join(lines) + "\n", newline="\n")
+    return {"cluster": cluster, "ssh_key": _posix(path), "login": conf["HPC_HOST"]}
+
+
 def _state() -> dict:
     return json.loads(STATE.read_text()) if STATE.exists() else {}
 
