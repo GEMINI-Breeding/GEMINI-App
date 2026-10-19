@@ -85,7 +85,10 @@ queued; it needs the `geo` worker and is not required for trait extraction.
 
 ## 4. Plot boundaries from the field design
 
-1. `{"tool": "field_design", "args": {"path": "<file on this computer>"}}` — beds,
+1. A design that is not a plain table (a drawn map, several sheets or files, several crops): first
+   `{"tool": "field_layout", "args": {"paths": ["<file>", "<file>"]}}` and use its `saved_as` as the design below;
+   its crops and bed ranges say which crop each part of the flight is.
+   `{"tool": "field_design", "args": {"path": "<file on this computer>"}}` — beds,
    tiers, bed blocks, and which plot sits at each corner of the design.
 2. Decide which of the design's beds are on **this** orthomosaic. A design
    often spans several flights (for example a well-watered block and a

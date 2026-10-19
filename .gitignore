@@ -52,3 +52,6 @@ __pycache__/
 
 # second desktop build folder (a build alongside a running copy of the app)
 /frontend/src-tauri/target-demo/
+
+# Demo dataset notes: kept locally, not shared
+/agent/DEMO_DATASETS.md

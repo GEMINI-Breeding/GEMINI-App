@@ -28,6 +28,7 @@ Never skip ahead: each step needs the previous one's output.
 |---|---|---|
 | GPS good, field design available | stitched plots' GPS footprints + the design | `ground_plot_boundaries`, `associate_plots` |
 | GPS poor or absent | the driving pattern: start corner + serpentine passes | `traversal_layout`, `traversal_boundaries`, `stitch_units`, `place_plot_images` |
+| Field design as a drawn map, several files, or several crops in the field | `field_layout` first; its `saved_as` is the design | then the row above that fits |
 | No field design yet | a stand-in | `mock_field_design` (GPS route), or `traversal_layout` without `design_path` |
 
 ### From the driving pattern

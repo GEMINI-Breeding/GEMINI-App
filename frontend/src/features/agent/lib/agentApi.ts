@@ -336,6 +336,15 @@ export interface InstallJob {
   note: string | null
 }
 
+export interface FieldLayoutSummary {
+  plots: number
+  crops: { crop: string; plots: number; beds: string; tiers: string }[]
+  environments: Record<string, number> | null
+  without_position: number
+  position_conflicts: number | null
+  bed_tier_swapped: string | null
+}
+
 export interface DiskSpace {
   data_free_gb: number | null
   docker_free_gb: number | null
@@ -431,6 +440,16 @@ export const agentApi = {
   nextStep: (runId: string) =>
     call<{ runs: AgentNextStep[] }>(
       `/next_step?run=${encodeURIComponent(runId)}`,
+    ),
+  /**
+   * Any field design file (a drawn map, a workbook, odd column names) as one
+   * clean CSV (plot, row = tier, col = bed, accession, crop, …), with a summary
+   * of the crops and where they are.
+   */
+  fieldLayout: (name: string, contentBase64: string) =>
+    call<{ csv: string; summary: FieldLayoutSummary }>(
+      "/field_layout",
+      post({ name, content_base64: contentBase64 }),
     ),
   /** Mark a run's rover track automatically; saved unless a pass needs a look. */
   automark: (runId: string) =>

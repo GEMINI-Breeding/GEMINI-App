@@ -46,7 +46,7 @@ DEFAULTS = {"base_url": "http://127.0.0.1:8000/v1", "model": "gemma4", "api_key"
 CORE_TOOLS = ("next_step", "continue_run", "run_facts", "read_skill", "status", "process_runs", "processes", "start_process", "stop_process",
               "hpc", "jobs", "job_detail", "wait_jobs", "cancel_job", "tasks", "wait_task", "browse", "datasets",
               "entities", "inference_stats", "stitch_stats", "canopy_cover", "traits_available", "analyze",
-              "genotype_studies", "gwas", "gwas_result", "cluster_rules")
+              "genotype_studies", "gwas", "gwas_result", "cluster_rules", "field_layout")
 _SKILL_TOOLS: dict[str, list[str]] = {}
 
 
@@ -238,6 +238,10 @@ _CLAIMS = re.compile(r"\b(?:has|have|had|was|were|is|are|I|I've|we|we've) (?:now
                      r"(uploaded|started|submitted|stopped|saved|stitched|marked|cancell?ed|deleted|launched|queued|recorded"
                      r"|initiated|begun|kicked off|shut down)\b", re.I)
 # A reply that asks the person where something is stored.
+# "I cannot access files on your computer" about a spreadsheet the person named: the tools can.
+_CANT_READ = re.compile(r"\b(can ?not|can't|unable to|don't have access|do not have access)\b[^.\n]{0,40}"
+                        r"\b(access|open|read|see|compare)\b[^.\n]{0,60}\b(file|files|spreadsheet|excel|computer)", re.I)
+_LOCAL_TABLE = re.compile(r"[A-Za-z]:[\\/][^\s\"']+\.(xlsx|xlsm|csv|tsv)\b|(^|\s)(~|/)[^\s\"']+\.(xlsx|xlsm|csv|tsv)\b", re.I)
 _ASKS_PATH = re.compile(r"\b(provide|give me|specify|tell me|what is|share)\b[^.?!\n]{0,60}\b(path|folder|directory|location|prefix)\b",
                         re.I)
 # Calls that act on a cluster: they wait until its administrators' rules have been read.
@@ -576,6 +580,17 @@ class Run:
                                           "You read the steps but have not done them. Do step 1 now: make its tool call. If "
                                           "the person has not given something a step needs (a label, a file, a choice), ask "
                                           "them for exactly that, as a question."})
+                    continue
+                if (call is None and self._calls == 0 and not self._nudged and _CANT_READ.search(text)
+                        and _LOCAL_TABLE.search(self._person_text())):
+                    # Said it cannot read a spreadsheet the person named on this computer: it can.
+                    self._nudged = True
+                    self.event("assistant", text=_SPECIAL.sub("", text).strip())
+                    self.messages.append({"role": "user", "content":
+                                          "You can read spreadsheets and CSV files on this computer: field_layout with "
+                                          "`paths` (every file the person named) reads field designs, field maps and "
+                                          "plot lists: plots, beds, tiers, genotypes, crops. Call it now, then answer "
+                                          "from its result."})
                     continue
                 if call is None and self._calls == 0 and not self._nudged and _ASKS_PATH.search(text):
                     # Asked the person where something is in the app's storage, without looking.

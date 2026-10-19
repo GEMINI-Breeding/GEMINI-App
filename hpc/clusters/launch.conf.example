@@ -8,7 +8,7 @@ GEMI_HPC_ROOT=/group/yourlab/gemini_app
 
 # Published stack the images come from; current source is mounted over it.
 GEMI_IMAGE_REGISTRY=ghcr.io/gemini-breeding
-GEMI_IMAGE_VERSION=sha-ee97cbb
+GEMI_IMAGE_VERSION=sha-ab4d1a5
 
 # Core job (database, storage, API): small, long-running.
 CORE_PARTITION=${CORE_PARTITION:-gpu-part}

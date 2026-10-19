@@ -444,6 +444,19 @@ A person's own session with the second Davis rover log ended with the model's se
 | H.12 | app, service | **"Mark automatically" on the Plot Marking screen** runs the same automatic marking as the agent (with the run's recorded facts), saves when no pass is in doubt, and names the passes to check. | Marking was entry, frame by frame, even where the crop shows the plots |
 | H.7 | app, tool | **Agent runs are filed where a person would file them**: in the workspace that already holds the experiment's runs (or one named after the experiment), in a pipeline of the same type that shares the platform and sensor. A small agent icon on the run, with a hover note, is the only difference. Runs already in the old "Agent runs" workspace are moved by `ProcessRuns.regroup()`. | One "Agent runs" workspace mixed every experiment and read as a separate kind of thing |
 
+### Field designs in the shapes breeders keep (18 October)
+
+Thirty real field designs, master tables and lab sheets (Davis and Kearney, 2022-2026): plot lists with a dozen spellings of plot, bed, tier, genotype and crop; drawn field maps (tiers down and beds across with a crop label row merged over each trial's beds; beds down with a plot and variety pair per tier); workbooks with a sheet per crop; master tables covering several seasons and sites. The new `field_layout` tool reads every one of them. Smaller files cut from the 2023 master (per crop, plot and genotype only, crop only in the file name, a sheet per crop, a lab sheet) give every plot the same position as the master whenever any file has one.
+
+| # | Where | Change | Why |
+|---|---|---|---|
+| L.1 | tool | `field_layout` reads any of these shapes, joins several files by plot number, keeps seasons and sites apart (plot numbers repeat between them), says which crop is on which beds, and saves one clean CSV used as `design_path` everywhere. | Field designs arrive as maps and workbooks, rarely as the one-table CSV the tools took |
+| L.2 | tool | Files that place the same plot differently are listed; a consistent bed/tier swap is named. | The lab master has bed and tier the other way round for all 60 CDBN plots of 2022 |
+| L.3 | runner | `field_layout` is a core tool; a reply saying it "cannot access files on your computer" when the person named a spreadsheet is sent back once with the tool to use. | Gemma 4 E2B: 0 of 4 questions, each answered "I cannot access local files" |
+| L.4 | backend | Trait records are stored per plot crop when the plots carry one (population made when missing). | A flight or a day of rover logs over neighbouring trials is one upload; Analyze needs each crop on its own |
+
+Gemma 4 E2B on four questions about these files (which beds the sorghum is on; the cowpea's beds from a plot list plus the map; whether the lab master and a design agree; the crops in a sheet-per-crop workbook): 0 of 4 before L.3, 3 of 4 after, 4 of 4 after making the tool description say it compares files.
+
 ### Where each kind of fix lives
 
 Counting the entries in this log, rounds 1 to 5g: 27 changes to tools, 20 to the agent loop, 2 to skills (one of them shared with a tool change). The pattern that held throughout:

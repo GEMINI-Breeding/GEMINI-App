@@ -31,6 +31,7 @@ token (checked against the REST API):
     GET  /agent/image?path=...         a picture a tool produced
     GET  /agent/next_step?run=<id>     what is due for a Process-tab run (the `next_step` tool)
     GET  /agent/facts/<run id>         what the person has said about a run; PUT {fact: value} to change
+    POST /agent/field_layout           {name, content_base64}  any field design file -> clean CSV + summary
     POST /agent/automark               {run}  mark the run's rover track automatically (as the agent would)
     GET  /agent/model_setup            open models to choose from, and the setup in flight (steps, estimates)
     GET  /agent/install                Ollama and Docker on this computer: installed / running, installs in flight
@@ -417,6 +418,27 @@ class Handler(BaseHTTPRequestHandler):
         if route == ["next_step"] and method == "GET" and not user.get("setup"):
             use_client(Client(token=token))
             return TOOLS["next_step"]["fn"]({"run": (query.get("run") or [""])[0]})["result"]
+        if route == ["field_layout"] and method == "POST":
+            # The Field design upload in the app: a breeder's file in any shape (a drawn map, a
+            # workbook, odd column names) read into one table with crops, on this computer.
+            import base64
+            import tempfile
+
+            from .field_layout import read_layout, summarize, write_csv
+
+            body = self._body()
+            name = Path(str(body.get("name") or "design.csv")).name
+            if Path(name).suffix.lower() not in (".csv", ".tsv", ".txt", ".xlsx", ".xlsm"):
+                raise HttpError(400, "a field design is a .csv or .xlsx file")
+            with tempfile.TemporaryDirectory(prefix="gemi-design-") as tmp:
+                src = Path(tmp) / name
+                src.write_bytes(base64.b64decode(str(body.get("content_base64") or "")))
+                try:
+                    layout = read_layout(str(src))
+                except ValueError as e:
+                    raise HttpError(400, str(e)) from None
+                out = write_csv(layout, Path(tmp) / "layout.csv")
+                return {"csv": out.read_text(encoding="utf-8"), "summary": summarize(layout)}
         if route == ["automark"] and method == "POST" and not user.get("setup"):
             # The Plot Marking screen's "Mark automatically": the same call the
             # agent would make for this run (with the facts recorded for it),

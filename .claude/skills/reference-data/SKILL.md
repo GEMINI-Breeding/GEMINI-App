@@ -11,6 +11,15 @@ description: Work with reference data — field design files and hand-measured t
 2. A new table: `field_design` with its `path` to see the columns, then `reference_upload` with `path` and a `mapping` of column to role.
 3. Report the match numbers it returns (rows matched to plots, rows not matched).
 
+**A field design in any shape** (a breeder's map with tiers and beds, a plot list with odd column names, a workbook
+with several sheets, a map in one file and the plot list in another): `field_layout` with `paths` (all the files
+at once; they are joined by plot number). It says which crop is on which beds and saves one clean CSV (`saved_as`)
+to use as `design_path` everywhere. Tell the person its `tell_the_person`. Asked whether two files agree (a design and a lab sheet, two years' maps): `field_layout` with both; its `position_conflicts` and `bed_tier_swapped` answer it. Reading files is not uploading them.
+
+**Several crops in one field** (a drone flight, or a whole day's rover logs, over neighbouring trials): upload it
+once (population e.g. `Mixed`), then use the design: every plot keeps its crop, and results are stored per crop
+automatically, so Analyze shows each crop on its own. To process one crop's beds only, `field_layout` with `crop`.
+
 Reference data is a table with one row per plot: the field design (plot,
 row/bed, column, genotype) and/or traits measured by hand. The app matches
 its rows to plots by plot identity.

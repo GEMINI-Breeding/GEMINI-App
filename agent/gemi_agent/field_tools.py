@@ -214,38 +214,31 @@ ALIASES = {"row": ("tier", "row", "range", "row_num"), "col": ("bed", "col", "co
 
 
 def read_design(path: str) -> dict:
-    """A field design table (.xlsx or .csv): one row per plot with its tier
-    (row), bed (column), plot label and genotype."""
+    """A field design in any of the shapes breeders keep (see field_layout):
+    one row per plot with its tier (row), bed (column), plot label, genotype
+    and crop. Only plots with a position are returned."""
+    from .field_layout import read_layout
+
     p = Path(path).expanduser()
     if not p.exists():
         raise ValueError(f"field design not found: {path}")
-    if p.suffix.lower() in (".xlsx", ".xlsm"):
-        try:
-            import openpyxl
-        except ImportError:
-            raise RuntimeError("reading .xlsx needs openpyxl (pip install openpyxl), or save the sheet as .csv") from None
-        ws = openpyxl.load_workbook(p, data_only=True).active
-        table = [[("" if c is None else str(c)).strip() for c in r] for r in ws.iter_rows(values_only=True)]
-    else:
-        with open(p, newline="", encoding="utf-8-sig") as f:
-            table = [[c.strip() for c in r] for r in csv.reader(f)]
-    header = [h.lower() for h in table[0]]
-    cols = {}
-    for key, names in ALIASES.items():
-        cols[key] = next((header.index(n) for n in names if n in header), None)
-    if cols["row"] is None or cols["col"] is None:
-        raise ValueError(f"the design needs tier/row and bed/column columns; found {table[0]}")
+    layout = read_layout(str(p))
     rows = []
-    for r in table[1:]:
-        if not any(r) or not r[cols["row"]] or not r[cols["col"]]:
+    for q in layout["plots"]:
+        if q.get("border") or q.get("tier") is None or q.get("bed") is None:
             continue
-        rec = {table[0][i]: r[i] for i in range(len(table[0])) if table[0][i]}
-        rec["_row"], rec["_col"] = int(float(r[cols["row"]])), int(float(r[cols["col"]]))
-        rec["_plot"] = r[cols["plot"]] if cols["plot"] is not None else f"{rec['_row']}-{rec['_col']}"
-        rec["_accession"] = r[cols["accession"]] if cols["accession"] is not None else ""
+        rec = dict(q.get("columns") or {})
+        rec.update({"_row": int(q["tier"]), "_col": int(q["bed"]),
+                    "_plot": q.get("plot") or f"{q['tier']}-{q['bed']}", "_accession": q.get("genotype") or "",
+                    "_crop": q.get("crop") or "", "_trial": q.get("trial") or "", "_bed_span": q.get("bed_span") or 1})
         rows.append(rec)
+    if not rows:
+        raise ValueError("the design gives no plot positions (tier and bed). It has "
+                         f"{len(layout['plots'])} plots; a map or a table with tier/row and bed columns is needed "
+                         "(field_layout with this and another file joins them by plot number)")
+    columns = sorted({k for r in rows for k in r if not k.startswith("_")})
     return {"rows": rows, "beds": sorted({r["_col"] for r in rows}), "tiers": sorted({r["_row"] for r in rows}),
-            "columns": [h for h in table[0] if h]}
+            "columns": columns, "crops": sorted({r["_crop"] for r in rows if r["_crop"]})}
 
 
 def field_design(args: dict) -> dict:
@@ -261,6 +254,7 @@ def field_design(args: dict) -> dict:
     return {"result": {"plots": len(d["rows"]), "beds": beds, "tiers": [tiers[0], tiers[-1]], "tier_count": len(tiers),
                        "bed_blocks": groups, "columns": d["columns"], "corner_plots": corners,
                        "genotypes": len({r["_accession"] for r in d["rows"]}),
+                       "crops": d.get("crops") or None,
                        "note": "bed_blocks = runs of consecutive bed numbers; a gap between runs is usually an "
                                "alley or a different treatment block, often flown and mapped separately"}}
 
@@ -310,6 +304,7 @@ def _cells(ortho: Ortho, lay: dict, design: dict, beds: list[int], tier_first_at
             label = rec["_plot"] if rec else f"{tier}-{bed}"
             props: dict[str, Any] = {"row": tier, "col": bed, "plot": numeric_plot(label, aliases) if rec else tier * 1000 + bed,
                                      "plot_label": label, "accession": rec["_accession"] if rec else "",
+                                     **({"crop": rec["_crop"]} if rec and rec.get("_crop") else {}),
                                      "_px": [[round(x, 1), round(y, 1)] for x, y in box]}
             if rec:
                 props.update({k: v for k, v in rec.items() if not k.startswith("_")})
@@ -461,6 +456,54 @@ def _field(fn, description: str, props: dict, required: list[str]) -> None:
     _tool(fn, description, props, required, track=False, group="aerial")
 
 
+def field_layout(args: dict) -> dict:
+    """Any field design or plot list (a table, a drawn map, several sheets or
+    files): plots with tier, bed, genotype and crop, summarised per crop, and
+    saved as one clean CSV the other tools take as `design_path`."""
+    from .client import AGENT_DIR
+    from .field_layout import crop_of, read_layout, summarize, write_csv
+
+    paths = args.get("paths") or args.get("path")
+    if not paths:
+        raise ValueError("give `paths`: the field design file(s) on this computer")
+    if isinstance(paths, str):
+        paths = [paths]
+    layout = read_layout(paths, args.get("sheet") or None)
+    summary = summarize(layout)
+    want = str(args.get("crop") or "").strip()
+    if want:
+        crop = crop_of(want) or want
+        kept = [p for p in layout["plots"] if p.get("crop") == crop or str(p.get("trial", "")).lower() == want.lower()]
+        if not kept:
+            raise ValueError(f"no plots of {want!r}; crops here: " + ", ".join(c["crop"] for c in summary["crops"]))
+        layout = {**layout, "plots": kept}
+        summary = summarize(layout)
+    stem = "_".join(__import__("pathlib").Path(p).stem for p in paths)[:60]
+    out = write_csv(layout, AGENT_DIR / "work" / "field_layouts" / f"{stem}{'_' + want.replace(' ', '-') if want else ''}.csv")
+    several = len([c for c in summary["crops"] if c["crop"] != "(no crop given)"]) > 1
+    return {"result": {**summary, "saved_as": str(out),
+                       "how_to_use": (
+                           "Pass saved_as as `design_path` to plot_boundaries, ground_plot_boundaries or "
+                           "plots_from_images. row = tier, col = bed. "
+                           + ("This field has SEVERAL CROPS: a flight or a folder of rover logs over it covers more "
+                              "than one. Each plot keeps its crop, so results are stored per crop (as that crop's "
+                              "population) automatically. To work on one crop's beds only, call again with `crop`. "
+                              if several else "")
+                           + ("Plots without a position come from a plot list only: add the field map file too, "
+                              "they are joined by plot number. " if summary["without_position"] else "")),
+                       "tell_the_person": "; ".join(f"{c['crop']}: {c['plots']} plots on beds {c['beds'] or '?'}, "
+                                                    f"tiers {c['tiers'] or '?'}" for c in summary["crops"][:6])}}
+
+
+_field(field_layout, "Read field designs and plot lists in any shape breeders keep (one row per plot with any column "
+       "names; a drawn field map with tiers and beds; several sheets or files joined by plot number) into plots with "
+       "tier, bed, genotype and CROP. Says which crop is on which beds, so a flight or rover dump covering several "
+       "crops can be sorted, and saves one clean CSV to use as design_path. `crop` keeps one crop's plots only. "
+       "Given several files it also CHECKS WHETHER THEY AGREE: position_conflicts lists plots placed differently "
+       "(bed_tier_swapped when one file has bed and tier the other way round). Reads files on this computer; "
+       "nothing is uploaded.",
+       {"paths": {"type": "array", "items": _str, "description": "the file(s) on this computer (.xlsx / .csv)"},
+        "sheet": _str, "crop": {**_str, "description": "keep only this crop (or trial label)"}}, ["paths"])
 _field(field_design, "Read a field design file (.xlsx / .csv) on this computer: plots, beds, tiers, bed blocks, "
        "which plot is at each corner of the design.", {"path": _str}, ["path"])
 _field(plot_boundaries, "Find the plots on an orthomosaic from its vegetation (tier strips along the field, beds "
@@ -540,7 +583,8 @@ def ground_plot_boundaries(args: dict) -> dict:
             continue
         feats.append({"type": "Feature",
                       "properties": {"plot": int(pid), "row": rec["_row"], "col": rec["_col"],
-                                     "accession": rec["_accession"]},
+                                     "accession": rec["_accession"],
+                                     **({"crop": rec["_crop"]} if rec.get("_crop") else {})},
                       "geometry": {"type": "Polygon", "coordinates": [ring]}})
     if not feats:
         raise ValueError("no stitched plot matched a row of the design (do the plot numbers agree?)")

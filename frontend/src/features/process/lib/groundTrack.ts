@@ -145,6 +145,12 @@ export interface PlotSelection {
   end_lon?: number | null
   /** Set when a marker was moved onto this track by GPS. */
   translated?: boolean
+  /**
+   * A person's review of this plot: "ok" = checked and right as it was,
+   * "corrected" = its start or end was moved. Saved with the markings, so a
+   * reviewed agent run is a record of what it got right.
+   */
+  review?: "ok" | "corrected"
 }
 
 export interface PlotMarkingSnapshot {

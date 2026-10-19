@@ -214,7 +214,8 @@ def plots_from_images(args: dict) -> dict:
         m = re.sub(r"\D", "", str(r["_plot"]))
         feats.append({"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring + [ring[0]]]},
                       "properties": {"plot": int(m) if m else r["_plot"], "plot_label": str(r["_plot"]), "row": r["_row"],
-                                     "col": r["_col"], "accession": r["_accession"], "schematic": True}})
+                                     "col": r["_col"], "accession": r["_accession"], "schematic": True,
+                                     **({"crop": r["_crop"]} if r.get("_crop") else {})}})
     v = c.save_version(processed, {"boundaries": {"type": "FeatureCollection", "features": feats},
                                    "created_from": "grid",
                                    "field_design": {"source": Path(design_path).name, "by": "agent",

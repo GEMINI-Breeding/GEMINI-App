@@ -54,6 +54,12 @@ export const FD_TARGET_COLS = [
     required: false,
     hint: "Entry / variety / line name",
   },
+  {
+    key: "crop",
+    label: "Crop",
+    required: false,
+    hint: "Crop or population of each plot: results of a field with several crops are filed per crop",
+  },
 ] as const
 
 export type FdTargetKey = (typeof FD_TARGET_COLS)[number]["key"]
@@ -80,6 +86,7 @@ export const FD_ALIASES: Record<FdTargetKey, string[]> = {
     "line id",
     "line_id",
   ],
+  crop: ["crop", "population", "population_exact", "species"],
 }
 
 export type FieldDesign = {

@@ -1,5 +1,4 @@
 import { useRef, useState } from "react"
-
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -10,6 +9,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import {
+  agentApi,
+  type FieldLayoutSummary,
+} from "@/features/agent/lib/agentApi"
 import {
   autoDetect,
   parseCSV,
@@ -61,38 +64,64 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
+  const [layoutNote, setLayoutNote] = useState<FieldLayoutSummary | null>(null)
+
   function handleClose() {
     reset()
     onClose()
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setFileName(file.name)
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = (ev.target?.result as string) ?? ""
-      try {
-        const { headers: h, rows } = parseCSV(text)
-        if (!h.length) {
-          showErrorToast("No columns found in CSV — file may be empty.")
-          return
-        }
-        setHeaders(h)
-        setParsedRows(rows)
-        const auto: Partial<Record<FdTargetKey, string>> = {}
-        for (const t of FD_TARGET_COLS)
-          auto[t.key] = autoDetect(h, FD_ALIASES[t.key])
-        setMapping(auto)
-        setStep("map")
-      } catch (err) {
+    setLayoutNote(null)
+    // Any shape of design (a drawn map, a workbook, odd column names): the
+    // agent service on this computer reads it into one clean table. Without
+    // it, a plain CSV is read here as before.
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] ?? "")
+        r.onerror = () => reject(r.error)
+        r.readAsDataURL(file)
+      })
+      const got = await agentApi.fieldLayout(file.name, b64)
+      loadText(got.csv)
+      setLayoutNote(got.summary)
+      return
+    } catch (err) {
+      if (!/\.csv$/i.test(file.name)) {
         showErrorToast(
-          err instanceof Error ? err.message : "Failed to parse CSV",
+          err instanceof Error
+            ? `Couldn't read ${file.name}: ${err.message}`
+            : `Couldn't read ${file.name}`,
         )
+        return
       }
     }
+    const reader = new FileReader()
+    reader.onload = (ev) => loadText((ev.target?.result as string) ?? "")
     reader.readAsText(file)
+  }
+
+  function loadText(text: string) {
+    try {
+      const { headers: h, rows } = parseCSV(text)
+      if (!h.length) {
+        showErrorToast("No columns found in CSV — file may be empty.")
+        return
+      }
+      setHeaders(h)
+      setParsedRows(rows)
+      const auto: Partial<Record<FdTargetKey, string>> = {}
+      for (const t of FD_TARGET_COLS)
+        auto[t.key] = autoDetect(h, FD_ALIASES[t.key])
+      setMapping(auto)
+      setStep("map")
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : "Failed to parse CSV")
+    }
   }
 
   function handleSave() {
@@ -126,7 +155,10 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
 
         {step === "upload" && (
           <div className="space-y-3">
-            <Label htmlFor="fd-file-button">Select CSV file</Label>
+            <Label htmlFor="fd-file-button">
+              Select the field design (.csv or Excel: a plot list, or a drawn
+              field map)
+            </Label>
             <div className="flex items-center gap-3">
               <Button
                 id="fd-file-button"
@@ -148,7 +180,7 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
                 ref={fileInputRef}
                 data-testid="field-design-file"
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,text/csv,.xlsx,.xlsm"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -158,6 +190,42 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
 
         {step === "map" && (
           <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
+            {layoutNote && (
+              <div
+                className="rounded-md border bg-muted/40 p-3 text-sm"
+                data-testid="fd-layout-summary"
+              >
+                <p className="font-medium">
+                  {layoutNote.plots} plots
+                  {layoutNote.crops.length > 1
+                    ? `, ${layoutNote.crops.length} crops: results are filed per crop`
+                    : ""}
+                </p>
+                <ul className="text-muted-foreground mt-1 space-y-0.5 text-xs">
+                  {layoutNote.crops.slice(0, 6).map((c) => (
+                    <li key={c.crop}>
+                      {c.crop}: {c.plots} plots, beds {c.beds || "?"}, tiers{" "}
+                      {c.tiers || "?"}
+                    </li>
+                  ))}
+                </ul>
+                {layoutNote.without_position > 0 && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    {layoutNote.without_position} plots have no bed and tier in
+                    this file (a plot list without the field map).
+                  </p>
+                )}
+                {layoutNote.environments &&
+                  Object.keys(layoutNote.environments).length > 1 && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      This file covers several seasons or sites (
+                      {Object.keys(layoutNote.environments).join(", ")}): plot
+                      numbers repeat between them. Use a file for one season and
+                      site.
+                    </p>
+                  )}
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b text-left">

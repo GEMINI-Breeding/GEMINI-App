@@ -162,9 +162,11 @@ export function DataStructureForm({
               description={
                 disabled
                   ? "Pick or create an experiment first."
-                  : field === "platform"
-                    ? "Decides the processing: rovers and handheld cameras go through the ground pipeline (plot marking, stitching); drones, with built-in or mounted sensors, through the aerial one (orthomosaic)."
-                    : undefined
+                  : field === "population"
+                    ? "Several crops in one upload (a flight or a day's rover logs over neighbouring trials)? Use one population such as Mixed: the field design's crop column files each plot's results under its own crop."
+                    : field === "platform"
+                      ? "Decides the processing: rovers and handheld cameras go through the ground pipeline (plot marking, stitching); drones, with built-in or mounted sensors, through the aerial one (orthomosaic)."
+                      : undefined
               }
             />
           )

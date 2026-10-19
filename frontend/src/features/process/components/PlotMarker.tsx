@@ -100,6 +100,67 @@ interface VersionRow {
 
 // ── Frame loading ───────────────────────────────────────────────────────────
 
+/** A small view of one frame (a plot's start or end); click to show it large. */
+function FrameThumb({
+  prefix,
+  name,
+  label,
+  active,
+  onClick,
+}: {
+  prefix: string
+  name: string | null
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    setUrl(null)
+    if (!name) return
+    let gone = false
+    let made: string | null = null
+    fetch(apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${prefix}${name}`), {
+      headers: authHeaders(),
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => {
+        if (b && !gone) {
+          made = URL.createObjectURL(b)
+          setUrl(made)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      gone = true
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [prefix, name])
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!name}
+      className={`relative aspect-video overflow-hidden rounded border bg-black ${active ? "ring-2 ring-primary" : ""}`}
+      title={name ? `${label}: ${name} (click to view)` : `${label} not set`}
+      data-testid={`pm-thumb-${label.toLowerCase()}`}
+    >
+      {url ? (
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-[10px]">
+          {name ? "…" : "not set"}
+        </span>
+      )}
+      <span
+        className={`absolute top-0.5 left-0.5 rounded px-1 text-[10px] text-white ${label === "Start" ? "bg-green-600" : "bg-red-600"}`}
+      >
+        {label}
+      </span>
+    </button>
+  )
+}
+
 /**
  * Blob URLs for frames (the download route needs the bearer token, so an
  * <img src> can't point at it). Cached, and the next frames are fetched
@@ -374,11 +435,44 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
     (patch: Partial<PlotSelection>) =>
       edit((ps) =>
         ps.map((p, i) =>
-          i === plotPage ? { ...p, ...patch, translated: undefined } : p,
+          i === plotPage
+            ? {
+                ...p,
+                ...patch,
+                translated: undefined,
+                // a moved marker is a correction of what was there
+                ...("start_image" in patch || "end_image" in patch
+                  ? { review: "corrected" as const }
+                  : {}),
+              }
+            : p,
         ),
       ),
     [edit, plotPage],
   )
+  /** Show plot i: select it and put its start frame in the viewer. */
+  const goToPlot = useCallback(
+    (i: number) => {
+      const p = plots[i]
+      if (!p) return
+      setPlotPage(i)
+      const at = p.start_image ? images.indexOf(p.start_image) : -1
+      if (at >= 0) setCurrentIdx(at)
+    },
+    [plots, images],
+  )
+  /** "Looks right": mark reviewed, then the next plot nobody has checked. */
+  const approve = useCallback(() => {
+    edit((ps) =>
+      ps.map((p, i) =>
+        i === plotPage ? { ...p, review: p.review ?? "ok" } : p,
+      ),
+    )
+    const after = plots.findIndex((p, i) => i > plotPage && !p.review)
+    const before = plots.findIndex((p, i) => i < plotPage && !p.review)
+    const nextIdx = after >= 0 ? after : before
+    if (nextIdx >= 0) goToPlot(nextIdx)
+  }, [edit, plots, plotPage, goToPlot])
   const markStart = useCallback(() => {
     if (currentImage) setOnActive({ start_image: currentImage })
   }, [currentImage, setOnActive])
@@ -505,12 +599,26 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
       else if (k === "e") markEnd()
       else if (k === "n") addPlot()
       else if (k === "d") deletePlot()
+      else if (k === "y") approve()
+      else if (e.key === "[") goToPlot(Math.max(0, plotPage - 1))
+      else if (e.key === "]") goToPlot(Math.min(plots.length - 1, plotPage + 1))
       else return
       e.preventDefault()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [prev, next, markStart, markEnd, addPlot, deletePlot])
+  }, [
+    prev,
+    next,
+    markStart,
+    markEnd,
+    addPlot,
+    deletePlot,
+    approve,
+    goToPlot,
+    plotPage,
+    plots.length,
+  ])
 
   if (!scope)
     return (
@@ -804,7 +912,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                 onChange={(e) => setPlotNavInput(e.target.value)}
                 onBlur={() => {
                   const n = Number.parseInt(plotNavInput, 10)
-                  if (n >= 1 && n <= plots.length) setPlotPage(n - 1)
+                  if (n >= 1 && n <= plots.length) goToPlot(n - 1)
                   else setPlotNavInput(String(plotPage + 1))
                 }}
                 onKeyDown={(e) => {
@@ -841,7 +949,8 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                 className="text-muted-foreground ml-auto text-xs"
                 data-testid="pm-done-count"
               >
-                {doneCount}/{plots.length} done
+                {doneCount}/{plots.length} done ·{" "}
+                {plots.filter((p) => p.review).length} checked
               </span>
             </div>
 
@@ -853,7 +962,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                     size="icon"
                     className="h-7 w-7"
                     aria-label="Previous plot"
-                    onClick={() => setPlotPage((p) => Math.max(0, p - 1))}
+                    onClick={() => goToPlot(Math.max(0, plotPage - 1))}
                     disabled={plotPage === 0}
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -880,7 +989,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                     className="h-7 w-7"
                     aria-label="Next plot"
                     onClick={() =>
-                      setPlotPage((p) => Math.min(plots.length - 1, p + 1))
+                      goToPlot(Math.min(plots.length - 1, plotPage + 1))
                     }
                     disabled={plotPage === plots.length - 1}
                   >
@@ -890,6 +999,36 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
 
                 {activePlot && (
                   <>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["start_image", "end_image"] as const).map((key) => (
+                        <FrameThumb
+                          key={key}
+                          prefix={track?.imagesPrefix ?? ""}
+                          name={activePlot[key]}
+                          label={key === "start_image" ? "Start" : "End"}
+                          active={activePlot[key] === currentImage}
+                          onClick={() => jumpTo(activePlot[key])}
+                        />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        className="h-7 flex-1"
+                        variant={activePlot.review ? "secondary" : "default"}
+                        disabled={!isComplete(activePlot)}
+                        data-testid="pm-approve"
+                        title="Mark this plot checked and go to the next one (Y)"
+                        onClick={approve}
+                      >
+                        <Check className="mr-1 h-3.5 w-3.5" />
+                        {activePlot.review === "corrected"
+                          ? "Corrected · next (Y)"
+                          : activePlot.review === "ok"
+                            ? "Checked · next (Y)"
+                            : "Looks right · next (Y)"}
+                      </Button>
+                    </div>
                     {(["start_image", "end_image"] as const).map((key) => {
                       const value = activePlot[key]
                       const missing = value != null && !imageSet.has(value)
@@ -992,8 +1131,14 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                     <button
                       type="button"
                       key={p.plot_id}
-                      onClick={() => setPlotPage(i)}
+                      onClick={() => goToPlot(i)}
                       className={`h-2.5 w-2.5 rounded-full border transition-colors ${
+                        p.review === "corrected"
+                          ? "ring-2 ring-orange-400 ring-offset-1 "
+                          : p.review === "ok"
+                            ? "ring-2 ring-sky-500 ring-offset-1 "
+                            : ""
+                      }${
                         i === plotPage
                           ? "border-primary bg-primary"
                           : p.translated ||
@@ -1005,7 +1150,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                               ? "border-green-500 bg-green-500"
                               : "border-muted-foreground/30 bg-muted hover:border-primary/50"
                       }`}
-                      title={`Plot ${p.plot_id}`}
+                      title={`Plot ${p.plot_id}${p.review === "ok" ? " · checked" : p.review === "corrected" ? " · corrected" : ""}`}
                       aria-label={`Plot ${p.plot_id}`}
                     />
                   ))}
