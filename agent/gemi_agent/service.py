@@ -32,6 +32,8 @@ token (checked against the REST API):
     GET  /agent/next_step?run=<id>     what is due for a Process-tab run (the `next_step` tool)
     GET  /agent/facts/<run id>         what the person has said about a run; PUT {fact: value} to change
     POST /agent/field_layout           {name, content_base64}  any field design file -> clean CSV + summary
+    POST /agent/boundaries/move        {from_directory, from_version?, to_directory, crops?, align?}
+                                       another date's plot boundaries moved onto this date's map (not saved)
     POST /agent/automark               {run}  mark the run's rover track automatically (as the agent would)
     GET  /agent/model_setup            open models to choose from, and the setup in flight (steps, estimates)
     GET  /agent/install                Ollama and Docker on this computer: installed / running, installs in flight
@@ -436,6 +438,23 @@ class Handler(BaseHTTPRequestHandler):
         if route == ["next_step"] and method == "GET" and not user.get("setup"):
             use_client(Client(token=token))
             return TOOLS["next_step"]["fn"]({"run": (query.get("run") or [""])[0]})["result"]
+        if route == ["boundaries", "move"] and method == "POST" and not user.get("setup"):
+            # The Plot Boundaries "Import from..." with "align": another date's plots, moved onto this
+            # date's orthomosaic (and some crops only), for the editor to check and save.
+            from .field_tools import shift_boundaries
+
+            use_client(Client(token=token))
+            body = self._body()
+            try:
+                out = shift_boundaries({"from_directory": str(body.get("from_directory") or ""),
+                                        "from_version": body.get("from_version"),
+                                        "to_directory": str(body.get("to_directory") or ""),
+                                        "crops": [str(c) for c in body.get("crops") or []] or None,
+                                        "align": body.get("align", True) is not False})["result"]
+            except (ValueError, RuntimeError) as e:
+                raise HttpError(400, str(e)) from None
+            out.pop("_ortho", None)
+            return out
         if route == ["field_layout"] and method == "POST":
             # The Field design upload in the app: a breeder's file in any shape (a drawn map, a
             # workbook, odd column names) read into one table with crops, on this computer.

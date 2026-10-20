@@ -182,22 +182,41 @@ class ProcessRuns:
     def _norm(text: Any) -> str:
         return " ".join(str(text or "").lower().replace("_", " ").replace("-", " ").split())
 
+    def _kin(self, run: dict, scope: dict) -> bool:
+        """Same experiment, season (year) and platform: runs a person keeps together."""
+        u = run.get("uploadScope") or {}
+        return (self._norm(u.get("experiment")) == self._norm(scope.get("experiment"))
+                and str(u.get("date") or "")[:4] == str(scope.get("date") or "")[:4]
+                and self._norm(u.get("platform")) == self._norm(scope.get("platform")))
+
+    def _fits(self, st: dict, ws: dict, scope: dict) -> int:
+        """How well a workspace suits a run of this scope: the runs a person put there
+        of the same experiment, season and platform (agent-made runs do not count, so
+        a misfiled run cannot pull others after it); a workspace named after the
+        experiment, or the experiment and year, also suits."""
+        placed = sum(1 for r in st["runs"] if r.get("workspaceId") == ws["id"] and r.get("createdBy") != "agent"
+                     and self._kin(r, scope))
+        if placed:
+            return placed
+        name = self._norm(ws.get("name"))
+        exp, year = self._norm(scope.get("experiment")), str(scope.get("date") or "")[:4]
+        return 1 if exp and name in (exp, f"{exp} {year}".strip()) else 0
+
     def _workspace_for(self, st: dict, scope: dict) -> dict:
-        """The workspace this experiment's runs live in: the one already holding
-        most runs of the experiment, else one named after it, else a new one
-        named after it. Never the legacy all-agent workspace."""
-        exp = self._norm(scope.get("experiment"))
+        """Where a person would file this run: a workspace holding their own runs of the
+        same experiment, season and platform, or named after the experiment (and year);
+        else a new one, "<experiment> <year>". A workspace made for something else
+        (another site's rover runs, say) is not used just because it shares the
+        experiment. Never the legacy all-agent workspace."""
         spaces = [w for w in st["workspaces"] if w.get("name") != LEGACY_WORKSPACE]
-        held: dict[str, int] = {}
-        for r in st["runs"]:
-            if self._norm((r.get("uploadScope") or {}).get("experiment")) == exp:
-                held[r.get("workspaceId")] = held.get(r.get("workspaceId"), 0) + 1
-        found = max((w for w in spaces if held.get(w["id"])), key=lambda w: held[w["id"]], default=None)
-        found = found or next((w for w in spaces if self._norm(w.get("name")) == exp), None)
-        if found:
-            return found
-        ws = {"id": str(uuid.uuid4()), "name": str(scope.get("experiment") or "Unnamed experiment"),
-              "description": f"Experiment {scope.get('experiment')}", "createdAt": _now()}
+        scored = [(self._fits(st, w, scope), w) for w in spaces]
+        best = max((x for x in scored if x[0] > 0), key=lambda x: x[0], default=None)
+        if best:
+            return best[1]
+        year = str(scope.get("date") or "")[:4]
+        name = " ".join(x for x in (str(scope.get("experiment") or "Unnamed experiment"), year) if x)
+        ws = {"id": str(uuid.uuid4()), "name": name,
+              "description": f"Experiment {scope.get('experiment')}, {year or 'season not given'}", "createdAt": _now()}
         self._put("workspace", ws)
         st["workspaces"].append(ws)
         return ws
@@ -228,13 +247,13 @@ class ProcessRuns:
         workspace has no pipeline of that type yet), then remove the legacy
         workspace and its pipelines once empty. Jobs and data are untouched:
         only the Process tab's folders change."""
+        moved = self._rehome(dry_run)
         st = self.state()
         legacy = [w for w in st["workspaces"] if w.get("name") == LEGACY_WORKSPACE]
         if not legacy:
-            return []
+            return moved
         ids = {w["id"] for w in legacy}
         old_pipes = {p["id"]: p for p in st["pipelines"] if p.get("workspaceId") in ids}
-        moved = []
         for run in [r for r in st["runs"] if r.get("workspaceId") in ids]:
             scope = run.get("uploadScope") or {}
             old = old_pipes.get(run.get("pipelineId")) or {}
@@ -255,6 +274,45 @@ class ProcessRuns:
             for w in ids:
                 if not any(r.get("workspaceId") == w for r in left["runs"]):
                     self.client.request("DELETE", f"/api/process_state/workspace/{w}")
+        return moved
+
+    def _rehome(self, dry_run: bool = False) -> list[dict]:
+        """Agent-made runs filed in a workspace that does not suit them (one made
+        for other runs that happened to share the experiment) move to where
+        _workspace_for files them now, with their pipeline's settings. A person's
+        own runs never move; pipelines the agent made and left empty are removed;
+        workspaces are kept."""
+        st = self.state()
+        pipes = {p["id"]: p for p in st["pipelines"]}
+        spaces = {w["id"]: w for w in st["workspaces"]}
+        moved: list[dict] = []
+        for run in [r for r in st["runs"] if r.get("createdBy") == "agent"]:
+            scope = run.get("uploadScope") or {}
+            ws = spaces.get(run.get("workspaceId"))
+            if not scope.get("experiment") or ws is None or ws.get("name") == LEGACY_WORKSPACE \
+                    or self._fits(st, ws, scope):
+                continue
+            old = pipes.get(run.get("pipelineId")) or {}
+            kind = old.get("type") or pipeline_type(scope)
+            if dry_run:
+                year = str(scope.get("date") or "")[:4]
+                to = next((w for w in st["workspaces"] if self._fits(st, w, scope)), None)
+                moved.append({"run": f"{scope.get('location')} {scope.get('date')}", "from": ws.get("name"),
+                              "to_workspace": (to or {}).get("name") or f"{scope.get('experiment')} {year} (new)"})
+                continue
+            new_ws = self._workspace_for(st, scope)
+            spaces[new_ws["id"]] = new_ws
+            pipe = self._pipeline_for(st, new_ws, kind, scope, old.get("params"))
+            moved.append({"run": f"{scope.get('location')} {scope.get('date')}", "from": ws.get("name"),
+                          "to_workspace": new_ws.get("name"), "to_pipeline": pipe.get("name")})
+            run.update(workspaceId=new_ws["id"], pipelineId=pipe["id"])
+            self._put("run", run)
+        if moved and not dry_run:
+            left = self.state()
+            for p in left["pipelines"]:
+                made = str(p.get("name") or "").startswith(("Aerial · ", "Ground · "))
+                if made and not any(r.get("pipelineId") == p["id"] for r in left["runs"]):
+                    self.client.request("DELETE", f"/api/process_state/pipeline/{p['id']}")
         return moved
 
     def _save(self, run: dict) -> None:

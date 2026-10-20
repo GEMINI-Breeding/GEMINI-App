@@ -49,6 +49,25 @@ def _utm_to_lonlat(e: float, n: float, zone: int, north: bool) -> tuple[float, f
     return math.degrees(lon) + (zone - 1) * 6 - 180 + 3, math.degrees(lat)
 
 
+def _lonlat_to_utm(lon: float, lat: float, zone: int) -> tuple[float, float]:
+    a, f = 6378137.0, 1 / 298.257223563
+    k0, e2 = 0.9996, f * (2 - f)
+    ep2 = e2 / (1 - e2)
+    phi, lam = math.radians(lat), math.radians(lon)
+    lam0 = math.radians((zone - 1) * 6 - 180 + 3)
+    n = a / math.sqrt(1 - e2 * math.sin(phi) ** 2)
+    t, c = math.tan(phi) ** 2, ep2 * math.cos(phi) ** 2
+    aa = math.cos(phi) * (lam - lam0)
+    mm = a * ((1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * phi
+              - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * math.sin(2 * phi)
+              + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * math.sin(4 * phi)
+              - (35 * e2 ** 3 / 3072) * math.sin(6 * phi))
+    x = k0 * n * (aa + (1 - t + c) * aa ** 3 / 6 + (5 - 18 * t + t ** 2 + 72 * c - 58 * ep2) * aa ** 5 / 120) + 500000.0
+    y = k0 * (mm + n * math.tan(phi) * (aa ** 2 / 2 + (5 - t + 9 * c + 4 * c ** 2) * aa ** 4 / 24
+                                       + (61 - 58 * t + t ** 2 + 600 * c - 330 * ep2) * aa ** 6 / 720))
+    return x, (y + 10000000.0 if lat < 0 else y)
+
+
 class Ortho:
     """An orthomosaic from storage: pixels (reduced if large) and the mapping
     from pixel to longitude/latitude."""
@@ -102,6 +121,20 @@ class Ortho:
     def metres_per_px(self) -> float:
         return self.px_x if self.zone else self.px_x * 111_320 * math.cos(math.radians(self.y0))
 
+    def proj(self, lon: float, lat: float) -> tuple[float, float]:
+        """Longitude/latitude in this map's own coordinates."""
+        return (lon, lat) if not self.zone else _lonlat_to_utm(lon, lat, self.zone)
+
+    def unproj(self, x: float, y: float) -> list[float]:
+        if not self.zone:
+            return [round(x, 8), round(y, 8)]
+        lon, lat = _utm_to_lonlat(x, y, self.zone, self.north)
+        return [round(lon, 8), round(lat, 8)]
+
+    def pixel(self, lon: float, lat: float) -> tuple[float, float]:
+        x, y = self.proj(lon, lat)
+        return (x - self.x0) / self.px_x, (self.y0 - y) / self.px_y
+
     def lonlat(self, col: float, row: float) -> list[float]:
         x, y = self.x0 + col * self.px_x, self.y0 - row * self.px_y
         if not self.zone:
@@ -131,7 +164,7 @@ def _smooth(a, k: int):
 
 
 def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", border_tiers: Optional[int] = None,
-                block: int = 0) -> dict:
+                block: int = 0, plot_length_m: Optional[float] = None) -> dict:
     """Locate the planted block and its tier strips from vegetation.
 
     Tiers are the strips separated by alleys along the field's long axis;
@@ -178,6 +211,25 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
 
     # Along the field, inside that block: strips of plants separated by alleys.
     along = _smooth(v[:, u0:u1].mean(axis=1), 0.25 / m)
+    used, found, note = _tier_strips(along, m, tiers, border_tiers)
+    used, even_note = _even_tiers(used, m, plot_length_m)
+    note = "; ".join(x for x in (note, even_note) if x)
+    bed_w = (u1 - u0) / beds
+    if not 0.6 <= bed_w * m <= 2.5:
+        note = (note + "; " if note else "") + (
+            f"WARNING: {beds} beds across a {(u1 - u0) * m:.0f} m block makes beds {bed_w * m:.2f} m wide, "
+            "not a usual bed width: the block found may be part of the field, or the flight covers fewer beds "
+            "(record `beds`)")
+    return {"long_is_rows": long_is_rows, "block": [int(u0), int(u1)], "tiers": [list(map(int, s)) for s in used],
+            "bed_width_px": bed_w, "strips_found": found, "blocks_found": len(blocks), "note": note,
+            "block_width_m": round((u1 - u0) * m, 2), "field_length_m": round((used[-1][1] - used[0][0]) * m, 1),
+            "tier_length_m": round(sum(b - a_ for a_, b in used) / len(used) * m, 2), "_veg": v}
+
+
+def _tier_strips(along, m: float, tiers: int, border_tiers: Optional[int]) -> tuple[list, int, str]:
+    """The tiers along a vegetation profile: (strips used, strips found, note)."""
+    import numpy as np
+
     strips = [r for r in _runs(along > 0.30 * along.max()) if (r[1] - r[0]) * m > 0.8]
     if len(strips) < 4:
         # Closed or uneven canopy: the alleys never fall near bare soil, but they
@@ -191,7 +243,8 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
             lows = [a_ + int(np.argmin(along[a_:b_])) for (_, a_), (b_, _) in zip(strips[:-1], strips[1:])]
             pitch = float(np.median(np.diff(lows))) if len(lows) >= 2 else 0.0
             half = int(0.3 / m)
-            cuts = ([lows[0] - int(pitch)] if pitch else [strips[0][0]]) + lows +                    ([lows[-1] + int(pitch)] if pitch else [strips[-1][1]])
+            cuts = ([lows[0] - int(pitch)] if pitch else [strips[0][0]]) + lows + \
+                   ([lows[-1] + int(pitch)] if pitch else [strips[-1][1]])
             strips = [(max(c0 + half, 0), min(c1 - half, len(along))) for c0, c1 in zip(cuts[:-1], cuts[1:])]
     # Where canopies have closed over an alley, several strips come out as
     # one long run: cut such runs into equal parts at the usual pitch.
@@ -208,6 +261,8 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
                 step = (b - a_ + (pitch - usual)) / n
                 split += [(int(a_ + i * step), int(a_ + i * step + usual)) for i in range(n)]
         strips = split
+    if not strips:
+        raise ValueError("no tiers found along the field")
     found = len(strips)
     note = ""
     if border_tiers is None and found == tiers + 1:
@@ -229,16 +284,94 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
         used = [(int(lo + i * step), int(lo + (i + 1) * step)) for i in range(tiers)]
         note = (f"WARNING: {found} strips found but the design has {tiers} tiers "
                 f"(with border_tiers={border_tiers}); evenly spaced cells were used instead - check the overlay")
-    bed_w = (u1 - u0) / beds
-    if not 0.6 <= bed_w * m <= 2.5:
-        note = (note + "; " if note else "") + (
-            f"WARNING: {beds} beds across a {(u1 - u0) * m:.0f} m block makes beds {bed_w * m:.2f} m wide, "
-            "not a usual bed width: the block found may be part of the field, or the flight covers fewer beds "
-            "(record `beds`)")
-    return {"long_is_rows": long_is_rows, "block": [int(u0), int(u1)], "tiers": [list(map(int, s)) for s in used],
-            "bed_width_px": bed_w, "strips_found": found, "blocks_found": len(blocks), "note": note,
-            "block_width_m": round((u1 - u0) * m, 2), "field_length_m": round((used[-1][1] - used[0][0]) * m, 1),
-            "tier_length_m": round(sum(b - a_ for a_, b in used) / len(used) * m, 2)}
+    return used, found, note
+
+
+# Space left between two plots along a bed when nobody gave the plot length (metres).
+ALLEY_M = 1.0
+
+
+def _even_tiers(used: list, m: float, plot_length_m: Optional[float]) -> tuple[list, str]:
+    """Every tier the same length, evenly spaced: plants grow to fill their plot, so
+    a box should not end where today's canopy ends. Centres follow a straight line
+    through the strips found (unless the field's spacing is irregular); the length
+    is the plot length given, else the longest of what the canopy shows and the
+    spacing less an alley."""
+    import numpy as np
+
+    if len(used) < 2:
+        return used, ""
+    centres = np.array([(a_ + b) / 2 for a_, b in used], dtype=float)
+    idx = np.arange(len(used))
+    slope, icept = np.polyfit(idx, centres, 1)
+    fitted = icept + slope * idx
+    regular = float(np.max(np.abs(fitted - centres))) < 0.25 * abs(slope)
+    if regular:
+        centres = fitted
+    pitch = abs(float(np.median(np.diff(centres))))
+    seen = float(np.median([b - a_ for a_, b in used]))
+    length = plot_length_m / m if plot_length_m else max(seen, pitch - ALLEY_M / m)
+    length = min(length, 0.97 * pitch)
+    out = [(int(round(c - length / 2)), int(round(c + length / 2))) for c in centres]
+    return out, (f"plots drawn {length * m:.2f} m long every {pitch * m:.2f} m"
+                 + ("" if regular else " (spacing irregular: centres kept where the strips were)"))
+
+
+def _plot_length(facts_value: Any, crop: Optional[str]) -> Optional[float]:
+    """A plot length given for the whole field (a number) or per crop ({"Sorghum": 3.0, ...})."""
+    if isinstance(facts_value, (int, float)):
+        return float(facts_value)
+    if isinstance(facts_value, dict) and crop:
+        for k, v in facts_value.items():
+            if str(k).lower() == str(crop).lower() and isinstance(v, (int, float)):
+                return float(v)
+    return None
+
+
+def _bed_crops(design: dict, beds: list[int]) -> list[Optional[str]]:
+    """The crop of each bed (the most common one among its plots)."""
+    from collections import Counter
+
+    out = []
+    for b in beds:
+        c = Counter(r.get("_crop") for r in design["rows"] if r["_col"] == b and r.get("_crop"))
+        out.append(c.most_common(1)[0][0] if c else None)
+    return out
+
+
+def crop_tiers(ortho: "Ortho", lay: dict, design: dict, beds: list[int], bed_first_at: str,
+               plot_length: Any = None) -> tuple[list[list], list[str]]:
+    """Tiers for each bed position, worked out per crop: crops on one field can have
+    plots of different lengths (sorghum beside cowpea), so each crop's beds get their
+    own strips and their own even size. A crop whose strips do not match the design
+    keeps the field's tiers. Returns (tiers per bed position, notes)."""
+    v, m = lay["_veg"], ortho.metres_per_px
+    u0, bw = lay["block"][0], lay["bed_width_px"]
+    order = beds if bed_first_at in ("west", "north") else beds[::-1]
+    crops = _bed_crops(design, order)
+    per_bed: list[list] = [lay["tiers"]] * len(order)
+    notes: list[str] = []
+    named = sorted({c for c in crops if c})
+    if len(named) < 2 and not isinstance(plot_length, dict):
+        return per_bed, notes
+    for crop in named:
+        cols = [i for i, c in enumerate(crops) if c == crop]
+        a, b = int(u0 + min(cols) * bw), int(u0 + (max(cols) + 1) * bw)
+        along = _smooth(v[:, a:b].mean(axis=1), 0.25 / m)
+        try:
+            used, found, note = _tier_strips(along, m, len(lay["tiers"]), None)
+        except ValueError:
+            continue
+        field_pitch = (lay["tiers"][-1][0] - lay["tiers"][0][0]) / max(1, len(lay["tiers"]) - 1)
+        own_pitch = (used[-1][0] - used[0][0]) / max(1, len(used) - 1)
+        if note.startswith("WARNING") or len(cols) < 3 or abs(own_pitch - field_pitch) > 0.15 * field_pitch:
+            # Too few beds to tell, or strips that do not match the design: the field's tiers.
+            used = [tuple(t) for t in lay["tiers"]]
+        used, even = _even_tiers(used, m, _plot_length(plot_length, crop))
+        for i in cols:
+            per_bed[i] = [list(map(int, t)) for t in used]
+        notes.append(f"{crop}: {even}")
+    return per_bed, notes
 
 
 # ── field design ─────────────────────────────────────────────────────────────
@@ -256,7 +389,14 @@ def read_design(path: str) -> dict:
 
     p = Path(path).expanduser()
     if not p.exists():
-        raise ValueError(f"field design not found: {path}")
+        # Facts recorded on another computer name its folders: the same file
+        # in this agent's own field_layouts folder is the one meant.
+        from .client import AGENT_DIR
+
+        here = AGENT_DIR / "work" / "field_layouts" / Path(str(path).replace("\\", "/")).name
+        if not here.exists():
+            raise ValueError(f"field design not found: {path}")
+        p = here
     layout = read_layout(str(p))
     rows = []
     for q in layout["plots"]:
@@ -328,8 +468,10 @@ def _cells(ortho: Ortho, lay: dict, design: dict, beds: list[int], tier_first_at
     aliases: dict = {}
     for r in sorted(design["rows"], key=lambda r: (r["_col"], r["_row"])):   # same alias whichever flight
         numeric_plot(r["_plot"], aliases)
-    for ti, (s0, s1) in enumerate(lay["tiers"]):
+    per_bed = lay.get("tiers_by_bed") or [lay["tiers"]] * len(beds)
+    for ti in range(len(lay["tiers"])):
         for bi in range(len(beds)):
+            s0, s1 = per_bed[bi][ti]
             a0, a1 = s0 + pad, s1 - pad
             c0, c1 = u0 + bi * bw + pad, u0 + (bi + 1) * bw - pad
             box = [(c0, a0), (c1, a0), (c1, a1), (c0, a1)] if long_rows else [(a0, c0), (a1, c0), (a1, c1), (a0, c1)]
@@ -381,6 +523,145 @@ def _overlay(ortho: Ortho, feats: list[dict], name: str, lay: dict) -> Path:
     return out
 
 
+# ── the same boundaries on another date ──────────────────────────────────────
+
+def _cells_of(snapshot: dict, crops: Optional[list[str]] = None) -> list[dict]:
+    """The plot cells of a saved boundary version (not the drawn outlines), of some crops only if asked."""
+    want = {str(c).lower() for c in crops or []}
+    out = []
+    for f in (snapshot.get("boundaries") or {}).get("features") or []:
+        p = f.get("properties") or {}
+        if p.get("role") == "outer" or (f.get("geometry") or {}).get("type") != "Polygon":
+            continue
+        if want and str(p.get("crop") or "").lower() not in want:
+            continue
+        out.append(f)
+    return out
+
+
+def _ortho_in(directory: str) -> str:
+    """The orthomosaic of a Processed/... folder (the newest, if it was rebuilt)."""
+    page = client().list_page(directory.rstrip("/") + "/odm_orthophoto", 50, 0)
+    # (…-Pyramid.tif is the map-tile copy in web-map coordinates, not the orthomosaic.)
+    tifs = [f for f in page.get("files") or [] if str(f["object_name"]).lower().endswith((".tif", ".tiff"))
+            and "pyramid" not in str(f["object_name"]).lower()]
+    if not tifs:
+        raise ValueError(f"no orthomosaic in {directory}")
+    return max(tifs, key=lambda f: f.get("last_modified") or "")["object_name"]
+
+
+def _measure_shift(prev: "Ortho", new: "Ortho", cells: list[dict], max_m: float = 8.0) -> dict:
+    """How far the field moved between two orthomosaics (GPS drift between flights):
+    phase correlation of their green-cover images over the plots, within max_m.
+    Returns dx/dy in metres (east, north) and the match strength (0-1)."""
+    import numpy as np
+
+    if prev.zone != new.zone or (prev.zone and prev.north != new.north):
+        raise ValueError("the two orthomosaics are in different map zones")
+    pts = [prev.proj(lon, lat) for f in cells for lon, lat in f["geometry"]["coordinates"][0]]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    pad = max_m + 2.0
+    x0 = max(min(xs) - pad, prev.x0, new.x0)
+    x1 = min(max(xs) + pad, prev.x0 + prev.w * prev.px_x, new.x0 + new.w * new.px_x)
+    y1 = min(max(ys) + pad, prev.y0, new.y0)
+    y0 = max(min(ys) - pad, prev.y0 - prev.h * prev.px_y, new.y0 - new.h * new.px_y)
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError("the two orthomosaics do not overlap where the plots are")
+    res = max(prev.px_x, new.px_x, 0.05) if prev.zone else max(prev.px_x, new.px_x)
+    while (x1 - x0) / res > 3000 or (y1 - y0) / res > 3000:
+        res *= 1.5
+    w, h = int((x1 - x0) / res), int((y1 - y0) / res)
+
+    def grab(o: "Ortho"):
+        box = ((x0 - o.x0) / o.px_x, (o.y0 - y1) / o.px_y, (x1 - o.x0) / o.px_x, (o.y0 - y0) / o.px_y)
+        a = np.asarray(o.image.crop(tuple(int(round(b)) for b in box)).resize((w, h)), dtype=np.float32)
+        rgb, alpha = a[..., :3] / 255.0, a[..., 3] > 0
+        g = (2 * rgb[..., 1] - rgb[..., 0] - rgb[..., 2]) / (rgb.sum(axis=2) + 1e-6)
+        g[~alpha] = float(g[alpha].mean()) if alpha.any() else 0.0
+        g = (g - g.mean()) / (g.std() + 1e-6)
+        return g * np.outer(np.hanning(h), np.hanning(w))
+
+    a, b = grab(prev), grab(new)
+    cross = np.fft.fft2(b) * np.conj(np.fft.fft2(a))
+    r = np.real(np.fft.ifft2(cross / (np.abs(cross) + 1e-9)))
+    lim = int(max_m / (res if prev.zone else res * 111_320))
+    dr = np.r_[0:lim + 1, h - lim:h] if h > 2 * lim else np.arange(h)
+    dc = np.r_[0:lim + 1, w - lim:w] if w > 2 * lim else np.arange(w)
+    win = r[np.ix_(dr, dc)]
+    i, j = np.unravel_index(int(np.argmax(win)), win.shape)
+    row, col = int(dr[i]), int(dc[j])
+    row, col = (row - h if row > h // 2 else row), (col - w if col > w // 2 else col)
+    peak = float(win[i, j])
+    return {"dx": col * res, "dy": -row * res, "match": round(peak, 3),
+            "unit": "m" if prev.zone else "degrees"}
+
+
+def shift_boundaries(args: dict) -> dict:
+    """Boundaries saved for one date, moved onto another date's orthomosaic of the
+    same field: each plot keeps its label, crop and genotype from the design;
+    only its position moves (by how far the maps differ). Some crops only, if asked."""
+    c = client()
+    src = str(args["from_directory"]).rstrip("/") + "/"
+    snap = c.load_version(src, args.get("from_version")).get("state_snapshot") or {}
+    cells = _cells_of(snap, args.get("crops"))
+    if not cells:
+        raise ValueError("no plots to bring over" + (f" for {args.get('crops')}" if args.get("crops") else ""))
+    to_path = args.get("orthomosaic_path") or _ortho_in(str(args["to_directory"]))
+    new = Ortho(to_path)
+    shift = {"dx": 0.0, "dy": 0.0, "match": None, "unit": "m"}
+    if args.get("align", True):
+        prev = Ortho(_ortho_in(src))
+        shift = _measure_shift(prev, new, cells, float(args.get("max_shift_m") or 8.0))
+    moved = []
+    for f in cells:
+        ring = []
+        for lon, lat in f["geometry"]["coordinates"][0]:
+            x, y = new.proj(lon, lat)
+            ring.append(new.unproj(x + shift["dx"], y + shift["dy"]))
+        props = {k: v for k, v in (f.get("properties") or {}).items() if k not in ("cellId", "blockId", "block")}
+        moved.append({"type": "Feature", "properties": props, "geometry": {"type": "Polygon", "coordinates": [ring]}})
+    crops = sorted({str(f["properties"].get("crop")) for f in moved if f["properties"].get("crop")})
+    snapshot = {"boundaries": {"type": "FeatureCollection", "features": moved},
+                "grid": snap.get("grid") or {}, "created_from": "import",
+                "field_design": snap.get("field_design"),
+                "imported_from": {"directory": src, "version": args.get("from_version"),
+                                  "shift_m": [round(shift["dx"], 2), round(shift["dy"], 2)], "match": shift["match"]}}
+    weak = shift["match"] is not None and shift["match"] < 0.05
+    return {"result": {"plots": len(moved), "crops": crops, "shift": {k: (round(v, 2) if isinstance(v, float) else v)
+                                                                      for k, v in shift.items()},
+                       "check": ("the match is weak: look closely at the overlay, the plots may need moving by hand"
+                                 if weak else "look at the overlay before saving"),
+                       "state_snapshot": snapshot, "_ortho": new}}
+
+
+def _earlier_boundaries(scope: dict, design_name: str) -> Optional[dict]:
+    """The earliest date of the same field and season (same year, experiment, site,
+    population, platform and sensor) with active boundaries made from the same
+    field design, if it is earlier than this date."""
+    try:
+        versions = client().get_json("/api/plot_geometry/versions/all") or []
+    except Exception:
+        return None
+    keys = ("year", "experiment", "location", "population", "date", "platform", "sensor")
+    best = None
+    for v in versions:
+        parts = str(v["directory"]).strip("/").split("/")
+        if len(parts) != 8 or parts[0] != "Processed" or not v.get("is_active"):
+            continue
+        other = dict(zip(keys, parts[1:]))
+        if any(str(other[k]) != str(scope[k]) for k in keys if k != "date") or other["date"] >= str(scope["date"]):
+            continue
+        if best is None or other["date"] < best["date"]:
+            best = {"date": other["date"], "directory": v["directory"], "version": v["version"]}
+    if best is None:
+        return None
+    snap = client().load_version(best["directory"], best["version"]).get("state_snapshot") or {}
+    source = str((snap.get("field_design") or {}).get("source") or "")
+    if source and design_name and source != design_name:
+        return {**best, "design_differs": source}
+    return best
+
+
 def plot_boundaries(args: dict) -> dict:
     """Find the plots on an orthomosaic, label them from the design, and
     (unless preview) save + activate them as the scope's plot boundaries."""
@@ -389,14 +670,42 @@ def plot_boundaries(args: dict) -> dict:
     if scope is None:
         raise ValueError("orthomosaic_path must be under Processed/{year}/{experiment}/{site}/{population}/{date}/…")
     design = read_design(args["design_path"])
+    crops = [str(c) for c in (args.get("crops") or [])]
     beds = [int(b) for b in args["beds"]] if args.get("beds") else design["beds"]
-    ortho = Ortho(path)
-    lay = find_layout(ortho, len(beds), len(design["tiers"]), border_tiers=args.get("border_tiers"),
-                      block=int(args.get("block") or 0))
-    feats = _cells(ortho, lay, design, beds, str(args.get("first_tier_at") or "south"),
-                   str(args.get("first_bed_at") or "west"), float(args.get("shrink_m") or 0.0))
+    if crops and not args.get("beds"):
+        # A flight of some crops only: the beds of those crops.
+        bc = _bed_crops(design, beds)
+        beds = [b for b, c in zip(beds, bc) if c and c.lower() in {x.lower() for x in crops}] or beds
     name = re.sub(r"[^A-Za-z0-9]+", "_", "_".join(str(scope[k]) for k in ("location", "population", "date"))
                   + "_" + "-".join(map(str, (beds[0], beds[-1]))))
+    earlier = None if args.get("fresh") else _earlier_boundaries(scope, Path(args["design_path"]).name)
+    if earlier and not earlier.get("design_differs"):
+        # The field was drawn on an earlier date (before the canopy closed): the same plots, moved.
+        got = shift_boundaries({"from_directory": earlier["directory"], "from_version": earlier["version"],
+                                "orthomosaic_path": path, "crops": crops or None})["result"]
+        ortho = got.pop("_ortho")
+        feats = got["state_snapshot"]["boundaries"]["features"]
+        for f in feats:
+            f["properties"]["_px"] = [list(ortho.pixel(*pt)) for pt in f["geometry"]["coordinates"][0][:4]]
+        image = _overlay(ortho, feats, name, {"long_is_rows": ortho.h >= ortho.w})
+        result = {"plots": len(feats), "reused_from": earlier["date"], "shift_m": got["shift"], "crops": got["crops"],
+                  "check": got["check"],
+                  "how": "the boundaries of the earliest date of this field and season, moved to this map; "
+                         "fresh=true draws this date on its own instead"}
+        if args.get("preview"):
+            result["saved"] = False
+            return {"result": result, "images": [str(image)]}
+        return _save_boundaries(args, scope, feats, result, image,
+                                {"source": Path(args["design_path"]).name, "by": "agent",
+                                 "moved_from": earlier["directory"]}, None)
+    ortho = Ortho(path)
+    lay = find_layout(ortho, len(beds), len(design["tiers"]), border_tiers=args.get("border_tiers"),
+                      block=int(args.get("block") or 0),
+                      plot_length_m=_plot_length(args.get("plot_length_m"), None))
+    lay["tiers_by_bed"], crop_notes = crop_tiers(ortho, lay, design, beds, str(args.get("first_bed_at") or "west"),
+                                                 args.get("plot_length_m"))
+    feats = _cells(ortho, lay, design, beds, str(args.get("first_tier_at") or "south"),
+                   str(args.get("first_bed_at") or "west"), float(args.get("shrink_m") or 0.0))
     image = _overlay(ortho, feats, name, lay)
     corners = {f"{ns}-{ew}": None for ns in ("north", "south") for ew in ("west", "east")}
     t, b = lay["tiers"], len(beds)
@@ -412,11 +721,21 @@ def plot_boundaries(args: dict) -> dict:
         "plots_at_corners": corners,
         "assumed": {"first_tier_at": args.get("first_tier_at") or "south (default - confirm with the person)",
                     "first_bed_at": args.get("first_bed_at") or "west (default)"},
+        **({"sizes_by_crop": crop_notes} if crop_notes else {}),
+        **({"earlier_date_not_used": f"{earlier['date']} was drawn from another design ({earlier['design_differs']})"}
+           if earlier else {}),
     }
     if args.get("preview"):
         result["saved"] = False
         return {"result": result, "images": [str(image)]}
+    return _save_boundaries(args, scope, feats, result, image,
+                            {"source": Path(args["design_path"]).name, "by": "agent"},
+                            {"rows": len(t), "cols": b, "spacing_m": 0, "angle_deg": 0, "row_offset": 0,
+                             "col_offset": 0, "fill_pattern": "row-major"})
 
+
+def _save_boundaries(args: dict, scope: dict, feats: list[dict], result: dict, image: Path, field_design: dict,
+                     grid: Optional[dict]) -> dict:
     c = client()
     directory = "Processed/" + "/".join(str(scope[k]) for k in ("year", "experiment", "location", "population", "date",
                                                                 "platform", "sensor")) + "/"
@@ -431,10 +750,7 @@ def plot_boundaries(args: dict) -> dict:
             existing = []
     clean = [{**f, "properties": {k: v for k, v in f["properties"].items() if k != "_px"}} for f in feats]
     snapshot = {"boundaries": {"type": "FeatureCollection", "features": existing + clean},
-                "grid": {"rows": len(t), "cols": b, "spacing_m": 0, "angle_deg": 0, "row_offset": 0, "col_offset": 0,
-                         "fill_pattern": "row-major"},
-                "created_from": "grid",
-                "field_design": {"source": Path(args["design_path"]).name, "by": "agent"}}
+                "grid": grid or {}, "created_from": "grid" if grid else "import", "field_design": field_design}
     v = c.save_version(directory, snapshot, args.get("name") or f"agent: {len(existing) + len(clean)} plots")
     c.post_json("/api/plot_geometry/versions/activate", {"directory": directory, "version": v["version"]})
 
@@ -633,7 +949,39 @@ _field(plot_boundaries, "Find the plots on an orthomosaic from its vegetation (t
         "block": {**_int, "description": "0 = widest planted block (default), 1 = next widest"},
         "shrink_m": {**_num, "description": "shrink each plot by this margin on every side"},
         "add_to_active": {**_bool, "description": "keep the other plots of the active version (second flight of the same field)"},
+        "crops": {"type": "array", "items": _str, "description": "only the plots of these crops (a flight of one crop)"},
+        "plot_length_m": {"description": "plot length without the alley, metres: one number, or per crop "
+                          "{\"Sorghum\": 3.0, \"Cowpea\": 3.5} (default: worked out; boxes are the same size within a crop)"},
+        "fresh": {**_bool, "description": "draw this date on its own instead of moving the earliest date's boundaries"},
         "preview": _bool, "name": _str}, ["orthomosaic_path", "design_path"])
+
+
+def move_boundaries(args: dict) -> dict:
+    out = shift_boundaries(args)["result"]
+    out.pop("_ortho", None)
+    snap = out.pop("state_snapshot")
+    if args.get("save"):
+        scope = scope_from_path(str(args.get("orthomosaic_path") or "")) or {}
+        if not scope:
+            raise ValueError("save needs orthomosaic_path (under Processed/...)")
+        c = client()
+        directory = "Processed/" + "/".join(str(scope[k]) for k in ("year", "experiment", "location", "population",
+                                                                    "date", "platform", "sensor")) + "/"
+        v = c.save_version(directory, snap, args.get("name") or f"moved from {args['from_directory']}")
+        c.post_json("/api/plot_geometry/versions/activate", {"directory": directory, "version": v["version"]})
+        out["saved"] = {"directory": directory, "version": v["version"]}
+    return {"result": out}
+
+
+_field(move_boundaries, "Bring plot boundaries saved for another date of the same field onto this date's orthomosaic: "
+       "the plots keep their labels, crops and genotypes; the whole set moves by how far the two maps differ "
+       "(measured from the images). plot_boundaries does this by itself from the earliest date.",
+       {"from_directory": {**_str, "description": "Processed/... folder of the date whose boundaries to use"},
+        "from_version": _int, "orthomosaic_path": _str, "to_directory": _str,
+        "crops": {"type": "array", "items": _str, "description": "only these crops' plots"},
+        "align": {**_bool, "description": "measure and apply the shift (default true)"},
+        "max_shift_m": _num, "save": {**_bool, "description": "save and activate for this date (default: report only)"},
+        "name": _str}, ["from_directory"])
 _field(split_plots, "Cut an orthomosaic into one image per plot using the active plot boundaries "
        "(SPLIT_ORTHOMOSAIC; needs the geo worker).", {"orthomosaic_path": _str}, ["orthomosaic_path"])
 _field(boundaries_geojson, "Which plot-boundary version is active for a scope, and how many plots it has.",

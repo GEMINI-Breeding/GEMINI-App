@@ -87,6 +87,7 @@ import {
   capabilityWarningForStep,
   useCapabilities,
 } from "@/features/process/hooks/useCapabilities"
+import { useJob } from "@/features/process/hooks/useJobs"
 import {
   useLoadPlotGeometryVersion,
   usePlotGeometryVersions,
@@ -744,6 +745,7 @@ const RECONSTRUCTION_QUALITY = [
   "Standard",
   "High Quality",
   "Ultra",
+  "Detailed map",
   "Custom",
 ] as const
 
@@ -756,6 +758,8 @@ const QUALITY_HINTS: Record<(typeof RECONSTRUCTION_QUALITY)[number], string> = {
     "Slower but detailed — suitable for final deliverables (2 cm/px, pc-quality high, feature-quality ultra).",
   Ultra:
     "Maximum quality, very slow — use for critical analysis (1 cm/px, pc-quality ultra, feature-quality ultra).",
+  "Detailed map":
+    "Fine map, light 3D — the orthophoto at 1 cm/px for plant counts and plot images; image matching, point cloud and mesh kept light, no textured 3D model, 5 cm surface model. Fits where Ultra runs out of memory.",
   Custom: "Use the textbox below to pass raw NodeODM CLI flags.",
 }
 
@@ -969,9 +973,26 @@ export function RunDetail() {
     reconstruction_quality: "Standard",
   })
   const orthoSeededRef = useRef(false)
+  // What the run's last orthomosaic actually ran with (the agent or another
+  // page may have used other settings than the pipeline's default).
+  const lastOrthoJob = useJob(run?.steps?.orthomosaic?.jobIds?.at(-1))
   useEffect(() => {
     if (orthoSeededRef.current || !pipeline) return
+    const jobId = run?.steps?.orthomosaic?.jobIds?.at(-1)
+    if (jobId && lastOrthoJob.isLoading) return
     orthoSeededRef.current = true
+    const ran = (lastOrthoJob.data?.parameters ?? {}) as Record<string, unknown>
+    if (typeof ran.custom_options === "string" && ran.custom_options.trim()) {
+      setOrthoParams({
+        reconstruction_quality: "Custom",
+        custom_options: ran.custom_options,
+      })
+      return
+    }
+    if (typeof ran.reconstruction_quality === "string") {
+      setOrthoParams({ reconstruction_quality: ran.reconstruction_quality })
+      return
+    }
     const cfg = pipeline.params
     setOrthoParams({
       reconstruction_quality:
@@ -981,7 +1002,7 @@ export function RunDetail() {
         ? { custom_options: cfg.custom_odm_options as string }
         : {}),
     })
-  }, [pipeline])
+  }, [pipeline, run, lastOrthoJob.isLoading, lastOrthoJob.data])
 
   // Derive AerialScope (the seven path components workers consume)
   // directly from the upload picked at run creation. This is the single
@@ -1930,9 +1951,11 @@ export function RunDetail() {
               <AgentRunMark run={run} className="h-5 w-5" />
             </h1>
             <p className="text-muted-foreground text-sm">
-              {pipeline?.name ?? "Pipeline"} ·{" "}
-              <span className="capitalize">{pipeline?.type ?? "?"}</span> ·
-              Created {new Date(run.createdAt).toLocaleString()}
+              {run.uploadScope?.location
+                ? `${run.uploadScope.location} · ${run.uploadScope.population ?? ""} · `
+                : ""}
+              {pipeline?.name ?? "Pipeline"} · added{" "}
+              {new Date(run.createdAt).toLocaleString()}
             </p>
           </div>
           <Button

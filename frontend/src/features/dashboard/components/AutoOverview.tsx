@@ -88,20 +88,24 @@ function Processing() {
 
 export function AutoOverview() {
   const records = useTraitRecords()
-  const experiments = useMemo(() => {
+  // One choice per experiment, season (year) and site: "over the season" means
+  // one season of one field, not every year and place the experiment ran.
+  const choices = useMemo(() => {
     const latest = new Map<string, string>()
     for (const r of records.data ?? []) {
       if (!r.experiment) continue
-      if ((latest.get(r.experiment) ?? "") < r.date)
-        latest.set(r.experiment, r.date)
+      const key = `${r.experiment}|${r.date.slice(0, 4)}|${r.location ?? ""}`
+      if ((latest.get(key) ?? "") < r.date) latest.set(key, r.date)
     }
     return [...latest.entries()]
       .sort((a, b) => b[1].localeCompare(a[1]))
-      .map(([e]) => e)
+      .map(([k]) => k)
   }, [records.data])
   const [picked, setPicked] = useState<string | null>(readPick)
-  const experiment =
-    picked && experiments.includes(picked) ? picked : experiments[0]
+  const choice = picked && choices.includes(picked) ? picked : choices[0]
+  const [experiment, season, site] = choice
+    ? choice.split("|")
+    : [undefined, undefined, undefined]
 
   if (records.isLoading)
     return (
@@ -124,16 +128,22 @@ export function AutoOverview() {
       </div>
     )
 
-  const recs = experimentRecords(records.data, experiment)
+  const recs = experimentRecords(records.data, experiment, season, site)
   const traits = traitsOf(recs)
   const dates = datesOf(recs)
 
   const pin = (view: (typeof VIEWS)[number]) => {
-    const config: AnalysisConfig = { kind: view.kind, experiment, traits: [] }
+    const config: AnalysisConfig = {
+      kind: view.kind,
+      experiment,
+      season,
+      site,
+      traits: [],
+    }
     const tab = pinWidget({
       instanceId: `widget-${Date.now()}`,
       type: "analysis",
-      title: `${view.title} · ${experiment}`,
+      title: `${view.title} · ${experiment} ${season} ${site}`.trim(),
       span: view.span,
       config,
     })
@@ -144,7 +154,7 @@ export function AutoOverview() {
     <div className="flex-1 overflow-auto p-6">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
-          value={experiment}
+          value={choice}
           onValueChange={(v) => {
             setPicked(v)
             try {
@@ -158,9 +168,9 @@ export function AutoOverview() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {experiments.map((e) => (
-              <SelectItem key={e} value={e}>
-                {e}
+            {choices.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c.split("|").filter(Boolean).join(" · ")}
               </SelectItem>
             ))}
           </SelectContent>
@@ -193,7 +203,7 @@ export function AutoOverview() {
             </div>
             <div className="min-h-[120px] flex-1 overflow-auto p-4">
               <AnalysisWidget
-                config={{ kind: v.kind, experiment, traits: [] }}
+                config={{ kind: v.kind, experiment, season, site, traits: [] }}
               />
             </div>
           </div>

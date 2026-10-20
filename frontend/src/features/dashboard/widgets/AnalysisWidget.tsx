@@ -36,8 +36,15 @@ import type { AnalysisConfig } from "../types"
 export function experimentRecords(
   records: TraitRecord[] | undefined,
   experiment: string,
+  season?: string | null,
+  site?: string | null,
 ): TraitRecord[] {
-  return (records ?? []).filter((r) => r.experiment === experiment)
+  return (records ?? []).filter(
+    (r) =>
+      r.experiment === experiment &&
+      (!season || r.date.startsWith(season)) &&
+      (!site || r.location === site),
+  )
 }
 
 export function traitsOf(records: TraitRecord[]): string[] {
@@ -67,6 +74,8 @@ function request(
   return {
     trait_names: traits,
     experiment_names: [config.experiment],
+    ...(config.season ? { season_names: [config.season] } : {}),
+    ...(config.site ? { site_names: [config.site] } : {}),
     aggregation: "mean",
     ...extra,
   }
@@ -172,7 +181,14 @@ function Trend({
     config.traits.length ? config.traits : traitsOf(records)
   ).slice(0, 6)
   const q = useQuery({
-    queryKey: ["dash-trend", config.experiment, traits, dates],
+    queryKey: [
+      "dash-trend",
+      config.experiment,
+      config.season,
+      config.site,
+      traits,
+      dates,
+    ],
     enabled: dates.length > 0 && traits.length > 0,
     staleTime: 60_000,
     queryFn: async () => {
@@ -267,7 +283,13 @@ function Correlation({
 }) {
   const traits = config.traits.length ? config.traits : traitsOf(records)
   const q = useQuery({
-    queryKey: ["dash-corr", config.experiment, traits],
+    queryKey: [
+      "dash-corr",
+      config.experiment,
+      config.season,
+      config.site,
+      traits,
+    ],
     enabled: traits.length >= 2,
     staleTime: 60_000,
     queryFn: async () => {
@@ -305,7 +327,13 @@ function Heritability({
 }) {
   const traits = config.traits.length ? config.traits : traitsOf(records)
   const q = useQuery({
-    queryKey: ["dash-h2", config.experiment, traits],
+    queryKey: [
+      "dash-h2",
+      config.experiment,
+      config.season,
+      config.site,
+      traits,
+    ],
     enabled: traits.length > 0,
     staleTime: 60_000,
     queryFn: () => fetchHeritability(request(config, traits)),
@@ -343,7 +371,14 @@ function Field({
   const trait = config.traits[0] ?? traitsOf(records)[0]
   const date = config.date ?? datesOf(records).slice(-1)[0]
   const q = useQuery({
-    queryKey: ["dash-field", config.experiment, trait, date],
+    queryKey: [
+      "dash-field",
+      config.experiment,
+      config.season,
+      config.site,
+      trait,
+      date,
+    ],
     enabled: Boolean(trait && date),
     staleTime: 60_000,
     queryFn: () =>
@@ -371,10 +406,21 @@ function Field({
 
 export function AnalysisWidget({ config }: { config: AnalysisConfig }) {
   const all = useTraitRecords()
-  const records = experimentRecords(all.data, config.experiment)
+  const records = experimentRecords(
+    all.data,
+    config.experiment,
+    config.season,
+    config.site,
+  )
   if (all.isLoading) return <Waiting />
   if (records.length === 0)
-    return <Note>No trait data for {config.experiment} yet.</Note>
+    return (
+      <Note>
+        No trait data for {config.experiment}
+        {config.season ? ` ${config.season}` : ""}
+        {config.site ? ` at ${config.site}` : ""} yet.
+      </Note>
+    )
   switch (config.kind) {
     case "summary":
       return <Summary records={records} />

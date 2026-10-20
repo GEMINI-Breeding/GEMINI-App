@@ -187,6 +187,9 @@ export function PlotBoundaryPrep({
     directory: string
     version: number
   } | null>(null)
+  // Boundaries brought from another date and moved onto this map (not saved yet).
+  const [importedSnapshot, setImportedSnapshot] =
+    useState<PlotGeometryStateSnapshot | null>(null)
   const [versionName, setVersionName] = useState("")
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -622,10 +625,11 @@ export function PlotBoundaryPrep({
     loadSource?.version ?? null,
   )
   useEffect(() => {
-    if (!loaded.data?.state_snapshot) return
-    const fc = loaded.data.state_snapshot.boundaries
-    const grid = loaded.data.state_snapshot.grid
-    const fd = loaded.data.state_snapshot.field_design
+    const snapshot = importedSnapshot ?? loaded.data?.state_snapshot
+    if (!snapshot) return
+    const fc = snapshot.boundaries
+    const grid = snapshot.grid
+    const fd = snapshot.field_design
 
     let nextState: PlotBoundaryEditorState = stateRef.current
     if (fc?.features) {
@@ -711,6 +715,7 @@ export function PlotBoundaryPrep({
     setDraftBanner({ visible: false })
   }, [
     loaded.data,
+    importedSnapshot,
     history.replace,
     history.clearHistory,
     draftApi.discardDraft,
@@ -1599,13 +1604,23 @@ export function PlotBoundaryPrep({
             activeVersion={
               loadSource?.directory === directory ? loadSource.version : null
             }
-            onLoad={(v) => setLoadSource({ directory, version: v })}
+            onLoad={(v) => {
+              setImportedSnapshot(null)
+              setLoadSource({ directory, version: v })
+            }}
           />
         </TabsContent>
         <TabsContent value="import" className="pt-3">
           <BoundaryImportPicker
             directory={directory}
+            onImportSnapshot={(snap, note) => {
+              setImportedSnapshot(snap as unknown as PlotGeometryStateSnapshot)
+              showSuccessToast(
+                `${note} Check the fit, then save to keep them here.`,
+              )
+            }}
             onImport={(dir, version, plotCount) => {
+              setImportedSnapshot(null)
               setLoadSource({ directory: dir, version })
               showSuccessToast(
                 `Imported ${plotCount} plots. Check the fit, then save to keep them here.`,

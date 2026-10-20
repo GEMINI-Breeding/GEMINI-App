@@ -179,7 +179,13 @@ const GROUND_DEFAULT_CONFIG = {
 // keep in sync if you tweak the worker side. The pipeline-level pick is
 // the *default* used by every Run; users can still override per-run on
 // the orthomosaic step in RunDetail.
-type OdmPreset = "Draft" | "Standard" | "High Quality" | "Ultra" | "Custom"
+type OdmPreset =
+  | "Draft"
+  | "Standard"
+  | "High Quality"
+  | "Ultra"
+  | "Detailed map"
+  | "Custom"
 
 const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
   Draft: {
@@ -197,6 +203,10 @@ const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
   Ultra: {
     label: "Ultra",
     desc: "Maximum quality, very slow — use for critical analysis (1 cm/px, pc-quality ultra, feature-quality ultra).",
+  },
+  "Detailed map": {
+    label: "Detailed map",
+    desc: "Fine map, light 3D — 1 cm/px orthophoto for plant counts and plot images; matching, point cloud and mesh kept light, no textured 3D model. Fits where Ultra runs out of memory.",
   },
   Custom: {
     label: "Custom",

@@ -470,6 +470,25 @@ export const agentApi = {
       "/field_layout",
       post({ name, content_base64: contentBase64 }),
     ),
+  /**
+   * Plot boundaries saved for another date, moved onto this date's
+   * orthomosaic (measured from the two maps), some crops only if given.
+   * Nothing is saved: the editor loads the result for checking.
+   */
+  moveBoundaries: (body: {
+    from_directory: string
+    from_version: number
+    to_directory: string
+    crops?: string[]
+    align?: boolean
+  }) =>
+    call<{
+      plots: number
+      crops: string[]
+      shift: { dx: number; dy: number; match: number | null; unit: string }
+      check: string
+      state_snapshot: Record<string, unknown>
+    }>("/boundaries/move", post(body)),
   /** Mark a run's rover track automatically; saved unless a pass needs a look. */
   automark: (runId: string) =>
     call<{

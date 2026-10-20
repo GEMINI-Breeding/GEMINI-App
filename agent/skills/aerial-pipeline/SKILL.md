@@ -57,6 +57,10 @@ The scope is the six path parts of the upload:
 - `skip_gcps: true` when no ground control points were picked.
 - `reconstruction_quality`: `Standard` unless asked otherwise; higher is
   much slower.
+  `Detailed map` keeps the orthophoto at 1 cm/px (plant counts, small objects)
+  with a light reconstruction (fewer image features, light point cloud and
+  mesh, no textured 3D model, 5 cm DSM): use it for fine detail on large
+  flights, where `Ultra` runs out of memory.
 - `dataset_short_ids`: restrict to given upload batches (8-character ids).
 - `custom_options`: raw ODM options as text.
 
@@ -76,7 +80,7 @@ person to open it.
 |---|---|---|
 | `joblib will operate in serial mode` near the top, later `queue.Full` | the ODM container has no usable shared memory; an installation fault, not the data | report it as a setup problem (cluster: see `hpc-session`) |
 | `Not enough overlap` / few matches / `could not align` | flight really lacks overlap, or mixed image types | check that only one image kind was uploaded; ask about the flight |
-| `MemoryError`, `Killed`, `std::bad_alloc` | ran out of memory | lower `reconstruction_quality`, or give the odm worker more memory |
+| `MemoryError`, `Killed`, `std::bad_alloc` | ran out of memory | the job error names the stage; in OpenSfM (matching) use `Detailed map` for 1 cm detail, else lower `reconstruction_quality`, or give the odm worker more memory |
 | job ran minutes, not hours, then failed at start | images missing at the scope | `browse` the Raw folder; re-check the upload |
 
 A normal run of ~450 images at Standard quality takes about 25 minutes on
@@ -107,6 +111,24 @@ queued; it needs the `geo` worker and is not required for trait extraction.
 4. Save: the same call without `preview`. For a second flight of the same
    field and date add `"add_to_active": true`, so both blocks end up in one
    boundary version.
+**Several dates of one field in one season.** Boundaries are drawn once, on the
+**earliest** date (before the canopy closes over the alleys), and every later
+date takes them, moved onto its own map:
+- `continue_run` does this order by itself: at a later date whose earlier date has
+  no boundaries yet it stops with `earlier date first`; carry that run first.
+- `plot_boundaries` on a later date finds the earliest date's boundaries (same year,
+  experiment, site, population, platform, sensor and field design), measures how far
+  the two maps differ (`shift_m`, `match`; a weak match means look closely) and
+  moves the same plots there: labels, crops and genotypes stay as the design gave
+  them. `"fresh": true` (continue_run: `fresh_boundaries`) draws the date on its own,
+  only when the person asks.
+- `move_boundaries` does the same for any two folders (`from_directory`, this date's
+  `orthomosaic_path`), some crops only with `crops`; `save` keeps it.
+- Boxes are the same size within a crop (plants grow to fill their plot): the plot
+  length, if the person gave it (`run_facts` `plot_length_m`, one number or per crop),
+  else the canopy's or the spacing less an alley. Crops sharing a field can differ
+  (`sizes_by_crop`). A flight of one crop: `run_facts` `crops`, e.g. `["Sorghum"]`.
+
 5. `split_plots` with the orthomosaic path cuts it into
    `…/PlotImages/plot_{n}_accession_{genotype}.png` (one job per orthomosaic).
 

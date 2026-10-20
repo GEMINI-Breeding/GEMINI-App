@@ -168,6 +168,10 @@ export interface AnalysisConfig {
   experiment: string
   /** Empty = every trait the experiment has. */
   traits: string[]
+  /** The season (year) within the experiment; unset = all of them. */
+  season?: string | null
+  /** The site; unset = every site. */
+  site?: string | null
   /** For "field": the collection date (latest when unset). */
   date?: string | null
 }

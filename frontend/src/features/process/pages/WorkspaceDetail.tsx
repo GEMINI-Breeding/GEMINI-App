@@ -150,78 +150,89 @@ function PipelineCard({
         {runs.length > 0 && (
           <CardContent>
             <div className="space-y-2">
-              {runs.map((run) => (
-                <div
-                  key={run.id}
-                  className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded-md p-2 transition-colors"
-                  onClick={() =>
-                    navigate({
-                      to: "/process/$workspaceId/run/$runId",
-                      params: { workspaceId, runId: run.id },
-                    })
-                  }
-                >
-                  <div className="flex items-center gap-3">
-                    <Play className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="flex items-center gap-1.5 text-sm font-medium">
-                        {run.name ?? `Run ${run.id.slice(0, 8)}`}
-                        <AgentRunMark run={run} />
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(run.createdAt).toLocaleString()}
-                      </p>
+              {[...runs]
+                .sort((a, b) =>
+                  (a.uploadScope?.date ?? a.createdAt).localeCompare(
+                    b.uploadScope?.date ?? b.createdAt,
+                  ),
+                )
+                .map((run) => (
+                  <div
+                    key={run.id}
+                    className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded-md p-2 transition-colors"
+                    onClick={() =>
+                      navigate({
+                        to: "/process/$workspaceId/run/$runId",
+                        params: { workspaceId, runId: run.id },
+                      })
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <Play className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="flex items-center gap-1.5 text-sm font-medium">
+                          {run.name ?? `Run ${run.id.slice(0, 8)}`}
+                          <AgentRunMark run={run} />
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {run.uploadScope?.location
+                            ? `${run.uploadScope.location} · ${run.uploadScope.population ?? ""} · `
+                            : ""}
+                          added {new Date(run.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      className={
-                        TAG_CLASS[
-                          runState(run, pipeline.type, queuedJobIds).tag
-                        ]
-                      }
-                      title={
-                        TAG_HINT[runState(run, pipeline.type, queuedJobIds).tag]
-                      }
-                      variant="secondary"
-                    >
-                      {
-                        TAG_LABEL[
-                          runState(run, pipeline.type, queuedJobIds).tag
-                        ]
-                      }
-                    </Badge>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label="Run actions"
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        className={
+                          TAG_CLASS[
+                            runState(run, pipeline.type, queuedJobIds).tag
+                          ]
+                        }
+                        title={
+                          TAG_HINT[
+                            runState(run, pipeline.type, queuedJobIds).tag
+                          ]
+                        }
+                        variant="secondary"
+                      >
+                        {
+                          TAG_LABEL[
+                            runState(run, pipeline.type, queuedJobIds).tag
+                          ]
+                        }
+                      </Badge>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            aria-label="Run actions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <MoreVertical className="h-3.5 w-3.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <DropdownMenuItem
-                          className="text-red-600"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setConfirmDeleteRun(run)
-                          }}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete Run
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          <DropdownMenuItem
+                            className="text-red-600"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setConfirmDeleteRun(run)
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete Run
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           </CardContent>
         )}

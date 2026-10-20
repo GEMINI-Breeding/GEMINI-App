@@ -39,6 +39,8 @@ FACT_KEYS = {
     "first_tier_at": "drone: which end of the field the design's first tier is at (north, south, east, west)",
     "first_bed_at": "drone: which side the design's first bed is on (north, south, east, west)",
     "beds": "drone: which beds of the design this flight covers, e.g. [2,3,4,5,6] (default: all)",
+    "crops": "drone: the crops this flight covers, e.g. [\"Sorghum\"] (a flight of one crop; default: all)",
+    "plot_length_m": "drone: plot length without the alley in metres, one number or per crop {\"Sorghum\": 3.0}",
     "gps_reliable": "rover: false when the rover's GPS cannot be trusted for placing plots",
     "start_corner": "rover: the corner of the field the rover started from (e.g. south-east)",
     "pass_axis": "rover: which way the beds run (north-south or east-west)",
@@ -298,7 +300,7 @@ def _plan(kind: str, step: str, run: dict) -> dict:
         if step == "plot_boundary_prep":
             args: dict[str, Any] = {"orthomosaic_path": ortho, "design_path": design or "<field design file>",
                                     "preview": True}
-            for k in ("first_tier_at", "first_bed_at", "beds"):
+            for k in ("first_tier_at", "first_bed_at", "beds", "crops", "plot_length_m"):
                 if facts.get(k):
                     args[k] = facts[k]
             return out({"skill": "aerial-pipeline", "do": {"tool": "plot_boundaries", "args": args},
@@ -509,6 +511,29 @@ def run_facts(args: dict) -> dict:
     return {"result": out}
 
 
+def _earlier_undrawn(runs: list[dict], run: dict) -> Optional[dict]:
+    """An earlier date of the same field and season whose plot boundaries are not done yet."""
+    up = run.get("uploadScope") or {}
+    same = ("experiment", "location", "population", "platform", "sensor")
+    best = None
+    for r in runs:
+        o = r.get("uploadScope") or {}
+        if r is run or str(o.get("date") or "") >= str(up.get("date") or "") or                 str(o.get("date") or "")[:4] != str(up.get("date") or "")[:4]:
+            continue
+        if any(str(o.get(k)) != str(up.get(k)) for k in same):
+            continue
+        if ((r.get("steps") or {}).get("plot_boundary_prep") or {}).get("status") == "completed":
+            continue
+        if best is None or str(o.get("date")) < str((best.get("uploadScope") or {}).get("date")):
+            best = r
+    if best is None:
+        return None
+    o = best.get("uploadScope") or {}
+    steps = best.get("steps") or {}
+    st = next((f"{k}: {v.get('status')}" for k, v in steps.items() if v.get("status") in ("running", "failed")), None)
+    return {"label": f"{o.get('location')} {o.get('date')}", "state": st or "waiting for its next step"}
+
+
 def continue_run(args: dict) -> dict:
     """Carry a run forward: make each due call, wait for its job, go on, and
     stop at the first thing that needs a person."""
@@ -590,6 +615,17 @@ def continue_run(args: dict) -> dict:
             save_facts(run["id"], {"design_path": str(made["file"])})
             did.append({"step": "Field design", "called": "mock_plot_design",
                         "result": {"design_path": str(made["file"]), "plots": len(photos), "made_up": True}})
+        if kind == "aerial" and step == "plot_boundary_prep" and not args.get("fresh_boundaries"):
+            # Same field, same season: the earliest date is drawn first (before the canopy closes
+            # over the alleys); later dates then take its boundaries, moved onto their own map.
+            first = _earlier_undrawn(runs, run)
+            if first:
+                return stop("earlier date first", step=STEP_TITLE[step],
+                            earlier_run=first["label"], its_state=first["state"],
+                            why="plot boundaries are drawn on the earliest date of a field and season, then moved "
+                                "onto later dates (the canopy hides the alleys later on)",
+                            next=f"continue_run with run \"{first['label']}\" first; or fresh_boundaries=true to draw "
+                                 "this date on its own")
         plan = _plan(kind, step, run)
         call = plan.get("do") or {}
         if plan.get("ask_person"):
@@ -683,6 +719,8 @@ _tool(continue_run, "Carry one pipeline run forward by itself: makes each due ca
       "run is finished or something needs the person. Returns what it did and what it needs. Call it again to "
       "resume. Use this instead of making the step calls one by one.",
       {"run": _run_arg, "timeout_s": {**_int, "description": "how long to wait for jobs in this call (default 900)"},
+       "fresh_boundaries": {**_bool, "description": "draw this date's plot boundaries on their own, not after the "
+                            "earliest date of the field (only when the person asks)"},
        "boundaries_confirmed": {**_bool, "description": "true only after the person approved what continue_run last "
                                                          "showed them: the plot-boundary overlay, or the pairing of "
                                                          "photos with plots"},

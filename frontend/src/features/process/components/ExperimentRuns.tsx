@@ -38,8 +38,11 @@ export function ExperimentRuns() {
   const groups = useMemo(() => {
     const exps = new Map<string, Map<string, Run[]>>()
     for (const r of runs) {
-      const exp = r.uploadScope?.experiment || "Runs without an upload"
       const date = r.uploadScope?.date || r.createdAt.slice(0, 10)
+      // An experiment runs over several seasons: one section per season.
+      const exp = r.uploadScope?.experiment
+        ? `${r.uploadScope.experiment} · ${date.slice(0, 4)}`
+        : "Runs without an upload"
       const dates = exps.get(exp) ?? new Map<string, Run[]>()
       dates.set(date, [...(dates.get(date) ?? []), r])
       exps.set(exp, dates)
