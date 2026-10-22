@@ -6,7 +6,12 @@
  * in the middle, model settings in a dialog. The conversation is the run's
  * event log from the agent service, polled while the run is working.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import {
   AlertCircle,
   Bot,
@@ -18,10 +23,12 @@ import {
   Send,
   Settings,
   Square,
+  Trash2,
   Wrench,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
+import { type JobOutput, JobsService } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -54,6 +61,7 @@ import {
   agentApi,
   takeAgentRequest,
 } from "@/features/agent/lib/agentApi"
+import { useAllRuns } from "@/features/process/lib/runStore"
 import useAuth from "@/hooks/useAuth"
 import { openUrl } from "@/lib/platform"
 
@@ -397,13 +405,98 @@ function ToolEvent({ event }: { event: AgentEvent }) {
   )
 }
 
+/** Live progress of the jobs the agent's current tool started or waits on:
+ *  the stage each is at (for stitching, plot by plot, as on the Process
+ *  tab), with a link to the run it belongs to. */
+function AgentJobs({ ids }: { ids: string[] }) {
+  const jobs = useQueries({
+    queries: ids.slice(-6).map((id) => ({
+      queryKey: ["agent", "job", id],
+      queryFn: () =>
+        JobsService.apiJobsJobIdGetJob({ jobId: id }) as Promise<JobOutput>,
+      refetchInterval: 3_000,
+    })),
+  })
+  const runs = useAllRuns()
+  return (
+    <div className="space-y-1.5" data-testid="agent-jobs">
+      {jobs.map((q, i) => {
+        const j = q.data
+        const id = ids.slice(-6)[i]
+        const detail = (
+          j as { progress_detail?: Record<string, unknown> } | undefined
+        )?.progress_detail
+        const pct = typeof j?.progress === "number" ? j.progress : null
+        const owner = runs.find((r) =>
+          Object.values(r.steps).some((st) => st.jobIds?.includes(id)),
+        )
+        const failed = Number(detail?.plots_failed ?? 0)
+        return (
+          <div
+            key={id}
+            className="bg-muted/30 rounded-md border px-3 py-2 text-xs"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">
+                {String(j?.job_type ?? "Job").replace(/_/g, " ")}
+              </span>
+              <span className="text-muted-foreground">
+                {String(j?.status ?? "…").toLowerCase()}
+              </span>
+              {pct !== null && (
+                <span className="bg-muted inline-block h-1.5 w-24 overflow-hidden rounded">
+                  <span
+                    className="bg-primary block h-full"
+                    style={{ width: `${Math.max(2, Math.min(100, pct))}%` }}
+                  />
+                </span>
+              )}
+              {detail?.plots_total != null && (
+                <span
+                  className={
+                    failed ? "text-amber-600" : "text-muted-foreground"
+                  }
+                >
+                  {String(detail.plots_done ?? 0)} stitched
+                  {failed ? ` · ${failed} failed` : ""} of{" "}
+                  {String(detail.plots_total)}
+                </span>
+              )}
+              {owner && (
+                <a
+                  className="text-primary ml-auto underline-offset-2 hover:underline"
+                  href={`/process/${owner.workspaceId}/run/${owner.id}`}
+                >
+                  Open run
+                </a>
+              )}
+            </div>
+            {detail?.stage != null && (
+              <p className="text-muted-foreground mt-1 truncate">
+                {String(detail.stage)}
+              </p>
+            )}
+            {(j as { error_message?: string } | undefined)?.error_message && (
+              <p className="mt-1 text-red-700 dark:text-red-400">
+                {(j as { error_message?: string }).error_message}
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function Conversation({ run }: { run: AgentRun }) {
+  const working = run.status === "running" || run.status === "idle"
+  const last = run.events.at(-1)
   const end = useRef<HTMLDivElement>(null)
   const count = run.events.length
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when events arrive
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" })
-  }, [count])
+  }, [count, working])
   return (
     <div
       className="flex min-w-0 flex-col gap-3"
@@ -458,6 +551,21 @@ function Conversation({ run }: { run: AgentRun }) {
           )
         return null
       })}
+      {working && (
+        <div className="mr-12 space-y-2" data-testid="agent-working">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            {run.current
+              ? `Running ${run.current.tool.replace(/_/g, " ")}…`
+              : last?.kind === "user"
+                ? "Reading your message…"
+                : "Thinking…"}
+          </div>
+          {run.current && run.current.jobs.length > 0 && (
+            <AgentJobs ids={run.current.jobs} />
+          )}
+        </div>
+      )}
       <div ref={end} />
     </div>
   )
@@ -525,10 +633,13 @@ export function AgentHome({
     queryKey: ["agent", "run", selected],
     queryFn: () => agentApi.run(selected as string),
     enabled: Boolean(selected),
+    // Always follow the open run: right after a message the service may not
+    // have started yet, and stopping on that "waiting" left the answer
+    // unseen until the page was opened again.
     refetchInterval: (q) =>
       q.state.data?.status === "running" || q.state.data?.status === "idle"
         ? 1_500
-        : false,
+        : 4_000,
   })
 
   const refresh = () => {
@@ -549,11 +660,28 @@ export function AgentHome({
       queryClient.invalidateQueries({ queryKey: ["agent", "runs"] })
     },
   })
+  // Show the run as working at once (the service is starting on it).
+  const markWorking = () =>
+    queryClient.setQueryData(
+      ["agent", "run", selected],
+      (r: AgentRun | undefined) => (r ? { ...r, status: "running" } : r),
+    )
   const reply = useMutation({
     mutationFn: () => agentApi.message(selected as string, text.trim()),
     onSuccess: () => {
       setText("")
+      markWorking()
       refresh()
+    },
+  })
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const remove = useMutation({
+    mutationFn: (id: string) => agentApi.deleteRun(id),
+    onSuccess: (_, id) => {
+      setConfirmDelete(null)
+      if (selected === id) setSelected(null)
+      queryClient.removeQueries({ queryKey: ["agent", "run", id] })
+      queryClient.invalidateQueries({ queryKey: ["agent", "runs"] })
     },
   })
   // A request handed over by another page ("Continue with agent" on a run):
@@ -577,7 +705,10 @@ export function AgentHome({
   const decide = useMutation({
     mutationFn: (approved: boolean) =>
       agentApi.approve(selected as string, approved),
-    onSuccess: refresh,
+    onSuccess: () => {
+      markWorking()
+      refresh()
+    },
   })
   const stop = useMutation({
     mutationFn: () => agentApi.cancel(selected as string),
@@ -648,22 +779,62 @@ export function AgentHome({
         </Button>
         <div className="flex-1 space-y-1 overflow-y-auto">
           {(runs.data ?? []).map((r) => (
-            <button
-              type="button"
+            <div
               key={r.id}
-              onClick={() => setSelected(r.id)}
-              className={`hover:bg-muted w-full rounded-md px-2 py-1.5 text-left ${selected === r.id ? "bg-muted" : ""}`}
+              className={`group hover:bg-muted relative rounded-md ${selected === r.id ? "bg-muted" : ""}`}
             >
-              <div className="truncate text-sm">
-                {r.title || "Untitled run"}
-              </div>
-              <div className="mt-0.5 flex items-center gap-2">
-                <StatusBadge status={r.status} />
-                <span className="text-muted-foreground text-xs">
-                  {r.steps} steps
-                </span>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => setSelected(r.id)}
+                className="w-full px-2 py-1.5 pr-8 text-left"
+              >
+                <div className="truncate text-sm">
+                  {r.title || "Untitled run"}
+                </div>
+                <div className="mt-0.5 flex items-center gap-2">
+                  <StatusBadge status={r.status} />
+                  <span className="text-muted-foreground text-xs">
+                    {r.steps} steps
+                  </span>
+                </div>
+              </button>
+              {confirmDelete === r.id ? (
+                <div className="flex items-center gap-1 px-2 pb-1.5 text-xs">
+                  <span className="text-muted-foreground mr-auto">
+                    Delete this run?
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-6 px-2 text-xs"
+                    disabled={remove.isPending}
+                    data-testid="agent-run-delete-confirm"
+                    onClick={() => remove.mutate(r.id)}
+                  >
+                    Delete
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setConfirmDelete(null)}
+                  >
+                    Keep
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="Delete run"
+                  title="Delete run"
+                  data-testid="agent-run-delete"
+                  onClick={() => setConfirmDelete(r.id)}
+                  className="text-muted-foreground hover:text-destructive absolute top-1.5 right-1.5 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           ))}
           {runs.data?.length === 0 && (
             <p className="text-muted-foreground px-2 text-sm">No runs yet.</p>

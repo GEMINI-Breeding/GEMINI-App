@@ -7,6 +7,9 @@ description: Upload local files or folders (rover .bin logs, images, orthomosaic
 
 ## Quick path
 
+0. When the person names a **folder**, look at it first:
+   `{"tool": "look_at_folder", "args": {"path": "<the folder they named>"}}`
+   It lists which sub-folders hold images, rover `.bin` logs or `.tif` maps, and advises the calls that fit. Tell the person in one sentence what is there. If it mixes kinds (images and `.bin` logs), each kind is its own upload with its own `data_type` and paths. If several sub-folders hold data, ask what they stand for (runs of the same day, treatments, separate dates, or one batch). If the path is wrong, it says what is in the nearest folder that exists: ask the person which one they meant, using those names.
 1. Call `upload` now with `"dry_run": true` and what the person gave you. The shape (drone photos; for rover `.bin` logs use `"data_type": "amiga_bin"` and leave `platform` out):
    `{"tool": "upload", "args": {"paths": ["<the folder or file they named>"], "experiment": "<experiment>", "site": "<site>", "population": "<population>", "date": "<YYYY-MM-DD>", "data_type": "images", "platform": "Drone", "dry_run": true}}`
    Replace every `<…>` with the person's own words: in "the wheat trial at Fargo, flown 3 May 2025" the population is the crop or trial, the site is the place, the date is when the data was collected (never today). Leave out a label they did not give: do not invent one.

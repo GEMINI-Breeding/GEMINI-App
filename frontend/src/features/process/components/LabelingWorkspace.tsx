@@ -55,12 +55,6 @@ import {
 
 type Tool = "select" | "box" | "point"
 
-interface Exemplar {
-  image: string
-  box: [number, number, number, number]
-  cls: string
-}
-
 /** Submit a prompted job and wait for its predictions (about a second
  *  once the worker has the model loaded). */
 async function prompt(
@@ -224,39 +218,52 @@ export function LabelingWorkspace({
   }, [loaded, image, initial, set.images])
 
   // Examples kept on earlier images (newest first), for carrying over.
-  const exemplars = useMemo<Exemplar[]>(() => {
-    const out: Exemplar[] = []
+  // Examples for "find similar": every kept box of the selected class on
+  // this image; with none here yet, those of the latest earlier image that
+  // has some (YOLOE reads examples from one image at a time).
+  const ownExamples = useMemo(
+    () => anns.filter((a) => a.status === "kept" && a.cls === activeClass),
+    [anns, activeClass],
+  )
+  const carriedExample = useMemo(() => {
     for (const p of images.slice(0, idx).reverse()) {
-      const a = set.images[p]?.annotations.find((x) => x.status === "kept")
-      if (a) out.push({ image: p, box: a.box, cls: a.cls })
-      if (out.length >= 3) break
+      const kept = (set.images[p]?.annotations ?? []).filter(
+        (a) => a.status === "kept" && a.cls === activeClass,
+      )
+      if (kept.length) {
+        const use = kept.slice(0, 12)
+        return {
+          image: p,
+          boxes: use.map((a) => a.box),
+          classes: use.map((a) => a.cls),
+        }
+      }
     }
-    return out
-  }, [images, idx, set.images])
+    return null
+  }, [images, idx, set.images, activeClass])
+  const exampleNote = ownExamples.length
+    ? `${ownExamples.length} on this image`
+    : carriedExample
+      ? `${carriedExample.boxes.length} from ${carriedExample.image
+          .split("/")
+          .pop()
+          ?.replace(/\.[a-z]+$/i, "")}`
+      : "none yet"
 
   const findSimilar = useCallback(
     async (useCarried = false) => {
       if (!image) return
-      const own = anns.filter(
-        (a) => a.status === "kept" && a.cls === activeClass,
-      )
-      const ex = own.length
+      const ex = ownExamples.length
         ? {
             image,
-            boxes: own.map((a) => a.box),
-            classes: own.map((a) => a.cls),
+            boxes: ownExamples.map((a) => a.box),
+            classes: ownExamples.map((a) => a.cls),
           }
-        : exemplars.length
-          ? {
-              image: exemplars[0].image,
-              boxes: [exemplars[0].box],
-              classes: [exemplars[0].cls],
-            }
-          : null
+        : carriedExample
       if (!ex) {
         if (!useCarried)
           toast.info(
-            "Draw a box around one example first (B), then find similar (F).",
+            `Draw a box around one ${activeClass || "object"} first (B), then find similar (F).`,
           )
         return
       }
@@ -282,17 +289,17 @@ export function LabelingWorkspace({
         setBusy(null)
       }
     },
-    [image, anns, activeClass, exemplars, setAnns, ask],
+    [image, ownExamples, carriedExample, activeClass, setAnns, ask],
   )
 
   // Carry-over: an untouched image with earlier examples gets proposals.
   const carried = useRef(new Set<string>())
   useEffect(() => {
     if (!loaded || !image || carried.current.has(image)) return
-    if (!exemplars.length || anns.length) return
+    if (!carriedExample || anns.length) return
     carried.current.add(image)
     void findSimilar(true)
-  }, [loaded, image, exemplars, anns.length, findSimilar])
+  }, [loaded, image, carriedExample, anns.length, findSimilar])
 
   const segmentKept = useCallback(async () => {
     const need = anns.filter((a) => a.status === "kept" && !a.points)
@@ -597,18 +604,36 @@ export function LabelingWorkspace({
       <div className="flex flex-wrap items-center gap-1 text-xs">
         {(
           [
-            ["box", "B", "Box", BoxSelect],
-            ["point", "P", "Click → outline", MousePointer2],
-            ["select", "V", "Select", SquareDashedMousePointer],
+            [
+              "box",
+              "B",
+              "Box",
+              BoxSelect,
+              "Drag a box around one object: it is kept, and is an example for Find similar",
+            ],
+            [
+              "point",
+              "P",
+              "Click → outline",
+              MousePointer2,
+              "Click inside one object: its exact outline (SAM 2) is kept",
+            ],
+            [
+              "select",
+              "V",
+              "Select",
+              SquareDashedMousePointer,
+              "Click an object to select it (Delete removes it)",
+            ],
           ] as const
-        ).map(([t, key, label, Icon]) => (
+        ).map(([t, key, label, Icon, hint]) => (
           <Button
             key={t}
             size="sm"
             variant={tool === t ? "default" : "outline"}
             className="h-7 px-2"
             onClick={() => setTool(t)}
-            title={`${label} (${key})`}
+            title={`${hint} (${key})`}
           >
             <Icon className="mr-1 h-3.5 w-3.5" /> {label}
           </Button>
@@ -619,9 +644,13 @@ export function LabelingWorkspace({
           className="h-7 px-2"
           disabled={Boolean(busy)}
           onClick={() => void findSimilar()}
-          title="Propose every object like your example (F)"
+          title={`Propose every object like the examples (F). Examples: every kept ${activeClass || "object"} box on this image, or, with none here yet, those of the latest image you labelled. One is enough to start; a few varied ones find more.`}
+          data-testid="labeling-find-similar"
         >
           <Sparkles className="mr-1 h-3.5 w-3.5" /> Find similar
+          <span className="text-muted-foreground ml-1 font-normal">
+            · {exampleNote}
+          </span>
         </Button>
         <Button
           size="sm"
@@ -629,7 +658,7 @@ export function LabelingWorkspace({
           className="h-7 px-2"
           disabled={Boolean(busy) || !kept}
           onClick={() => void segmentKept()}
-          title="Exact masks for the kept boxes (M)"
+          title="Exact outlines (SAM 2) for every kept box that has none yet (M)"
         >
           <WandSparkles className="mr-1 h-3.5 w-3.5" /> Masks
         </Button>
@@ -934,12 +963,55 @@ export function LabelingWorkspace({
         >
           Save &amp; next <ChevronRight className="ml-1 h-3.5 w-3.5" />
         </Button>
-        <span className="text-muted-foreground">
-          Draw one example (B) → Find similar (F) → Enter keeps all, click a
-          proposal to keep it, right-click to drop → Masks (M) → → next. Earlier
-          examples are proposed on each new image.
-        </span>
       </div>
+      <details
+        className="text-muted-foreground rounded-md border px-3 py-2 text-xs"
+        data-testid="labeling-help"
+      >
+        <summary className="text-foreground cursor-pointer font-medium">
+          How labelling works
+        </summary>
+        <ol className="mt-2 list-decimal space-y-1.5 pl-4">
+          <li>
+            <span className="text-foreground">Class.</span> Pick the class you
+            are labelling (or add one; keys 1–9 switch). Find similar and the
+            examples work per class.
+          </li>
+          <li>
+            <span className="text-foreground">One example (B).</span> Drag a box
+            around one object. It is kept (solid) and is an example.
+          </li>
+          <li>
+            <span className="text-foreground">Find similar (F).</span> Uses{" "}
+            <em>every</em> kept box of the class on this image together as
+            examples. One is enough to start. If it misses some (other sizes,
+            angles, light), box one or two of those as well and run it again:
+            more varied examples find more. With no example on this image yet,
+            it uses the kept boxes of the class from the latest image you
+            labelled. The button shows which it will use.
+          </li>
+          <li>
+            <span className="text-foreground">Review.</span> Proposals are
+            dashed. Enter keeps them all; click one to keep it, right-click to
+            drop it. Select (V) a kept one and Delete to remove it.
+          </li>
+          <li>
+            <span className="text-foreground">Outlines.</span> Click → outline
+            (P): click inside one object for its exact outline. Masks (M):
+            outlines for every kept box at once. Boxes alone are enough to train
+            a detector; outlines are for segmentation.
+          </li>
+          <li>
+            <span className="text-foreground">Next (→).</span> Saves this image
+            and moves on. The next image gets proposals from this one's examples
+            by itself: check them, fix, next.
+          </li>
+          <li>
+            <span className="text-foreground">COCO.</span> Exports the kept
+            objects of every saved image, for training.
+          </li>
+        </ol>
+      </details>
     </div>
   )
 }

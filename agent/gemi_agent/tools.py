@@ -575,9 +575,15 @@ def stitch(args: dict) -> dict:
 
     def update(pr):
         run = holder.get("run") or pr.ensure_run(_track_scope(track), "ground")
-        for key in ("data_sync", "plot_marking"):
-            if (run["steps"].get(key) or {}).get("status") != "completed":
-                pr.set_step(run, key, "completed")
+        if (run["steps"].get("data_sync") or {}).get("status") != "completed":
+            pr.set_step(run, "data_sync", "completed")
+        marking = run["steps"].get("plot_marking") or {}
+        if marking.get("status") != "completed" or not (marking.get("outputs") or {}).get("version"):
+            # Stitched straight from the agent's marks: save them as a version
+            # and record it, so the person can open the marking on the run.
+            saved = m.save("before stitching", None)
+            pr.set_step(run, "plot_marking", "completed",
+                        outputs={"directory": m.directory, "version": saved.get("version"), "plots": len(m.plots)})
         pr.set_step(run, "stitching", "running", job_id=str(out["job_id"]))
         return pr.describe(run)
 

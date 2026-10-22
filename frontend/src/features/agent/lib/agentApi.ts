@@ -91,6 +91,9 @@ export interface AgentRun extends AgentRunBrief {
     reason?: string
   } | null
   events: AgentEvent[]
+  /** The tool working now (a long one: waiting for jobs, stitching), with the
+   *  jobs it started or waits on. */
+  current?: { tool: string; since: number; jobs: string[] } | null
 }
 
 export interface AgentStackStatus {
@@ -415,6 +418,9 @@ export const agentApi = {
   approve: (id: string, approved: boolean) =>
     call<{ ok: boolean }>(`/runs/${id}/approve`, post({ approved })),
   cancel: (id: string) => call<{ ok: boolean }>(`/runs/${id}/cancel`, post()),
+  /** Remove a run from the list (stopped first if working). */
+  deleteRun: (id: string) =>
+    call<{ ok: boolean }>(`/runs/${id}/delete`, post()),
   compute: (fresh = false) =>
     call<ComputeOverview>(`/compute${fresh ? "?fresh=1" : ""}`),
   /** What is in a folder on the cluster the person named (two levels). */

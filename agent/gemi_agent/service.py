@@ -545,6 +545,21 @@ class Handler(BaseHTTPRequestHandler):
                 _runs[run.id] = run
             threading.Thread(target=run.send, args=(text,), daemon=True).start()
             return run.snapshot()
+        if len(route) == 3 and route[0] == "runs" and route[2] == "delete" and method == "POST":
+            # Remove a run from the list: stop it if working, forget it, and
+            # delete its saved conversation.
+            live = _runs.get(route[1])
+            saved = next((r for r in _saved_runs(owner) if r["id"] == route[1]), None)
+            if (live is None or live.owner != owner) and saved is None:
+                raise HttpError(404, "no such run")
+            if live is not None:
+                live.deleted = True
+                live.cancel()
+                with _lock:
+                    _runs.pop(route[1], None)
+            for p in (RUNS / f"{route[1]}.json", RUNS / f"{route[1]}.state.json"):
+                p.unlink(missing_ok=True)
+            return {"ok": True}
         if len(route) >= 2 and route[0] == "runs":
             run = _runs.get(route[1])
             if run is None:
@@ -570,12 +585,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     raise HttpError(400, "empty message")
                 run.cancelled = False
+                # Working from now: a page that polls right after sending must
+                # not see the old "waiting" and stop following the run.
+                run.status = "running"
                 threading.Thread(target=run.send, args=(text,), daemon=True).start()
                 return {"ok": True}
             if method == "POST" and route[2:] == ["approve"]:
                 if run.status != "awaiting_approval":
                     raise HttpError(409, "nothing is waiting for approval")
                 approved = bool(self._body().get("approved"))
+                run.status = "running"
                 threading.Thread(target=run.resolve, args=(approved,), daemon=True).start()
                 return {"ok": True}
             if method == "POST" and route[2:] == ["cancel"]:

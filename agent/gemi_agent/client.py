@@ -10,6 +10,7 @@ Connection comes from the environment, or from ``agent/.env``:
 from __future__ import annotations
 
 import json
+import threading
 import os
 import sys
 import time
@@ -80,6 +81,9 @@ def _load_env_file() -> None:
 
 # Called with the job type after every job submitted through a Client.
 SUBMIT_HOOKS: list = []
+# Per thread: called with each submitted job (the agent run whose tool is
+# working there follows its jobs).
+SUBMITTED = threading.local()
 
 
 class ApiError(RuntimeError):
@@ -259,6 +263,12 @@ class Client:
         if experiment_id:
             body["experiment_id"] = experiment_id
         job = self.post_json("/api/jobs/submit", body)
+        listener = getattr(SUBMITTED, "cb", None)
+        if listener is not None:
+            try:
+                listener(job)
+            except Exception:
+                pass
         for hook in SUBMIT_HOOKS:           # e.g. make sure the worker for this job type is up
             try:
                 hook(job_type)

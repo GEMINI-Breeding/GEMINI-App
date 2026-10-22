@@ -196,6 +196,105 @@ def check_platform(args: dict) -> None:
                          "Add platform and call upload again.")
 
 
+def data_type_files(kind: dict) -> str:
+    return "/".join(kind["ext"]) + " files"
+
+
+def local_path(given: str) -> Path:
+    """A path as a person or a small model writes it: quotes, ~, a path
+    relative to the home folder. Not found: the error names what is there."""
+    raw = str(given).strip().strip("'\"").strip()
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and not path.exists():
+        path = Path.home() / raw
+    if path.exists():
+        return path
+    parent = path.parent
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    near = []
+    if parent.exists() and parent.is_dir():
+        import difflib
+
+        want = path.name.lower() if parent == path.parent else ""
+        names = sorted(c.name + ("/" if c.is_dir() else "") for c in parent.iterdir() if not c.name.startswith("."))
+        by_lower = {n.lower().rstrip("/"): n for n in names}
+        close = difflib.get_close_matches(want, list(by_lower), n=5, cutoff=0.6) if want else []
+        near = [by_lower[c] for c in close] or names[:15]
+    raise ValueError(f"not found: {raw}. The nearest folder that exists is {parent}"
+                     + (f"; it holds: {', '.join(near)}" if near else "")
+                     + ". Ask the person for the exact path (or call look_at_folder on that folder).")
+
+
+_KIND_OF = {**{e: "images" for e in (".jpg", ".jpeg", ".png")}, ".bin": "amiga_bin",
+            ".tif": "tif", ".tiff": "tif"}
+
+
+def look_at_folder(args: dict) -> dict:
+    """What a folder on this computer holds, before uploading it: files per
+    sub-folder by kind, and the upload call that fits."""
+    root = local_path(args["path"])
+    if root.is_file():
+        return {"result": {"path": str(root), "is_file": True, "kind": _KIND_OF.get(root.suffix.lower(), "other")}}
+    max_depth = int(args.get("depth") or 4)
+    rows: list[dict] = []
+    other: dict[str, int] = {}
+
+    def walk(d: Path, depth: int) -> None:
+        counts: dict[str, int] = {}
+        size = 0
+        try:
+            entries = sorted(d.iterdir())
+        except PermissionError:
+            return
+        for f in entries:
+            if f.name.startswith("."):
+                continue
+            if f.is_file():
+                k = _KIND_OF.get(f.suffix.lower())
+                if k:
+                    counts[k] = counts.get(k, 0) + 1
+                    size += f.stat().st_size
+                else:
+                    other[f.suffix.lower() or "(no extension)"] = other.get(f.suffix.lower() or "(no extension)", 0) + 1
+        if counts:
+            rows.append({"folder": str(d.relative_to(root)) if d != root else ".", "files": counts,
+                         "mb": round(size / 1e6, 1)})
+        if depth < max_depth:
+            for sub in entries:
+                if sub.is_dir() and not sub.name.startswith("."):
+                    walk(sub, depth + 1)
+
+    walk(root, 0)
+    kinds = sorted({k for r in rows for k in r["files"]})
+    out: dict = {"path": str(root), "folders_with_data": rows[:60],
+                 **({"more_folders": len(rows) - 60} if len(rows) > 60 else {}),
+                 "totals": {k: sum(r["files"].get(k, 0) for r in rows) for k in kinds},
+                 **({"other_files": dict(sorted(other.items(), key=lambda x: -x[1])[:10])} if other else {})}
+    advice = []
+    if len(kinds) > 1:
+        advice.append("this folder mixes kinds of data (" + ", ".join(kinds) + "): upload each kind as its own "
+                      "call, with its own data_type and paths (the folders listed for it)")
+    for k in kinds:
+        dt = {"images": "images", "amiga_bin": "amiga_bin",
+              "tif": "orthomosaic (a stitched map) or images (single photos): ask the person"}[k]
+        where = [r["folder"] for r in rows if k in r["files"]]
+        advice.append(f"{k}: data_type {dt}; in {len(where)} folder(s): {', '.join(where[:8])}"
+                      + (" …" if len(where) > 8 else ""))
+    sib = [r for r in rows if r["folder"] != "." and "/" not in r["folder"]]
+    if len(sib) > 1:
+        advice.append(f"{len(sib)} sub-folders hold data ({', '.join(r['folder'] for r in sib[:6])}): ask the person "
+                      "whether they are runs of the same day, treatments, separate dates, or one batch; then "
+                      "upload with folders_are (runs | treatments | one), or one upload per date")
+    if any("/" in r["folder"] for r in rows):
+        advice.append("data sits more than one folder deep: give upload the deepest folders that hold the files "
+                      "(or this folder, which upload now searches all the way down)")
+    out["advice"] = advice or ["no images, .bin logs or .tif files here"]
+    out["next"] = ("tell the person what is here in a sentence, ask what is not clear (experiment, site, population, "
+                   "date, what sub-folders stand for), then upload with dry_run first")
+    return {"result": out}
+
+
 def upload(args: dict) -> dict:
     """Start a background upload batch."""
     kind = uploads.DATA_TYPES.get(args.get("data_type", ""))
@@ -206,26 +305,42 @@ def upload(args: dict) -> dict:
     files: list[Path] = []
     folders: dict[str, list[Path]] = {}          # sub-folder (as given) -> its files, when a folder holds folders
 
-    def matching(d: Path) -> list[Path]:
-        return sorted(f for f in d.iterdir() if f.is_file() and f.suffix.lower() in kind["ext"])
+    skipped: dict[str, int] = {}
+
+    def matching(d: Path, deep: bool = False) -> list[Path]:
+        """The files of this data type in d (and below it, when deep)."""
+        found = []
+        for f in (d.rglob("*") if deep else d.iterdir()):
+            if not f.is_file() or any(part.startswith(".") for part in f.relative_to(d).parts):
+                continue
+            if f.suffix.lower() in kind["ext"]:
+                found.append(f)
+            else:
+                skipped[f.suffix.lower() or "(no extension)"] = skipped.get(f.suffix.lower() or "(no extension)", 0) + 1
+        return sorted(found)
 
     given = args["paths"] if isinstance(args["paths"], list) else [args["paths"]]
     for p in given:
-        path = Path(p).expanduser()
+        path = local_path(p)
         if path.is_dir():
             here = matching(path)
             files += here
-            subs = {d.name: matching(d) for d in sorted(path.iterdir()) if d.is_dir()}
+            # Each sub-folder with everything below it: data is often a
+            # folder or two deeper (date/run/images).
+            subs = {d.name: matching(d, deep=True) for d in sorted(path.iterdir())
+                    if d.is_dir() and not d.name.startswith(".")}
             subs = {k: v for k, v in subs.items() if v}
             if len(given) > 1 and here:
                 folders[path.name] = here            # several folders named: each is a part
             elif subs and not here:
                 folders.update(subs)                 # one folder of folders
                 files += [f for v in subs.values() for f in v]
-        elif path.is_file():
-            files.append(path)
         else:
-            raise ValueError(f"not found: {p}")
+            files.append(path)
+    if not files:
+        raise ValueError(f"no {data_type_files(kind)} in {', '.join(map(str, given))}"
+                         + (f" (other files there: {', '.join(f'{v} {k}' for k, v in skipped.items())})" if skipped else "")
+                         + ". Call look_at_folder on it to see what it holds and which data_type fits.")
     if args.get("name_contains"):
         files = [f for f in files if str(args["name_contains"]) in f.name]
         folders = {k: [f for f in v if str(args["name_contains"]) in f.name] for k, v in folders.items()}
@@ -261,6 +376,10 @@ def upload(args: dict) -> dict:
                **({"existing_names_used": renamed} if renamed else {}),
                "next": "tell the person this count, then call upload again with the same arguments "
                        "but without dry_run"}
+        if skipped:
+            out["not_uploaded"] = {"files": dict(sorted(skipped.items(), key=lambda x: -x[1])[:8]),
+                                   "why": f"not {data_type_files(kind)}; another kind needs its own upload "
+                                          "with its data_type"}
         if len(parts) > 1 or labels[0]:
             out["batches"] = [{"folder": p["folder"] or None, "files": len(p["files"]), "label": lab or None}
                               for p, lab in zip(parts, labels)]
@@ -726,6 +845,11 @@ _app(upload, "Start a background upload of local files or folders into the app; 
       "name_contains": _str, "dataset_id": {**_str, "description": "add to this existing batch instead of a new one"},
       "extract": _bool, "dry_run": _bool},
      ["paths", "experiment", "site", "population", "date", "data_type"], "upload")
+_app(look_at_folder, "Look at a folder on this computer before uploading it: which sub-folders hold images, rover "
+     ".bin logs or .tif maps (counts and size per folder), other files, and advice on the upload calls that fit. "
+     "Use it whenever the person names a folder; a wrong path returns what is there instead.",
+     {"path": {**_str, "description": "the folder (or file) as the person gave it"},
+      "depth": {**_int, "description": "how many folder levels down to look (default 4)"}}, ["path"], "upload")
 _app(tasks, "Progress of background uploads: one task (task_id) or the latest ones.",
      {"task_id": _str, "limit": _int}, [], "upload")
 _app(wait_task, "Wait for a background upload: returns when it finishes or after timeout_s (default 300, max "

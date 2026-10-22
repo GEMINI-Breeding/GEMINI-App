@@ -430,11 +430,14 @@ class Run:
     def snapshot(self, since: int = 0) -> dict:
         return {"id": self.id, "title": self.title, "status": self.status, "owner": self.owner, "steps": self.steps,
                 "created": self.created, "model": self.cfg["model"], "pending": self.pending,
-                "events": self.events[since:], "event_count": len(self.events)}
+                "events": self.events[since:], "event_count": len(self.events),
+                "current": getattr(self, "current", None)}
 
     def save(self) -> None:
         """Write the record (what the person sees) and the conversation (what
         the model needs to carry on), so a run outlives the process."""
+        if getattr(self, "deleted", False):
+            return                      # removed from the list: nothing to keep
         RUNS.mkdir(parents=True, exist_ok=True)
         for name, data in ((f"{self.id}.json", self.snapshot()),
                            (f"{self.id}.state.json", {"messages": self.messages, "context": self.context,
@@ -851,6 +854,15 @@ class Run:
         if "track" in TOOLS[name]["schema"]["properties"] and not args.get("track") and self.context.get("track"):
             args = {**args, "track": self.context["track"]}
         t = time.time()
+        # What is working now, and the jobs it started or waits on, so the
+        # page can show their progress while the tool runs.
+        from .client import SUBMITTED
+
+        given = args.get("job_ids") or ([args["job_id"]] if args.get("job_id") else [])
+        self.current = {"tool": name, "since": round(t), "jobs": [str(j) for j in
+                        (given if isinstance(given, list) else [given])]}
+        SUBMITTED.cb = lambda job: self.current["jobs"].append(str(job.get("id"))) \
+            if self.current and job.get("id") else None
         try:
             out = TOOLS[name]["fn"](dict(args))
             result, images = out.get("result"), list(out.get("images") or [])
@@ -874,6 +886,9 @@ class Run:
         except Exception as e:
             text, images = f"ERROR {type(e).__name__}: {e}", []
             self.event("tool", tool=name, args=args, error=text, seconds=round(time.time() - t, 1))
+        finally:
+            SUBMITTED.cb = None
+            self.current = None
         self._tool_reply(name, text, images, call_id)
 
     def _tool_reply(self, name: str, text: str, images: list[str], call_id: Optional[str]) -> None:
