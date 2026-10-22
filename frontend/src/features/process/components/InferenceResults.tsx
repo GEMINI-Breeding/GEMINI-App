@@ -3,13 +3,14 @@
  * or from the agent, grouped by the model that ran it.
  *
  * For each model: how many plots it counted and the average count of its
- * latest finished job, earlier jobs below it, and a button to open a job's
- * results in the viewer above. A model the pipeline does not list yet (one
+ * latest finished job, earlier jobs below it, and a button that opens a job's
+ * results right under it (InferenceJobView). A model the pipeline does not list yet (one
  * the agent chose) can be added to it in one click, so it can be run again
  * by hand.
  */
 import { useQueries } from "@tanstack/react-query"
-import { Bot, Eye, Plus } from "lucide-react"
+import { Bot, Eye, EyeOff, Plus } from "lucide-react"
+import { useState } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { InferenceJobView } from "@/features/process/components/InferenceJobView"
 import {
   type InferenceModel,
   modelDisplayName,
@@ -54,6 +56,8 @@ function counted(j: JobOutput): string {
   }
   const rows = summaryRows(r).filter((x) => x.count != null)
   if (!rows.length) return "no plots counted"
+  const task = (j.parameters as { task_type?: string } | null)?.task_type
+  if (task === "classification") return `${rows.length} plots labelled`
   const mean = rows.reduce((a, x) => a + (x.count ?? 0), 0) / rows.length
   return `${rows.length} plots, mean ${mean.toFixed(1)} per plot`
 }
@@ -68,15 +72,14 @@ const STATUS: Record<string, string> = {
 export function InferenceResults({
   run,
   configured,
-  onOpen,
   onAddModel,
 }: {
   run: Run
   /** The pipeline's models; others found in jobs get "Add to pipeline". */
   configured: InferenceModel[]
-  onOpen: (jobId: string) => void
   onAddModel: (m: InferenceModel) => void
 }) {
+  const [open, setOpen] = useState<string | null>(null)
   const ids = run.steps.inference?.jobIds ?? []
   const jobs = useQueries({
     queries: ids.map((jobId) => ({
@@ -156,34 +159,59 @@ export function InferenceResults({
               </div>
               <ul className="mt-2 space-y-1">
                 {g.jobs.map((j) => (
-                  <li
-                    key={j.id}
-                    className="flex flex-wrap items-center gap-2 text-xs"
-                  >
-                    <Badge
-                      variant="secondary"
-                      className={STATUS[String(j.status)] ?? ""}
+                  <li key={j.id}>
+                    <div
+                      className={`flex flex-wrap items-center gap-2 rounded px-1 text-xs ${
+                        open === String(j.id) ? "bg-primary/10" : ""
+                      }`}
                     >
-                      {String(j.status).toLowerCase()}
-                    </Badge>
-                    <span className="text-muted-foreground">{when(j)}</span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {j.status === "FAILED"
-                        ? String(
-                            (j as { error_message?: string | null })
-                              .error_message ?? "failed",
-                          ).slice(0, 160)
-                        : counted(j)}
-                    </span>
-                    {j.status === "COMPLETED" && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-2"
-                        onClick={() => onOpen(String(j.id))}
+                      <Badge
+                        variant="secondary"
+                        className={STATUS[String(j.status)] ?? ""}
                       >
-                        <Eye className="h-3.5 w-3.5" /> Show
-                      </Button>
+                        {String(j.status).toLowerCase()}
+                      </Badge>
+                      <span className="text-muted-foreground">{when(j)}</span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {j.status === "FAILED"
+                          ? String(
+                              (j as { error_message?: string | null })
+                                .error_message ?? "failed",
+                            ).slice(0, 160)
+                          : counted(j)}
+                      </span>
+                      {j.status === "COMPLETED" && (
+                        <Button
+                          size="sm"
+                          variant={
+                            open === String(j.id) ? "secondary" : "outline"
+                          }
+                          className="h-6 px-2"
+                          data-testid="inference-show-job"
+                          onClick={() =>
+                            setOpen((o) =>
+                              o === String(j.id) ? null : String(j.id),
+                            )
+                          }
+                        >
+                          {open === String(j.id) ? (
+                            <>
+                              <EyeOff className="h-3.5 w-3.5" /> Hide
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-3.5 w-3.5" /> View results
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {open === String(j.id) && (
+                      <InferenceJobView
+                        job={j}
+                        modelName={g.name}
+                        onClose={() => setOpen(null)}
+                      />
                     )}
                   </li>
                 ))}

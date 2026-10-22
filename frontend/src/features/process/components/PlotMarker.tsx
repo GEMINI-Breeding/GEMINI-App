@@ -58,13 +58,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { apiUrl, DEFAULT_BUCKET } from "@/features/files/lib/download"
+import { apiUrl } from "@/features/files/lib/download"
+import {
+  openFullImage,
+  thumbnailSrc,
+} from "@/features/genotyping/components/AuthImage"
 import { useGroundTrack } from "@/features/process/hooks/useGroundTrack"
 import {
+  type FrameLayout,
   isComplete,
+  laneName,
+  lanePlotId,
   type PlotMarkingSnapshot,
   type PlotSelection,
   plotMarkingsDirectory,
+  SINGLE_LANE,
   type TrackPoint,
   translateMarkings,
   withGps,
@@ -100,6 +108,19 @@ interface VersionRow {
 
 // ── Frame loading ───────────────────────────────────────────────────────────
 
+/**
+ * Frames are shown as server-resized previews: marking a plot's start and
+ * end needs to see the stakes and rows, not every pixel, and a preview is
+ * ~50 KB against ~1 MB for the camera's full frame, which over a remote link
+ * is the difference between stepping through a track and waiting on it.
+ * The full frame is one click away ("Full size").
+ */
+const FRAME_PX = 800
+
+function frameSrc(objectPath: string, size: number): string {
+  return thumbnailSrc(objectPath, size)
+}
+
 /** A small view of one frame (a plot's start or end); click to show it large. */
 function FrameThumb({
   prefix,
@@ -120,7 +141,7 @@ function FrameThumb({
     if (!name) return
     let gone = false
     let made: string | null = null
-    fetch(apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${prefix}${name}`), {
+    fetch(apiUrl(frameSrc(`${prefix}${name}`, 300)), {
       headers: authHeaders(),
     })
       .then((r) => (r.ok ? r.blob() : null))
@@ -181,7 +202,7 @@ function useFrameUrl(
       const key = prefix + name
       let p = cache.current.get(key)
       if (!p) {
-        p = fetch(apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${key}`), {
+        p = fetch(apiUrl(frameSrc(key, FRAME_PX)), {
           headers: authHeaders(),
         }).then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -324,6 +345,57 @@ interface PlotMarkerProps {
   onCancel: () => void
 }
 
+/** Every plot as a thin segment: where the work stands, and a quick way to
+ *  jump. Green: start and end marked · amber: needs a look (moved, or a frame
+ *  that is not in this track) · grey: not marked. A ring: checked (blue) or
+ *  corrected (orange). The current plot stands taller. */
+function PlotStrip({
+  plots,
+  current,
+  imageSet,
+  onPick,
+}: {
+  plots: PlotSelection[]
+  current: number
+  imageSet: Set<string>
+  onPick: (i: number) => void
+}) {
+  return (
+    <div className="flex h-3 w-full items-center gap-px" data-testid="pm-strip">
+      {plots.map((p, i) => {
+        const warn =
+          p.translated ||
+          (isComplete(p) &&
+            (!imageSet.has(p.start_image as string) ||
+              !imageSet.has(p.end_image as string)))
+        const colour = warn
+          ? "bg-amber-400"
+          : isComplete(p)
+            ? "bg-green-500"
+            : "bg-muted-foreground/25"
+        const ring =
+          p.review === "corrected"
+            ? "outline outline-1 outline-orange-400"
+            : p.review === "ok"
+              ? "outline outline-1 outline-sky-500"
+              : ""
+        return (
+          <button
+            type="button"
+            key={p.plot_id}
+            onClick={() => onPick(i)}
+            className={`min-w-px flex-1 rounded-[1px] transition-all hover:opacity-80 ${colour} ${ring} ${
+              i === current ? "h-3 ring-2 ring-primary" : "h-1.5"
+            }`}
+            title={`Plot ${p.plot_id}${isComplete(p) ? "" : " · not marked"}${warn ? " · needs a look" : ""}${p.review === "ok" ? " · checked" : p.review === "corrected" ? " · corrected" : ""}`}
+            aria-label={`Plot ${p.plot_id}`}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const queryClient = useQueryClient()
@@ -354,6 +426,8 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   })
 
   const [plots, setPlots] = useState<PlotSelection[]>([emptyPlot(1)])
+  // Plots per frame (two when each frame shows one plot above another).
+  const [layout, setLayout] = useState<FrameLayout>(SINGLE_LANE)
   const [activeVersion, setActiveVersion] = useState<number | null>(null)
   const [translatedBanner, setTranslatedBanner] = useState(false)
   const loadedRef = useRef(false)
@@ -377,6 +451,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
           points,
         )
         setPlots(selections.length ? selections : [emptyPlot(1)])
+        setLayout(res.state_snapshot?.layout ?? SINGLE_LANE)
         setActiveVersion(res.version)
         setTranslatedBanner(translated)
         dirtyRef.current = false
@@ -509,6 +584,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
           imagesPrefix: track.imagesPrefix,
           msgsSyncedPath: track.msgsSyncedPath,
         },
+        ...(layout.lanes > 1 ? { layout } : {}),
       }
       return (await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
         requestBody: {
@@ -666,7 +742,49 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
             plot · <kbd className="bg-background rounded border px-1">Ctrl</kbd>
             +<kbd className="bg-background rounded border px-1">S</kbd> save
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex items-center gap-1"
+              data-testid="pm-layout"
+              title="Some rover passes see more than one plot at once, e.g. one plot in the top half of every frame and the next bed's plot in the bottom half. Mark each stretch once: it is stitched as one plot per band of the frame (the blue boxes), each placed beside the GPS line by where its band sits. Save to keep this."
+            >
+              <span className="text-foreground">Plots per frame</span>
+              {[1, 2, 3, 4].map((n) => (
+                <Button
+                  key={n}
+                  size="sm"
+                  variant={layout.lanes === n ? "default" : "outline"}
+                  className="h-6 w-6 p-0 text-xs"
+                  onClick={() => {
+                    dirtyRef.current = true
+                    setLayout((l) => ({ ...l, lanes: n }))
+                  }}
+                  data-testid={`pm-lanes-${n}`}
+                >
+                  {n}
+                </Button>
+              ))}
+              {layout.lanes > 1 &&
+                (
+                  [
+                    ["top_bottom", "Top / bottom"],
+                    ["left_right", "Left / right"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <Button
+                    key={v}
+                    size="sm"
+                    variant={layout.split === v ? "secondary" : "ghost"}
+                    className="h-6 px-2 text-xs"
+                    onClick={() => {
+                      dirtyRef.current = true
+                      setLayout((l) => ({ ...l, split: v }))
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+            </div>
             {tracks.length > 1 && (
               <Select
                 value={track.imagesPrefix}
@@ -780,6 +898,37 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                 <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-red-500/70 border-l-2 border-dashed" />
                 <div className="absolute top-1/2 right-0 left-0 -translate-y-1/2 border-red-500/70 border-t-2 border-dashed" />
               </div>
+              {layout.lanes > 1 && (
+                // Where the frame is divided between the plots it shows.
+                <div
+                  className="pointer-events-none absolute inset-0"
+                  data-testid="pm-lanes"
+                >
+                  {Array.from({ length: layout.lanes }, (_, i) => {
+                    const lane = i + 1
+                    const at = `${(i / layout.lanes) * 100}%`
+                    const size = `${100 / layout.lanes}%`
+                    const box =
+                      layout.split === "left_right"
+                        ? { left: at, width: size, top: 0, bottom: 0 }
+                        : { top: at, height: size, left: 0, right: 0 }
+                    return (
+                      <div
+                        key={lane}
+                        className="absolute border-2 border-sky-400/80"
+                        style={box}
+                      >
+                        <span className="absolute top-1 right-1 rounded bg-sky-500/80 px-1 text-[10px] text-white">
+                          {activePlot
+                            ? `plot ${lanePlotId(activePlot.plot_id, lane, layout)}`
+                            : laneName(lane, layout)}{" "}
+                          · {laneName(lane, layout)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               {activePlot?.start_image === currentImage && (
                 <Badge className="absolute top-2 left-2 bg-green-600 text-white">
                   START
@@ -794,6 +943,18 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                 <span className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
                   Heading {heading}
                 </span>
+              )}
+              {currentImage && track && (
+                <button
+                  type="button"
+                  className="absolute right-2 bottom-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white hover:bg-black/80"
+                  onClick={() =>
+                    openFullImage(`${track.imagesPrefix}${currentImage}`)
+                  }
+                  title="This view is a reduced copy for quick stepping; open the camera's full frame"
+                >
+                  Full size
+                </button>
               )}
             </div>
 
@@ -896,107 +1057,108 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
             </div>
           </div>
 
-          {/* Plot pager */}
+          {/* Plot pager: one place to move between plots */}
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Label className="text-muted-foreground whitespace-nowrap text-xs">
-                Plot
-              </Label>
-              <Input
-                type="number"
-                min={1}
-                max={plots.length}
-                value={plotNavInput}
-                aria-label="Plot number"
-                className="h-7 w-14 text-xs"
-                onChange={(e) => setPlotNavInput(e.target.value)}
-                onBlur={() => {
-                  const n = Number.parseInt(plotNavInput, 10)
-                  if (n >= 1 && n <= plots.length) goToPlot(n - 1)
-                  else setPlotNavInput(String(plotPage + 1))
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur()
-                }}
-              />
-              <span className="text-muted-foreground text-xs">
-                / {plots.length}
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-7 w-7"
-                title="Add plot (N)"
-                aria-label="Add plot"
-                data-testid="pm-add-plot"
-                onClick={addPlot}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="text-muted-foreground hover:border-destructive hover:text-destructive h-7 w-7"
-                title="Delete current plot (D)"
-                aria-label="Delete plot"
-                data-testid="pm-delete-plot"
-                onClick={deletePlot}
-                disabled={plots.length <= 1}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-              <span
-                className="text-muted-foreground ml-auto text-xs"
-                data-testid="pm-done-count"
-              >
-                {doneCount}/{plots.length} done ·{" "}
-                {plots.filter((p) => p.review).length} checked
-              </span>
-            </div>
-
-            <Card className="border-primary/40">
-              <CardContent className="space-y-3 px-3 py-3">
-                <div className="flex items-center justify-between gap-1">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Previous plot"
+                  onClick={() => goToPlot(Math.max(0, plotPage - 1))}
+                  disabled={plotPage === 0}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Label className="whitespace-nowrap text-sm font-medium">
+                  Plot
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={plots.length}
+                  value={plotNavInput}
+                  aria-label="Plot number"
+                  // No up/down arrows: the ‹ › buttons and arrow keys step plots.
+                  className="h-7 w-12 [appearance:textfield] text-center text-xs [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  onChange={(e) => setPlotNavInput(e.target.value)}
+                  onBlur={() => {
+                    const n = Number.parseInt(plotNavInput, 10)
+                    if (n >= 1 && n <= plots.length) goToPlot(n - 1)
+                    else setPlotNavInput(String(plotPage + 1))
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                  }}
+                />
+                <span
+                  className="text-muted-foreground whitespace-nowrap text-xs"
+                  data-testid="pm-plot-label"
+                >
+                  / {plots.length}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Next plot"
+                  onClick={() =>
+                    goToPlot(Math.min(plots.length - 1, plotPage + 1))
+                  }
+                  disabled={plotPage === plots.length - 1}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                {activePlot && isComplete(activePlot) ? (
+                  <Check
+                    className="h-3.5 w-3.5 shrink-0 text-green-600"
+                    aria-label="Start and end marked"
+                  />
+                ) : null}
+                <div className="ml-auto flex items-center gap-1">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
                     className="h-7 w-7"
-                    aria-label="Previous plot"
-                    onClick={() => goToPlot(Math.max(0, plotPage - 1))}
-                    disabled={plotPage === 0}
+                    title="Add plot (N)"
+                    aria-label="Add plot"
+                    data-testid="pm-add-plot"
+                    onClick={addPlot}
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
-                  <div className="flex flex-1 items-center justify-center gap-1">
-                    {activePlot && isComplete(activePlot) ? (
-                      <Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
-                    ) : (
-                      <div className="border-muted-foreground h-3.5 w-3.5 shrink-0 rounded-full border-2" />
-                    )}
-                    <span
-                      className="font-medium text-sm"
-                      data-testid="pm-plot-label"
-                    >
-                      Plot {activePlot?.plot_id ?? "—"}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      / {plots.length}
-                    </span>
-                  </div>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
-                    className="h-7 w-7"
-                    aria-label="Next plot"
-                    onClick={() =>
-                      goToPlot(Math.min(plots.length - 1, plotPage + 1))
-                    }
-                    disabled={plotPage === plots.length - 1}
+                    className="text-muted-foreground hover:border-destructive hover:text-destructive h-7 w-7"
+                    title="Delete current plot (D)"
+                    aria-label="Delete plot"
+                    data-testid="pm-delete-plot"
+                    onClick={deletePlot}
+                    disabled={plots.length <= 1}
                   >
-                    <ChevronRight className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+              </div>
+              <PlotStrip
+                plots={plots}
+                current={plotPage}
+                imageSet={imageSet}
+                onPick={goToPlot}
+              />
+              <p
+                className="text-muted-foreground text-xs"
+                data-testid="pm-done-count"
+              >
+                {doneCount}/{plots.length} marked ·{" "}
+                {plots.filter((p) => p.review).length} checked
+              </p>
+            </div>
 
+            <Card className="border-primary/40 py-3">
+              <CardContent className="space-y-3 px-3">
                 {activePlot && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
@@ -1084,9 +1246,23 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                       )
                     })}
 
-                    <div className="space-y-1">
-                      <Label
+                    {layout.lanes > 1 && (
+                      <p
                         className="text-muted-foreground text-xs"
+                        data-testid="pm-lane-plots"
+                      >
+                        This stretch is stitched as{" "}
+                        {Array.from(
+                          { length: layout.lanes },
+                          (_, i) =>
+                            `plot ${lanePlotId(activePlot.plot_id, i + 1, layout)} (${laneName(i + 1, layout)})`,
+                        ).join(", ")}
+                        .
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Label
+                        className="text-muted-foreground shrink-0 text-xs"
                         htmlFor="pm-direction"
                       >
                         Stitching direction
@@ -1100,7 +1276,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                         <SelectTrigger
                           id="pm-direction"
                           data-testid="pm-direction"
-                          className={`h-7 text-xs ${activePlot.direction ? "" : "text-amber-600"}`}
+                          className={`h-7 flex-1 text-xs ${activePlot.direction ? "" : "text-amber-600"}`}
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -1125,36 +1301,6 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
                     </div>
                   </>
                 )}
-
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {plots.map((p, i) => (
-                    <button
-                      type="button"
-                      key={p.plot_id}
-                      onClick={() => goToPlot(i)}
-                      className={`h-2.5 w-2.5 rounded-full border transition-colors ${
-                        p.review === "corrected"
-                          ? "ring-2 ring-orange-400 ring-offset-1 "
-                          : p.review === "ok"
-                            ? "ring-2 ring-sky-500 ring-offset-1 "
-                            : ""
-                      }${
-                        i === plotPage
-                          ? "border-primary bg-primary"
-                          : p.translated ||
-                              (isComplete(p) &&
-                                (!imageSet.has(p.start_image as string) ||
-                                  !imageSet.has(p.end_image as string)))
-                            ? "border-amber-400 bg-amber-400"
-                            : isComplete(p)
-                              ? "border-green-500 bg-green-500"
-                              : "border-muted-foreground/30 bg-muted hover:border-primary/50"
-                      }`}
-                      title={`Plot ${p.plot_id}${p.review === "ok" ? " · checked" : p.review === "corrected" ? " · corrected" : ""}`}
-                      aria-label={`Plot ${p.plot_id}`}
-                    />
-                  ))}
-                </div>
               </CardContent>
             </Card>
 

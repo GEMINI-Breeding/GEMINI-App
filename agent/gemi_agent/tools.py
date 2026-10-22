@@ -478,6 +478,12 @@ def profile(args: dict) -> dict:
 
 def mark(args: dict) -> dict:
     m = Markings(_track(args))
+    if args.get("plots_per_frame") is not None or args.get("split"):
+        layout = m.set_layout(args.get("plots_per_frame"), args.get("split"))
+        if args.get("plot_id") is None:
+            return {"result": {"layout": layout}}
+    if args.get("plot_id") is None:
+        raise ValueError("give plot_id (or plots_per_frame / split to set the track's layout)")
     if args.get("delete"):
         m.delete(int(args["plot_id"]))
         return {"result": {"deleted": int(args["plot_id"])}}
@@ -495,6 +501,8 @@ def markings(args: dict) -> dict:
     frames = [p["end"] - p["start"] + 1 for p in m.plots if p["start"] is not None and p["end"] is not None]
     return {"result": {
         "count": len(m.plots), "problems": m.problems(), "directory": m.directory,
+        "layout": m.layout,
+        "plots_to_stitch": len(m.lane_plots()),
         "frames_per_plot": {"min": min(frames), "max": max(frames), "mean": round(sum(frames) / len(frames), 1)} if frames else None,
         "saved_versions": track.client.versions(m.directory),
         "plots": plots if (args.get("list") or len(plots) <= 40) else f"{len(plots)} plots (pass list=true or a plot id range)",
@@ -753,8 +761,11 @@ _tool(plot_view, "A marked plot's start and end frames with their neighbours, to
 _tool(profile, "Green cover per frame (dips are gaps between plots).",
       {"first": _int, "last": _int, "step": _int}, ["first", "last"])
 _tool(mark, "Set or change one plot by hand: start/end frame index and stitching direction "
-      "(up/down/left/right = camera movement relative to the image).",
-      {"plot_id": _int, "start": _int, "end": _int, "direction": _str, "note": _str, "delete": _bool}, ["plot_id"])
+      "(up/down/left/right = camera movement relative to the image). plots_per_frame / split set the "
+      "track's layout when one frame shows several plots (e.g. 2, top_bottom: one plot in the top half, "
+      "one in the bottom); each marked stretch is then stitched as that many plots.",
+      {"plot_id": _int, "start": _int, "end": _int, "direction": _str, "note": _str, "delete": _bool,
+       "plots_per_frame": _int, "split": {"type": "string", "enum": ["top_bottom", "left_right"]}}, [])
 _tool(markings, "The working plot markings, problems found, and the versions saved in the app.",
       {"list": _bool, "first_plot_id": _int, "last_plot_id": _int}, [])
 _tool(save_markings, "Save the working markings as a Plot Marking version in the app (new version unless "

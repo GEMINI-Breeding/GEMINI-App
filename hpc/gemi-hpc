@@ -235,10 +235,14 @@ case "$cmd" in
     fi
     # The tunnel is reopened if it drops (Wi-Fi blip, sleep): a long upload
     # retries its chunks for a few minutes and carries on once it is back.
+    # (`|| true`: under `set -e` a dropped ssh exiting non-zero ended the loop,
+    # and the tunnel stayed down until the app was restarted.) The agent
+    # service's Reconnect ends a hung ssh through the pid file, so the loop
+    # opens a fresh one on the same port at once.
     keep=$(mktemp)
     ( while [ -e "$keep" ]; do
         ssh "${SSH_OPTS[@]}" -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$api_port:$CORE_IP:$API_PORT" "${tiles[@]}" "$HPC_HOST" &
-        echo $! > "$keep.pid"; wait $!
+        echo $! > "$keep.pid"; wait $! || true
         [ -e "$keep" ] && { echo "  tunnel dropped; reconnecting..." >&2; sleep 3; }
       done ) &
     trap 'rm -f "$keep"; kill "$(cat "$keep.pid" 2>/dev/null)" 2>/dev/null; rm -f "$keep.pid"' EXIT
@@ -264,12 +268,15 @@ case "$cmd" in
     else
       echo "  agent model: not started on the cluster (gemi-hpc llm up) — using agent/config.json"
     fi
+    py=$(command -v python3 || command -v python) || { echo "Python 3 not found (needed for the agent service)"; exit 1; }
     ( cd "$REPO/agent" && GEMI_API="http://127.0.0.1:$api_port" GEMI_EMAIL= GEMI_PASSWORD= \
-        python -m gemi_agent serve --port "$agent_port" ) &
+        GEMI_TUNNEL_PIDFILE="$keep.pid" \
+        "$py" -m gemi_agent serve --port "$agent_port" ) &
     agent_pid=$!
     trap 'rm -f "$keep"; kill "$(cat "$keep.pid" 2>/dev/null)" ${llm_pid:-} $agent_pid 2>/dev/null; rm -f "$keep.pid"' EXIT
     echo
     cd "$REPO/frontend"
+    [ -d node_modules ] || { echo "  first start here: installing the frontend packages (npm install)"; npm install --no-fund --no-audit || exit 1; }
     GEMI_API_TARGET="http://127.0.0.1:$api_port" GEMI_AGENT_TARGET="http://127.0.0.1:$agent_port" \
       VITE_DISABLE_UPDATE_CHECK=1 npx vite --port "$web_port" --strictPort
     ;;

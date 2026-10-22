@@ -454,9 +454,11 @@ export function UploadList({
             const ds = await createOrGetDatasetForUpload({
               experimentName,
               dataTypeLabel: dataType,
+              // Every upload records where it belongs (season, site, date…),
+              // so Manage Data can list it by season and find its files.
               info: canSplit
                 ? batchInfo(batch, merged, batch.folder || undefined)
-                : undefined,
+                : batchInfo({ run: "", treatment: "" }, merged),
               nameSuffix: canSplit ? batchNameSuffix(batch) : undefined,
             })
             datasetId = idAsString(ds.dataset.id) ?? undefined

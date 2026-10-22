@@ -59,6 +59,35 @@ export type BoundaryMapProps = {
   onCellSelect?: (cellId: string, mode: "replace" | "toggle" | "add") => void
   /** Fires when the user clicks the map background — used to clear cell selection. */
   onSelectionClear?: () => void
+  /**
+   * Read-only outlines drawn over the map (e.g. stitched ground plots as the
+   * GPS places them). Not editable; clicking one reports its group.
+   */
+  overlays?: MapOverlay[]
+  onOverlayClick?: (group: string) => void
+  /**
+   * Several orthomosaics at once (e.g. one flight per treatment), each shown
+   * only inside its region (where it is nearer than any other's centre).
+   * Used instead of orthoTileUrl.
+   */
+  orthoLayers?: OrthoLayer[]
+}
+
+export interface OrthoLayer {
+  id: string
+  url: string
+  /** [lon, lat] polygon this layer is shown in. */
+  region: [number, number][]
+}
+
+export interface MapOverlay {
+  id: string
+  /** [lon, lat] ring. */
+  ring: [number, number][]
+  label?: string
+  /** Outlines in the same group are styled and picked together (a bed). */
+  group: string
+  highlighted?: boolean
 }
 
 /**
@@ -88,11 +117,18 @@ export function BoundaryMap({
   selectedCellIds,
   onCellSelect,
   onSelectionClear,
+  overlays,
+  onOverlayClick,
+  orthoLayers,
 }: BoundaryMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
+  const resizeRef = useRef<ResizeObserver | null>(null)
   const layerRef = useRef<FeatureGroup | null>(null)
   const orthoLayerRef = useRef<L.TileLayer | null>(null)
+  const overlayLayerRef = useRef<L.LayerGroup | null>(null)
+  const onOverlayClickRef = useRef(onOverlayClick)
+  onOverlayClickRef.current = onOverlayClick
   const [tilesDown, setTilesDown] = useState(false)
   const didFitOrthoRef = useRef(false)
   const onChangeRef = useRef(onFeaturesChange)
@@ -181,6 +217,11 @@ export function BoundaryMap({
     const editable = L.featureGroup().addTo(map)
     layerRef.current = editable
     mapRef.current = map
+    // Keep the map filling its box when the box changes size (the side
+    // panel opening or closing), or the new area stays grey.
+    const resize = new ResizeObserver(() => map.invalidateSize())
+    resize.observe(mapEl.current)
+    resizeRef.current = resize
     // Expose for e2e: the field-design spec needs to inject a polygon
     // programmatically rather than driving the Geoman toolbar over a
     // non-deterministic ortho. The map and L are otherwise unreachable
@@ -387,6 +428,9 @@ export function BoundaryMap({
       map.stop()
       map.remove()
       mapRef.current = null
+      overlayLayerRef.current = null
+      resizeRef.current?.disconnect()
+      resizeRef.current = null
       layerRef.current = null
       orthoLayerRef.current = null
       didFitOrthoRef.current = false
@@ -428,6 +472,79 @@ export function BoundaryMap({
     orthoLayerRef.current = layer
     return watchTileLayer(layer, setTilesDown)
   }, [orthoTileUrl, orthoOpacity])
+
+  // Several orthomosaics: one pane each, clipped to its region. Clip paths
+  // are in layer coordinates, which only change when the zoom does.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !orthoLayers?.length) return
+    const made: { layer: L.TileLayer; pane: HTMLElement }[] = []
+    orthoLayers.forEach((o, i) => {
+      const name = `orthoPane${i}`
+      const pane = map.getPane(name) ?? map.createPane(name)
+      pane.style.zIndex = String(250 + i)
+      const layer = L.tileLayer(o.url, {
+        opacity: orthoOpacity ?? 0.9,
+        pane: name,
+        maxNativeZoom: 22,
+        maxZoom: 24,
+      })
+      layer.addTo(map)
+      made.push({ layer, pane })
+    })
+    const clip = () => {
+      orthoLayers.forEach((o, i) => {
+        const pane = made[i]?.pane
+        if (!pane) return
+        const pts = o.region.map(([lon, lat]) =>
+          map.latLngToLayerPoint([lat, lon]),
+        )
+        pane.style.clipPath = pts.length
+          ? `polygon(${pts.map((p) => `${p.x}px ${p.y}px`).join(", ")})`
+          : "none"
+      })
+    }
+    clip()
+    map.on("zoomend viewreset", clip)
+    return () => {
+      map.off("zoomend viewreset", clip)
+      for (const { layer, pane } of made) {
+        map.removeLayer(layer)
+        pane.style.clipPath = "none"
+      }
+    }
+  }, [orthoLayers, orthoOpacity])
+
+  // Read-only overlays (stitched plot outlines), above the ortho, below the
+  // editable boundaries.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!overlayLayerRef.current)
+      overlayLayerRef.current = L.layerGroup().addTo(map)
+    const group = overlayLayerRef.current
+    group.clearLayers()
+    for (const o of overlays ?? []) {
+      const poly = L.polygon(
+        o.ring.map(([lon, lat]) => [lat, lon] as [number, number]),
+        {
+          color: o.highlighted ? "#f59e0b" : "#38bdf8",
+          weight: o.highlighted ? 2.5 : 1.5,
+          fillOpacity: o.highlighted ? 0.18 : 0.06,
+          interactive: true,
+          bubblingMouseEvents: false,
+        },
+      )
+      if (o.label)
+        poly.bindTooltip(o.label, {
+          permanent: false,
+          direction: "center",
+          className: "text-[10px]",
+        })
+      poly.on("click", () => onOverlayClickRef.current?.(o.group))
+      poly.addTo(group)
+    }
+  }, [overlays])
 
   // First-load fit-to-ortho when no features are drawn yet. The
   // fit-to-features effect below wins whenever the user has features.

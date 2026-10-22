@@ -338,7 +338,7 @@ def canopy_cover(args: dict) -> dict:
         out["values"] = values
     if args.get("save_as_trait", True) and scope:
         try:
-            out["stored"] = _write_trait(scope, str(args.get("trait_name") or "canopy cover (agent)"), "fraction", values,
+            out["stored"] = _write_trait(scope, str(args.get("trait_name") or "canopy cover"), "fraction", values,
                                          "canopy cover")
         except Exception as e:
             # The measurement is made; only keeping it in the app failed. Say so, and give the numbers.
@@ -350,8 +350,9 @@ def canopy_cover(args: dict) -> dict:
     return {"result": out}
 
 
-_tool(canopy_cover, "Green canopy cover (0-1) of every plot image under a PlotImages prefix, from colour; stored "
-      "as a per-plot trait so it shows in Analyze and on the map. A simple, model-free measurement.",
+_tool(canopy_cover, "Canopy cover (0-1): the fraction of each plot image that is green vegetation (excess green "
+      "> 0.08), for every plot image under a PlotImages prefix; stored as the trait 'canopy cover'. For plot "
+      "photos and rover plots. Drone runs: use extract_traits instead (vegetation fraction and plant height).",
       {"run": {**_str, "description": "words naming the run whose plot images to measure"},
        "images_prefix": {**_str, "description": "a PlotImages folder, instead of run"},
        "trait_name": _str, "save_as_trait": {"type": "boolean"}, "limit": _int,

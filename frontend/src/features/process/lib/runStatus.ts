@@ -85,7 +85,9 @@ export const TAG_LABEL: Record<RunTag, string> = {
   running: "running",
   queued: "queued",
   failed: "failed",
-  waiting: "waiting",
+  // The user's turn: the run is between steps and needs someone (the person,
+  // or the agent on their behalf) to check a result or start the next step.
+  waiting: "input needed",
   complete: "complete",
   new: "new",
 }
@@ -96,7 +98,7 @@ export const TAG_HINT: Record<RunTag, string> = {
     "A job is submitted for this run and waiting its turn (a free worker, or the cluster's queue).",
   failed: "A step failed. Open the run to see why and retry it.",
   waiting:
-    "Nothing is running: the next step is waiting for you (or the agent) to start it.",
+    "Your turn: nothing is running until you (or the agent) check the last result and start the next step. Open the run to see what it needs.",
   complete: "Every step is done.",
   new: "Nothing has been processed yet.",
 }

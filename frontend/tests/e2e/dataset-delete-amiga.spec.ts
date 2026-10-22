@@ -55,12 +55,16 @@ test.describe("Per-dataset delete — amiga .bin extraction", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
 
     const datasetRow = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({
-        has: page.locator(`text=${experiment}__FarmngBinaryFile__`),
-      })
+      .locator(
+        `[data-testid^="manage-data-dataset-${experiment}__FarmngBinaryFile__"]`,
+      )
       .first()
     await expect(datasetRow).toBeVisible({ timeout: 30_000 })
     const datasetTestid = await datasetRow.getAttribute("data-testid")
@@ -86,7 +90,9 @@ test.describe("Per-dataset delete — amiga .bin extraction", () => {
     await page
       .locator(`[data-testid="manage-data-delete-dataset-${datasetName}"]`)
       .click()
-    await page.getByRole("button", { name: /delete dataset/i }).click()
+    await page
+      .getByRole("button", { name: /delete (dataset|upload|results)/i })
+      .click()
 
     // Dataset row gone.
     await expect(

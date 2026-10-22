@@ -17,8 +17,9 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Loader2, Play, Trash2 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import {
   type FileMetadata,
@@ -47,6 +48,13 @@ import {
 } from "@/components/ui/select"
 import { apiUrl } from "@/features/files/lib/download"
 import { InferenceResults } from "@/features/process/components/InferenceResults"
+import { LabelingWorkspace } from "@/features/process/components/LabelingWorkspace"
+import {
+  classColour,
+  type Prediction,
+  PredictionOverlay,
+  useAuthedBlobUrl,
+} from "@/features/process/components/predictionView"
 import {
   type InferenceModel,
   modelDisplayName,
@@ -230,77 +238,6 @@ async function loadActiveBoundaries(
   return fc?.features?.length ? fc : undefined
 }
 
-export interface Prediction {
-  image?: string
-  class: string
-  confidence: number
-  /** Box geometry; absent for classification (whole-image) results. */
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  points?: Array<{ x: number; y: number }>
-}
-
-const hasBox = (
-  p: Prediction,
-): p is Prediction & { x: number; y: number; width: number; height: number } =>
-  typeof p.x === "number" &&
-  typeof p.y === "number" &&
-  typeof p.width === "number" &&
-  typeof p.height === "number"
-
-const CLASS_COLOURS = [
-  "#ef4444",
-  "#3b82f6",
-  "#22c55e",
-  "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-  "#f97316",
-  "#14b8a6",
-  "#6366f1",
-]
-
-function classColour(cls: string): string {
-  let hash = 0
-  for (let i = 0; i < cls.length; i += 1)
-    hash = (hash * 31 + cls.charCodeAt(i)) | 0
-  return CLASS_COLOURS[Math.abs(hash) % CLASS_COLOURS.length]
-}
-
-/** Authed fetch → blob URL for an arbitrary MinIO file. */
-function useAuthedBlobUrl(path: string | null): string | null {
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!path) {
-      setUrl(null)
-      return
-    }
-    let cancelled = false
-    let urlRef: string | null = null
-    const token = localStorage.getItem("gemini.auth.token") ?? ""
-    fetch(apiUrl(`/api/files/download/${path}`), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((b) => {
-        if (cancelled || !b) return
-        urlRef = URL.createObjectURL(b)
-        setUrl(urlRef)
-      })
-      .catch(() => {
-        if (!cancelled) setUrl(null)
-      })
-    return () => {
-      cancelled = true
-      if (urlRef) URL.revokeObjectURL(urlRef)
-    }
-  }, [path])
-  return url
-}
-
 interface InferenceToolProps {
   pipeline: Pipeline
   run: Run
@@ -331,6 +268,8 @@ export function InferenceTool({
     return arr.map(normalizeModel).filter((m) => modelKey(m))
   }, [pipeline.params.roboflow_models])
 
+  const navigate = useNavigate()
+  const [labeling, setLabeling] = useState(false)
   const [activeModelIdx, setActiveModelIdx] = useState(0)
   const activeModel = models[activeModelIdx]
   // Zero-shot labels for the next run only, pre-filled from the pipeline's
@@ -542,29 +481,64 @@ export function InferenceTool({
     showSuccessToast(`Added ${modelDisplayName(m)} to this pipeline`)
   }
   const results = (
-    <InferenceResults
-      run={run}
-      configured={models}
-      onOpen={(id) => {
-        setSubmittedJobId(id)
-        queryClient.invalidateQueries({ queryKey: ["jobs", id] })
-      }}
-      onAddModel={addModel}
-    />
+    <InferenceResults run={run} configured={models} onAddModel={addModel} />
   )
+
+  const openModelSetup = () =>
+    navigate({
+      to: "/process/$workspaceId/pipeline",
+      params: { workspaceId: String(pipeline.workspaceId) },
+      search: {
+        type: pipeline.type === "ground" ? "ground" : "aerial",
+        pipelineId: String(pipeline.id),
+        step: 3,
+        returnRunId: String(run.id),
+      },
+    })
+  const plotImageNames =
+    sourceIdx === 0
+      ? images.map((f) => f.object_name ?? "").filter(Boolean)
+      : []
+
+  if (labeling && plotImageNames.length > 0) {
+    return (
+      <LabelingWorkspace
+        images={plotImageNames}
+        experimentId={run.uploadScope?.experimentId}
+        onClose={() => setLabeling(false)}
+      />
+    )
+  }
 
   if (models.length === 0) {
     return (
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">No models configured</CardTitle>
+            <CardTitle className="text-base">No models yet</CardTitle>
             <CardDescription>
               {run.steps.inference?.jobIds?.length
-                ? "Models were run on this run (below) but are not in this pipeline's list. Add one with its button to run it again from here, or add others in the pipeline settings (Step 3 of the wizard)."
-                : "Open the pipeline settings (Step 3 of the wizard) and add at least one model — Roboflow, Hugging Face, your own weights, or another provider. Then return here to run inference."}
+                ? "Models were run on this run (below) but are not in this pipeline's list. Add one with its button to run it again, or set up another."
+                : "Add a model to run on the plot images (Roboflow, Hugging Face, your own weights, or another provider), or start by labelling plot images yourself to build a training set."}
             </CardDescription>
           </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            <Button onClick={openModelSetup}>Set up a model</Button>
+            <Button
+              variant="outline"
+              disabled={plotImageNames.length === 0}
+              onClick={() => setLabeling(true)}
+            >
+              Label plot images
+            </Button>
+            <span className="text-muted-foreground text-xs">
+              {imagesQuery.isLoading
+                ? "Finding plot images…"
+                : plotImageNames.length === 0
+                  ? "No plot images yet: split the orthomosaic into plot images first."
+                  : `${plotImageNames.length} plot images`}
+            </span>
+          </CardContent>
         </Card>
         {results}
       </div>
@@ -575,11 +549,24 @@ export function InferenceTool({
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Inference setup</CardTitle>
-          <CardDescription>
-            Pick a model + a sample image to test detection. Predictions are
-            written to MinIO and rendered below.
-          </CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-base">Inference setup</CardTitle>
+              <CardDescription>
+                Pick a model + a sample image to test detection. Predictions are
+                written to MinIO and rendered below.
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={plotImageNames.length === 0}
+              title="Draw or correct objects on the plot images to build a training set"
+              onClick={() => setLabeling(true)}
+            >
+              Label plot images
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -891,86 +878,4 @@ function endpointDescription(
   return localServerUrl
     ? `Using the local inference server at ${localServerUrl}.`
     : "Using Roboflow cloud inference."
-}
-
-function PredictionOverlay({
-  src,
-  alt,
-  predictions,
-}: {
-  src: string
-  alt: string
-  predictions: Prediction[]
-}) {
-  const imgRef = useRef<HTMLImageElement | null>(null)
-  const [, setRect] = useState<DOMRect | null>(null)
-
-  useEffect(() => {
-    function onResize() {
-      if (imgRef.current) setRect(imgRef.current.getBoundingClientRect())
-    }
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
-  }, [])
-
-  return (
-    <div className="relative">
-      <img
-        ref={imgRef}
-        src={src}
-        alt={alt}
-        className="block max-h-[60vh] w-full object-contain"
-        onLoad={() => {
-          if (imgRef.current) setRect(imgRef.current.getBoundingClientRect())
-        }}
-        draggable={false}
-      />
-      {predictions.length > 0 && !predictions.some(hasBox) && (
-        // Classification: whole-image labels, best first — no boxes to draw.
-        <div
-          className="absolute left-2 top-2 space-y-1"
-          data-testid="inference-classification"
-        >
-          {predictions.map((p, i) => (
-            <span
-              key={i}
-              className="block w-fit rounded-sm px-1.5 py-0.5 text-xs font-medium text-white"
-              style={{ background: classColour(p.class) }}
-            >
-              {p.class} {(p.confidence * 100).toFixed(0)}%
-            </span>
-          ))}
-        </div>
-      )}
-      {imgRef.current &&
-        predictions.filter(hasBox).map((p, i) => {
-          const img = imgRef.current
-          if (!img) return null
-          const w = img.clientWidth
-          const h = img.clientHeight
-          const sx = w / img.naturalWidth
-          const sy = h / img.naturalHeight
-          const left = (p.x - p.width / 2) * sx
-          const top = (p.y - p.height / 2) * sy
-          const width = p.width * sx
-          const height = p.height * sy
-          const colour = classColour(p.class)
-          return (
-            <div
-              key={i}
-              className="pointer-events-none absolute border-2"
-              style={{ left, top, width, height, borderColor: colour }}
-              title={`${p.class} (${(p.confidence * 100).toFixed(0)}%)`}
-            >
-              <span
-                className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] font-medium text-white"
-                style={{ background: colour }}
-              >
-                {p.class} {(p.confidence * 100).toFixed(0)}%
-              </span>
-            </div>
-          )
-        })}
-    </div>
-  )
 }

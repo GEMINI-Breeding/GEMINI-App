@@ -150,6 +150,7 @@ export function DataStructureForm({
 
           return (
             <EntitySelectField
+              matchExisting
               key={field}
               label={entity.label}
               fieldKey={entity.scopeKey}

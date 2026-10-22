@@ -14,6 +14,7 @@ about workers at all.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -163,12 +164,27 @@ def _state_of(name: str, job: Optional[dict], up: set[str]) -> str:
 _watch_client: Any = None        # the last client that could read the job list (for the idle watcher)
 
 
+def _api_answers(timeout: float = 3.0) -> bool:
+    """Does the app's API answer right now (through the tunnel, when there is one)?"""
+    import os
+    import urllib.request
+
+    base = os.environ.get("GEMI_API") or f"http://127.0.0.1:{API_PORT}"
+    try:
+        with urllib.request.urlopen(base.rstrip("/") + "/healthz", timeout=timeout) as r:
+            return r.status < 500
+    except Exception:
+        return False
+
+
 def _job_counts() -> Optional[tuple[dict[str, int], dict[str, int]]]:
     """The app's waiting and running jobs per worker; None when the job list
     cannot be read (then nothing may be called idle)."""
     global _watch_client
     waiting: dict[str, int] = {}
     running: dict[str, int] = {}
+    if not _api_answers():
+        return None                     # a hung tunnel would hold the whole overview for minutes
     try:
         c = client()
         for status, into in (("PENDING", waiting), ("RUNNING", running)):
@@ -227,7 +243,9 @@ def overview(fresh: bool = False, with_jobs: bool = True) -> dict:
     return {"cluster": cluster, "host": conf.get("HPC_HOST", "").split("@")[-1], "parts": parts,
             "login": conf.get("HPC_HOST"), "ssh_key": conf.get("HPC_KEY"),
             "auto_start": p["auto_start"], "idle_stop_minutes": p["idle_stop_minutes"], "error": snap["error"], "checked": round(_cache["t"]),
-            "connection": {"api": _port_open(API_PORT) and st.get("api_pid") is not None,
+            # Under `gemi-hpc app` the tunnel is that script's, on the app's own port.
+            "connection": {"api": _api_answers() if os.environ.get("GEMI_TUNNEL_PIDFILE")
+                           else _port_open(API_PORT) and st.get("api_pid") is not None,
                            "model": bool(st.get("llm_pid")) and _port_open(int(st.get("llm_port") or 0) or 1)}}
 
 
@@ -353,10 +371,42 @@ def stop(name: str, background: bool = True) -> dict:
     return _run(name, "stopping", lambda: _do_stop(name), background)
 
 
+def _reopen_app_tunnel(pidfile: str) -> dict:
+    """`gemi-hpc app`: its tunnel loop holds the app's own API port. End the
+    current (dropped or hung) ssh; the loop opens a new one on the same port.
+    Wait until the API answers through it."""
+    import os
+    import signal
+    import urllib.request
+
+    api = os.environ.get("GEMI_API", "").rstrip("/")
+    try:
+        os.kill(int(open(pidfile).read().strip()), signal.SIGKILL)
+    except (OSError, ValueError):
+        pass                                  # already gone: the loop is reopening it
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        time.sleep(2)
+        try:
+            with urllib.request.urlopen(api + "/healthz", timeout=4) as r:
+                if r.status < 500:
+                    _cache["t"] = 0.0
+                    return {"app_api": api, "reconnected": True}
+        except Exception:
+            continue
+    raise RuntimeError("the tunnel to the cluster did not come back within a minute: check this computer's "
+                       "network (VPN, Wi-Fi) and press Reconnect again")
+
+
 def reconnect(use_model: bool = False) -> dict:
+    import os
+
     cluster = active_cluster()
     if not cluster:
         raise RuntimeError("no cluster is configured")
+    pidfile = os.environ.get("GEMI_TUNNEL_PIDFILE")
+    if pidfile:
+        return _reopen_app_tunnel(pidfile)
     out = _connect(cluster, _conf(cluster), use_model)
     out.pop("app_login", None)
     return out

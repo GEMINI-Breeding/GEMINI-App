@@ -1,28 +1,26 @@
 /**
  * PlotImageGrid — thumbnail grid of per-plot PNGs.
  *
- * The /api/files/download/{path} endpoint requires bearer auth so we can't
- * just point an <img src=…> at it. Instead, fetch into a blob and render
- * via object URLs. Object URLs are revoked on unmount.
+ * Each tile is a small server-resized preview (AuthImage: bearer-authed
+ * blob, fetched once it scrolls into view), so a run with hundreds of plots
+ * does not download every full image to draw the grid.
  */
 
-import { Download } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { ChevronLeft, ChevronRight, Download } from "lucide-react"
+import { useMemo, useState } from "react"
 import type { FileMetadata } from "@/client"
-import { OpenAPI } from "@/client/core/OpenAPI"
 
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ImageLightbox } from "@/features/files/components/ImageLightbox"
 import { downloadZip } from "@/features/files/lib/download"
+import {
+  AuthImage,
+  thumbnailSrc,
+} from "@/features/genotyping/components/AuthImage"
 import useCustomToast from "@/hooks/useCustomToast"
-import { getToken } from "@/lib/auth"
 
-const DEFAULT_BUCKET = "gemini"
-const MAX_INITIAL = 60
-
-function apiUrl(path: string): string {
-  return `${(OpenAPI.BASE ?? "").replace(/\/$/, "")}${path}`
-}
+/** Plot images shown at once; the rest page through. */
+const PER_PAGE = 24
 
 export function PlotImageGrid({
   files,
@@ -37,6 +35,8 @@ export function PlotImageGrid({
   )
   const { showErrorToast } = useCustomToast()
   const [zipping, setZipping] = useState(false)
+  const [page, setPage] = useState(0)
+  const [viewing, setViewing] = useState<number | null>(null)
   const downloadAll = async () => {
     setZipping(true)
     try {
@@ -53,6 +53,7 @@ export function PlotImageGrid({
     }
   }
 
+  const pages = Math.ceil(pngFiles.length / PER_PAGE)
   if (pngFiles.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
@@ -64,10 +65,39 @@ export function PlotImageGrid({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-muted-foreground text-xs">
-          {pngFiles.length} plot{pngFiles.length === 1 ? "" : "s"} · showing{" "}
-          {Math.min(pngFiles.length, MAX_INITIAL)}
-        </p>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {pngFiles.length} plot{pngFiles.length === 1 ? "" : "s"}
+          </span>
+          {pages > 1 && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0"
+                disabled={page === 0}
+                onClick={() => setPage((n) => n - 1)}
+                aria-label="Previous plots"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-muted-foreground">
+                {page * PER_PAGE + 1}–
+                {Math.min((page + 1) * PER_PAGE, pngFiles.length)}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0"
+                disabled={page >= pages - 1}
+                onClick={() => setPage((n) => n + 1)}
+                aria-label="Next plots"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
         <Button
           size="sm"
           variant="outline"
@@ -80,58 +110,57 @@ export function PlotImageGrid({
         </Button>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {pngFiles.slice(0, MAX_INITIAL).map((f) => (
-          <PlotThumb key={f.object_name} file={f} prefix={prefix} />
+        {pngFiles.slice(page * PER_PAGE, (page + 1) * PER_PAGE).map((f) => (
+          <PlotThumb
+            key={f.object_name}
+            file={f}
+            prefix={prefix}
+            onOpen={() =>
+              setViewing(
+                pngFiles.findIndex((x) => x.object_name === f.object_name),
+              )
+            }
+          />
         ))}
       </div>
+      <ImageLightbox
+        images={pngFiles.map((f) => f.object_name ?? "")}
+        index={viewing}
+        onIndex={(i) => {
+          setViewing(i)
+          setPage(Math.floor(i / PER_PAGE))
+        }}
+        onClose={() => setViewing(null)}
+        caption={(n) => n.replace(prefix, "")}
+      />
     </div>
   )
 }
 
-function PlotThumb({ file, prefix }: { file: FileMetadata; prefix: string }) {
-  const [src, setSrc] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    let objectUrl: string | null = null
-    async function load() {
-      try {
-        const path = file.object_name
-        if (!path) return
-        const res = await fetch(
-          apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${path}`),
-          { headers: { Authorization: `Bearer ${getToken()}` } },
-        )
-        if (!res.ok) throw new Error(String(res.status))
-        const blob = await res.blob()
-        objectUrl = URL.createObjectURL(blob)
-        if (!cancelled) setSrc(objectUrl)
-      } catch {
-        if (!cancelled) setError(true)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [file.object_name])
-
+function PlotThumb({
+  file,
+  prefix,
+  onOpen,
+}: {
+  file: FileMetadata
+  prefix: string
+  onOpen: () => void
+}) {
+  // A resized preview, fetched when it scrolls into view; the full image
+  // opens in the viewer on click.
+  const path = file.object_name ?? ""
   const label = (file.object_name ?? "").replace(prefix, "")
 
   return (
     <div className="space-y-1">
       <div className="bg-muted relative aspect-square overflow-hidden rounded">
-        {src ? (
-          <img src={src} alt={label} className="h-full w-full object-cover" />
-        ) : error ? (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-xs">
-            ✗
-          </div>
-        ) : (
-          <Skeleton className="h-full w-full" />
-        )}
+        <AuthImage
+          src={thumbnailSrc(path, 400)}
+          alt={label}
+          className="h-full w-full border-0 object-cover"
+          onImageClick={onOpen}
+          lazy
+        />
       </div>
       <p className="truncate text-xs" title={label}>
         {label}

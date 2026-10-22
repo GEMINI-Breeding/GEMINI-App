@@ -58,9 +58,15 @@ test.describe("Edit upload metadata", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
     const datasetRow = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({ has: page.locator(`text=${experiment}__ImageData__`) })
+      .locator(
+        `[data-testid^="manage-data-dataset-${experiment}__ImageData__"]`,
+      )
       .first()
     await expect(datasetRow).toContainText("2 files", { timeout: 30_000 })
     const list = page.locator('[data-testid="manage-data-list"]')

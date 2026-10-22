@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from "react"
 
 import {
+  type DatasetOutput,
   type ExperimentOutput,
   ExperimentsService,
   type FileMetadata,
@@ -30,7 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { idAsString } from "@/features/admin/lib/ids"
+import { ImageLightbox } from "@/features/files/components/ImageLightbox"
 import { ThermalViewerDialog } from "@/features/files/components/ThermalViewerDialog"
+import { classify } from "@/features/files/lib/experimentContents"
 import { deriveImagePathAttrs } from "@/features/files/lib/imagePath"
 import useCustomToast from "@/hooks/useCustomToast"
 import { getToken } from "@/lib/auth"
@@ -149,9 +152,8 @@ function ThumbnailTile({
     previewObjectName,
   )
   const name = fileNameOf(file.object_name)
-  // Only thermal images are clickable in v1 — they're the only files
-  // with a useful "open" action beyond the existing download button.
-  const clickable = selectable || (isThermal && onOpen !== null)
+  // Thermal images open the thermal viewer; others open full size.
+  const clickable = selectable || onOpen !== null
   const activate = () => {
     if (selectable) onToggle?.(file)
     else onOpen?.(file)
@@ -240,6 +242,56 @@ async function downloadFile(file: FileMetadata): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
+/** One folder the user can look at: an upload's images or a flight's outputs. */
+interface Source {
+  key: string
+  label: string
+  prefixes: string[]
+}
+
+const EVERYTHING = "__everything__"
+
+/**
+ * The folders of an experiment worth viewing, from its datasets: for each
+ * field date / site / platform, the uploaded images (Raw/…) and what
+ * processing made from them (Processed/…). Listing one folder is quick;
+ * listing all of storage and filtering (the last option) takes minutes on a
+ * real season, so it is only there for files filed nowhere else.
+ */
+function sourcesOf(experiment: string, datasets: DatasetOutput[]): Source[] {
+  const seen = new Map<string, Source>()
+  const entries = datasets
+    .map(classify)
+    .filter((e) => e.where)
+    .sort((a, b) => (b.where?.date ?? "").localeCompare(a.where?.date ?? ""))
+  for (const e of entries) {
+    const w = e.where
+    if (!w) continue
+    const tail = `${w.season}/${experiment}/${w.site}/${w.population}/${w.date}/${w.platform}/${w.sensor}/`
+    const what = `${w.date} · ${[w.site, w.population].filter(Boolean).join(" ")} · ${w.platform} ${w.sensor}`
+    if (e.kind === "upload" && !seen.has(`raw:${tail}`))
+      seen.set(`raw:${tail}`, {
+        key: `raw:${tail}`,
+        label: `${what} — uploaded images`,
+        prefixes: [`Raw/${tail}`],
+      })
+    if (!seen.has(`proc:${tail}`))
+      seen.set(`proc:${tail}`, {
+        key: `proc:${tail}`,
+        label: `${what} — processed (plot images, maps)`,
+        prefixes: [`Processed/${tail}`],
+      })
+  }
+  return [
+    ...seen.values(),
+    {
+      key: EVERYTHING,
+      label: "Everything in this experiment (slow: searches all storage)",
+      prefixes: [...TOP_PREFIXES],
+    },
+  ]
+}
+
 export function ImageViewer() {
   const [experimentName, setExperimentName] = useState<string>("")
   const [offset, setOffset] = useState(0)
@@ -288,13 +340,32 @@ export function ImageViewer() {
       return next
     })
 
+  const pickedExperiment = experiments.find(
+    (e) => e.experiment_name === experimentName,
+  )
+  const experimentId = pickedExperiment ? idAsString(pickedExperiment.id) : null
+  const datasetsQuery = useQuery({
+    queryKey: ["experiments", experimentId, "datasets"],
+    queryFn: async () =>
+      ((await ExperimentsService.apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets(
+        { experimentId: experimentId as string },
+      )) as DatasetOutput[] | null) ?? [],
+    enabled: Boolean(experimentId),
+  })
+  const sources = useMemo(
+    () => sourcesOf(experimentName, datasetsQuery.data ?? []),
+    [experimentName, datasetsQuery.data],
+  )
+  const [sourceKey, setSourceKey] = useState<string>("")
+  const source = sources.find((s) => s.key === sourceKey) ?? null
+
   const filesQuery = useQuery({
-    queryKey: ["view", "image-files", experimentName],
+    queryKey: ["view", "image-files", experimentName, sourceKey],
     queryFn: async () => {
-      if (!experimentName) return [] as FileMetadata[]
+      if (!experimentName || !source) return [] as FileMetadata[]
       const out: FileMetadata[] = []
       const segment = `/${experimentName}/`
-      for (const top of TOP_PREFIXES) {
+      for (const top of source.prefixes) {
         try {
           const res = await FilesService.apiFilesListFilePathListFiles({
             filePath: `${DEFAULT_BUCKET}/${top}`,
@@ -304,14 +375,18 @@ export function ImageViewer() {
             if (f.object_name.includes(segment)) out.push(f)
           }
         } catch {
-          // 404 on an empty top-level prefix (e.g. nothing under
-          // Processed/ yet) is benign — keep going.
+          // 404 on an empty prefix (e.g. nothing processed yet) is
+          // benign — keep going.
         }
       }
       return out
     },
-    enabled: Boolean(experimentName),
+    enabled: Boolean(experimentName && source),
+    staleTime: 5 * 60_000,
   })
+
+  // Full-size viewing of ordinary images (thermal ones open their own dialog).
+  const [lightbox, setLightbox] = useState<number | null>(null)
 
   // All matching files for the experiment. Build an attrs lookup once
   // so per-file filter checks are O(1).
@@ -525,6 +600,15 @@ export function ImageViewer() {
     [orderedFiles, offset],
   )
   const imageFiles = pagedFiles.filter((f) => isImageFile(f.object_name))
+  // What the full-size viewer steps through: every matching image, not just
+  // this page.
+  const viewable = useMemo(
+    () =>
+      orderedFiles
+        .filter((f) => isImageFile(f.object_name))
+        .map((f) => f.object_name),
+    [orderedFiles],
+  )
   const otherFiles = pagedFiles.filter((f) => !isImageFile(f.object_name))
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1
@@ -623,6 +707,7 @@ export function ImageViewer() {
             value={experimentName}
             onValueChange={(v) => {
               setExperimentName(v)
+              setSourceKey("")
               setOffset(0)
             }}
           >
@@ -642,7 +727,53 @@ export function ImageViewer() {
             </SelectContent>
           </Select>
         </div>
+        {experimentName && (
+          <div className="min-w-0 flex-1 space-y-1">
+            <label
+              htmlFor="image-viewer-source"
+              className="text-xs text-muted-foreground"
+            >
+              What to view
+            </label>
+            <Select
+              value={sourceKey}
+              onValueChange={(v) => {
+                setSourceKey(v)
+                setOffset(0)
+                setLightbox(null)
+              }}
+            >
+              <SelectTrigger
+                id="image-viewer-source"
+                className="w-full max-w-xl"
+                data-testid="image-viewer-source"
+              >
+                <SelectValue
+                  placeholder={
+                    datasetsQuery.isLoading
+                      ? "Loading…"
+                      : "Pick a flight or drive"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {sources.map((s) => (
+                  <SelectItem key={s.key} value={s.key}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
+
+      {experimentName && !sourceKey && (
+        <p className="text-sm text-muted-foreground">
+          Pick a date and what to view: the images as uploaded, or what
+          processing made from them.
+        </p>
+      )}
 
       {!experimentName && (
         <p className="text-sm text-muted-foreground">
@@ -650,8 +781,13 @@ export function ImageViewer() {
         </p>
       )}
 
-      {experimentName && filesQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Loading files…</p>
+      {experimentName && source && filesQuery.isLoading && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ImageIcon className="h-4 w-4 animate-pulse" />
+          {sourceKey === EVERYTHING
+            ? "Searching all storage for this experiment's files — this can take minutes on a large season…"
+            : "Listing files…"}
+        </p>
       )}
 
       {experimentName && filesQuery.isError && (
@@ -687,7 +823,7 @@ export function ImageViewer() {
                 data-testid="image-viewer-filter-filename"
               />
             </div>
-            {locationOptions.length > 0 && (
+            {locationOptions.length > 1 && (
               <MultiSelectFilter
                 label="Location"
                 options={locationOptions}
@@ -700,7 +836,7 @@ export function ImageViewer() {
                 testId="image-viewer-filter-location"
               />
             )}
-            {populationOptions.length > 0 && (
+            {populationOptions.length > 1 && (
               <MultiSelectFilter
                 label="Population"
                 options={populationOptions}
@@ -713,7 +849,7 @@ export function ImageViewer() {
                 testId="image-viewer-filter-population"
               />
             )}
-            {dateOptions.length > 0 && (
+            {dateOptions.length > 1 && (
               <MultiSelectFilter
                 label="Date"
                 options={dateOptions}
@@ -726,7 +862,7 @@ export function ImageViewer() {
                 testId="image-viewer-filter-date"
               />
             )}
-            {platformOptions.length > 0 && (
+            {platformOptions.length > 1 && (
               <MultiSelectFilter
                 label="Platform"
                 options={platformOptions}
@@ -739,7 +875,7 @@ export function ImageViewer() {
                 testId="image-viewer-filter-platform"
               />
             )}
-            {sensorOptions.length > 0 && (
+            {sensorOptions.length > 1 && (
               <MultiSelectFilter
                 label="Sensor"
                 options={sensorOptions}
@@ -766,6 +902,7 @@ export function ImageViewer() {
         )}
 
       {experimentName &&
+        source &&
         !filesQuery.isLoading &&
         !filesQuery.isError &&
         allFiles.length === 0 && (
@@ -773,7 +910,9 @@ export function ImageViewer() {
             className="text-sm text-muted-foreground"
             data-testid="image-viewer-empty"
           >
-            No files uploaded under this experiment yet.
+            {sourceKey === EVERYTHING
+              ? "No files found for this experiment."
+              : "Nothing here yet."}
           </p>
         )}
 
@@ -893,7 +1032,11 @@ export function ImageViewer() {
                     file={f}
                     isThermal={isThermalImage(f)}
                     previewObjectName={previewJpegByOriginal.get(f.object_name)}
-                    onOpen={setThermalOpenFile}
+                    onOpen={(file) =>
+                      isThermalImage(file)
+                        ? setThermalOpenFile(file)
+                        : setLightbox(viewable.indexOf(file.object_name))
+                    }
                     selectable={selectMode}
                     selected={selected.has(f.object_name)}
                     onToggle={toggleSelected}
@@ -956,6 +1099,17 @@ export function ImageViewer() {
           )}
         </>
       )}
+
+      <ImageLightbox
+        images={viewable}
+        index={lightbox}
+        onIndex={(i) => {
+          setLightbox(i)
+          // Keep the gallery page in step with the viewer.
+          setOffset(Math.floor(i / PAGE_SIZE) * PAGE_SIZE)
+        }}
+        onClose={() => setLightbox(null)}
+      />
 
       {thermalOpenFile && (
         <ThermalViewerDialog

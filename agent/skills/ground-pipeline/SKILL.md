@@ -97,3 +97,21 @@ person expects, and each pass's length (metres) the bed length.
 
 Per step: counts (files, jobs, passes, plots), failures with ids, and the
 saved marking version and stitch output folder.
+
+
+## When the rover GPS is off
+
+Each stitched plot is placed along its frames' GPS. If the outlines don't sit
+in their plots (a bed drifts, wobbles or is turned), correct the placement
+before associating — the person can do it on the Plot Boundary map, or:
+
+```json
+{"tool": "gps_placement", "args": {"stitch_prefix": "<…/AgRowStitch_vN/>"}}
+```
+
+lists the beds ("lane 1 · pass 2" when a frame shows two plots) and the
+current placement. Then one change at a time, e.g. `"bed": "lane 2 · pass 1",
+"straighten": true`, `"bed_shift_m": [0, -0.3]` (east, north), `"rotate_deg":
+1.5` (clockwise), or `"shift_m": [0.5, 0]` for everything. Each call saves a
+new placement version; `associate_plots` and `ground_plot_boundaries` use the
+active one. Ask the person to check the result on the Plot Boundary map.

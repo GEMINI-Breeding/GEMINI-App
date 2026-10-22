@@ -369,8 +369,10 @@ def _adopt(pr) -> int:
     link existed, with `submit_job`, or by another client) to the run of their
     scope, oldest first, so the Process tab shows them too."""
     known = {j for r in pr.state()["runs"] for s in r.get("steps", {}).values() for j in s.get("jobIds") or []}
+    # Labelling prompts (LOCATE_PLANTS with `prompted`) belong to no run step.
     jobs = [j for j in client().jobs(limit=1000)
-            if str(j.get("job_type")) in JOB_STEP and str(j.get("id")) not in known]
+            if str(j.get("job_type")) in JOB_STEP and str(j.get("id")) not in known
+            and not (j.get("parameters") or {}).get("prompted")]
     adopted = 0
     for job in sorted(jobs, key=lambda j: j.get("created_at") or ""):
         params = job.get("parameters") or {}

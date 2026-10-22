@@ -12,7 +12,7 @@
  * without the header).
  */
 import { ImageOff, Loader2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { authHeaders } from "@/components/Common/PlotImage"
 
@@ -58,6 +58,64 @@ export interface AuthImageProps {
    * Click is a no-op while the image is still loading.
    */
   onImageClick?: (blobUrl: string) => void
+  /** Fetch only once the image scrolls near the viewport. */
+  lazy?: boolean
+}
+
+/**
+ * Server-side resized preview of an image object (longest side `size` px,
+ * at most 800): a few KB instead of the full file. Use it for grids and
+ * cards; fetch the full file only when the user opens one.
+ */
+export function thumbnailSrc(objectPath: string, size = 400): string {
+  const path = objectPath.split("/").map(encodeURIComponent).join("/")
+  return `/api/files/thumbnail/gemini/${path}?size=${Math.min(size, 800)}`
+}
+
+/** Open the full-size file in a new tab (opened at click time, so popup
+ *  blockers allow it; filled in once the authed download lands). */
+export function openFullImage(objectPath: string): void {
+  const tab = window.open("", "_blank")
+  const base = (window as unknown as { __GEMI_BACKEND_URL__?: string })
+    .__GEMI_BACKEND_URL__
+  const path = `/api/files/download/gemini/${objectPath.split("/").map(encodeURIComponent).join("/")}`
+  fetch(base ? `${base}${path}` : path, { headers: authHeaders() })
+    .then((r) =>
+      r.ok ? r.blob() : Promise.reject(new Error(String(r.status))),
+    )
+    .then((b) => {
+      if (tab) tab.location.href = URL.createObjectURL(b)
+    })
+    .catch(() => tab?.close())
+}
+
+/** True once `ref` has come within `margin` of the viewport (then stays true). */
+function useNearViewport(
+  ref: React.RefObject<HTMLElement | null>,
+  enabled: boolean,
+  margin = "300px",
+): boolean {
+  const [near, setNear] = useState(!enabled)
+  useEffect(() => {
+    if (!enabled || near) return
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setNear(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setNear(true)
+          io.disconnect()
+        }
+      },
+      { rootMargin: margin },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [ref, enabled, near, margin])
+  return near
 }
 
 export function AuthImage({
@@ -66,11 +124,15 @@ export function AuthImage({
   className,
   "data-testid": testId,
   onImageClick,
+  lazy = false,
 }: AuthImageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [errored, setErrored] = useState(false)
+  const holder = useRef<HTMLDivElement | null>(null)
+  const near = useNearViewport(holder, lazy)
 
   useEffect(() => {
+    if (!near) return
     if (!src) {
       setErrored(true)
       return
@@ -101,7 +163,7 @@ export function AuthImage({
       cancelled = true
       if (created) URL.revokeObjectURL(created)
     }
-  }, [src])
+  }, [src, near])
 
   if (errored) {
     return (
@@ -117,6 +179,7 @@ export function AuthImage({
   if (!blobUrl) {
     return (
       <div
+        ref={holder}
         data-testid={testId}
         className={`bg-muted/20 text-muted-foreground flex items-center justify-center rounded border p-4 ${className ?? ""}`}
       >

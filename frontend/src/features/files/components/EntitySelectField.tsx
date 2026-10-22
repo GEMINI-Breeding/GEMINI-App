@@ -50,6 +50,11 @@ export interface EntitySelectFieldProps {
   disabled?: boolean
   /** Hint shown under the field. */
   description?: string
+  /**
+   * A "new" name that matches an existing option becomes that option (used
+   * by the upload form, whose values can be filled in from a recent upload).
+   */
+  matchExisting?: boolean
   /** Pre-fills the new-name input when "+ Create new..." is first picked. */
   newNameSuggestion?: string
 }
@@ -83,6 +88,7 @@ export function EntitySelectField({
   disabled,
   description,
   newNameSuggestion,
+  matchExisting = false,
 }: EntitySelectFieldProps) {
   const slugTestId = fieldKey.toLowerCase().replace(/_/g, "-")
   const selectValue =
@@ -106,6 +112,16 @@ export function EntitySelectField({
   }
 
   const newName = value.kind === "new" ? value.name : ""
+
+  // A name filled in from elsewhere (e.g. "continue a recent upload") that
+  // matches an existing entry is that entry, not a new one to create.
+  useEffect(() => {
+    if (!matchExisting || value.kind !== "new" || !value.name.trim()) return
+    const match = options.find(
+      (o) => o.name.trim().toLowerCase() === value.name.trim().toLowerCase(),
+    )
+    if (match) onChange(chooseExisting(match))
+  }, [matchExisting, value, options, onChange])
 
   // Radix Select returns focus to its trigger when it closes, which races
   // with the new-name input's `autoFocus`. Defer focusing past that handoff.

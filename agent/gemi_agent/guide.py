@@ -309,13 +309,13 @@ def _plan(kind: str, step: str, run: dict) -> dict:
                             (facts.get("first_tier_at"), "which end of the field the design's first tier is at"),
                             (facts.get("first_bed_at"), "which side of the field the first bed is on")))
         if step == "split_orthomosaic":
-            return {"skill": "aerial-pipeline", "do": {"tool": "split_plots", "args": {"orthomosaic_path": ortho}},
-                    "then": "wait_jobs with the returned job id"}
+            return {"skill": "aerial-pipeline", "do": {"tool": "split_plots", "args": {"path": processed}},
+                    "then": "wait_jobs with the returned job ids (one per orthomosaic)"}
         if step == "trait_extraction":
-            return {"skill": "aerial-pipeline",
-                    "do": {"tool": "canopy_cover", "args": {"images_prefix": processed + "PlotImages/"}},
-                    "note": "canopy_cover is the simple colour-based trait; run_trait_extraction is the full one "
-                            "(see the skill for its paths)"}
+            # The full extraction: vegetation fraction and, from the elevation
+            # model ODM writes with the orthomosaic, plant height.
+            return {"skill": "aerial-pipeline", "do": {"tool": "extract_traits", "args": {"path": processed}},
+                    "then": "wait_jobs with the returned job ids; the traits appear in Analyze"}
     if step == "inference":
         model = facts.get("model")
         name = str((model or {}).get("model_id") or (model or {}).get("name") or "model").split("/")[-1] \
@@ -701,8 +701,8 @@ def continue_run(args: dict) -> dict:
                         ask_person=["nothing is required: tell them the result. If they know how many plots a bed has "
                                     "and it differs from what was found, record it with run_facts and mark again"],
                         then="continue_run again to go on (stitching, or plot images from single frames)")
-        if tool == "canopy_cover":
-            pr.set_step(run, "trait_extraction", "completed")
+        if tool in ("canopy_cover", "extract_traits"):
+            pr.set_step(run, "trait_extraction", "completed" if tool == "canopy_cover" else "running")
         if time.time() > deadline:
             return stop("paused", next="call continue_run again")
     return stop("paused", next="call continue_run again")

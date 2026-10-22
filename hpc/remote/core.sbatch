@@ -146,8 +146,9 @@ rm -rf "/tmp/gemi-mc-$SLURM_JOB_ID"
 log "storage initialised"
 
 # --- REST API (current source over the image's /geminibase) ---
-$APT $(private_ipc "$TMP/shm-api") --env-file "$RUN/stack.env" --env GEMINI_RUN_MIGRATIONS=1 \
+$APT $(private_ipc "$TMP/shm-api") --env-file "$RUN/stack.env" --env GEMINI_RUN_MIGRATIONS=${GEMI_RUN_MIGRATIONS:-0} \
   -B "$SRC/gemini:/geminibase/gemini" -B "$SRC/alembic:/geminibase/alembic" -B "$SRC/alembic.ini:/geminibase/alembic.ini" \
+  -B "$SRC/gemini/rest_api/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
   "$IMAGES/rest-api.sif" poetry run litestar --app gemini.rest_api.app:app run --host 0.0.0.0 --port "$API_PORT" \
   >"$SLOG/rest-api.log" 2>&1 &
 API_PID=$!

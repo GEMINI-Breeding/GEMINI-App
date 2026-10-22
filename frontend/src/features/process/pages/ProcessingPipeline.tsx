@@ -230,8 +230,21 @@ export function ProcessingPipeline() {
 
   const { showErrorToast } = useCustomToast()
 
-  const [currentStep, setCurrentStep] = useState<Step>(1)
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set())
+  // Opened from a run's inference step: straight to the models, and back
+  // to that run when done.
+  const startStep: Step = editingPipelineId && search.step ? search.step : 1
+  const [currentStep, setCurrentStep] = useState<Step>(startStep)
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(
+    () => new Set(Array.from({ length: startStep - 1 }, (_, i) => i + 1)),
+  )
+  const leave = () =>
+    search.returnRunId
+      ? navigate({
+          to: "/process/$workspaceId/tool",
+          params: { workspaceId },
+          search: { runId: search.returnRunId, step: "inference" },
+        })
+      : navigate({ to: "/process/$workspaceId", params: { workspaceId } })
 
   const [pipelineName, setPipelineName] = useState("")
   const [groundConfig, setGroundConfig] = useState(() => ({
@@ -377,7 +390,7 @@ export function ProcessingPipeline() {
           params: configPayload(),
         })
       }
-      navigate({ to: "/process/$workspaceId", params: { workspaceId } })
+      leave()
     } catch (err) {
       showErrorToast(
         editingPipelineId
@@ -416,13 +429,7 @@ export function ProcessingPipeline() {
     <div className="bg-background">
       <div className="mx-auto max-w-5xl p-8">
         <div className="mb-8 flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() =>
-              navigate({ to: "/process/$workspaceId", params: { workspaceId } })
-            }
-          >
+          <Button variant="ghost" size="icon" onClick={leave}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>

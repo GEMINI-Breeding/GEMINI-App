@@ -26,6 +26,7 @@ import {
   YAxis,
   ZAxis,
 } from "recharts"
+import { chartTooltip } from "@/lib/chartTheme"
 import { useMultiSourceData } from "../hooks/useMultiSourceData"
 import {
   applyFilters,
@@ -200,7 +201,9 @@ function SpatialBarChart({ config }: { config: ChartConfig }) {
           />
         )}
         <Tooltip
-          contentStyle={{ fontSize: 12, borderRadius: 6 }}
+          contentStyle={chartTooltip.contentStyle}
+          labelStyle={chartTooltip.labelStyle}
+          itemStyle={chartTooltip.itemStyle}
           formatter={(v, name) => [
             typeof v === "number" ? v.toFixed(4) : v,
             formatLabel(String(name)),
@@ -436,7 +439,9 @@ function TemporalChart({ config }: { config: ChartConfig }) {
             />
           )}
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            contentStyle={chartTooltip.contentStyle}
+            labelStyle={chartTooltip.labelStyle}
+            itemStyle={chartTooltip.itemStyle}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null
               const visible = payload.filter(
@@ -597,7 +602,9 @@ function CorrelationScatter({ config }: { config: ChartConfig }) {
         <ZAxis range={[20, 20]} />
         <Tooltip
           cursor={{ strokeDasharray: "3 3" }}
-          contentStyle={{ fontSize: 12, borderRadius: 6 }}
+          contentStyle={chartTooltip.contentStyle}
+          labelStyle={chartTooltip.labelStyle}
+          itemStyle={chartTooltip.itemStyle}
           formatter={(v, name) => [
             typeof v === "number" ? v.toFixed(4) : v,
             formatLabel(String(name)),
@@ -660,7 +667,9 @@ function HistogramChart({ config }: { config: ChartConfig }) {
           label={Y_LABEL_PROPS("Count")}
         />
         <Tooltip
-          contentStyle={{ fontSize: 12, borderRadius: 6 }}
+          contentStyle={chartTooltip.contentStyle}
+          labelStyle={chartTooltip.labelStyle}
+          itemStyle={chartTooltip.itemStyle}
           formatter={(v) => [v, "Count"]}
           labelFormatter={(l) => `≥ ${l}`}
         />
@@ -785,7 +794,9 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
             label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
           />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            contentStyle={chartTooltip.contentStyle}
+            labelStyle={chartTooltip.labelStyle}
+            itemStyle={chartTooltip.itemStyle}
             formatter={(v: any, name: any) => {
               const s = nonBaselineSeries.find((s) => s.key === String(name))
               return [formatDashboardValue(v), s?.label ?? String(name)]
@@ -896,7 +907,9 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
               label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
             />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 6 }}
+              contentStyle={chartTooltip.contentStyle}
+              labelStyle={chartTooltip.labelStyle}
+              itemStyle={chartTooltip.itemStyle}
               formatter={(v: any, name: any) => {
                 const parts = String(name).split("__")
                 return [
@@ -1020,7 +1033,9 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
             label={msYLabel ? Y_LABEL_PROPS(msYLabel) : undefined}
           />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            contentStyle={chartTooltip.contentStyle}
+            labelStyle={chartTooltip.labelStyle}
+            itemStyle={chartTooltip.itemStyle}
             formatter={(v: any) => [formatDashboardValue(v), ""]}
           />
           <Bar dataKey="value" radius={[3, 3, 0, 0]}>
@@ -1143,7 +1158,9 @@ function MultiSourceChart({ config }: { config: ChartConfig }) {
             />
           )}
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            contentStyle={chartTooltip.contentStyle}
+            labelStyle={chartTooltip.labelStyle}
+            itemStyle={chartTooltip.itemStyle}
             formatter={(value: any, name: any) => {
               const s = series.find((s) => s.key === String(name))
               return [formatDashboardValue(value), s?.label ?? String(name)]

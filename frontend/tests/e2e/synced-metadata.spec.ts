@@ -68,6 +68,11 @@ test.describe("Synced metadata → metadata viewer", () => {
     const expRow = page.getByTestId(`manage-data-experiment-${experiment}`)
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
     const list = page.getByTestId("manage-data-list")
     await expect(
       list.locator('[data-testid^="download-"][data-testid$="/rover_gps.csv"]'),

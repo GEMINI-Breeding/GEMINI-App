@@ -19,7 +19,7 @@ import {
   type InstallJob,
   type InstallOverview,
 } from "@/features/agent/lib/agentApi"
-import { openUrl } from "@/lib/platform"
+import { isWindows, openUrl } from "@/lib/platform"
 
 const PAGES = {
   ollama: "https://ollama.com/download",
@@ -111,6 +111,9 @@ export function InstallHelper({
     }
   }, [ready, onReady])
 
+  // Git is only for Windows: elsewhere there is nothing to offer, even when
+  // the agent service cannot say so (e.g. while the cluster is unreachable).
+  if (what === "git" && !isWindows()) return null
   // No agent service: only the download page can help.
   if (status.isError)
     return (

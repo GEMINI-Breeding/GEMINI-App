@@ -17,7 +17,8 @@
  * the active version from the same directory.
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import { PanelRightClose, PanelRightOpen } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { type FileMetadata, FilesService } from "@/client"
@@ -50,9 +51,14 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BoundaryImportPicker } from "@/features/process/components/BoundaryImportPicker"
+import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
 import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
+import {
+  StitchPlacementPanel,
+  useStitchPlacement,
+} from "@/features/process/components/StitchPlacement"
 import { VersionPicker } from "@/features/process/components/VersionPicker"
 import { useDraftPersistence } from "@/features/process/hooks/useDraftPersistence"
 import { useHistory } from "@/features/process/hooks/useHistory"
@@ -81,11 +87,11 @@ import {
   type FillPattern,
   generateGridFeatures,
 } from "@/features/process/lib/grid"
-import { stitchVersions } from "@/features/process/lib/groundTrack"
 import {
   mirrorFeatures,
   rotateFeatures,
 } from "@/features/process/lib/groupTransform"
+import { folderOrthos, nearestRegions } from "@/features/process/lib/multiOrtho"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
   processedPrefix,
@@ -97,7 +103,11 @@ import {
   INITIAL_EDITOR_STATE,
   type PlotBoundaryEditorState,
 } from "@/features/process/lib/plotBoundaryEditorState"
-import { type Run, setStepState } from "@/features/process/lib/runStore"
+import {
+  type Run,
+  setStepState,
+  useAllRuns,
+} from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { titilerBase } from "@/lib/stack"
 
@@ -160,6 +170,8 @@ export interface PlotBoundaryPrepProps {
   onCancel?: () => void
 }
 
+const PANEL_KEY = "gemi.boundaryPrep.panel"
+
 export function PlotBoundaryPrep({
   run,
   scope,
@@ -167,6 +179,24 @@ export function PlotBoundaryPrep({
   onCancel,
 }: PlotBoundaryPrepProps) {
   const directory = useMemo(() => processedPrefix(scope), [scope])
+  // The grid side panel can be hidden so the map gets the full width;
+  // remembered across visits.
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return localStorage.getItem(PANEL_KEY) !== "closed"
+    } catch {
+      return true
+    }
+  })
+  const togglePanel = () =>
+    setPanelOpen((open) => {
+      try {
+        localStorage.setItem(PANEL_KEY, open ? "closed" : "open")
+      } catch {
+        // remembered for this visit only
+      }
+      return !open
+    })
 
   const history = useHistory<PlotBoundaryEditorState>(INITIAL_EDITOR_STATE, {
     limit: 50,
@@ -556,16 +586,14 @@ export function PlotBoundaryPrep({
       ]),
     [run, scope, filesQuery.data, uploadedOrthosQuery.data],
   )
-  // Ground runs have no ortho; draw over the newest stitch version's
-  // georeferenced combined mosaic instead (main's ground underlay).
-  const groundMosaic = useMemo(
-    () =>
-      stitchVersions(
-        (filesQuery.data as FileMetadata[] | null) ?? [],
-        scope,
-      ).find((v) => v.combinedMosaic)?.combinedMosaic ?? null,
-    [filesQuery.data, scope],
+  // Ground runs have no ortho; draw over the stitch version association
+  // uses (the fullest) — its georeferenced combined mosaic (main's ground
+  // underlay) — with its plots' outlines and GPS corrections on top.
+  const placement = useStitchPlacement(
+    (filesQuery.data as FileMetadata[] | null) ?? undefined,
+    scope,
   )
+  const groundMosaic = placement.version?.combinedMosaic ?? null
   const s3Url = activeOrtho
     ? s3UrlForOrtho(activeOrtho)
     : groundMosaic
@@ -603,14 +631,120 @@ export function PlotBoundaryPrep({
     [s3Url],
   )
 
+  // Several orthomosaics in this date's folder (e.g. one flight per
+  // treatment): show them all, each where it is nearer than the others'
+  // centres, so one set of boundaries can be drawn across both.
+  const allRuns = useAllRuns()
+  const folderOrthoList = useMemo(() => {
+    const all = folderOrthos(
+      (filesQuery.data as FileMetadata[] | null) ?? [],
+      directory,
+    )
+    // A flight re-run leaves its older orthomosaic beside the new one: keep
+    // each run's latest (the runs on this date folder say which job that was).
+    const latest = new Set(
+      allRuns
+        .filter((r) => {
+          const u = r.uploadScope
+          return (
+            u &&
+            scope &&
+            u.date === scope.date &&
+            u.location === scope.location &&
+            u.population === scope.population &&
+            u.experiment === scope.experiment &&
+            u.platform === scope.platform
+          )
+        })
+        .map((r) => r.steps.orthomosaic?.jobIds?.at(-1))
+        .filter((j): j is string => Boolean(j)),
+    )
+    const kept = all.filter((o) => o.jobId && latest.has(o.jobId))
+    return kept.length ? kept : all
+  }, [filesQuery.data, directory, allRuns, scope])
+  const multi = folderOrthoList.length > 1
+  const orthoInfos = useQueries({
+    queries: (multi ? folderOrthoList : []).map((o) => ({
+      queryKey: [
+        "titiler",
+        "tilejson",
+        `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`,
+      ],
+      queryFn: async () => {
+        const url = `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`
+        const res = await fetch(
+          `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(url)}&tilesize=256`,
+        )
+        if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
+        return (await res.json()) as {
+          bounds: [number, number, number, number]
+        }
+      },
+      staleTime: 5 * 60_000,
+    })),
+  })
+  const boundsKey = orthoInfos
+    .map((q) => q.data?.bounds?.join(",") ?? "")
+    .join("|")
+  const orthoLayers = useMemo<OrthoLayer[] | undefined>(() => {
+    if (!multi) return undefined
+    const parts = boundsKey.split("|")
+    if (parts.some((b) => !b)) return undefined
+    const bs = parts.map(
+      (b) => b.split(",").map(Number) as [number, number, number, number],
+    )
+    const centres = bs.map(
+      (b) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] as [number, number],
+    )
+    const all: [number, number, number, number] = [
+      Math.min(...bs.map((b) => b[0])),
+      Math.min(...bs.map((b) => b[1])),
+      Math.max(...bs.map((b) => b[2])),
+      Math.max(...bs.map((b) => b[3])),
+    ]
+    const regions = nearestRegions(centres, all)
+    return folderOrthoList.map((o, i) => ({
+      id: o.path,
+      url: buildTitilerTileUrl(`s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`),
+      region: regions[i],
+    }))
+  }, [multi, folderOrthoList, boundsKey])
+  const orthoLabels = useMemo(
+    () =>
+      folderOrthoList.map((o) => {
+        const r = allRuns.find((x) =>
+          (x.steps.orthomosaic?.jobIds ?? []).includes(o.jobId ?? "—"),
+        )
+        return (
+          r?.uploadScope?.batchLabel || o.jobId?.slice(0, 8) || "orthomosaic"
+        )
+      }),
+    [folderOrthoList, allRuns],
+  )
+
   // tilejson bounds: [west, south, east, north] in WGS84.
   // BoundaryMap wants [[south, west], [north, east]].
   const orthoBounds = useMemo<
     [[number, number], [number, number]] | undefined
   >(() => {
+    if (multi) {
+      const bs = boundsKey
+        .split("|")
+        .filter(Boolean)
+        .map(
+          (b) => b.split(",").map(Number) as [number, number, number, number],
+        )
+      if (!bs.length) return undefined
+      return tilejsonBoundsToLeaflet([
+        Math.min(...bs.map((b) => b[0])),
+        Math.min(...bs.map((b) => b[1])),
+        Math.max(...bs.map((b) => b[2])),
+        Math.max(...bs.map((b) => b[3])),
+      ])
+    }
     const b = tilejsonQuery.data?.bounds
     return b ? tilejsonBoundsToLeaflet(b) : undefined
-  }, [tilejsonQuery.data])
+  }, [tilejsonQuery.data, multi, boundsKey])
 
   // Derived counts. The outer-boundary polygon is held in `features` (so
   // it renders/edits on the map) but isn't a plot — keep it out of the
@@ -1000,29 +1134,49 @@ export function PlotBoundaryPrep({
           </CardContent>
         </Card>
       ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Scope</CardTitle>
-          <CardDescription>
-            Versions are scoped per <code>{directory}</code>.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+      <div
+        className={`grid grid-cols-1 gap-4 ${panelOpen ? "lg:grid-cols-[2fr_1fr]" : ""}`}
+      >
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Map</CardTitle>
-            <CardDescription>
-              Use the toolbar to draw or edit polygons. Geometry renders live in
-              the panels on the right.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="text-base">Map</CardTitle>
+              <CardDescription>
+                Use the toolbar to draw or edit polygons.
+                {panelOpen
+                  ? " The grid panel on the right lays out plots."
+                  : " The grid panel is hidden; show it to lay out plots."}
+              </CardDescription>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => togglePanel()}
+              data-testid="boundary-panel-toggle"
+              title={
+                panelOpen
+                  ? "Hide the grid panel so the map uses the full width"
+                  : "Show the grid panel"
+              }
+            >
+              {panelOpen ? (
+                <>
+                  <PanelRightClose className="mr-1.5 h-4 w-4" /> Full-width map
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="mr-1.5 h-4 w-4" /> Grid panel
+                </>
+              )}
+            </Button>
           </CardHeader>
           <CardContent>
             <BoundaryMap
               features={features}
               onFeaturesChange={setFeatures}
-              orthoTileUrl={orthoTileUrl}
+              orthoTileUrl={multi ? undefined : orthoTileUrl}
+              orthoLayers={orthoLayers}
               orthoBounds={orthoBounds}
               selectedBlockId={activeBlockId}
               onSelectBlock={(id) =>
@@ -1049,6 +1203,8 @@ export function PlotBoundaryPrep({
                   { tag: "select", coalesce: true },
                 )
               }
+              overlays={placement.overlays}
+              onOverlayClick={(bed) => placement.setSelectedBed(bed)}
               onSelectionClear={() =>
                 history.set(
                   { ...stateRef.current, selectedCellIds: [] },
@@ -1157,6 +1313,17 @@ export function PlotBoundaryPrep({
               </div>
             ) : null}
             <div className="mt-2 flex items-center justify-between text-xs">
+              {multi && (
+                <p
+                  className="text-muted-foreground"
+                  data-testid="boundary-orthos"
+                  title="Where the flights overlap, each point shows the orthomosaic whose centre it is nearer; plot images and traits are taken from the same one."
+                >
+                  {folderOrthoList.length} orthomosaics:{" "}
+                  {orthoLabels.join(", ")} · each shown where it is nearest its
+                  centre
+                </p>
+              )}
               <p className="text-muted-foreground">
                 {plotFeatureCount} plot{plotFeatureCount === 1 ? "" : "s"}{" "}
                 across {Object.keys(blocks).length} block
@@ -1171,7 +1338,9 @@ export function PlotBoundaryPrep({
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
+        {/* Kept mounted when hidden so the panel's settings survive. */}
+        <div className={panelOpen ? "space-y-4" : "hidden"}>
+          <StitchPlacementPanel state={placement} />
           <Card>
             <CardHeader>
               <CardTitle className="text-base">

@@ -165,7 +165,7 @@ export function OnboardingTour({
             width: spotW,
             height: spotH,
             borderRadius: 8,
-            border: "2px solid hsl(var(--primary))",
+            border: "2px solid var(--primary)",
             zIndex: 9999,
             pointerEvents: "none",
             boxSizing: "border-box",

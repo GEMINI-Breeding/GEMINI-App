@@ -174,6 +174,11 @@ export interface AnalysisConfig {
   site?: string | null
   /** For "field": the collection date (latest when unset). */
   date?: string | null
+  /** The population ("crop group") within the season: compare like with
+   *  like. Unset = every population. */
+  population?: string | null
+  /** For "trend": traits the person chose to hide. */
+  hiddenTraits?: string[]
 }
 
 // ── Widget definitions ─────────────────────────────────────────────────────────

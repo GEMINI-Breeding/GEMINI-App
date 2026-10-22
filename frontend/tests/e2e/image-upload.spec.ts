@@ -71,6 +71,11 @@ test.describe("Image upload (non-bin path)", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
 
     const list = page.locator('[data-testid="manage-data-list"]')
     await expect(
@@ -88,9 +93,11 @@ test.describe("Image upload (non-bin path)", () => {
     // after the experiment.
     const [zip] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTestId(`manage-data-zip-${experiment}`).click(),
+      page.locator('[data-testid^="manage-data-zip-"]').first().click(),
     ])
-    expect(zip.suggestedFilename()).toBe(`${experiment}.zip`)
+    expect(zip.suggestedFilename()).toMatch(
+      new RegExp(`^${experiment}-.*\\.zip$`),
+    )
     const names = zipEntryNames(readFileSync(await zip.path()))
     expect(names.filter((n) => n.endsWith("test_image_001.jpg"))).toHaveLength(
       1,

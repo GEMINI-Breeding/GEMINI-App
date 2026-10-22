@@ -18,6 +18,7 @@ import { idAsString } from "@/features/admin/lib/ids"
 import { useReferenceDatasets } from "@/features/analyze/hooks/useScopeReference"
 import useCustomToast from "@/hooks/useCustomToast"
 import { downloadViaBrowser } from "../lib/download"
+import { dayOf } from "../lib/experimentContents"
 
 /** MinIO object holding the original upload, if the backend kept one. */
 export function originalObject(d: ReferenceDatasetOutput): string | null {
@@ -159,7 +160,9 @@ export function ReferenceDataSection() {
                     <td className="px-3 py-2">{d.experiment || "—"}</td>
                     <td className="px-3 py-2">{d.location || "—"}</td>
                     <td className="px-3 py-2">{d.population || "—"}</td>
-                    <td className="px-3 py-2">{d.dataset_date || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {dayOf(d.dataset_date) || "—"}
+                    </td>
                     <td
                       className="px-3 py-2 tabular-nums"
                       data-testid={`reference-data-plots-${d.name}`}

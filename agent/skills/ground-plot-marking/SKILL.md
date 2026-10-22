@@ -179,3 +179,21 @@ few plots first; it also explains how to tune AgRowStitch when plots fail).
 Say how many passes and plots were marked, which passes needed corrections
 or still look doubtful (and why), the saved version number, and for stitching
 the settings used and which plots failed.
+
+
+## Several plots in one frame
+
+Some passes see two plots at once: one in the top half of every frame and
+the neighbouring bed's plot in the bottom half (Riverside and Coachella
+2026 Amiga runs look like this). Check a few frames before marking. If so:
+
+```json
+{"tool": "mark", "args": {"track": "<track>", "plots_per_frame": 2, "split": "top_bottom"}}
+```
+
+Then mark each stretch once, as usual. Each stretch is stitched as two
+plots: stretch n becomes plots 2n-1 (top) and 2n (bottom). `markings` shows
+`layout` and `plots_to_stitch`. `save_markings` keeps the layout with the
+version. Each lane is placed beside the GPS line by where its band sits in
+the frame; the person fine-tunes the placement per bed on the Plot Boundary
+map.

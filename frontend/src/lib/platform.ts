@@ -1,4 +1,11 @@
 /** Returns true when running inside Tauri (desktop), false in a plain browser. */
+/** This computer runs Windows (from the browser; no agent service needed). */
+export function isWindows(): boolean {
+  if (typeof navigator === "undefined") return false
+  const n = navigator as Navigator & { userAgentData?: { platform?: string } }
+  return /win/i.test(n.userAgentData?.platform ?? n.platform ?? n.userAgent)
+}
+
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }

@@ -245,6 +245,39 @@ class Markings:
         self.track = track
         self.path = track.cache / "markings.json"
         self.plots: list[dict] = json.loads(self.path.read_text()) if self.path.exists() else []
+        # Plots per frame: {"lanes": N, "split": "top_bottom" | "left_right"}.
+        # Each marked stretch is stitched as N plots, one per band of the
+        # frames (frontend lib/groundTrack.lanePlots, same numbering).
+        self.layout_path = track.cache / "layout.json"
+        self.layout: dict = (json.loads(self.layout_path.read_text()) if self.layout_path.exists()
+                             else {"lanes": 1, "split": "top_bottom"})
+
+    def set_layout(self, lanes: Optional[int], split: Optional[str]) -> dict:
+        if lanes is not None:
+            if not 1 <= int(lanes) <= 6:
+                raise ValueError("plots_per_frame must be 1 to 6")
+            self.layout["lanes"] = int(lanes)
+        if split is not None:
+            if split not in ("top_bottom", "left_right"):
+                raise ValueError("split must be top_bottom or left_right")
+            self.layout["split"] = split
+        self.layout_path.write_text(json.dumps(self.layout))
+        return self.layout
+
+    def lane_plots(self) -> list[dict]:
+        """The plots to stitch: one per marked stretch per lane. Stretch n of
+        an N-lane track is plots (n-1)*N+1 … n*N, lane 1 first (top / left)."""
+        lanes = int(self.layout.get("lanes") or 1)
+        out = []
+        for s in self.selections():
+            base = {k: s[k] for k in ("start_image", "end_image", "direction")}
+            if lanes <= 1:
+                out.append({"plot_id": s["plot_id"], **base})
+                continue
+            for k in range(1, lanes + 1):
+                out.append({"plot_id": (s["plot_id"] - 1) * lanes + k, **base, "lane": k,
+                            "lanes": lanes, "split": self.layout.get("split") or "top_bottom"})
+        return out
 
     @property
     def directory(self) -> str:
@@ -326,11 +359,16 @@ class Markings:
             "selections": self.selections(),
             "track": {"imagesPrefix": self.track.images_prefix, "msgsSyncedPath": self.track.msgs_path},
         }
+        if int(self.layout.get("lanes") or 1) > 1:
+            snapshot["layout"] = self.layout
         return self.track.client.save_version(self.directory, snapshot, name, overwrite)
 
     def pull(self, version: Optional[int]) -> int:
         """Replace the working copy with a saved version."""
         res = self.track.client.load_version(self.directory, version)
+        layout = (res.get("state_snapshot") or {}).get("layout")
+        self.layout = dict(layout) if layout else {"lanes": 1, "split": "top_bottom"}
+        self.layout_path.write_text(json.dumps(self.layout))
         index = {f.name: f.index for f in self.track.frames}
         self.plots = []
         for s in (res.get("state_snapshot") or {}).get("selections") or []:
@@ -375,11 +413,9 @@ def submit_stitch(markings: Markings, plot_ids: Optional[list[int]], settings: d
                   custom_options: Optional[str], device: Optional[str],
                   experiment_id: Optional[str], output_prefix: Optional[str]) -> dict:
     track = markings.track
-    plots = [
-        {k: s[k] for k in ("plot_id", "start_image", "end_image", "direction")}
-        for s in markings.selections()
-        if not plot_ids or s["plot_id"] in plot_ids
-    ]
+    # plot_ids are stitched plot numbers (with several plots per frame, each
+    # marked stretch is several plots; see Markings.lane_plots).
+    plots = [p for p in markings.lane_plots() if not plot_ids or p["plot_id"] in plot_ids]
     if not plots:
         raise RuntimeError("no marked plots to stitch")
     out = output_prefix or next_stitch_prefix(track.client, track.prefix)

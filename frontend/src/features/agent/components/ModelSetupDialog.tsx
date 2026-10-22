@@ -206,6 +206,18 @@ export function ModelSetupPanel({
           <div className="space-y-1.5">
             <Label>1. Model</Label>
             <div className="grid gap-1.5">
+              {setup.isLoading && (
+                <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking which
+                  models suit this computer…
+                </p>
+              )}
+              {setup.isError && (
+                <p className="text-destructive text-sm">
+                  Could not reach the agent service to list models. Is it
+                  running?
+                </p>
+              )}
               {(data?.models ?? []).map((m) => (
                 <button
                   type="button"

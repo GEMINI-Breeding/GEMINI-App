@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { RunAgentCard } from "@/features/agent/components/RunAgentCard"
+import { agentApi } from "@/features/agent/lib/agentApi"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import {
@@ -93,9 +94,11 @@ import {
   usePlotGeometryVersions,
 } from "@/features/process/hooks/usePlotGeometry"
 import { s3UrlForOrtho } from "@/features/process/lib/activeOrtho"
+import { correctionsDirectory } from "@/features/process/lib/gpsCorrections"
 import {
   findGroundTracks,
   isComplete,
+  lanePlots,
   nextStitchPrefix,
   type PlotMarkingSnapshot,
   plotMarkingsDirectory,
@@ -174,6 +177,8 @@ interface StepDef {
   kind: StepKind
   /** Phase that fully wires this step. */
   wiredIn?: "R4a" | "R4b" | "R4c" | "R5a" | "R5b" | "R5c" | "R6"
+  /** The steps it actually needs. Default: every earlier required step. */
+  needs?: string[]
 }
 
 const GROUND_STEPS: StepDef[] = [
@@ -282,6 +287,7 @@ const AERIAL_STEPS: StepDef[] = [
       "Extract vegetation fraction (and canopy height when a DEM is present) per plot",
     kind: "compute",
     wiredIn: "R4c",
+    needs: ["orthomosaic", "plot_boundary_prep"],
   },
   {
     key: "inference",
@@ -289,6 +295,8 @@ const AERIAL_STEPS: StepDef[] = [
     description: "Detection, segmentation or classification on plot images",
     kind: "interactive",
     wiredIn: "R5c",
+    // Works on the plot images; trait extraction is not needed first.
+    needs: ["split_orthomosaic"],
   },
 ]
 
@@ -317,15 +325,18 @@ function getStepStatus(
     if (state.status === "skipped") return "skipped"
     if (state.status === "unavailable") return "unavailable"
   }
-  // Not yet attempted: ready iff all preceding non-optional steps are done.
+  // Not yet attempted: ready iff the steps it needs (by default all
+  // preceding non-optional steps) are done.
   const idx = steps.findIndex((s) => s.key === stepKey)
-  const ready = steps
-    .slice(0, idx)
-    .filter((s) => s.kind !== "optional")
-    .every((s) => {
-      const ss = stepsState[s.key]?.status
-      return ss === "completed" || ss === "skipped"
-    })
+  const needs = steps[idx]?.needs
+  const ready = (
+    needs
+      ? steps.filter((s) => needs.includes(s.key))
+      : steps.slice(0, idx).filter((s) => s.kind !== "optional")
+  ).every((s) => {
+    const ss = stepsState[s.key]?.status
+    return ss === "completed" || ss === "skipped"
+  })
   return ready ? "ready" : "locked"
 }
 
@@ -392,6 +403,24 @@ function ProgressLog({ events }: { events: RunProgressEvent[] }) {
 
 // ── StepRow ─────────────────────────────────────────────────────────────────
 
+/** The job each step submits (to find the worker that runs it). */
+const STEP_JOB_TYPE: Record<string, string> = {
+  orthomosaic: "RUN_ODM",
+  stitching: "RUN_STITCH",
+  associate_boundaries: "ASSOCIATE_BOUNDARIES",
+  split_orthomosaic: "SPLIT_ORTHOMOSAIC",
+  trait_extraction: "EXTRACT_TRAITS",
+  inference: "LOCATE_PLANTS",
+  data_sync: "SYNC_METADATA",
+}
+
+/** Narrowing a step run: only some plots (re-stitching the failed ones), or
+ *  settings that override the pipeline's for this run. */
+interface RunStepOptions {
+  plotIds?: number[]
+  settings?: Record<string, unknown>
+}
+
 interface StepRowProps {
   step: StepDef
   status: StepStatus
@@ -406,6 +435,10 @@ interface StepRowProps {
   onOpenTool: () => void
   onStopStep: () => void
   onSkipStep?: () => void
+  /** This step's job is being submitted (the button must not start another). */
+  isStarting?: boolean
+  /** Set when the step's job is queued, not running: where it stands. */
+  queuedNote?: string | null
   warning?: string
   extraContent?: React.ReactNode
   /** Step-specific summary chip rendered alongside the kind/status badges. */
@@ -421,6 +454,8 @@ function StepRow(props: StepRowProps) {
     events,
     lastProgress,
     isExecuting,
+    isStarting = false,
+    queuedNote = null,
     errorMessage,
     onRunStep,
     onOpenTool,
@@ -475,6 +510,8 @@ function StepRow(props: StepRowProps) {
     !isExecuting
 
   const actionLabel = (() => {
+    if (isStarting) return "Starting…"
+    if (isActive && queuedNote) return "Queued…"
     if (isActive) return "Running…"
     if (status === "completed") return isInteractive ? "Re-open Tool" : "Re-run"
     if (status === "skipped") return isInteractive ? "Open Tool" : "Run Step"
@@ -572,6 +609,7 @@ function StepRow(props: StepRowProps) {
                   status === "locked" ||
                   status === "unavailable" ||
                   isActive ||
+                  isStarting ||
                   (isExecuting && !isActive)
                 }
                 title={
@@ -584,7 +622,9 @@ function StepRow(props: StepRowProps) {
                   else if (canRun) onRunStep()
                 }}
               >
-                {isActive && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                {(isActive || isStarting) && (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                )}
                 {warning && !isActive && (
                   <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
                 )}
@@ -629,6 +669,15 @@ function StepRow(props: StepRowProps) {
 
           {isNext && status !== "completed" && !isActive && (
             <p className="text-primary mt-1 text-xs">Ready to start</p>
+          )}
+
+          {isActive && queuedNote && (
+            <p
+              className="mt-1 rounded border border-amber-400/60 bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-300"
+              data-testid={`step-queued-${step.key}`}
+            >
+              {queuedNote}
+            </p>
           )}
 
           {humanizedError && (
@@ -700,39 +749,44 @@ function StepRow(props: StepRowProps) {
  * must not be able to) re-select date / platform / sensor here. To run a
  * different flight, create a new Run from the WorkspaceDetail page.
  */
-function RunScopeSummary({ scope }: { scope: AerialScope }) {
+function RunScopeSummary({
+  scope,
+  images,
+}: {
+  scope: AerialScope
+  /** "14,968 images found", or a loading note. */
+  images: string
+}) {
   const fields: Array<[string, string]> = [
-    ["Year", scope.year],
     ["Experiment", scope.experiment],
     ["Site", scope.location],
     ["Population", scope.population],
     ["Date", scope.date],
     ["Platform", scope.platform],
     ["Sensor", scope.sensor],
+    ["Year", scope.year],
   ]
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Run scope</CardTitle>
-        <CardDescription>
-          The uploaded dataset this run targets. To process a different flight
-          or experiment, create a new Run from the workspace page.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
-          {fields.map(([label, value]) => (
-            <div key={label}>
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd
-                className="font-medium break-all"
-                data-testid={`scope-${label.toLowerCase()}`}
-              >
-                {value || "—"}
-              </dd>
-            </div>
-          ))}
-        </dl>
+    <Card data-testid="run-data">
+      <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-1 py-3 text-xs">
+        {fields.map(([label, value]) => (
+          <span key={label}>
+            <span className="text-muted-foreground">{label} </span>
+            <span
+              className="font-medium"
+              data-testid={`scope-${label.toLowerCase()}`}
+            >
+              {value || "—"}
+            </span>
+          </span>
+        ))}
+        <span
+          className="text-muted-foreground ml-auto flex items-center gap-1.5"
+          title={`Raw images under ${rawScopePrefix(scope)}. To process a different flight, create a new run from the workspace page.`}
+        >
+          <ImageIcon className="h-3.5 w-3.5" />
+          {images}
+        </span>
       </CardContent>
     </Card>
   )
@@ -952,7 +1006,7 @@ export function RunDetail() {
   const storeReady = useRunStoreReady()
   const pipeline = usePipeline(run?.pipelineId)
   const { showErrorToast, showSuccessToast } = useCustomToast()
-  const { addProcess, updateProcess, processes } = useProcess()
+  const { addProcess, updateProcess, processes, queuedJobIds } = useProcess()
   const queryClient = useQueryClient()
   // Preflight: warn before submitting a step the backend can't service
   // (no AgRowStitch in the stitch worker, no Docker for ODM). Both probes
@@ -1039,7 +1093,11 @@ export function RunDetail() {
       return (res as FileMetadata[] | null) ?? []
     },
     enabled: isLoggedIn() && Boolean(scope),
-    staleTime: 30_000,
+    // A whole flight's listing is megabytes over a remote tunnel, and raw
+    // uploads rarely change: keep it while the user moves around the run
+    // (the Inputs card's refresh button refetches on demand).
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
   })
   const imageFiles = useMemo(
     () =>
@@ -1429,22 +1487,69 @@ export function RunDetail() {
   // (work done from another run, or outside this page), which left the step
   // "Ready to start" and every step after it locked while plot images
   // already existed.
+  // The same goes for the orthomosaic (one date's runs share a folder: a
+  // run covering both treatment blocks uses orthomosaics made by the
+  // blocks' own runs) and for the plot images.
   const hasActiveBoundaries = boundaryVersions.some((v) => v.is_active)
+  const hasOrtho =
+    pipeline?.type !== "ground" &&
+    buildOrthoVersions(run, scope, orthoFiles).length > 0
+  const hasPlotImages = plotImageFiles.length > 0
   const recorded: Record<string, { status: string }> = run?.steps ?? {}
-  const stepsState: Record<string, { status: string }> =
-    hasActiveBoundaries &&
-    !["completed", "running"].includes(
-      recorded.plot_boundary_prep?.status ?? "",
+  const stepsState: Record<string, { status: string }> = { ...recorded }
+  for (const [key, present] of [
+    ["orthomosaic", hasOrtho],
+    ["plot_boundary_prep", hasActiveBoundaries],
+    ["split_orthomosaic", hasPlotImages],
+  ] as const) {
+    if (
+      present &&
+      !["completed", "running"].includes(recorded[key]?.status ?? "")
     )
-      ? { ...recorded, plot_boundary_prep: { status: "completed" } }
-      : recorded
+      stepsState[key] = { status: "completed" }
+  }
   const nextKey = getNextStep(steps, stepsState)
+  // Where a queued job stands: which worker would take it and whether this
+  // app can reach the cluster at all. A job that will not start for a while
+  // must not look like one that is running.
+  const anyQueued = Object.keys(STEP_JOB_TYPE).some((k) => {
+    const last = run?.steps[k]?.jobIds?.at(-1)
+    return Boolean(last && queuedJobIds.has(last))
+  })
+  const computeQuery = useQuery({
+    queryKey: ["agent", "compute"],
+    queryFn: () => agentApi.compute(),
+    enabled: anyQueued,
+    refetchInterval: anyQueued ? 30_000 : false,
+    retry: false,
+  })
+  const queuedNote = (stepKey: string): string | null => {
+    const last = run?.steps[stepKey]?.jobIds?.at(-1)
+    if (!last || !queuedJobIds.has(last)) return null
+    const type = STEP_JOB_TYPE[stepKey]
+    if (computeQuery.isError)
+      return "Queued, but this app cannot reach the service that starts workers on the cluster (its connection or tunnel is down). The job waits until that is back; reconnect, or start a worker in Settings → Compute."
+    const c = computeQuery.data
+    if (!c) return "Queued: waiting for a worker to pick it up."
+    if (c.error || c.connection?.api === false)
+      return `Queued, but the cluster can't be reached from this computer right now${c.error ? ` (${c.error})` : ""}. Nothing will start until the connection is back.`
+    const part = c.parts.find((x) => type && x.job_types.includes(type))
+    if (!part) return "Queued: waiting for a worker to pick it up."
+    if (part.state === "running")
+      return `Queued: the ${part.label} worker is busy${part.jobs_running ? ` with ${part.jobs_running} job${part.jobs_running === 1 ? "" : "s"}` : ""}; this one is next in line.`
+    if (part.state === "starting" || part.state === "queued")
+      return `Queued: a ${part.label} worker is waiting for the cluster to start it${part.reason ? ` (Slurm: ${part.reason})` : ""}.`
+    return c.auto_start
+      ? `Queued: no ${part.label} worker is running; one is being started on the cluster.`
+      : `Queued: no ${part.label} worker is running. Start one in Settings → Compute.`
+  }
+
   const isAnyExecuting = Object.values(stepsState).some(
     (s) => s.status === "running",
   )
 
-  const handleRunStep = useCallback(
-    async (stepKey: string) => {
+  const runStepNow = useCallback(
+    async (stepKey: string, opts: RunStepOptions = {}) => {
       if (!run || !workspace) return
       const wired = steps.find((s) => s.key === stepKey)?.wiredIn
       if (wired && !isLive(wired)) {
@@ -1592,7 +1697,12 @@ export function RunDetail() {
         } catch {
           marking = null
         }
-        const plots = (marking?.selections ?? []).filter(isComplete)
+        // One plot per marked stretch per lane (several plots per frame);
+        // a re-stitch of chosen plots (e.g. the failed ones) keeps only those.
+        const plots = lanePlots(
+          (marking?.selections ?? []).filter(isComplete),
+          marking?.layout,
+        ).filter((pl) => !opts.plotIds || opts.plotIds.includes(pl.plot_id))
         if (!marking || plots.length === 0) {
           showErrorToast(
             "No saved plot markings for this population. Mark plots in the Plot Marking step first.",
@@ -1609,11 +1719,14 @@ export function RunDetail() {
         stitchingParams = {
           imagesPrefix: marking.track.imagesPrefix,
           msgsSyncedPath: marking.track.msgsSyncedPath,
-          plots: plots.map((s) => ({
-            plot_id: s.plot_id,
-            start_image: s.start_image as string,
-            end_image: s.end_image as string,
-            direction: s.direction || "down",
+          plots: plots.map((pl) => ({
+            plot_id: pl.plot_id,
+            start_image: pl.start_image,
+            end_image: pl.end_image,
+            direction: pl.direction,
+            ...(pl.lanes > 1
+              ? { lane: pl.lane, lanes: pl.lanes, split: pl.split }
+              : {}),
           })),
           // Fresh listing: an unloaded one would reuse (overwrite) v1.
           outputPrefix: nextStitchPrefix(
@@ -1623,7 +1736,10 @@ export function RunDetail() {
               scope,
             ),
           ),
-          settings: (p.agrowstitch_params ?? {}) as Record<string, unknown>,
+          settings: {
+            ...((p.agrowstitch_params ?? {}) as Record<string, unknown>),
+            ...(opts.settings ?? {}),
+          },
           customOptions: (p.custom_agrowstitch_options as string) ?? "",
           device: (p.device as string) ?? "cpu",
           numCpu: (p.num_cpu as number) ?? 0,
@@ -1644,16 +1760,35 @@ export function RunDetail() {
           const processed = processedFilesQuery.isSuccess
             ? (processedFilesQuery.data ?? [])
             : ((await processedFilesQuery.refetch()).data ?? [])
-          const stitched = stitchVersions(processed, scope).find(
-            (v) => v.combinedMosaic,
-          )
+          // The fullest stitch, newest on a tie: a re-stitch of a few failed
+          // plots is a newer version with only those plots, and must not
+          // stand in for the whole field.
+          const stitched = stitchVersions(processed, scope)
+            .filter((v) => v.combinedMosaic)
+            .sort((a, b) => b.plotImages.length - a.plotImages.length)[0]
           if (!stitched) {
             showErrorToast(
               "Run Stitching first — there are no georeferenced plots to associate.",
             )
             return
           }
+          // The placement the person saved on the Plot Boundary map, if any.
+          let corrections: Record<string, unknown> | undefined
+          try {
+            const res =
+              (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion(
+                {
+                  requestBody: {
+                    directory: correctionsDirectory(stitched.prefix),
+                  },
+                },
+              )) as { state_snapshot?: Record<string, unknown> }
+            corrections = res.state_snapshot
+          } catch {
+            corrections = undefined // none saved: plots go where the GPS puts them
+          }
           associateBoundaries = {
+            corrections,
             stitchPrefix: stitched.prefix,
             boundaries: splitBoundariesRef.current as GeoJSON.FeatureCollection,
             boundaryVersion: boundaryVersionRef.current ?? 0,
@@ -1749,6 +1884,26 @@ export function RunDetail() {
       pipeline?.type,
       importedDemPath,
     ],
+  )
+
+  // One start per step at a time. Submitting takes a few seconds (markings,
+  // listings, the job itself) before the step shows as running, and a second
+  // click in that gap used to queue a duplicate job.
+  const startingRef = useRef(new Set<string>())
+  const [starting, setStarting] = useState<string | null>(null)
+  const handleRunStep = useCallback(
+    async (stepKey: string, opts: RunStepOptions = {}) => {
+      if (startingRef.current.has(stepKey)) return
+      startingRef.current.add(stepKey)
+      setStarting(stepKey)
+      try {
+        await runStepNow(stepKey, opts)
+      } finally {
+        startingRef.current.delete(stepKey)
+        setStarting((k) => (k === stepKey ? null : k))
+      }
+    },
+    [runStepNow],
   )
 
   const handleStopStep = useCallback(
@@ -1985,35 +2140,20 @@ export function RunDetail() {
           </div>
         )}
 
-        {/* Scope is locked to the upload picked at run-creation time —
-            see RunScopeSummary. The Inputs card is a sanity readout
-            (does the path actually contain images?), not a configurator. */}
+        {/* Scope is locked to the upload picked at run-creation time; one
+            line says what the run is on and how many images it found. */}
         {(pipeline?.type === "aerial" || pipeline?.type === "ground") &&
           scope && (
             <div className="mb-6 space-y-4">
-              <RunScopeSummary scope={scope} />
+              <RunScopeSummary
+                scope={scope}
+                images={
+                  rawImagesQuery.isLoading
+                    ? "Looking for images…"
+                    : `${imageFiles.length.toLocaleString()} image${imageFiles.length === 1 ? "" : "s"} found`
+                }
+              />
               {run && <RunAgentCard runId={run.id} kind={pipeline.type} />}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Inputs</CardTitle>
-                  <CardDescription>
-                    Raw images expected at the prefix below.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
-                    {rawScopePrefix(scope)}
-                  </code>
-                  <p className="text-muted-foreground flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4" />
-                    {rawImagesQuery.isLoading
-                      ? "Looking for images…"
-                      : `${imageFiles.length} image${
-                          imageFiles.length === 1 ? "" : "s"
-                        } found`}
-                  </p>
-                </CardContent>
-              </Card>
             </div>
           )}
 
@@ -2061,6 +2201,10 @@ export function RunDetail() {
                     events={events}
                     lastProgress={lastProgress}
                     isExecuting={isAnyExecuting}
+                    isStarting={starting === step.key}
+                    queuedNote={
+                      status === "running" ? queuedNote(step.key) : null
+                    }
                     errorMessage={run?.steps[step.key]?.error}
                     warning={capabilityWarningForStep(step.key, capabilities)}
                     onRunStep={() => handleRunStep(step.key)}
@@ -2132,6 +2276,17 @@ export function RunDetail() {
                         <StitchResultsPanel
                           files={processedFilesQuery.data ?? []}
                           scope={scope}
+                          restitching={
+                            starting === "stitching" ||
+                            getStepStatus("stitching", stepsState, steps) ===
+                              "running"
+                          }
+                          onRestitch={(plotIds, settings) =>
+                            void handleRunStep("stitching", {
+                              plotIds,
+                              settings,
+                            })
+                          }
                         />
                       ) : step.wiredIn && !isLive(step.wiredIn) ? (
                         <p className="text-muted-foreground rounded border bg-muted/30 p-2 text-xs">

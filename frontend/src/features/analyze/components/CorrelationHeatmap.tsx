@@ -12,11 +12,38 @@ import type {
   CorrelationResponse,
   MatrixResponse,
 } from "../lib/multivariate"
-import { divergingColor, linearScale, textOn } from "../lib/svg"
+import { linearScale } from "../lib/svg"
 
 interface Props {
   matrix: MatrixResponse
   correlation: CorrelationResponse
+  /** Scale the matrix to its container's width (dashboard cards) instead of
+   *  fixed-size cells in a scrolling box. */
+  fit?: boolean
+}
+
+/**
+ * Cell colours from the app's theme, so the matrix matches it in light and
+ * dark mode: the primary teal for traits that rise together, orange for
+ * traits that move opposite, fading to the card colour at 0.
+ */
+function cellFill(v: number | null): string {
+  if (v == null) return "var(--muted)"
+  const pct = Math.round(Math.min(1, Math.abs(v)) * 100)
+  // A fixed orange: the theme's chart colours change hue between modes.
+  const hue = v >= 0 ? "var(--primary)" : "oklch(0.7 0.17 50)"
+  // sRGB keeps the fade on one hue (oklch mixing drifts through lavender).
+  return `color-mix(in srgb, ${hue} ${pct}%, var(--card))`
+}
+
+function cellText(v: number | null): string {
+  if (v == null) return "var(--muted-foreground)"
+  return Math.abs(v) >= 0.55 ? "#fff" : "var(--foreground)"
+}
+
+/** Long trait names cut to fit beside the matrix; the full name is on hover. */
+function short(name: string, max: number): string {
+  return name.length > max ? `${name.slice(0, max - 1)}…` : name
 }
 
 type Method = "pearson" | "spearman"
@@ -25,7 +52,11 @@ const CELL = 56
 const LABEL_PAD = 140
 const TOP_PAD = 28
 
-export function CorrelationHeatmap({ matrix, correlation }: Props) {
+export function CorrelationHeatmap({
+  matrix,
+  correlation,
+  fit = false,
+}: Props) {
   const [method, setMethod] = useState<Method>("pearson")
   const [drill, setDrill] = useState<{ i: number; j: number } | null>(null)
 
@@ -41,8 +72,16 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
   }
 
   const n = m.trait_names.length
-  const width = LABEL_PAD + n * CELL + 16
-  const height = TOP_PAD + LABEL_PAD + n * CELL + 16
+  const maxChars = fit ? 22 : 28
+  const longest = Math.max(
+    ...m.trait_names.map((t) => short(t, maxChars).length),
+  )
+  // Label room from the longest (shortened) name, ~6.2 px per character.
+  const labelPad = fit ? Math.min(150, 12 + longest * 6.2) : LABEL_PAD
+  const topPad = fit ? Math.round(labelPad * 0.72) : LABEL_PAD
+  // Room on the right for the last column's label, which leans that way.
+  const width = labelPad + n * CELL + (fit ? topPad : 16)
+  const height = TOP_PAD + topPad + n * CELL + 16
 
   return (
     <section className="flex flex-col gap-3">
@@ -66,18 +105,29 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
         </span>
       </div>
 
-      <div className="overflow-auto rounded-md border" data-testid="mv-heatmap">
+      <div
+        className={fit ? "w-full" : "overflow-auto rounded-md border"}
+        data-testid="mv-heatmap"
+      >
         <svg
-          width={width}
-          height={height}
+          width={fit ? "100%" : width}
+          height={fit ? undefined : height}
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="xMinYMin meet"
+          // Fit: shrink to the box when large, never blow a small matrix up.
+          style={
+            fit
+              ? { maxWidth: width, maxHeight: 460, display: "block" }
+              : undefined
+          }
           role="img"
           aria-label="Trait correlation matrix"
         >
           {m.trait_names.map((name, j) => {
             // Pivot at the top-left of each column's cell strip; text starts
             // at pivot and rotates -45° so labels read up-and-to-the-right.
-            const px = LABEL_PAD + j * CELL + CELL / 2
-            const py = TOP_PAD + LABEL_PAD - 4
+            const px = labelPad + j * CELL + CELL / 2
+            const py = TOP_PAD + topPad - 4
             return (
               <text
                 key={`col-${name}`}
@@ -87,27 +137,29 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
                 transform={`rotate(-45, ${px}, ${py})`}
                 className="fill-foreground text-xs"
               >
-                {name}
+                <title>{name}</title>
+                {short(name, maxChars)}
               </text>
             )
           })}
           {m.trait_names.map((name, i) => (
             <text
               key={`row-${name}`}
-              x={LABEL_PAD - 6}
-              y={TOP_PAD + LABEL_PAD + i * CELL + CELL / 2 + 4}
+              x={labelPad - 6}
+              y={TOP_PAD + topPad + i * CELL + CELL / 2 + 4}
               textAnchor="end"
               className="fill-foreground text-xs"
             >
-              {name}
+              <title>{name}</title>
+              {short(name, maxChars)}
             </text>
           ))}
           {m.matrix.flatMap((row, i) =>
             row.map((value, j) => {
-              const cx = LABEL_PAD + j * CELL
-              const cy = TOP_PAD + LABEL_PAD + i * CELL
-              const bg = value == null ? "#eee" : divergingColor(value)
-              const fg = value == null ? "#666" : textOn(bg)
+              const cx = labelPad + j * CELL
+              const cy = TOP_PAD + topPad + i * CELL
+              const bg = cellFill(value)
+              const fg = cellText(value)
               return (
                 <g key={`${i}-${j}`}>
                   {/* biome-ignore lint/a11y/useSemanticElements: an SVG <rect> cannot be a <button> */}
@@ -117,7 +169,7 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
                     width={CELL}
                     height={CELL}
                     fill={bg}
-                    stroke="#fff"
+                    stroke="var(--card)"
                     strokeWidth={1}
                     role="button"
                     tabIndex={i !== j && value != null ? 0 : -1}
@@ -181,7 +233,7 @@ export function CorrelationHeatmap({ matrix, correlation }: Props) {
 
 function Legend() {
   const stops = useMemo(
-    () => [-1, -0.5, 0, 0.5, 1].map((v) => ({ v, color: divergingColor(v) })),
+    () => [-1, -0.5, 0, 0.5, 1].map((v) => ({ v, color: cellFill(v) })),
     [],
   )
   return (

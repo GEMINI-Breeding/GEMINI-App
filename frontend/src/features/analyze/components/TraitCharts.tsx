@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { chartTooltip } from "@/lib/chartTheme"
 import {
   fetchAnova,
   fetchGGE,
@@ -775,7 +776,7 @@ function Histogram({
           tick={{ fontSize: 11 }}
           allowDecimals={false}
         />
-        <Tooltip />
+        <Tooltip {...chartTooltip} />
         {seriesKeys.length > 1 && <Legend verticalAlign="top" />}
         {seriesKeys.map((key, i) => (
           <Bar

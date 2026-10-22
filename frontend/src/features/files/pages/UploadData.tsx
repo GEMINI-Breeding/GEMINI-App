@@ -21,6 +21,7 @@ import {
   ImportWizardDialog,
 } from "../components/ImportWizardDialog"
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
+import { type RecentUpload, RecentUploads } from "../components/RecentUploads"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
 import { UploadZone } from "../components/UploadZone"
 import { useResolveScope } from "../hooks/useUploadScope"
@@ -146,6 +147,40 @@ export function UploadData() {
     [resolveScope, scope.experiment],
   )
 
+  /** Fill the form from a recent upload of the same field; the date is left
+   *  for the new upload. Names match existing entries, which the form's
+   *  fields pick up as the existing ones (not new ones to create). */
+  const applyRecent = (r: RecentUpload) => {
+    setSelectedFileType(r.dataType)
+    setRgbTifPath(null)
+    setDemTifPath(null)
+    setWizardFiles(null)
+    const w = r.where
+    const named = (name: string): EntityChoice =>
+      name ? { kind: "new", name } : { kind: "none" }
+    setScope({
+      experiment: {
+        kind: "existing",
+        id: r.experiment.id,
+        name: r.experiment.name,
+      },
+      season: named(w.season),
+      location: named(w.site),
+      population: named(w.population),
+      platform: named(w.platform),
+      sensor: named(w.sensor),
+    })
+    setFormValues({
+      experiment: r.experiment.name,
+      season: w.season,
+      location: w.site,
+      population: w.population,
+      platform: w.platform,
+      sensor: w.sensor,
+      date: "",
+    })
+  }
+
   const handleValueChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }))
   }
@@ -254,6 +289,7 @@ export function UploadData() {
         <div className="grid grid-cols-2 gap-8 items-start">
           <div className="space-y-6">
             <DataTypes
+              value={selectedFileType}
               onChange={(t) => {
                 setSelectedFileType(t)
                 setRgbTifPath(null)
@@ -268,6 +304,7 @@ export function UploadData() {
               onScopeChange={handleScopeChange}
               onValueChange={handleValueChange}
             />
+            <RecentUploads onUse={applyRecent} />
           </div>
 
           <div className="space-y-6">

@@ -47,6 +47,46 @@ function sameField(a: string, b: string): boolean {
   )
 }
 
+/**
+ * How close a saved layout's directory is to the one being edited, highest
+ * first: the same field (site and population) matters most, then the same
+ * season and experiment; ties go to the nearest date. A 2026 sorghum layout
+ * is rarely what a 2023 legume flight needs.
+ */
+export function closeness(candidate: string, current: string): number {
+  const a = describeDirectory(candidate)
+  const b = describeDirectory(current)
+  let score = 0
+  if (a.site && a.site === b.site) score += 8
+  if (a.population && a.population === b.population) score += 8
+  if (a.season && a.season === b.season) score += 4
+  if (a.experiment && a.experiment === b.experiment) score += 2
+  if (a.platform && a.platform === b.platform) score += 1
+  return score
+}
+
+function daysApart(x?: string, y?: string): number {
+  const dx = Date.parse(x ?? "")
+  const dy = Date.parse(y ?? "")
+  return Number.isNaN(dx) || Number.isNaN(dy)
+    ? Number.POSITIVE_INFINITY
+    : Math.abs(dx - dy) / 86_400_000
+}
+
+/** Saved versions in the order to offer them: best candidates first. */
+export function rankCandidates<
+  T extends { directory: string; version: number },
+>(rows: T[], current: string): T[] {
+  const date = describeDirectory(current).date
+  return [...rows].sort(
+    (p, q) =>
+      closeness(q.directory, current) - closeness(p.directory, current) ||
+      daysApart(describeDirectory(p.directory).date, date) -
+        daysApart(describeDirectory(q.directory).date, date) ||
+      q.version - p.version,
+  )
+}
+
 export function BoundaryImportPicker({
   directory,
   onImport,
@@ -70,19 +110,12 @@ export function BoundaryImportPicker({
 
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    return data
-      .filter((v) => v.directory !== directory && v.plot_count > 0)
-      .filter((v) => !q || v.directory.toLowerCase().includes(q))
-      .map((v) => ({ ...v, same: sameField(v.directory, directory) }))
-      .sort((a, b) =>
-        a.same !== b.same
-          ? a.same
-            ? -1
-            : 1
-          : describeDirectory(a.directory).date.localeCompare(
-              describeDirectory(b.directory).date,
-            ),
-      )
+    return rankCandidates(
+      data
+        .filter((v) => v.directory !== directory && v.plot_count > 0)
+        .filter((v) => !q || v.directory.toLowerCase().includes(q)),
+      directory,
+    ).map((v) => ({ ...v, same: sameField(v.directory, directory) }))
   }, [data, directory, filter])
 
   // The crops in the picked version (from each plot's design properties).
@@ -152,8 +185,10 @@ export function BoundaryImportPicker({
     <div className="space-y-2" data-testid="boundary-import-picker">
       <p className="text-muted-foreground text-xs">
         Load boundaries saved for another date, sensor or experiment into the
-        editor. Check they line up with this orthomosaic, adjust if needed, then
-        save — nothing is written until you do.
+        editor. The closest matches to this flight (same field, season and
+        nearest date) are listed first. Check they line up with this
+        orthomosaic, adjust if needed, then save — nothing is written until you
+        do.
       </p>
       <Input
         placeholder="Filter by experiment, site, date…"

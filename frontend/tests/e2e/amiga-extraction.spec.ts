@@ -77,6 +77,11 @@ test.describe("Amiga .bin full extraction", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
 
     // FileRow encodes the full object_name in `data-testid="download-<obj>"`,
     // so the button matching `…/report.txt` for our experiment slug uniquely

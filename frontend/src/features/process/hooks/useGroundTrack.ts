@@ -8,6 +8,9 @@
  *  - Direct: when the run names its datasets, each one's
  *    `{id}/RGB/Metadata/msgs_synced.csv` is read and its frame names taken
  *    from it. One small request per dataset, whatever the track's size.
+ *    A run that does not name its datasets (older runs) tries the
+ *    experiment's uploads that can be at this scope instead: an upload's
+ *    folder is the first 8 hex characters of its dataset id.
  *  - Listing: otherwise (or when a dataset has no msgs_synced.csv there,
  *    e.g. a handheld pass) the whole raw scope is listed. That listing is
  *    recursive — fine for hundreds of files, but it never returned for a
@@ -17,9 +20,16 @@
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
-import { type FileMetadata, FilesService } from "@/client"
+import {
+  type DatasetOutput,
+  type ExperimentOutput,
+  ExperimentsService,
+  type FileMetadata,
+  FilesService,
+} from "@/client"
 import { authHeaders } from "@/components/Common/PlotImage"
 import { apiUrl, DEFAULT_BUCKET } from "@/features/files/lib/download"
+import { classify } from "@/features/files/lib/experimentContents"
 import {
   findGroundTracks,
   type GroundTrack,
@@ -68,7 +78,43 @@ export function useGroundTrack(
   // Keyed on strings, not the scope/array objects: callers often build
   // those per render, and a new track object per render re-runs every
   // effect downstream (it looped the crop tool's image loading).
-  const idsKey = (datasetShortIds ?? []).join(",")
+  const namedKey = (datasetShortIds ?? []).join(",")
+
+  // No datasets named: the experiment's uploads that may be at this scope.
+  const candidates = useQuery<string[]>({
+    queryKey: ["ground-track", "candidates", rawPrefix],
+    queryFn: async () => {
+      const exps =
+        ((await ExperimentsService.apiExperimentsAllGetAllExperiments({
+          limit: 500,
+          offset: 0,
+        })) as ExperimentOutput[] | null) ?? []
+      const exp = exps.find((e) => e.experiment_name === scope?.experiment)
+      if (!exp?.id) return []
+      const datasets =
+        ((await ExperimentsService.apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets(
+          { experimentId: String(exp.id) },
+        )) as DatasetOutput[] | null) ?? []
+      return datasets
+        .map(classify)
+        .filter((e) => {
+          if (e.kind !== "upload") return false
+          const w = e.where
+          // Facts recorded: must be this scope. Not recorded (older uploads):
+          // could be; a wrong guess costs one small 404.
+          return w
+            ? w.date === scope?.date &&
+                w.site === scope?.location &&
+                w.platform === scope?.platform
+            : true
+        })
+        .map((e) => String(e.dataset.id).replace(/-/g, "").slice(0, 8))
+        .filter((id) => /^[0-9a-f]{8}$/.test(id))
+    },
+    enabled: isLoggedIn() && Boolean(rawPrefix) && !namedKey,
+    staleTime: 10 * 60_000,
+  })
+  const idsKey = namedKey || (candidates.data ?? []).join(",")
 
   const direct = useQuery<DirectTrack[]>({
     queryKey: ["ground-track", "direct", rawPrefix, idsKey],
@@ -97,7 +143,9 @@ export function useGroundTrack(
   const useDirect = (direct.data?.length ?? 0) > 0
   // List only when the direct way is not available or found nothing.
   const needListing =
-    Boolean(rawPrefix) && (!idsKey || (direct.isFetched && !useDirect))
+    Boolean(rawPrefix) &&
+    Boolean(namedKey || candidates.isFetched || candidates.isError) &&
+    (!idsKey || (direct.isFetched && !useDirect))
 
   const listing = useQuery<FileMetadata[]>({
     queryKey: ["files", "list", rawPrefix],
@@ -159,6 +207,8 @@ export function useGroundTrack(
       : listing.isSuccess && (!track?.msgsSyncedPath || trackCsv.isFetched),
     isLoading: useDirect
       ? false
-      : direct.isLoading || (needListing && listing.isLoading),
+      : candidates.isLoading ||
+        direct.isLoading ||
+        (needListing && listing.isLoading),
   }
 }

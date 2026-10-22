@@ -14,6 +14,7 @@ import csv
 import json
 import math
 import re
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
@@ -101,6 +102,7 @@ class Ortho:
                 break
             frame = i
         im.seek(frame)
+        self.local, self.frame = local, frame
         self.image = im.convert("RGBA")
         self.w, self.h = self.image.size
         k = full_w / self.w
@@ -135,6 +137,27 @@ class Ortho:
         x, y = self.proj(lon, lat)
         return (x - self.x0) / self.px_x, (self.y0 - y) / self.px_y
 
+    def coverage(self, ring: list) -> float:
+        """Share of a polygon (lon/lat ring) that has image on this
+        orthomosaic, from a 7x7 grid of points across it."""
+        import numpy as np
+
+        if not hasattr(self, "_alpha"):
+            self._alpha = np.asarray(self.image)[..., 3] > 0
+        pts = [self.pixel(p[0], p[1]) for p in ring[:4]]
+        if len(pts) < 4:
+            return 0.0
+        (x0, y0), (x1, y1), (x2, y2), (x3, y3) = pts
+        hit = 0
+        for u in np.linspace(0.1, 0.9, 7):
+            for w in np.linspace(0.1, 0.9, 7):
+                x = (1 - u) * (1 - w) * x0 + u * (1 - w) * x1 + u * w * x2 + (1 - u) * w * x3
+                y = (1 - u) * (1 - w) * y0 + u * (1 - w) * y1 + u * w * y2 + (1 - u) * w * y3
+                c, r = int(x), int(y)
+                if 0 <= r < self._alpha.shape[0] and 0 <= c < self._alpha.shape[1] and self._alpha[r, c]:
+                    hit += 1
+        return hit / 49.0
+
     def lonlat(self, col: float, row: float) -> list[float]:
         x, y = self.x0 + col * self.px_x, self.y0 - row * self.px_y
         if not self.zone:
@@ -163,8 +186,376 @@ def _smooth(a, k: int):
     return np.convolve(np.pad(a, k // 2, mode="edge"), np.ones(k) / k, mode="valid")[: len(a)]
 
 
+def furrow_grid(soil, m: float, pitch_hint_m: Optional[float] = None) -> Optional[dict]:
+    """The furrows in a bare-ground brightness profile across the field
+    (ridges light, furrows dark; NaN where there is no bare ground):
+    {"pitch_px", "phase_px" (a furrow's position), "strength"}, or None."""
+    import numpy as np
+
+    p = np.asarray(soil, dtype=float)
+    ok = np.isfinite(p)
+    if ok.sum() * m < 6:
+        return None
+    fill = np.where(ok, p, np.nanmean(p))
+    q = _smooth(fill, 0.08 / m) - _smooth(fill, 3.0 / m)
+    q[~ok] = 0.0
+    w = ok.astype(float)
+    lo_m, hi_m = (0.95 * pitch_hint_m, 1.05 * pitch_hint_m) if pitch_hint_m else (0.6, 3.2)
+    ac = []
+    for L in range(max(2, int(lo_m / m)), int(hi_m / m) + 2):
+        if L >= len(q) - 2:
+            break
+        a, b, ww = q[:-L], q[L:], w[:-L] * w[L:]
+        if ww.sum() * m < 3:
+            break
+        ac.append((float((a * b * ww).sum() / (np.sqrt((a * a * ww).sum() * (b * b * ww).sum()) + 1e-12)), L))
+    peaks = [i for i in range(1, len(ac) - 1) if ac[i][0] >= ac[i - 1][0] and ac[i][0] >= ac[i + 1][0]]
+    if not peaks:
+        return None
+    i = max(peaks, key=lambda j: ac[j][0])
+    corr, L = ac[i]
+    # A peak at half the spacing almost as strong: that is the furrow spacing.
+    half = [j for j in peaks if abs(ac[j][1] - L / 2) <= 2 and ac[j][0] >= 0.8 * corr]
+    if half and not pitch_hint_m:
+        i = half[0]
+        corr, L = ac[i]
+    (c0, _), (c2, _) = ac[i - 1], ac[i + 1]
+    den = c0 - 2 * corr + c2
+    pitch = L + (0.5 * (c0 - c2) / den if den < 0 else 0.0)
+    if corr < 0.25:
+        return None
+    # Where the furrows are: fold the profile at that spacing; the furrow is the dark phase.
+    idx = np.flatnonzero(ok)
+    nb = max(8, int(pitch))
+    bins = ((idx % pitch) / pitch * nb).astype(int) % nb
+    tot = np.bincount(bins, weights=q[idx], minlength=nb)
+    cnt = np.bincount(bins, minlength=nb)
+    prof = np.where(cnt > 0, tot / np.maximum(cnt, 1), 0.0)
+    k = max(1, nb // 12)
+    circ = np.convolve(np.concatenate([prof[-k:], prof, prof[:k]]), np.ones(2 * k + 1) / (2 * k + 1), "same")[k:-k]
+    phase = float(np.argmin(circ) + 0.5) / nb * pitch
+    return {"pitch_px": float(pitch), "phase_px": phase, "strength": round(corr, 2)}
+
+
+def fit_beds(prof, u0: int, u1: int, beds: int, m: float, grid: Optional[dict] = None,
+             pitch_m: Optional[float] = None, border_beds: Optional[list] = None,
+             border_side: Optional[int] = None) -> dict:
+    """Bed edges across a planted block (pixels on the profile's axis).
+
+    Splitting the block evenly into the design's beds goes wrong when the
+    block holds more beds than the design (border beds) or a weedy strip:
+    each box then spans a furrow.
+
+    `grid`: the furrows read from bare ground at the field's ends (see
+    furrow_grid), visible all season even after the canopy closes. Then
+    the planted beds are counted between the furrows and the design's
+    beds taken from among them; the rest are border beds, split evenly
+    between the sides, an odd one on the side whose outer bed is weaker
+    (`border_beds` = [first side, other side] overrides; `border_side`
+    0/1 puts them all on the first/other side). Without it: the spacing is read from
+    the plants' own repeat, or `pitch_m` (measured on an earlier date) is
+    used, else the block is split evenly. Returns {"edges": [n+1 pixels],
+    "pitch_px", "method", "source", "beds_in_block", "border_beds"}."""
+    import numpy as np
+
+    n = max(1, int(beds))
+    expected = (u1 - u0) / n
+    even = {"edges": [u0 + k * expected for k in range(n + 1)], "pitch_px": expected, "method": "even"}
+
+    def centred(pitch, phase, src):
+        # Furrows at phase + j*pitch. Planted beds: those with at least half
+        # the cover of the well-grown ones (a weedy or bare strip is not a bed).
+        p = np.asarray(prof, dtype=float)
+        j0 = int(np.floor((u0 - phase) / pitch)) - 2
+        j1 = int(np.ceil((u1 - phase) / pitch)) + 2
+        cover = {}
+        for j in range(j0, j1):
+            a, b = int(phase + j * pitch), int(phase + (j + 1) * pitch)
+            if 0 <= a < b <= len(p):
+                cover[j] = float(p[a:b].mean())
+        top = sorted(cover.values(), reverse=True)[:n]
+        mid = int(round(((u0 + u1) / 2 - phase) / pitch - 0.5))
+        run: list = []
+        if top and mid in cover:
+            cut = 0.5 * float(np.median(top))
+            lo_j = hi_j = mid
+            while cover.get(lo_j - 1, 0) >= cut:
+                lo_j -= 1
+            while cover.get(hi_j + 1, 0) >= cut:
+                hi_j += 1
+            run = list(range(lo_j, hi_j + 1))
+        if len(run) < n:
+            js = int(round(((u0 + u1) / 2 - phase) / pitch - n / 2))
+            left = right = 0
+        else:
+            extra = len(run) - n
+            if border_beds is not None:
+                left = int(border_beds[0])
+            elif border_side is not None:
+                # Border beds all on one side (the field's outer edge): the
+                # design's beds run up to the other end of the planted beds.
+                left = extra if border_side == 0 else 0
+            elif extra % 2 == 0:
+                left = extra // 2
+            else:
+                # One border bed more on one side: the weaker outer bed is the border.
+                left = extra // 2 + (1 if cover[run[0]] < cover[run[-1]] else 0)
+            left = max(0, min(extra, left))
+            js = run[0] + left
+            right = extra - left
+        return {"edges": [phase + (js + i) * pitch for i in range(n + 1)], "pitch_px": float(pitch),
+                "method": "furrows", "source": src, "beds_in_block": len(run) or None,
+                "border_beds": [left, right],
+                "bed_cover": [round(cover[j], 2) for j in run]}
+
+    if grid:
+        return centred(grid["pitch_px"], grid["phase_px"], grid.get("source", "furrows at the field's ends"))
+    if expected * m < 0.3 or len(prof) < 10:
+        return even
+    lo = int(max(0, u0 - 0.6 * expected))
+    hi = int(min(len(prof), u1 + 0.6 * expected))
+    if pitch_m:
+        # Spacing known, furrows not seen: the design's beds in the middle of the block.
+        pitch = pitch_m / m
+        return {**centred(pitch, (u0 + u1) / 2 - n / 2 * pitch, "bed spacing measured earlier this season"),
+                "method": "known spacing"}
+
+    q = _smooth(np.asarray(prof, dtype=float), 0.15 / m)
+    seg = q[lo:hi] - q[lo:hi].mean()
+    if seg.std() < 1e-6:
+        return even
+    lags = range(max(2, int(0.6 / m)), max(3, int(min(3.5 / m, 1.3 * expected))))
+    ac = []
+    for L in lags:
+        if L >= len(seg) - 2:
+            break
+        a, b = seg[:-L], seg[L:]
+        ac.append((float((a * b).mean() / (a.std() * b.std() + 1e-9)), L))
+    peaks = [(c, L) for i, (c, L) in enumerate(ac)
+             if 0 < i < len(ac) - 1 and c >= ac[i - 1][0] and c >= ac[i + 1][0]]
+    if not peaks:
+        return even
+    corr, pitch = max(peaks)
+    # Two plant rows per bed can repeat at half the bed spacing.
+    if pitch < 0.6 * expected and any(abs(L - 2 * pitch) <= 2 for _, L in peaks):
+        pitch *= 2
+    if corr < 0.15 or not 0.5 * expected <= pitch <= 1.15 * expected:
+        return even
+    sm = q
+    # Where the beds sit: most plant inside the middle of each bed, least at its furrows.
+    best, start = None, lo
+    for s0 in range(lo, int(hi - n * pitch) + 1):
+        inner = sum(sm[int(s0 + (k + 0.2) * pitch): int(s0 + (k + 0.8) * pitch)].mean() for k in range(n))
+        edge = sum(sm[min(len(sm) - 1, int(s0 + k * pitch))] for k in range(n + 1))
+        score = inner - 0.5 * edge
+        if best is None or score > best:
+            best, start = score, s0
+    edges = []
+    for k in range(n + 1):
+        c = start + k * pitch
+        a, b = int(max(0, c - 0.25 * pitch)), int(min(len(sm), c + 0.25 * pitch + 1))
+        if b <= a:
+            edges.append(c)
+            continue
+        # The furrow's middle: the centre of the low stretch near the expected
+        # edge (a wide furrow has no single lowest point, only noise).
+        w = sm[a:b]
+        low = np.flatnonzero(w <= w.min() + 0.25 * (w.max() - w.min()))
+        edges.append(float(a + low.mean()))
+    # The outer edges have bare ground beyond them, not a furrow: one bed
+    # spacing from their inner neighbours.
+    if n >= 2:
+        edges[0] = edges[1] - pitch
+        edges[n] = edges[n - 1] + pitch
+    # Keep edges in order and every bed at least half the spacing wide.
+    for k in range(1, n + 1):
+        if edges[k] - edges[k - 1] < 0.5 * pitch:
+            edges[k] = edges[k - 1] + pitch
+    return {"edges": edges, "pitch_px": float(pitch), "method": "furrows", "source": "plants"}
+
+
+def _end_soil(ortho: "Ortho", long_is_rows: bool, spans: list, target_m: float = 0.012):
+    """Bare-ground brightness across the field over `spans` (along-field
+    ranges, in the overview's pixels) from a finer overview (~1 cm/px):
+    furrows are a few centimetres of shadow. Returns (profile, fine px per
+    overview px) or (None, 1)."""
+    import numpy as np
+    from PIL import Image
+
+    im = Image.open(ortho.local)
+    pick = None
+    for i in range(getattr(im, "n_frames", 1)):
+        im.seek(i)
+        fw, fh = im.size
+        mf = ortho.metres_per_px * ortho.w / fw
+        if mf <= target_m * 1.4 and fw * fh <= 60e6:
+            pick = i                                   # coarsest one that is fine enough
+    if pick is None:
+        return None, 1.0
+    im.seek(pick)
+    fw, fh = im.size
+    k = fw / ortho.w
+    a = np.asarray(im.convert("RGBA"))
+    prof_sum = np.zeros(fw if long_is_rows else fh)
+    prof_n = np.zeros_like(prof_sum)
+    for s0, s1 in spans:
+        f0, f1 = int(s0 * k), int(s1 * k)
+        blk = a[f0:f1] if long_is_rows else a[:, f0:f1].transpose(1, 0, 2)
+        if blk.size == 0:
+            continue
+        rgb = blk[..., :3].astype(np.float32) / 255.0
+        exg = (2 * rgb[..., 1] - rgb[..., 0] - rgb[..., 2]) / (rgb.sum(axis=2) + 1e-6)
+        bare = (blk[..., 3] > 0) & (exg < 0.05)
+        prof_sum += np.where(bare, rgb.mean(axis=2), 0).sum(axis=0)
+        prof_n += bare.sum(axis=0)
+    rows = sum(int((s1 - s0) * k) for s0, s1 in spans)
+    if rows == 0:
+        return None, k
+    with np.errstate(invalid="ignore", divide="ignore"):
+        prof = np.where(prof_n >= 0.3 * rows, prof_sum / prof_n, np.nan)
+    return prof, k
+
+
+def _coverage_check():
+    """covers(ortho, feature) for multiortho.assign, from each orthomosaic's
+    overview (loaded once)."""
+    loaded: dict = {}
+
+    def covers(o: dict, feature: dict) -> float:
+        if o["path"] not in loaded:
+            try:
+                loaded[o["path"]] = Ortho(o["path"])
+            except Exception:
+                loaded[o["path"]] = None
+        ortho = loaded[o["path"]]
+        ring = ((feature.get("geometry") or {}).get("coordinates") or [[]])[0]
+        return ortho.coverage(ring) if ortho is not None else 1.0
+
+    return covers
+
+
+def _local_copy(path: str) -> Path:
+    WORK.mkdir(parents=True, exist_ok=True)
+    local = WORK / (re.sub(r"[^A-Za-z0-9._-]", "_", path)[-150:])
+    if not local.exists():
+        local.write_bytes(client().download(path))
+    return local
+
+
+def furrow_track(dsm_file, ortho: "Ortho", long_is_rows: bool, windows: list, u_lo: float, u_hi: float,
+                 pitch_hint_m: Optional[float] = None) -> Optional[dict]:
+    """The furrows from the elevation model (ODM's DSM): low ground between
+    raised beds, whatever the light (an RGB furrow can be confused with a
+    ridge's shadow). Beds are rarely exactly parallel to the image, so the
+    furrows' position is measured in windows along the field (`windows`:
+    (start, end, "end" | "alley") in the overview's along-field pixels) and
+    fitted as straight lines: furrow j at across = phase + slope*along +
+    j*pitch, in overview pixels. Returns {"pitch_px", "phase_px", "slope",
+    "strength", "windows"} or None."""
+    import numpy as np
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    im = Image.open(dsm_file)
+    tags = im.tag_v2
+    scale, tie = tags.get(33550), tags.get(33922)
+    if not scale or not tie or not ortho.zone:
+        return None
+    z = np.array(im, dtype=np.float32)
+    nodata = tags.get(42113)
+    z[~np.isfinite(z) | (z < -9000)] = np.nan
+    if nodata not in (None, ""):
+        try:
+            z[z == float(nodata)] = np.nan
+        except ValueError:
+            pass
+    sx, sy = float(scale[0]), float(scale[1])
+    X0, Y0 = float(tie[3]) - float(tie[0]) * sx, float(tie[4]) + float(tie[1]) * sy
+    # DSM pixel -> overview pixel: col = ox + j*kx, row = oy + i*ky
+    kx, ky = sx / ortho.px_x, sy / ortho.px_y
+    ox, oy = (X0 - ortho.x0) / ortho.px_x, (ortho.y0 - Y0) / ortho.px_y
+    if not long_is_rows:                      # along = columns, across = rows
+        z = z.T
+        kx, ky, ox, oy = ky, kx, oy, ox
+    mz = sx                                     # metres per DSM pixel
+    m = ortho.metres_per_px
+    j0 = max(0, int((u_lo - 2.0 / m - ox) / kx))
+    j1 = min(z.shape[1], int((u_hi + 2.0 / m - ox) / kx) + 1)
+    if j1 - j0 < 4.0 / mz:
+        return None
+    u = ox + np.arange(j0, j1) * kx              # across position of each DSM column, overview px
+
+    def profile(a0, a1):
+        i0, i1 = max(0, int((a0 - oy) / ky)), min(z.shape[0], int((a1 - oy) / ky))
+        if i1 - i0 < 10:
+            return None
+        blk = z[i0:i1:max(1, (i1 - i0) // 200), j0:j1]
+        cnt = np.isfinite(blk).sum(axis=0)
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)       # columns with no ground at all
+            prof = np.where(cnt >= 0.5 * blk.shape[0], np.nanmedian(blk, axis=0), np.nan)
+        ok = np.isfinite(prof)
+        if ok.sum() * mz < 3:
+            return None
+        w = int(3.0 / mz)
+        num = np.convolve(np.where(ok, prof, 0.0), np.ones(w), "same")
+        den = np.convolve(ok.astype(float), np.ones(w), "same")
+        return np.where(ok & (den > 0.5 * w), prof - num / np.maximum(den, 1), np.nan)
+
+    profs = [(a0, a1, kind, profile(a0, a1)) for a0, a1, kind in windows]
+    profs = [x for x in profs if x[3] is not None]
+    if not profs:
+        return None
+    # Spacing: bare ground at the ends shows it best; the canopy's dips otherwise.
+    pitches = []
+    for kind in ("end", "alley"):
+        for _, _, k_, pr in profs:
+            if k_ != kind:
+                continue
+            g = furrow_grid(pr, mz, pitch_hint_m)
+            if g:
+                pitches.append((g["strength"], g["pitch_px"] * mz))
+        if pitches:
+            break
+    if not pitches:
+        return None
+    pitch_m = float(sum(c * p for c, p in pitches) / sum(c for c, _ in pitches))
+    if pitch_hint_m:
+        pitch_m = float(pitch_hint_m)           # measured earlier this season: beds do not move
+    P = pitch_m / m
+    # Each window's furrow phase as a phasor; the slope that lines them up.
+    zs, ws, ac = [], [], []
+    for a0, a1, kind, pr in profs:
+        ok = np.isfinite(pr)
+        if ok.sum() * mz < 2 * pitch_m:
+            continue
+        c = np.sum(pr[ok] * np.exp(2j * np.pi * u[ok] / P)) / ok.sum()
+        if abs(c) == 0:
+            continue
+        zs.append(-c / abs(c))                    # furrows are the low points
+        ws.append(abs(c) * (2.0 if kind == "end" else 1.0))
+        ac.append((a0 + a1) / 2)
+    if len(zs) < 2:
+        return None
+    zs, ws, ac = np.array(zs), np.array(ws), np.array(ac)
+    best = None
+    for slope in np.linspace(-0.03, 0.03, 601):
+        tot = np.sum(ws * zs * np.exp(-2j * np.pi * slope * ac / P))
+        if best is None or abs(tot) > abs(best[1]):
+            best = (slope, tot)
+    slope, tot = best
+    strength = float(abs(tot) / ws.sum())
+    if strength < 0.5:
+        return None
+    phase = float((np.angle(tot) / (2 * np.pi)) % 1.0 * P)
+    return {"pitch_px": P, "phase_px": phase, "slope": float(slope), "strength": round(strength, 2),
+            "windows": len(zs)}
+
+
 def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", border_tiers: Optional[int] = None,
-                block: int = 0, plot_length_m: Optional[float] = None) -> dict:
+                block: int = 0, plot_length_m: Optional[float] = None, bed_pitch_m: Optional[float] = None,
+                border_beds: Optional[list] = None, border_beds_at: Optional[str] = None,
+                dsm_file=None) -> dict:
     """Locate the planted block and its tier strips from vegetation.
 
     Tiers are the strips separated by alleys along the field's long axis;
@@ -212,16 +603,83 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
     # Along the field, inside that block: strips of plants separated by alleys.
     along = _smooth(v[:, u0:u1].mean(axis=1), 0.25 / m)
     used, found, note = _tier_strips(along, m, tiers, border_tiers)
+
+    # Beds from the furrows between them, not an even split of the block.
+    # Inside the plots the canopy can hide the furrows; bare ground in the
+    # alleys between tiers and at the ends of the beds still shows them.
+    t0, t1 = used[0][0], used[-1][1]
+    # Beyond the outermost planted strips (border tiers included): headland.
+    planted = np.flatnonzero(along > 0.30 * along.max())
+    p0, p1 = (int(planted[0]), int(planted[-1])) if planted.size else (t0, t1)
+    reach = int(4.0 / m)
+    ends = [(max(0, p0 - reach), max(0, p0 - int(0.5 / m))), (min(v.shape[0], p1 + int(0.5 / m)), min(v.shape[0], p1 + reach))]
+    grid, track, a_ref = None, None, (t0 + t1) / 2
+    if dsm_file:
+        try:
+            # Bare ground: the field's ends and the alleys between tiers.
+            wins = [(e0, e1, "end") for e0, e1 in ends if e1 - e0 > 0.5 / m] + \
+                [(e0, s1, "alley") for (_, e0), (s1, _) in zip(used[:-1], used[1:]) if (s1 - e0) * m > 0.3]
+            track = furrow_track(dsm_file, ortho, long_is_rows, wins, u0, u1, bed_pitch_m)
+        except Exception:
+            track = None
+    if track:
+        # Furrows at phase + slope*along + j*pitch: straighten the plants by the
+        # slope, so the beds are upright where they are counted.
+        grid = {"pitch_px": track["pitch_px"], "phase_px": track["phase_px"] + track["slope"] * a_ref,
+                "source": "furrows in the elevation model"}
+    else:
+        try:
+            soil, k = _end_soil(ortho, long_is_rows, [e for e in ends if e[1] - e[0] > 0.5 / m])
+            if soil is not None:
+                g = furrow_grid(soil, m / k, bed_pitch_m)
+                if g:
+                    grid = {"pitch_px": g["pitch_px"] / k, "phase_px": g["phase_px"] / k,
+                            "source": "furrows at the field's ends"}
+        except Exception:
+            grid = None
+    slope = track["slope"] if track else 0.0
+    vt = v[t0:t1, :].astype(np.float32)
+    if slope:
+        for i in range(vt.shape[0]):
+            sh = int(round(-slope * (t0 + i - a_ref)))
+            if sh:
+                vt[i] = np.roll(vt[i], sh)
+    fit = fit_beds(vt.mean(axis=0), int(u0), int(u1), beds, m, grid=grid, pitch_m=bed_pitch_m,
+                   border_beds=border_beds,
+                   border_side=({"west": 0, "north": 0, "east": 1, "south": 1}.get(str(border_beds_at).lower())
+                                if border_beds_at else None))
+    bed_w = fit["pitch_px"]
+    if fit["method"] != "even":
+        u0, u1 = int(fit["edges"][0]), int(fit["edges"][-1])
+        msg = (f"beds fitted to the furrows ({bed_w * m:.2f} m apart, from {fit.get('source', 'plants')})"
+               if fit["method"] == "furrows" else f"beds {bed_w * m:.2f} m apart (spacing measured earlier this season)")
+        if "border_beds" in fit:
+            bl, br = fit["border_beds"]
+            msg += f"; {fit['beds_in_block']} planted beds (cover {fit.get('bed_cover')})"
+            sides = ("west", "east") if long_is_rows else ("north", "south")
+            if bl or br:
+                msg += f", the outer {bl} ({sides[0]}) and {br} ({sides[1]}) taken as border beds"
+            if border_beds is None and not border_beds_at and (bl + br) % 2:
+                msg += (f" - CHECK: one border bed more on one side; the {sides[0] if bl > br else sides[1]} "
+                        "outer bed was weaker so taken as border (border_beds=[first side, other side] to set it)")
+            if not fit.get("beds_in_block"):
+                msg += f" - WARNING: fewer planted beds than the design's {beds}; check the overlay"
+        if slope:
+            msg += f"; beds slant {abs(slope) * (t1 - t0) * m:.2f} m across the field's length (followed)"
+        note = (note + "; " if note else "") + msg
+
     used, even_note = _even_tiers(used, m, plot_length_m)
     note = "; ".join(x for x in (note, even_note) if x)
-    bed_w = (u1 - u0) / beds
     if not 0.6 <= bed_w * m <= 2.5:
         note = (note + "; " if note else "") + (
             f"WARNING: {beds} beds across a {(u1 - u0) * m:.0f} m block makes beds {bed_w * m:.2f} m wide, "
             "not a usual bed width: the block found may be part of the field, or the flight covers fewer beds "
             "(record `beds`)")
     return {"long_is_rows": long_is_rows, "block": [int(u0), int(u1)], "tiers": [list(map(int, s)) for s in used],
-            "bed_width_px": bed_w, "strips_found": found, "blocks_found": len(blocks), "note": note,
+            "bed_width_px": bed_w, "bed_edges": [float(e) for e in fit["edges"]],
+            "bed_pitch_m": round(bed_w * m, 3) if fit["method"] != "even" else None,
+            "bed_fit": fit["method"], "bed_source": fit.get("source"), "border_beds": fit.get("border_beds"),
+            "bed_slope": slope, "bed_ref": a_ref, "strips_found": found, "blocks_found": len(blocks), "note": note,
             "block_width_m": round((u1 - u0) * m, 2), "field_length_m": round((used[-1][1] - used[0][0]) * m, 1),
             "tier_length_m": round(sum(b - a_ for a_, b in used) / len(used) * m, 2), "_veg": v}
 
@@ -473,8 +931,18 @@ def _cells(ortho: Ortho, lay: dict, design: dict, beds: list[int], tier_first_at
         for bi in range(len(beds)):
             s0, s1 = per_bed[bi][ti]
             a0, a1 = s0 + pad, s1 - pad
-            c0, c1 = u0 + bi * bw + pad, u0 + (bi + 1) * bw - pad
-            box = [(c0, a0), (c1, a0), (c1, a1), (c0, a1)] if long_rows else [(a0, c0), (a1, c0), (a1, c1), (a0, c1)]
+            edges = lay.get("bed_edges")
+            if edges and len(edges) == len(beds) + 1:
+                # Each bed between its two furrows, kept just off them.
+                gap = 0.04 * (edges[bi + 1] - edges[bi])
+                c0, c1 = edges[bi] + gap + pad, edges[bi + 1] - gap - pad
+            else:
+                c0, c1 = u0 + bi * bw + pad, u0 + (bi + 1) * bw - pad
+            # Beds not quite parallel to the image: the edges follow the furrows.
+            slope, ref = float(lay.get("bed_slope") or 0.0), float(lay.get("bed_ref") or 0.0)
+            d0, d1 = slope * (a0 - ref), slope * (a1 - ref)
+            pts = [(c0 + d0, a0), (c1 + d0, a0), (c1 + d1, a1), (c0 + d1, a1)]
+            box = pts if long_rows else [(a, c) for c, a in pts]
             ring = [ortho.lonlat(x, y) for x, y in box]
             tier, bed = tier_order[ti], bed_order[bi]
             rec = by.get((tier, bed))
@@ -662,6 +1130,37 @@ def _earlier_boundaries(scope: dict, design_name: str) -> Optional[dict]:
     return best
 
 
+FIELD_FACTS = AGENT_DIR / "work" / "field_facts.json"
+
+
+def _field_key(scope: dict, beds: list) -> str:
+    """One field (and block of beds) across a season's dates."""
+    return "/".join(str(scope[k]) for k in ("year", "experiment", "location", "population", "platform")) + \
+        f"/beds {beds[0]}-{beds[-1]}"
+
+
+def _bed_pitch(scope: dict, beds: list) -> Optional[dict]:
+    try:
+        return json.loads(FIELD_FACTS.read_text()).get(_field_key(scope, beds), {}).get("bed_pitch")
+    except Exception:
+        return None
+
+
+def _keep_bed_pitch(scope: dict, beds: list, pitch_m: float, source: str) -> None:
+    """The spacing read from the earliest date (least canopy) is kept."""
+    try:
+        facts = json.loads(FIELD_FACTS.read_text())
+    except Exception:
+        facts = {}
+    key = _field_key(scope, beds)
+    old = facts.get(key, {}).get("bed_pitch")
+    if old and str(old.get("date", "")) <= str(scope["date"]):
+        return
+    facts.setdefault(key, {})["bed_pitch"] = {"m": pitch_m, "date": str(scope["date"]), "from": source}
+    FIELD_FACTS.parent.mkdir(parents=True, exist_ok=True)
+    FIELD_FACTS.write_text(json.dumps(facts, indent=1))
+
+
 def plot_boundaries(args: dict) -> dict:
     """Find the plots on an orthomosaic, label them from the design, and
     (unless preview) save + activate them as the scope's plot boundaries."""
@@ -699,9 +1198,27 @@ def plot_boundaries(args: dict) -> dict:
                                 {"source": Path(args["design_path"]).name, "by": "agent",
                                  "moved_from": earlier["directory"]}, None)
     ortho = Ortho(path)
+    # The elevation model beside the orthomosaic (ODM writes both) shows the furrows.
+    dsm_file = None
+    dsm = args.get("dsm_path") or (path.replace("odm_orthophoto-", "odm_dsm-") if "odm_orthophoto-" in path else None)
+    if dsm:
+        try:
+            dsm_file = _local_copy(dsm)
+        except Exception:
+            dsm_file = None
+    # Bed spacing: given, else measured on an earlier date of this field
+    # (furrows show before the canopy closes), else read from this image.
+    known = _bed_pitch(scope, beds)
+    pitch_m = args.get("bed_pitch_m") or (known["m"] if known and str(known["date"]) < str(scope["date"]) else None)
     lay = find_layout(ortho, len(beds), len(design["tiers"]), border_tiers=args.get("border_tiers"),
                       block=int(args.get("block") or 0),
-                      plot_length_m=_plot_length(args.get("plot_length_m"), None))
+                      plot_length_m=_plot_length(args.get("plot_length_m"), None),
+                      bed_pitch_m=float(pitch_m) if pitch_m else None,
+                      border_beds=args.get("border_beds"), border_beds_at=args.get("border_beds_at"),
+                      dsm_file=dsm_file)
+    if lay.get("bed_source") in ("furrows at the field's ends", "furrows in the elevation model") \
+            and not args.get("bed_pitch_m"):
+        _keep_bed_pitch(scope, beds, lay["bed_pitch_m"], lay["bed_source"])
     lay["tiers_by_bed"], crop_notes = crop_tiers(ortho, lay, design, beds, str(args.get("first_bed_at") or "west"),
                                                  args.get("plot_length_m"))
     feats = _cells(ortho, lay, design, beds, str(args.get("first_tier_at") or "south"),
@@ -718,6 +1235,10 @@ def plot_boundaries(args: dict) -> dict:
         "plots": len(feats), "beds": beds, "tiers": len(t), "layout": {k: lay[k] for k in (
             "strips_found", "blocks_found", "block_width_m", "field_length_m", "tier_length_m", "note")},
         "bed_width_m": round(lay["bed_width_px"] * ortho.metres_per_px, 2),
+        "bed_spacing": ("given" if args.get("bed_pitch_m") else
+                        f"measured on {known['date']}" if pitch_m else
+                        f"fitted to the furrows on this image ({lay.get('bed_source')})" if lay.get("bed_fit") == "furrows" else
+                        "even split of the block (no furrows found)"),
         "plots_at_corners": corners,
         "assumed": {"first_tier_at": args.get("first_tier_at") or "south (default - confirm with the person)",
                     "first_bed_at": args.get("first_bed_at") or "west (default)"},
@@ -765,29 +1286,107 @@ def _save_boundaries(args: dict, scope: dict, feats: list[dict], result: dict, i
     return {"result": result, "images": [str(image)]}
 
 
-def split_plots(args: dict) -> dict:
-    """SPLIT_ORTHOMOSAIC: cut an orthomosaic into one image per plot of the active boundaries."""
-    path = args["orthomosaic_path"]
+def _folder_of(path: str) -> tuple[dict, str]:
     scope = scope_from_path(path)
     if scope is None:
-        raise ValueError("orthomosaic_path must be under Processed/…")
+        raise ValueError("path must be under Processed/… (or Raw/…)")
+    folder = "Processed/" + "/".join(str(scope[k]) for k in ("year", "experiment", "location", "population", "date",
+                                                             "platform", "sensor")) + "/"
+    return scope, folder
+
+
+def split_plots(args: dict) -> dict:
+    """SPLIT_ORTHOMOSAIC: cut the orthomosaics into one image per plot of the
+    active boundaries. With several orthomosaics in the folder (one flight per
+    treatment), each plot is cut from the one whose centre it is nearest."""
+    from . import multiortho
+
+    scope, directory = _folder_of(args.get("orthomosaic_path") or args["path"])
     c = client()
-    directory = "Processed/" + "/".join(str(scope[k]) for k in ("year", "experiment", "location", "population", "date",
-                                                                "platform", "sensor")) + "/"
     snap = c.load_version(directory).get("state_snapshot") or {}
     boundaries = snap.get("boundaries") or {}
     if not boundaries.get("features"):
         raise ValueError("no active plot boundaries for this scope: run plot_boundaries first")
-    params = {**{k: scope[k] for k in ("year", "experiment", "location", "population", "date", "platform", "sensor")},
-              "boundaries": boundaries, "orthomosaic_path": path}
+    orthos = multiortho.orthos_in(c, directory)
+    if args.get("orthomosaic_path"):
+        chosen = [o for o in orthos if o["path"] == args["orthomosaic_path"]] or [{"path": args["orthomosaic_path"]}]
+        groups = multiortho.assign(boundaries["features"], orthos, _coverage_check()).get(args["orthomosaic_path"]) \
+            if len(orthos) > 1 else boundaries["features"]
+        plan = {chosen[0]["path"]: groups or []}
+    else:
+        if not orthos:
+            raise ValueError(f"no orthomosaic in {directory}")
+        plan = multiortho.assign(boundaries["features"], orthos, _coverage_check())
     exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
-    job = c.submit_job("SPLIT_ORTHOMOSAIC", params, str(exp["id"]) if exp else None)
+    jobs = []
+    for path, feats in plan.items():
+        if not feats:
+            continue
+        params = {**{k: scope[k] for k in ("year", "experiment", "location", "population", "date", "platform", "sensor")},
+                  "boundaries": {**boundaries, "features": feats}, "orthomosaic_path": path}
+        job = c.submit_job("SPLIT_ORTHOMOSAIC", params, str(exp["id"]) if exp else None)
+        jobs.append({"job_id": job.get("id"), "orthomosaic": path, "plots": len(feats)})
 
-    def update(pr):
-        return pr.record_job(scope, job)
+        def update(pr, job=job):
+            return pr.record_job(scope, job)
 
-    return {"result": {"job_id": job.get("id"), "status": job.get("status"), "plots": len(boundaries["features"]),
-                       "output": directory + "PlotImages/", "process_tab": process_tab(update)}}
+        process_tab(update)
+    return {"result": {"jobs": jobs, "plots": sum(j["plots"] for j in jobs), "output": directory + "PlotImages/",
+                       "note": "one job per orthomosaic, each plot from the one whose centre it is nearest"
+                       if len(jobs) > 1 else None}}
+
+
+def extract_traits(args: dict) -> dict:
+    """EXTRACT_TRAITS for a date's orthomosaics with the active boundaries:
+    vegetation fraction per plot, and plant height (95th percentile canopy top
+    above ground) from the orthomosaic's elevation model when ODM made one.
+    Several orthomosaics: each plot measured from the one whose centre it is
+    nearest."""
+    import json as _json
+
+    from . import multiortho
+
+    scope, directory = _folder_of(args["path"])
+    c = client()
+    v = c.load_version(directory)
+    boundaries = (v.get("state_snapshot") or {}).get("boundaries") or {}
+    if not boundaries.get("features"):
+        raise ValueError("no active plot boundaries for this scope: run plot_boundaries first")
+    orthos = multiortho.orthos_in(c, directory)
+    if not orthos:
+        raise ValueError(f"no orthomosaic in {directory}")
+    plan = multiortho.assign(boundaries["features"], orthos, _coverage_check())
+    exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
+    jobs, no_height = [], []
+    for o in orthos:
+        feats = plan.get(o["path"]) or []
+        if not feats:
+            continue
+        tag = o["job_id"][:8]
+        bpath = f"{directory}traits/boundaries-v{v.get('version')}-{tag}.geojson"
+        blob = _json.dumps({**boundaries, "features": feats}).encode()
+        c.upload_chunk(blob, 0, 1, f"agent:{bpath}:{len(blob)}", bpath, str(exp["id"]) if exp else None)
+        params = {"orthomosaic_path": o["path"], "boundary_geojson_path": bpath,
+                  "output_traits_geojson_path": f"{directory}traits/traits-v{v.get('version')}-{tag}.geojson"}
+        if len(orthos) > 1:
+            # One dataset per flight (its uploads): this block's re-run replaces
+            # its own earlier records, not the other block's.
+            params["dataset_label"] = "flight " + "+".join(sorted(o.get("uploads") or [tag]))
+        if o.get("dsm"):
+            params["dem_path"] = o["dsm"]
+        else:
+            no_height.append(o["path"])
+        job = c.submit_job("EXTRACT_TRAITS", params, str(exp["id"]) if exp else None)
+        jobs.append({"job_id": job.get("id"), "orthomosaic": o["path"], "plots": len(feats),
+                     "height": bool(o.get("dsm"))})
+
+        def update(pr, job=job):
+            return pr.record_job(scope, job)
+
+        process_tab(update)
+    return {"result": {"jobs": jobs, "plots": sum(j["plots"] for j in jobs),
+                       "traits": "Vegetation_Fraction, Height_95p_meters (where an elevation model exists)",
+                       "no_elevation_model": no_height or None}}
 
 
 def boundaries_geojson(args: dict) -> dict:
@@ -948,6 +1547,16 @@ _field(plot_boundaries, "Find the plots on an orthomosaic from its vegetation (t
         "border_tiers": {**_int, "description": "unplanned strips at each end to ignore (default: worked out)"},
         "block": {**_int, "description": "0 = widest planted block (default), 1 = next widest"},
         "shrink_m": {**_num, "description": "shrink each plot by this margin on every side"},
+        "border_beds": {"type": "array", "items": _int, "description": "planted beds beside the design's beds "
+                        "that are not plots, [west, east] (or [north, south] when beds run east-west). Default: "
+                        "worked out from the planted beds between the furrows"},
+        "border_beds_at": {**_str, "description": "west | east | north | south: the side the border beds are on "
+                           "(the block's outer edge, e.g. away from another treatment's block); the design's beds "
+                           "then run to the planted beds' other edge"},
+        "dsm_path": {**_str, "description": "elevation model for the furrows (default: ODM's odm_dsm-… beside "
+                     "the orthomosaic)"},
+        "bed_pitch_m": {**_num, "description": "bed spacing (centre to centre) in metres. Default: measured from "
+                        "the furrows on this field's earliest date already done, else from this image"},
         "add_to_active": {**_bool, "description": "keep the other plots of the active version (second flight of the same field)"},
         "crops": {"type": "array", "items": _str, "description": "only the plots of these crops (a flight of one crop)"},
         "plot_length_m": {"description": "plot length without the alley, metres: one number, or per crop "
@@ -982,8 +1591,14 @@ _field(move_boundaries, "Bring plot boundaries saved for another date of the sam
         "align": {**_bool, "description": "measure and apply the shift (default true)"},
         "max_shift_m": _num, "save": {**_bool, "description": "save and activate for this date (default: report only)"},
         "name": _str}, ["from_directory"])
-_field(split_plots, "Cut an orthomosaic into one image per plot using the active plot boundaries "
-       "(SPLIT_ORTHOMOSAIC; needs the geo worker).", {"orthomosaic_path": _str}, ["orthomosaic_path"])
+_field(split_plots, "Cut a date's orthomosaics into one image per plot using the active plot boundaries "
+       "(SPLIT_ORTHOMOSAIC; needs the geo worker). path: any path in the date's folder (all its orthomosaics; "
+       "with several, e.g. one per treatment, each plot from the one whose centre it is nearest), or "
+       "orthomosaic_path for one.", {"path": _str, "orthomosaic_path": _str}, [])
+_field(extract_traits, "Per-plot traits for a date's orthomosaics and active plot boundaries (EXTRACT_TRAITS): "
+       "vegetation fraction and plant height from each orthomosaic's elevation model (ODM's DSM) when present. "
+       "Several orthomosaics: each plot from the nearest one. path: any path in the date's folder.",
+       {"path": _str}, ["path"])
 _field(boundaries_geojson, "Which plot-boundary version is active for a scope, and how many plots it has.",
        {"path": _str}, ["path"])
 
@@ -1035,11 +1650,13 @@ def ground_plot_boundaries(args: dict) -> dict:
         raise ValueError("stitch_prefix must be Processed/…/AgRowStitch_v{N}/")
     c = client()
     manifest = json.loads(c.download(prefix + "stitch_manifest.json"))
+    # Footprints where the saved GPS placement puts them (if any).
+    corrected = _placed_footprints(c, prefix, manifest)
     design = read_design(args["design_path"])
     by_plot = {str(r["_plot"]): r for r in design["rows"]}
     feats, missing = [], 0
     for pid, info in (manifest.get("plots") or {}).items():
-        ring = info.get("footprint")
+        ring = corrected.get(str(pid)) or info.get("footprint")
         rec = by_plot.get(str(pid))
         if not ring or rec is None:
             missing += 1
@@ -1072,6 +1689,65 @@ def ground_plot_boundaries(args: dict) -> dict:
                        "process_tab": process_tab(update)}}
 
 
+def _saved_placement(c, prefix: str) -> dict:
+    """The active GPS placement saved for a stitch version, or {}."""
+    from . import placement
+
+    try:
+        return (c.load_version(placement.directory(prefix)).get("state_snapshot") or {})
+    except Exception:
+        return {}
+
+
+def _placed_footprints(c, prefix: str, manifest: dict) -> dict:
+    from . import placement
+
+    saved = _saved_placement(c, prefix)
+    rings = {str(k): v["footprint"] for k, v in (manifest.get("plots") or {}).items() if v.get("footprint")}
+    if not saved:
+        return rings
+    return placement.apply(rings, {**saved, "plot_bed": placement.beds_of(manifest.get("plots") or {})})[0]
+
+
+def gps_placement(args: dict) -> dict:
+    """Correct where a stitch version's plots sit when the rover's GPS is off:
+    shift everything, or one bed (straighten, rotate, shift). Saves a new
+    placement version that Associate uses; the app's Plot Boundary map shows
+    the same thing. Without changes, reports the beds and current placement."""
+    from . import placement
+
+    prefix = args["stitch_prefix"].rstrip("/") + "/"
+    c = client()
+    manifest = json.loads(c.download(prefix + "stitch_manifest.json"))
+    beds = placement.beds_of(manifest.get("plots") or {})
+    names = sorted(set(beds.values()))
+    current = _saved_placement(c, prefix)
+    changes = {k: args[k] for k in ("shift_m", "bed", "bed_shift_m", "rotate_deg", "straighten") if args.get(k) is not None}
+    if not changes:
+        return {"result": {"beds": {b: sum(1 for v in beds.values() if v == b) for b in names},
+                           "placement": {k: v for k, v in current.items() if k != "plot_bed"}}}
+    new = {**current}
+    if "shift_m" in changes:
+        new["shift_m"] = [float(x) for x in changes["shift_m"]][:2]
+    if any(k in changes for k in ("bed_shift_m", "rotate_deg", "straighten")):
+        bed = changes.get("bed")
+        if bed not in names:
+            raise ValueError(f"bed must be one of: {', '.join(names)}")
+        spec = dict((new.get("beds") or {}).get(bed) or {})
+        if "bed_shift_m" in changes:
+            spec["shift_m"] = [float(x) for x in changes["bed_shift_m"]][:2]
+        if "rotate_deg" in changes:
+            spec["rotate_deg"] = float(changes["rotate_deg"])
+        if "straighten" in changes:
+            spec["straighten"] = bool(changes["straighten"])
+        new["beds"] = {**(new.get("beds") or {}), bed: spec}
+    new["plot_bed"] = beds
+    saved = c.save_version(placement.directory(prefix), new, "GPS placement (agent)", None)
+    return {"result": {"saved_version": saved.get("version"),
+                       "placement": {k: v for k, v in new.items() if k != "plot_bed"},
+                       "note": "Associate (associate_plots) applies this; ground_plot_boundaries uses it too."}}
+
+
 def associate_plots(args: dict) -> dict:
     """ASSOCIATE_BOUNDARIES: file each stitched plot mosaic under its plot
     (PlotImages/plot_{n}_accession_{a}.png), using the active boundaries."""
@@ -1089,6 +1765,9 @@ def associate_plots(args: dict) -> dict:
     exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
     params = {"stitch_prefix": prefix, "boundaries": boundaries, "plot_images_prefix": directory + "PlotImages/",
               "boundary_version": v.get("version")}
+    placement_saved = _saved_placement(c, prefix)
+    if placement_saved:
+        params["corrections"] = placement_saved
     job = c.submit_job("ASSOCIATE_BOUNDARIES", params, str(exp["id"]) if exp else None)
 
     def update(pr):
@@ -1105,6 +1784,12 @@ _tool(ground_plot_boundaries, "Rover: make plot boundaries from a stitch run's g
       "from a field design; saves and activates them (the ground run's Plot Boundary Prep).",
       {"stitch_prefix": _str, "design_path": _str, "name": _str}, ["stitch_prefix", "design_path"],
       track=False, group="ground")
+_tool(gps_placement, "Rover: correct where a stitch version's plots sit when GPS is off, saved for Associate and the "
+      "app's Plot Boundary map. shift_m [east, north] moves everything; bed + bed_shift_m / rotate_deg (clockwise) "
+      "/ straighten fix one bed (one lane of one pass). No changes: lists the beds and the current placement.",
+      {"stitch_prefix": _str, "shift_m": {"type": "array", "items": {"type": "number"}}, "bed": _str,
+       "bed_shift_m": {"type": "array", "items": {"type": "number"}}, "rotate_deg": {"type": "number"},
+       "straighten": _bool}, ["stitch_prefix"], track=False, group="ground")
 _tool(associate_plots, "Rover: file each stitched mosaic under its plot using the active boundaries "
       "(ASSOCIATE_BOUNDARIES; needs the stitch worker). Output: …/PlotImages/.",
       {"stitch_prefix": _str}, ["stitch_prefix"], track=False, group="ground")

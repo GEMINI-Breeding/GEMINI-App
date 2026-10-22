@@ -6,7 +6,8 @@
  * Every view leads with a sentence saying what it shows, then the detail.
  */
 import { useQuery } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { EyeOff, Loader2 } from "lucide-react"
+import { useEffect } from "react"
 import {
   CartesianGrid,
   Line,
@@ -29,6 +30,7 @@ import {
   fetchSpatial,
   type MultivariateRequest,
 } from "@/features/analyze/lib/multivariate"
+import { CHART_PRIMARY, chartActiveDot, chartTooltip } from "@/lib/chartTheme"
 import { useTraitRecords } from "../hooks/useTraitData"
 import type { AnalysisConfig } from "../types"
 
@@ -76,9 +78,66 @@ function request(
     experiment_names: [config.experiment],
     ...(config.season ? { season_names: [config.season] } : {}),
     ...(config.site ? { site_names: [config.site] } : {}),
+    ...(config.population ? { populations: [config.population] } : {}),
     aggregation: "mean",
     ...extra,
   }
+}
+
+/** Season (year) of a record: its collection date's year. */
+export const seasonOf = (r: TraitRecord) => r.date.slice(0, 4)
+
+/** A season and population ("crop group") holding trait data. */
+export interface Group {
+  season: string
+  population: string
+  records: TraitRecord[]
+}
+
+/** Season × population groups, newest season first, then by size. */
+export function groupsOf(records: TraitRecord[]): Group[] {
+  const by = new Map<string, Group>()
+  for (const r of records) {
+    const key = `${seasonOf(r)}\n${r.population}`
+    const g = by.get(key) ?? {
+      season: seasonOf(r),
+      population: r.population,
+      records: [],
+    }
+    g.records.push(r)
+    by.set(key, g)
+  }
+  return [...by.values()].sort(
+    (a, b) =>
+      b.season.localeCompare(a.season) || b.records.length - a.records.length,
+  )
+}
+
+/** The records a view should use: the experiment's, narrowed to its group. */
+export function inScope(
+  records: TraitRecord[],
+  config: Pick<AnalysisConfig, "season" | "population">,
+): TraitRecord[] {
+  return records.filter(
+    (r) =>
+      (!config.season || seasonOf(r) === config.season) &&
+      (!config.population || r.population === config.population),
+  )
+}
+
+/** Traits with values on at least two dates (a trend needs two points). */
+export function trendTraits(records: TraitRecord[]): string[] {
+  const dates = new Map<string, Set<string>>()
+  for (const r of records)
+    for (const t of r.trait_columns) {
+      const s = dates.get(t) ?? new Set<string>()
+      s.add(r.date)
+      dates.set(t, s)
+    }
+  return [...dates.entries()]
+    .filter(([, d]) => d.size >= 2)
+    .map(([t]) => t)
+    .sort()
 }
 
 function strength(r: number): string {
@@ -169,23 +228,37 @@ function Summary({ records }: { records: TraitRecord[] }) {
   )
 }
 
+const TREND_MAX = 9
+
 function Trend({
   config,
   records,
+  onHideTrait,
+  onUnavailable,
 }: {
   config: AnalysisConfig
   records: TraitRecord[]
+  onHideTrait?: (trait: string) => void
+  onUnavailable?: (unavailable: boolean) => void
 }) {
   const dates = datesOf(records).slice(-12)
-  const traits = (
-    config.traits.length ? config.traits : traitsOf(records)
-  ).slice(0, 6)
+  // Only traits measured on two or more dates have a trend to show.
+  const hidden = new Set(config.hiddenTraits ?? [])
+  const withTrend = (
+    config.traits.length ? config.traits : trendTraits(records)
+  ).filter((t) => !hidden.has(t))
+  const traits = withTrend.slice(0, TREND_MAX)
+  const unavailable = withTrend.length === 0
+  useEffect(() => {
+    onUnavailable?.(unavailable)
+  }, [unavailable, onUnavailable])
   const q = useQuery({
     queryKey: [
       "dash-trend",
       config.experiment,
       config.season,
       config.site,
+      config.population,
       traits,
       dates,
     ],
@@ -213,10 +286,12 @@ function Trend({
       return rows
     },
   })
-  if (dates.length < 2)
+  if (unavailable)
     return (
       <Note>
-        One collection date so far; the season's trend appears after the next.
+        {hidden.size
+          ? "Every trait with a trend is hidden."
+          : "No trait has been measured on two dates yet; trends appear after the next collection."}
       </Note>
     )
   if (q.isLoading) return <Waiting />
@@ -247,22 +322,48 @@ function Trend({
               .join(", ") +
             "."
           : "Plot means per collection date."}
+        {withTrend.length > TREND_MAX &&
+          ` Showing ${TREND_MAX} of ${withTrend.length} traits; hide some to see others.`}
       </Note>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {traits.map((t) => (
-          <div key={t} className="rounded-md border p-2">
-            <div className="mb-1 truncate text-xs font-medium">{t}</div>
+          <div key={t} className="group rounded-md border p-2">
+            <div className="mb-1 flex items-center gap-1">
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                {t}
+              </span>
+              {onHideTrait && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                  onClick={() => onHideTrait(t)}
+                  title="Hide this chart"
+                  aria-label={`Hide ${t}`}
+                >
+                  <EyeOff className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
             <ResponsiveContainer width="100%" height={120}>
               <LineChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} width={40} />
-                <Tooltip />
+                <Tooltip
+                  {...chartTooltip}
+                  formatter={(v) => [
+                    typeof v === "number"
+                      ? Number(v.toPrecision(3)).toLocaleString()
+                      : String(v ?? "—"),
+                    "plot mean",
+                  ]}
+                />
                 <Line
                   type="monotone"
                   dataKey={t}
-                  stroke="hsl(var(--primary))"
-                  dot
+                  stroke={CHART_PRIMARY}
+                  dot={{ r: 3, fill: CHART_PRIMARY, strokeWidth: 0 }}
+                  activeDot={chartActiveDot}
                   connectNulls
                 />
               </LineChart>
@@ -277,17 +378,24 @@ function Trend({
 function Correlation({
   config,
   records,
+  onUnavailable,
 }: {
   config: AnalysisConfig
   records: TraitRecord[]
+  onUnavailable?: (unavailable: boolean) => void
 }) {
   const traits = config.traits.length ? config.traits : traitsOf(records)
+  const tooFew = traits.length < 2
+  useEffect(() => {
+    onUnavailable?.(tooFew)
+  }, [tooFew, onUnavailable])
   const q = useQuery({
     queryKey: [
       "dash-corr",
       config.experiment,
       config.season,
       config.site,
+      config.population,
       traits,
     ],
     enabled: traits.length >= 2,
@@ -313,6 +421,7 @@ function Correlation({
       <CorrelationHeatmap
         matrix={q.data.matrix}
         correlation={q.data.correlation}
+        fit
       />
     </div>
   )
@@ -321,9 +430,11 @@ function Correlation({
 function Heritability({
   config,
   records,
+  onUnavailable,
 }: {
   config: AnalysisConfig
   records: TraitRecord[]
+  onUnavailable?: (unavailable: boolean) => void
 }) {
   const traits = config.traits.length ? config.traits : traitsOf(records)
   const q = useQuery({
@@ -332,12 +443,18 @@ function Heritability({
       config.experiment,
       config.season,
       config.site,
+      config.population,
       traits,
     ],
     enabled: traits.length > 0,
     staleTime: 60_000,
     queryFn: () => fetchHeritability(request(config, traits)),
   })
+  // Nothing estimable (no genotypes, or none replicated): the page hides it.
+  const none = q.isSuccess && !(q.data?.panels ?? []).some((p) => p.h2 != null)
+  useEffect(() => {
+    onUnavailable?.(none)
+  }, [none, onUnavailable])
   if (q.isLoading) return <Waiting />
   if (q.error) return <Failed error={q.error} />
   if (!q.data) return null
@@ -376,6 +493,7 @@ function Field({
       config.experiment,
       config.season,
       config.site,
+      config.population,
       trait,
       date,
     ],
@@ -404,13 +522,21 @@ function Field({
   )
 }
 
-export function AnalysisWidget({ config }: { config: AnalysisConfig }) {
+export function AnalysisWidget({
+  config,
+  onHideTrait,
+  onUnavailable,
+}: {
+  config: AnalysisConfig
+  /** Trend: the person hid one trait's chart. */
+  onHideTrait?: (trait: string) => void
+  /** The view has nothing to show for this data (the page may hide it). */
+  onUnavailable?: (unavailable: boolean) => void
+}) {
   const all = useTraitRecords()
-  const records = experimentRecords(
-    all.data,
-    config.experiment,
-    config.season,
-    config.site,
+  const records = inScope(
+    experimentRecords(all.data, config.experiment, config.season, config.site),
+    config,
   )
   if (all.isLoading) return <Waiting />
   if (records.length === 0)
@@ -425,11 +551,30 @@ export function AnalysisWidget({ config }: { config: AnalysisConfig }) {
     case "summary":
       return <Summary records={records} />
     case "trend":
-      return <Trend config={config} records={records} />
+      return (
+        <Trend
+          config={config}
+          records={records}
+          onHideTrait={onHideTrait}
+          onUnavailable={onUnavailable}
+        />
+      )
     case "correlation":
-      return <Correlation config={config} records={records} />
+      return (
+        <Correlation
+          config={config}
+          records={records}
+          onUnavailable={onUnavailable}
+        />
+      )
     case "heritability":
-      return <Heritability config={config} records={records} />
+      return (
+        <Heritability
+          config={config}
+          records={records}
+          onUnavailable={onUnavailable}
+        />
+      )
     case "field":
       return <Field config={config} records={records} />
   }

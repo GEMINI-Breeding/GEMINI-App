@@ -6,10 +6,10 @@
  * platform / sensor are all picked at run-creation time from an uploaded
  * dataset (see NewRunDialog). Backed by the local runStore.
  *
- * Card thumbnails: previously fetched from `/api/v1/workspaces/{id}/card-images`
- * which doesn't exist on GEMINIbase. For now cards show a placeholder; once
- * a workspace has runs whose scope resolves to raw images, a follow-up can
- * pull first-N from `/api/files/list/{rawImagesPrefix}`.
+ * Card pictures: up to three of the workspace's runs, each shown by a plot
+ * image or stitched plot when processing has made one, else a raw photo
+ * (lib/runPreview: one short listing per run, remembered, then a small
+ * server-made thumbnail). A workspace without runs keeps the placeholder.
  */
 import { useNavigate } from "@tanstack/react-router"
 import {
@@ -42,14 +42,28 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useProcess } from "@/contexts/ProcessContext"
+import {
+  AuthImage,
+  thumbnailSrc,
+} from "@/features/genotyping/components/AuthImage"
 import { ExperimentRuns } from "@/features/process/components/ExperimentRuns"
 import {
   legacyRunCount,
   regroupAgentRuns,
 } from "@/features/process/lib/regroup"
+import { previewRuns, useRunPreview } from "@/features/process/lib/runPreview"
+import {
+  type RunTag,
+  runState,
+  TAG_CLASS,
+  TAG_HINT,
+  TAG_LABEL,
+} from "@/features/process/lib/runStatus"
 import {
   createWorkspace,
   deleteWorkspace,
+  type Run,
   updateWorkspace,
   usePipelines,
   useWorkspaceRuns,
@@ -61,7 +75,19 @@ interface WorkspaceStats {
   aerial: number
   ground: number
   agent: number
+  /** Runs per status, as on the run lists ("input needed", "running", …). */
+  byTag: Partial<Record<RunTag, number>>
 }
+
+/** Order the statuses are shown in: what needs the person first. */
+const TAG_ORDER: RunTag[] = [
+  "waiting",
+  "failed",
+  "running",
+  "queued",
+  "new",
+  "complete",
+]
 
 function useWorkspaceStats(workspaceId: string): WorkspaceStats {
   // Match main's per-workspace "dataset" count semantics: number of
@@ -74,11 +100,75 @@ function useWorkspaceStats(workspaceId: string): WorkspaceStats {
   const groundPipelineIds = new Set(
     pipelines.filter((p) => p.type === "ground").map((p) => p.id),
   )
+  const { queuedJobIds } = useProcess()
+  const byTag: Partial<Record<RunTag, number>> = {}
+  for (const r of runs) {
+    const tag = runState(
+      r,
+      groundPipelineIds.has(r.pipelineId) ? "ground" : "aerial",
+      queuedJobIds,
+    ).tag
+    byTag[tag] = (byTag[tag] ?? 0) + 1
+  }
   return {
     aerial: runs.filter((r) => aerialPipelineIds.has(r.pipelineId)).length,
     ground: runs.filter((r) => groundPipelineIds.has(r.pipelineId)).length,
     agent: runs.filter((r) => r.createdBy === "agent").length,
+    byTag,
   }
+}
+
+/** One run's picture in a card; nothing (the backdrop shows) until found. */
+function RunPicture({ run }: { run: Run }) {
+  const preview = useRunPreview(run)
+  const u = run.uploadScope
+  if (!preview.data)
+    return (
+      <div
+        className={`bg-muted h-full w-full ${preview.isLoading ? "animate-pulse" : ""}`}
+      />
+    )
+  return (
+    <div className="relative h-full w-full">
+      <AuthImage
+        src={thumbnailSrc(preview.data, 400)}
+        alt={u ? `${u.location} ${u.date} ${u.platform}` : "Run image"}
+        className="h-full w-full rounded-none border-0 object-cover"
+        lazy
+      />
+      {u && (
+        <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 py-px text-[10px] text-white">
+          {u.date}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function CardPictures({ workspaceId }: { workspaceId: string }) {
+  const runs = previewRuns(useWorkspaceRuns(workspaceId))
+  if (runs.length === 0)
+    return (
+      <div className="flex h-28 w-full items-center justify-center rounded-t-lg bg-muted">
+        <Layers className="h-8 w-8 text-muted-foreground/30" />
+      </div>
+    )
+  return (
+    <div
+      className={`grid h-28 w-full gap-px overflow-hidden rounded-t-lg bg-border ${
+        runs.length === 1
+          ? "grid-cols-1"
+          : runs.length === 2
+            ? "grid-cols-2"
+            : "grid-cols-3"
+      }`}
+      data-testid="workspace-card-pictures"
+    >
+      {runs.map((r) => (
+        <RunPicture key={r.id} run={r} />
+      ))}
+    </div>
+  )
 }
 
 function WorkspaceCard({
@@ -104,9 +194,7 @@ function WorkspaceCard({
         })
       }
     >
-      <div className="h-28 w-full rounded-t-lg bg-muted flex items-center justify-center">
-        <Layers className="h-8 w-8 text-muted-foreground/30" />
-      </div>
+      <CardPictures workspaceId={workspace.id} />
 
       <div className="absolute top-2 right-2">
         <DropdownMenu>
@@ -158,6 +246,22 @@ function WorkspaceCard({
             </span>{" "}
             {stats.ground} dataset{stats.ground !== 1 ? "s" : ""}
           </p>
+          {TAG_ORDER.some((t) => stats.byTag[t]) && (
+            <div
+              className="flex flex-wrap gap-1 pt-1"
+              data-testid="workspace-card-status"
+            >
+              {TAG_ORDER.filter((t) => stats.byTag[t]).map((t) => (
+                <span
+                  key={t}
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${TAG_CLASS[t]}`}
+                  title={TAG_HINT[t]}
+                >
+                  {stats.byTag[t]} {TAG_LABEL[t]}
+                </span>
+              ))}
+            </div>
+          )}
           {stats.agent > 0 && (
             <p
               className="flex items-center gap-1 text-xs text-muted-foreground"
@@ -204,13 +308,14 @@ const VIEW_KEY = "gemi.process.view"
 
 export function WorkspaceDashboard() {
   const workspaces = useWorkspaces()
+  // Workspaces first; "By experiment" is the second view (remembered).
   const [view, setViewState] = useState<"experiments" | "workspaces">(() => {
     try {
-      return localStorage.getItem(VIEW_KEY) === "workspaces"
-        ? "workspaces"
-        : "experiments"
+      return localStorage.getItem(VIEW_KEY) === "experiments"
+        ? "experiments"
+        : "workspaces"
     } catch {
-      return "experiments"
+      return "workspaces"
     }
   })
   const setView = (v: "experiments" | "workspaces") => {
@@ -265,8 +370,8 @@ export function WorkspaceDashboard() {
             <div className="flex rounded-md border p-0.5" role="tablist">
               {(
                 [
-                  ["experiments", "By experiment"],
                   ["workspaces", "Workspaces"],
+                  ["experiments", "By experiment"],
                 ] as const
               ).map(([id, label]) => (
                 <button

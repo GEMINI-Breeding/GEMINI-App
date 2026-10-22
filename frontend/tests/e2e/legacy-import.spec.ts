@@ -118,20 +118,20 @@ test.describe("Import from the previous GEMI app", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
-    const images = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({ has: page.locator(`text=${EXPERIMENT}__ImageData__`) })
+    const images = page.locator(
+      `[data-testid^="manage-data-dataset-${EXPERIMENT}__ImageData__"]`,
+    )
     await expect(images).toHaveCount(1)
     await expect(images).toContainText("2 files")
     await expect(images).toContainText("2025-06-10")
-    const design = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({ has: page.locator(`text=${EXPERIMENT}__FieldDesign__`) })
+    const design = page.locator(
+      `[data-testid^="manage-data-dataset-${EXPERIMENT}__FieldDesign__"]`,
+    )
     await expect(design).toContainText("1 file")
 
-    const traits = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({ has: page.locator("text=Traits from GEMI") })
+    const traits = page.locator(
+      '[data-testid*="Traits from GEMI"][data-testid^="manage-data-dataset-"]',
+    )
     await expect(traits).toHaveCount(1)
     // Both reference datasets (same name, different data), each once.
     await expect(page.getByTestId("reference-data-row-LAI survey")).toHaveCount(

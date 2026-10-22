@@ -99,7 +99,7 @@ queued; it needs the `geo` worker and is not required for trait extraction.
    drought block flown separately): give only that block's bed numbers as
    `beds`. Ask the person which block is where (east/west) if they have not said.
 3. Preview: `plot_boundaries` with `"preview": true`. It finds the tier
-   strips from the vegetation, divides the block into beds, and returns an
+   strips from the vegetation, fits the beds to the furrows, and returns an
    overlay picture plus `plots_at_corners`. Check:
    - every box sits on one plot's canopy, with the alleys between boxes;
    - `layout.note` has no WARNING (the strip count matched the design's tiers);
@@ -108,6 +108,20 @@ queued; it needs the `geo` worker and is not required for trait extraction.
      `"first_bed_at": "east"`.
    Never guess the orientation: if the person has not said which end tier 1
    (or the lowest plot number) is at, ask.
+
+   Beds: the tool finds the furrows in the elevation model beside the
+   orthomosaic (ODM's DSM; low ground between beds, whatever the light) in
+   the bare ground at the field's ends and in the alleys, all season even
+   after the canopy closes, and follows them when the beds slant across
+   the image (the note says how much). Without a DSM it uses the furrows'
+   shading at the field's ends. It counts the planted beds between furrows and takes the design's
+   beds from among them. The note lists the planted beds' cover. More
+   planted beds than the design has are border beds: say which side with
+   `border_beds_at` (the block's outer edge, e.g. away from the other
+   treatment's block; the design's beds then run to the other edge), or
+   give `border_beds` [west, east]. A note with CHECK means it guessed the
+   side. The spacing from the earliest date is kept for the field and used
+   on later dates (`bed_spacing` in the result); `bed_pitch_m` sets it.
 4. Save: the same call without `preview`. For a second flight of the same
    field and date add `"add_to_active": true`, so both blocks end up in one
    boundary version.
@@ -171,3 +185,15 @@ threshold, default chosen by the worker).
 Steps 1 and 3 were run end to end by an agent on the cluster (454 images,
 orthomosaic in 25 min, no GCPs). Trait extraction has not been run by an
 agent yet; treat a first run as a test and report closely.
+
+
+## Several orthomosaics on one date (e.g. one flight per treatment)
+
+When a date's folder holds more than one orthomosaic (well-watered and
+drought blocks flown separately), make ONE set of plot boundaries covering
+both (`plot_boundaries` per orthomosaic with `add_to_active: true`, or drawn
+in the app across both). Then `split_plots` and `extract_traits` with
+`path` set to the date's folder: each plot is cut and measured from the
+orthomosaic whose centre it is nearest. `extract_traits` gives vegetation
+fraction and plant height (from each orthomosaic's elevation model, ODM's
+`odm_dsm-…`); always use it on drone runs rather than `canopy_cover`.

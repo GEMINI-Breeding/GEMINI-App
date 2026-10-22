@@ -91,6 +91,9 @@ def _require_sign_in() -> bool:
         return False
 
 
+_CLUSTER_LOGIN: dict = {}   # cluster name -> its stack's first-account login, once read
+
+
 def _owner_token() -> str:
     """Sign in as the stack's own account. Which stack answers can change under a
     running app (a tunnel to the cluster one day, Docker on this computer the
@@ -134,11 +137,27 @@ def _owner_token() -> str:
 
         cluster = active_cluster()
         if cluster:
-            try:
-                login = _kv(_gemi_hpc(["login"], cluster, timeout=30))
-            except Exception:
-                login = {}
-            token = attempt(login.get("GEMINI_FIRST_SUPERUSER_EMAIL"), login.get("GEMINI_FIRST_SUPERUSER_PASSWORD"))
+            # Reading the login is an ssh round trip (seconds over a remote link);
+            # keep it for this process and read it again only when it stops working
+            # (a new session has a new password).
+            def read_login() -> dict:
+                try:
+                    return _kv(_gemi_hpc(["login"], cluster, timeout=30))
+                except Exception:
+                    return {}
+
+            def with_login(login: dict) -> Optional[str]:
+                return attempt(login.get("GEMINI_FIRST_SUPERUSER_EMAIL"), login.get("GEMINI_FIRST_SUPERUSER_PASSWORD"))
+
+            cached = _CLUSTER_LOGIN.pop(cluster, None)
+            token = with_login(cached) if cached else None
+            if token is None:
+                login = read_login()
+                token = with_login(login)
+            else:
+                login = cached
+            if token:
+                _CLUSTER_LOGIN[cluster] = login
     if token is None:
         raise HttpError(404, "no account that this stack accepts is configured for signing in automatically "
                              "(set GEMI_EMAIL and GEMI_PASSWORD in agent/.env, or sign in under Settings)")

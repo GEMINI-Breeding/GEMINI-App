@@ -153,10 +153,85 @@ export interface PlotSelection {
   review?: "ok" | "corrected"
 }
 
+/**
+ * How many plots one frame shows. On some fields a pass sees two plots at
+ * once (one in the top half of every frame, one in the bottom); the person
+ * marks each stretch once and every stretch becomes one plot per lane, each
+ * stitched from its own band of the frames (lanePlots).
+ */
+export interface FrameLayout {
+  lanes: number
+  /** Which way the frame is divided: bands stacked top/bottom or side by side. */
+  split: "top_bottom" | "left_right"
+}
+
+export const SINGLE_LANE: FrameLayout = { lanes: 1, split: "top_bottom" }
+
 export interface PlotMarkingSnapshot {
   selections: PlotSelection[]
   /** The track the markings were made on. */
   track: { imagesPrefix: string; msgsSyncedPath: string | null }
+  /** Absent = one plot per frame. */
+  layout?: FrameLayout
+}
+
+/** "top" / "bottom", "left" / "right", or "lane k" for three or more. */
+export function laneName(lane: number, layout: FrameLayout): string {
+  if (layout.lanes === 2)
+    return layout.split === "left_right"
+      ? lane === 1
+        ? "left"
+        : "right"
+      : lane === 1
+        ? "top"
+        : "bottom"
+  return `lane ${lane}`
+}
+
+/** The stitched plot number of a marked stretch's lane: stretch 3 of a
+ *  two-lane track gives plots 5 (lane 1) and 6 (lane 2). */
+export function lanePlotId(
+  stretch: number,
+  lane: number,
+  layout: FrameLayout,
+): number {
+  return (stretch - 1) * layout.lanes + lane
+}
+
+export interface LanePlot {
+  plot_id: number
+  start_image: string
+  end_image: string
+  direction: string
+  /** The marked stretch it came from. */
+  stretch: number
+  lane: number
+  lanes: number
+  split: FrameLayout["split"]
+}
+
+/** Every plot to stitch: one per marked stretch per lane. */
+export function lanePlots(
+  selections: PlotSelection[],
+  layout: FrameLayout = SINGLE_LANE,
+): LanePlot[] {
+  const lanes = Math.max(1, Math.floor(layout.lanes || 1))
+  const out: LanePlot[] = []
+  for (const s of selections) {
+    if (!s.start_image || !s.end_image) continue
+    for (let k = 1; k <= lanes; k++)
+      out.push({
+        plot_id: lanes > 1 ? lanePlotId(s.plot_id, k, layout) : s.plot_id,
+        start_image: s.start_image,
+        end_image: s.end_image,
+        direction: s.direction || "down",
+        stretch: s.plot_id,
+        lane: k,
+        lanes,
+        split: layout.split,
+      })
+  }
+  return out
 }
 
 /**

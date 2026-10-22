@@ -69,15 +69,19 @@ test.describe("Per-dataset delete — imagery", () => {
     )
     await expect(expRow).toBeVisible({ timeout: 30_000 })
     await expRow.getByRole("button", { name: "Expand" }).click()
+    // Files are listed per upload: open this upload's files.
+    await expRow
+      .locator('[data-testid^="manage-data-browse-"]:not([disabled])')
+      .first()
+      .click()
 
     // The auto-named dataset shows up under the experiment as
     // `{experiment}__ImageData__{YYYYMMDD}__{HHMMSS}__{4hex}`. We
     // match by prefix (rather than try to predict the timestamp tail).
     const datasetRow = page
-      .locator('[data-testid^="manage-data-dataset-"]')
-      .filter({
-        has: page.locator(`text=${experiment}__ImageData__`),
-      })
+      .locator(
+        `[data-testid^="manage-data-dataset-${experiment}__ImageData__"]`,
+      )
       .first()
     await expect(datasetRow).toBeVisible({ timeout: 30_000 })
 
@@ -111,7 +115,9 @@ test.describe("Per-dataset delete — imagery", () => {
     await page
       .locator(`[data-testid="manage-data-delete-dataset-${datasetName}"]`)
       .click()
-    await page.getByRole("button", { name: /delete dataset/i }).click()
+    await page
+      .getByRole("button", { name: /delete (dataset|upload|results)/i })
+      .click()
 
     // 1. Dataset row gone from Manage Data.
     await expect(

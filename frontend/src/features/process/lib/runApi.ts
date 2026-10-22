@@ -112,6 +112,10 @@ export interface StitchingParams {
     start_image: string
     end_image: string
     direction: string
+    /** Several plots per frame: this plot's lane (1-based) of `lanes`. */
+    lane?: number
+    lanes?: number
+    split?: "top_bottom" | "left_right"
   }[]
   /** Where this stitch version goes (`…/AgRowStitch_v{N}/`). */
   outputPrefix: string
@@ -188,6 +192,8 @@ export interface AssociateBoundariesParams {
   boundaryVersion: number
   /** Where matched plots' images go (`…/PlotImages/`). */
   plotImagesPrefix: string
+  /** GPS corrections set on the Plot Boundary map (lib/gpsCorrections). */
+  corrections?: Record<string, unknown>
 }
 
 export interface ExecuteStepResult {
@@ -482,6 +488,7 @@ export async function executeStep(
             boundaries: a.boundaries,
             boundary_version: a.boundaryVersion,
             plot_images_prefix: a.plotImagesPrefix,
+            ...(a.corrections ? { corrections: a.corrections } : {}),
           },
           experiment_id: experimentId,
         } as Parameters<

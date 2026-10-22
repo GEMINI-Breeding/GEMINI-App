@@ -11,13 +11,16 @@ import { dataTypes } from "@/config/dataTypes"
 
 interface DataTypesProps {
   onChange?: (value: string) => void
+  /** Set from outside (e.g. "continue a recent upload"); else self-managed. */
+  value?: string | null
 }
 
-export function DataTypes({ onChange }: DataTypesProps) {
+export function DataTypes({ onChange, value }: DataTypesProps) {
   const fileTypes = Object.entries(dataTypes)
     .filter(([, cfg]) => !cfg.hidden)
     .map(([key]) => key)
-  const [selectedFileType, setSelectedFileType] = useState<string | null>(null)
+  const [picked, setSelectedFileType] = useState<string | null>(null)
+  const selectedFileType = value !== undefined ? value : picked
   const dropdownWidth: string = "w-50"
 
   const handleSelect = (type: string) => {
