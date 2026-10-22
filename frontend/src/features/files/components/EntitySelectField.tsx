@@ -57,6 +57,10 @@ export interface EntitySelectFieldProps {
   matchExisting?: boolean
   /** Pre-fills the new-name input when "+ Create new..." is first picked. */
   newNameSuggestion?: string
+  /** Names offered ready to pick even before they exist (e.g. "Mixed" for a
+   *  population of several crops): picking one selects it if it exists,
+   *  else creates it under exactly that name. */
+  presets?: { name: string; hint?: string }[]
 }
 
 /**
@@ -64,6 +68,8 @@ export interface EntitySelectFieldProps {
  * `EntityChoice` discriminated union. Useful when the parent serializes
  * the form state and needs to translate it back.
  */
+const PRESET = "__preset__:"
+
 export function chooseExisting(option: EntityOption): EntityChoice {
   return { kind: "existing", id: option.id, name: option.name }
 }
@@ -89,14 +95,34 @@ export function EntitySelectField({
   description,
   newNameSuggestion,
   matchExisting = false,
+  presets = [],
 }: EntitySelectFieldProps) {
+  const same = (a: string, b: string) =>
+    a.trim().toLowerCase() === b.trim().toLowerCase()
+  const missingPresets = presets.filter(
+    (p) => !options.some((o) => same(o.name, p.name)),
+  )
+  // Presets that exist already come first, with their hint.
+  const presetOptions = presets.flatMap((p) => {
+    const o = options.find((x) => same(x.name, p.name))
+    return o ? [{ opt: o, hint: p.hint }] : []
+  })
+  const restOptions = options.filter(
+    (o) => !presetOptions.some((p) => p.opt.id === o.id),
+  )
   const slugTestId = fieldKey.toLowerCase().replace(/_/g, "-")
+  const presetOf = (name: string) =>
+    missingPresets.find(
+      (p) => p.name.trim().toLowerCase() === name.trim().toLowerCase(),
+    )
   const selectValue =
     value.kind === "existing"
       ? value.id
-      : value.kind === "new"
-        ? CREATE_NEW
-        : NOT_SELECTED
+      : value.kind === "new" && presetOf(value.name)
+        ? `${PRESET}${presetOf(value.name)?.name}`
+        : value.kind === "new"
+          ? CREATE_NEW
+          : NOT_SELECTED
 
   const handleSelect = (next: string) => {
     if (next === CREATE_NEW) {
@@ -105,6 +131,10 @@ export function EntitySelectField({
     }
     if (next === NOT_SELECTED) {
       onChange({ kind: "none" })
+      return
+    }
+    if (next.startsWith(PRESET)) {
+      onChange(chooseNew(next.slice(PRESET.length)))
       return
     }
     const opt = options.find((o) => o.id === next)
@@ -165,12 +195,40 @@ export function EntitySelectField({
             >
               + Create new…
             </SelectItem>
-            {options.length === 0 ? (
+            {presetOptions.map(({ opt, hint }) => (
+              <SelectItem
+                key={opt.id}
+                value={opt.id}
+                data-testid={`entity-preset-${slugTestId}-${opt.name.toLowerCase()}`}
+              >
+                {opt.name}
+                {hint && (
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {hint}
+                  </span>
+                )}
+              </SelectItem>
+            ))}
+            {missingPresets.map((p) => (
+              <SelectItem
+                key={p.name}
+                value={`${PRESET}${p.name}`}
+                data-testid={`entity-preset-${slugTestId}-${p.name.toLowerCase()}`}
+              >
+                {p.name}
+                {p.hint && (
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {p.hint}
+                  </span>
+                )}
+              </SelectItem>
+            ))}
+            {options.length === 0 && missingPresets.length === 0 ? (
               <SelectItem value="__none_yet__" disabled>
                 No {label.toLowerCase()}s exist yet — pick "Create new…"
               </SelectItem>
             ) : (
-              options.map((opt) => (
+              restOptions.map((opt) => (
                 <SelectItem key={opt.id} value={opt.id}>
                   {opt.name}
                 </SelectItem>
@@ -179,7 +237,7 @@ export function EntitySelectField({
           </SelectContent>
         </Select>
       )}
-      {value.kind === "new" && (
+      {value.kind === "new" && !presetOf(value.name) && (
         <Input
           ref={newNameInputRef}
           id={`entity-new-${slugTestId}`}

@@ -616,6 +616,18 @@ export function UploadList({
                   ? String(resolved.experiment.id)
                   : undefined,
               batchLabel,
+              ...(() => {
+                const i = batchInfo(batch, {}, undefined) as Record<
+                  string,
+                  unknown
+                >
+                return {
+                  runOfDay:
+                    typeof i.run_of_day === "string" ? i.run_of_day.trim() : "",
+                  treatment:
+                    typeof i.treatment === "string" ? i.treatment.trim() : "",
+                }
+              })(),
             })
             if (filed) filedRuns.push(filed)
           } catch (e) {

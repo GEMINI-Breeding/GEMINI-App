@@ -66,6 +66,9 @@ export interface RunStepState {
   startedAt?: IsoDate
   completedAt?: IsoDate
   error?: string
+  /** Jobs started together (one per treatment's orthomosaic, say): the step
+   *  is done when all of them are. */
+  batch?: string[]
 }
 
 export interface Workspace {
@@ -129,6 +132,22 @@ export interface RunUploadScope {
   datasetShortIds?: string[]
   /** Run of the day and/or treatment of these batches ("run 2 · drought"). */
   batchLabel?: string
+  /**
+   * One date flown in several parts, e.g. one flight per treatment block:
+   * each upload with its label, and the orthomosaic job made from it. The
+   * orthomosaic step starts one job per treatment; later steps use all of
+   * the treatments' orthomosaics together (each plot from the nearest).
+   */
+  treatments?: RunTreatment[]
+}
+
+export interface RunTreatment {
+  /** The upload (8-hex dataset short id). */
+  datasetShortId: string
+  /** "well-watered", "drought", … */
+  label: string
+  /** The RUN_ODM job of this treatment's current orthomosaic. */
+  orthoJobId?: string
 }
 
 export interface Run {
@@ -610,6 +629,28 @@ export function setStepState(
   })
 }
 
+/** Start a step with several jobs at once; it completes when all have. */
+export function startStepBatch(
+  runId: Id,
+  stepKey: string,
+  jobIds: string[],
+): void {
+  const run = current.runs.find((r) => r.id === runId)
+  if (!run || jobIds.length === 0) return
+  const prev: RunStepState = run.steps[stepKey] ?? {
+    status: "pending",
+    jobIds: [],
+  }
+  setStepState(runId, stepKey, {
+    jobIds: [...prev.jobIds, ...jobIds.filter((j) => !prev.jobIds.includes(j))],
+    batch: jobIds,
+    status: "running",
+    startedAt: nowIso(),
+    completedAt: undefined,
+    error: undefined,
+  })
+}
+
 export function appendStepJobId(
   runId: Id,
   stepKey: string,
@@ -630,6 +671,7 @@ export function appendStepJobId(
   const isTerminal = prev.status !== "pending" && prev.status !== "running"
   setStepState(runId, stepKey, {
     jobIds: [...prev.jobIds, jobId],
+    batch: undefined,
     status: "running",
     startedAt: isTerminal ? nowIso() : (prev.startedAt ?? nowIso()),
     completedAt: undefined,

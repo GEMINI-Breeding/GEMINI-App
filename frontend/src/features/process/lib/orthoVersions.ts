@@ -170,12 +170,22 @@ export function buildOrthoVersions(
       path: defaultProcessedPath(basename),
       label: null,
       source: "RUN_ODM",
+      // odm_orthophoto-{job}.tif names the job that made it.
+      jobId:
+        /odm_orthophoto-([0-9a-f-]{36})\.tif$/i.exec(basename)?.[1] ??
+        undefined,
       createdAt: lastModifiedByName.get(basename) ?? null,
       hasCog: filesByName.has(cogSiblingName(basename)),
     })
     knownFilenames.add(basename)
   }
 
+  // A date flown in parts: name each treatment's current orthomosaic after
+  // the treatment, unless the person named it.
+  for (const t of run?.uploadScope?.treatments ?? []) {
+    const v = versions.find((x) => x.jobId && x.jobId === t.orthoJobId)
+    if (v && !v.label) v.label = t.label
+  }
   versions.sort((a, b) => {
     const aMs = a.createdAt ? Date.parse(a.createdAt) : 0
     const bMs = b.createdAt ? Date.parse(b.createdAt) : 0

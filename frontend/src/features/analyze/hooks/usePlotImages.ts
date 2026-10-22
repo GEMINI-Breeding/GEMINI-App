@@ -148,3 +148,9 @@ export function usePopulationOrthos(
     select: (files: FileMetadata[]) => orthosFromListing(files, withPopulation),
   })
 }
+
+/** Every file under a population (or site) prefix — the listing the plot
+ *  images and orthomosaics above are read from, shared through the cache. */
+export function usePopulationListing(prefix: string | null) {
+  return useQuery(populationListingQuery(prefix))
+}

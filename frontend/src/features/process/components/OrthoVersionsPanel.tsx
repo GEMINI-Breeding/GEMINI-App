@@ -176,10 +176,14 @@ function OrthoViewerDialog({
               </AlertDescription>
             </Alert>
           ) : (
-            <OrthoMapView
-              orthoTileUrl={orthoTileUrl}
-              orthoBounds={orthoBounds}
-            />
+            // A fixed-height box: the map's wrapper fills its parent, and inside
+            // this dialog that pushed the path below into the buttons.
+            <div className="h-[480px]">
+              <OrthoMapView
+                orthoTileUrl={orthoTileUrl}
+                orthoBounds={orthoBounds}
+              />
+            </div>
           )}
           <code className="bg-muted/40 block break-all rounded px-2 py-1 text-xs">
             {v.path}

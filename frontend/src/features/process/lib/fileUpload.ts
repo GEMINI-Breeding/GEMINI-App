@@ -129,11 +129,24 @@ export function fileUploadAsRun(opts: {
   path: string
   experimentId?: string
   batchLabel?: string
+  /** The batch's parts, when known: a treatment joins the run of its date
+   *  (and run of the day) as one more treatment; a run of the day is a
+   *  separate flight, so a separate run. */
+  runOfDay?: string
+  treatment?: string
 }): { run: Run; created: boolean } | null {
   const scope = scopeFromUploadPath(opts.path)
   if (!scope) return null
   const type = pipelineTypeFor(scope.platform)
-  const label = opts.batchLabel ?? ""
+  const split = opts.runOfDay !== undefined || opts.treatment !== undefined
+  const treatment = opts.treatment ?? ""
+  // What tells runs apart: the run of the day when the parts are known,
+  // else the whole label (as before).
+  const label = split
+    ? opts.runOfDay
+      ? `run ${opts.runOfDay}`
+      : ""
+    : (opts.batchLabel ?? "")
   const st = getState()
   const typeOf = new Map(st.pipelines.map((p) => [p.id, p.type]))
   const matches = st.runs.filter(
@@ -157,7 +170,21 @@ export function fileUploadAsRun(opts: {
   if (sameLabel.length) {
     const run = latest(sameLabel)
     const ids = run.uploadScope?.datasetShortIds ?? []
-    if (scope.shortId && run.uploadScope && ids.length > 0) {
+    if (treatment && scope.shortId && run.uploadScope) {
+      // Another treatment of this date: the run processes it too, with its
+      // own orthomosaic.
+      const treatments = run.uploadScope.treatments ?? []
+      updateRun(run.id, {
+        uploadScope: {
+          ...run.uploadScope,
+          datasetShortIds: [...new Set([...ids, scope.shortId])].sort(),
+          treatments: [
+            ...treatments.filter((t) => t.datasetShortId !== scope.shortId),
+            { datasetShortId: scope.shortId, label: treatment },
+          ],
+        },
+      })
+    } else if (scope.shortId && run.uploadScope && ids.length > 0) {
       // Another batch at this scope: the run now covers it too. (An empty
       // list already means "every batch at this scope".)
       updateRun(run.id, {
@@ -199,6 +226,9 @@ export function fileUploadAsRun(opts: {
       ...(opts.experimentId ? { experimentId: opts.experimentId } : {}),
       ...(scope.shortId ? { datasetShortIds: [scope.shortId] } : {}),
       ...(label ? { batchLabel: label } : {}),
+      ...(treatment && scope.shortId
+        ? { treatments: [{ datasetShortId: scope.shortId, label: treatment }] }
+        : {}),
     },
   })
   return { run, created: true }

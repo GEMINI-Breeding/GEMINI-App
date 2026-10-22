@@ -23,12 +23,27 @@ import {
   type Id,
   type RunStepStatus,
   setStepState,
+  startStepBatch,
   updateRun,
 } from "@/features/process/lib/runStore"
 import {
   checkThermalGpsPreflight,
   ThermalGpsRequiredError,
 } from "@/features/process/lib/thermalGpsPreflight"
+
+function traitParams(t: TraitExtractionParams): Record<string, unknown> {
+  return {
+    orthomosaic_path: t.orthomosaicPath,
+    boundary_geojson_path: t.boundaryGeojsonPath,
+    output_traits_geojson_path: t.outputTraitsGeojsonPath,
+    ...(t.demPath ? { dem_path: t.demPath } : {}),
+    ...(t.thermalPath ? { thermal_path: t.thermalPath } : {}),
+    ...(typeof t.exgThreshold === "number"
+      ? { exg_threshold: t.exgThreshold }
+      : {}),
+    ...(t.datasetLabel ? { dataset_label: t.datasetLabel } : {}),
+  }
+}
 
 export interface OrthomosaicParams {
   reconstruction_quality?: string
@@ -48,6 +63,9 @@ export interface TraitExtractionParams {
   exgThreshold?: number
   /** MinIO path the worker should write the traits GeoJSON to (no bucket prefix). */
   outputTraitsGeojsonPath: string
+  /** Names the trait dataset of one flight among several on a date (one per
+   *  treatment), so each run replaces only its own earlier records. */
+  datasetLabel?: string
 }
 
 export interface InferenceParams {
@@ -164,6 +182,8 @@ export interface ExecuteStepInput {
   /** Per-step parameters. */
   orthomosaic?: OrthomosaicParams
   traitExtraction?: TraitExtractionParams
+  /** Several at once: one per orthomosaic of the date (per treatment). */
+  traitExtractions?: TraitExtractionParams[]
   inference?: InferenceParams
   stitching?: StitchingParams
   splitOrthomosaic?: SplitOrthomosaicParams
@@ -336,18 +356,61 @@ export async function executeStep(
           ? { custom_options: orthomosaic.custom_options }
           : {}),
       }
-      const job = (await JobsService.apiJobsSubmitSubmitJob({
-        requestBody: {
-          job_type: "RUN_ODM",
-          parameters: params,
-          experiment_id: experimentId,
-        } as Parameters<
-          typeof JobsService.apiJobsSubmitSubmitJob
-        >[0]["requestBody"],
-      })) as JobOutput
-      const jobId = String(job?.id ?? "")
-      if (!jobId) throw new Error("RUN_ODM submitted but no job id returned")
+      const submitOdm = async (ids: string[]) => {
+        const job = (await JobsService.apiJobsSubmitSubmitJob({
+          requestBody: {
+            job_type: "RUN_ODM",
+            parameters: {
+              ...params,
+              ...(ids.length ? { dataset_short_ids: ids } : {}),
+            },
+            experiment_id: experimentId,
+          } as Parameters<
+            typeof JobsService.apiJobsSubmitSubmitJob
+          >[0]["requestBody"],
+        })) as JobOutput
+        const id = String(job?.id ?? "")
+        if (!id) throw new Error("RUN_ODM submitted but no job id returned")
+        return id
+      }
+      // A date flown in parts (one flight per treatment): one orthomosaic
+      // per part, as separate jobs, unless one part was picked.
+      const treatments = getRun(runId)?.uploadScope?.treatments ?? []
+      if (treatments.length > 1 && datasetShortIds.length !== 1) {
+        const ids: string[] = []
+        const done: typeof treatments = []
+        for (const t of treatments) {
+          // eslint-disable-next-line no-await-in-loop
+          const id = await submitOdm([t.datasetShortId])
+          ids.push(id)
+          done.push({ ...t, orthoJobId: id })
+        }
+        const r0 = getRun(runId)
+        if (r0?.uploadScope)
+          updateRun(runId, {
+            uploadScope: { ...r0.uploadScope, treatments: done },
+            ...(r0.status === "draft" ? { status: "running" as const } : {}),
+          })
+        startStepBatch(runId, "orthomosaic", ids)
+        return { jobId: ids[ids.length - 1], done: false }
+      }
+      const jobId = await submitOdm(datasetShortIds)
       appendStepJobId(runId, "orthomosaic", jobId)
+      if (treatments.length > 1 && datasetShortIds.length === 1) {
+        // One part re-made: it is that treatment's orthomosaic now.
+        const r0 = getRun(runId)
+        if (r0?.uploadScope)
+          updateRun(runId, {
+            uploadScope: {
+              ...r0.uploadScope,
+              treatments: treatments.map((t) =>
+                t.datasetShortId === datasetShortIds[0]
+                  ? { ...t, orthoJobId: jobId }
+                  : t,
+              ),
+            },
+          })
+      }
       // appendStepJobId flips the step to running and sets startedAt.
       // Bump the Run's status so WorkspaceDetail's run badge reflects activity.
       const r = getRun(runId)
@@ -356,10 +419,36 @@ export async function executeStep(
     }
 
     case "trait_extraction": {
-      if (!input.traitExtraction) {
+      const all =
+        input.traitExtractions ??
+        (input.traitExtraction ? [input.traitExtraction] : [])
+      if (all.length === 0) {
         throw new Error("trait_extraction requires ortho + boundary inputs")
       }
-      const t = input.traitExtraction
+      if (all.length > 1) {
+        const ids: string[] = []
+        for (const t of all) {
+          // eslint-disable-next-line no-await-in-loop
+          const job = (await JobsService.apiJobsSubmitSubmitJob({
+            requestBody: {
+              job_type: "EXTRACT_TRAITS",
+              parameters: traitParams(t),
+              experiment_id: experimentId,
+            } as Parameters<
+              typeof JobsService.apiJobsSubmitSubmitJob
+            >[0]["requestBody"],
+          })) as JobOutput
+          const id = String(job?.id ?? "")
+          if (!id)
+            throw new Error("EXTRACT_TRAITS submitted but no job id returned")
+          ids.push(id)
+        }
+        startStepBatch(runId, "trait_extraction", ids)
+        const r = getRun(runId)
+        if (r && r.status === "draft") updateRun(runId, { status: "running" })
+        return { jobId: ids[ids.length - 1], done: false }
+      }
+      const t = all[0]
       const params: Record<string, unknown> = {
         orthomosaic_path: t.orthomosaicPath,
         boundary_geojson_path: t.boundaryGeojsonPath,
@@ -369,6 +458,7 @@ export async function executeStep(
         ...(typeof t.exgThreshold === "number"
           ? { exg_threshold: t.exgThreshold }
           : {}),
+        ...(t.datasetLabel ? { dataset_label: t.datasetLabel } : {}),
       }
       const job = (await JobsService.apiJobsSubmitSubmitJob({
         requestBody: {

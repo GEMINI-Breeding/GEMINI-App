@@ -23,6 +23,8 @@ export type UsePlotTraitValuesArgs = {
    *  `plot_number`-only key (unique within a population). Without it the
    *  reduce falls back to the `plot_number-row-col` composite key. */
   populationName?: string | null
+  /** One collection date (YYYY-MM-DD): the values measured that day only. */
+  collectionDate?: string | null
 }
 
 export type PlotTraitValues = {
@@ -41,7 +43,14 @@ export type PlotTraitValues = {
 export function usePlotTraitValues(
   args: UsePlotTraitValuesArgs,
 ): UseQueryResult<PlotTraitValues, Error> {
-  const { traitId, experimentName, seasonName, siteName, populationName } = args
+  const {
+    traitId,
+    experimentName,
+    seasonName,
+    siteName,
+    populationName,
+    collectionDate,
+  } = args
   return useQuery<PlotTraitValues, Error>({
     queryKey: [
       "analyze",
@@ -51,6 +60,7 @@ export function usePlotTraitValues(
       seasonName ?? null,
       siteName ?? null,
       populationName ?? null,
+      collectionDate ?? null,
     ],
     enabled: Boolean(traitId),
     queryFn: async () => {
@@ -61,6 +71,7 @@ export function usePlotTraitValues(
         seasonName: seasonName ?? null,
         siteName: siteName ?? null,
         populationName: populationName ?? null,
+        collectionDate: collectionDate ?? null,
       })
       // Population-scoped → join by plot_number alone (unique within a
       // population). Otherwise keep the composite plot+row+col key.

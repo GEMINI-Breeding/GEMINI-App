@@ -14,10 +14,10 @@
  * date) and could mis-match the season the boundary was actually saved
  * under.
  */
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 
-import { ExperimentsService, type TraitOutput, TraitsService } from "@/client"
+import { PlotGeometryService, type TraitOutput, TraitsService } from "@/client"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -27,6 +27,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { idAsString } from "@/features/admin/lib/ids"
+import { useTraitRecords } from "@/features/dashboard/hooks/useTraitData"
+import { plotImagesForDate } from "@/features/dashboard/lib/traitCatalog"
+import { DEFAULT_BUCKET } from "@/features/files/lib/download"
 import {
   ProcessScopeSelectors,
   useAerialScopeContext,
@@ -34,8 +37,12 @@ import {
 import { TraitMap } from "@/features/process/components/TraitMap"
 import { buildTitilerTileUrl } from "@/features/process/lib/activeOrtho"
 import { processedPopulationPrefix } from "@/features/process/lib/paths"
+import { useAllRuns } from "@/features/process/lib/runStore"
 import { PlotImageDialog } from "../components/PlotImageDialog"
-import { usePlotImages, usePopulationOrthos } from "../hooks/usePlotImages"
+import {
+  usePopulationListing,
+  usePopulationOrthos,
+} from "../hooks/usePlotImages"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
 import { usePlotTraitValues } from "../hooks/usePlotTraitValues"
 import {
@@ -43,24 +50,34 @@ import {
   joinTraitToPolygons,
   plotKey,
 } from "../lib/joinTraitToPolygons"
+import {
+  boundaryPlots,
+  dateFolders,
+  dateOrthos,
+  mapDates,
+  traitsOnDate,
+} from "../lib/mapDate"
 import { fetchMatrix } from "../lib/multivariate"
 
 const STORAGE_KEY = "gemini.analyze.map.fields.v1"
 
 type LocalFields = {
   traitId: string
+  /** The flight date shown (YYYY-MM-DD); "" = the newest with traits. */
+  date: string
 }
 
 function loadLocalFields(): LocalFields {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { traitId: "" }
+    if (!raw) return { traitId: "", date: "" }
     const parsed = JSON.parse(raw) as Partial<LocalFields>
     return {
       traitId: typeof parsed.traitId === "string" ? parsed.traitId : "",
+      date: typeof parsed.date === "string" ? parsed.date : "",
     }
   } catch {
-    return { traitId: "" }
+    return { traitId: "", date: "" }
   }
 }
 
@@ -80,50 +97,7 @@ export function AnalyzeMap() {
   }, [fields])
 
   const hasScopeIds = Boolean(ctx.experimentId && ctx.seasonId && ctx.siteId)
-  // Population narrows the join so plot_number alone is the key (it's unique
-  // only within a population). When no population is picked we fall back to
-  // the experiment/season/site scope + the composite plot+row+col key.
-  const joinKeyMode = ctx.populationId ? "plot" : "plotrc"
-  const polygonsQuery = usePlotPolygons({
-    experimentId: ctx.experimentId,
-    seasonId: ctx.seasonId,
-    siteId: ctx.siteId,
-    populationId: ctx.populationId,
-  })
-  const polygonsFc = polygonsQuery.data ?? null
-  const hasPolygons = polygonsFc !== null && polygonsFc.features.length > 0
-
-  // Trait list. Globally scoped today — the analyze page is read-only and
-  // a long list is acceptable; the join will simply produce no matches for
-  // traits without records in this scope (those features render in the
-  // "no value" gray). Slice 5 may add an "only show traits with records
-  // in this experiment" filter.
-  const traitsQuery = useQuery({
-    queryKey: ["analyze", "map", "traits"],
-    queryFn: () =>
-      TraitsService.apiTraitsAllGetAllTraits({ limit: 500, offset: 0 }),
-  })
-  const traits: TraitOutput[] = (traitsQuery.data as TraitOutput[] | null) ?? []
-  const selectedTrait = useMemo(
-    () => traits.find((t) => idAsString(t.id) === fields.traitId) ?? null,
-    [traits, fields.traitId],
-  )
-
-  // Per-plot mean values for the chosen trait, scoped to the picked
-  // experiment/season/site. Empty Map until a trait is chosen.
-  const valuesQuery = usePlotTraitValues({
-    traitId: fields.traitId || null,
-    experimentName: ctx.experimentName || null,
-    seasonName: ctx.seasonName || null,
-    siteName: ctx.siteName || null,
-    populationName: ctx.populationName || null,
-  })
-
-  const traitValues = valuesQuery.data?.values ?? null
-
-  // Per-plot PNGs for the click-through. The scope has no flight date, so
-  // list from the population prefix and let usePlotImages index every
-  // PlotImages/ directory under it.
+  // Every file of the scope: plot images, orthomosaics and the dates' folders.
   const plotImagesPrefix =
     ctx.seasonName && ctx.experimentName && ctx.siteName && ctx.populationName
       ? processedPopulationPrefix({
@@ -133,52 +107,173 @@ export function AnalyzeMap() {
           population: ctx.populationName,
         })
       : null
-  const plotImagesQuery = usePlotImages(plotImagesPrefix)
-
-  // Ortho underlay: every orthomosaic in scope, newest first.
-  // "" = follow the newest; "__none__" = no underlay.
   // Without a population, list the whole site so a run over any
   // population can still sit under the plots.
   const sitePrefix =
     ctx.seasonName && ctx.experimentName && ctx.siteName
       ? `Processed/${ctx.seasonName}/${ctx.experimentName}/${ctx.siteName}/`
       : null
+  const listing = usePopulationListing(plotImagesPrefix ?? sitePrefix)
+  const files = useMemo(() => listing.data ?? [], [listing.data])
   const orthosQuery = usePopulationOrthos(
     plotImagesPrefix ?? sitePrefix,
     !plotImagesPrefix,
   )
-  const orthos = orthosQuery.data ?? []
-  const [underlayChoice, setUnderlayChoice] = useState("")
+
+  // One flight date at a time: its traits, its boundaries and its
+  // orthomosaics. A trait measured on one date is never drawn over another
+  // date's plots or image.
+  const catalog = useTraitRecords()
+  const mapScope = useMemo(
+    () => ({
+      experiment: ctx.experimentName || null,
+      season: ctx.seasonName || null,
+      site: ctx.siteName || null,
+      population: ctx.populationName || null,
+    }),
+    [ctx.experimentName, ctx.seasonName, ctx.siteName, ctx.populationName],
+  )
+  const dates = useMemo(
+    () =>
+      mapDates(
+        catalog.data ?? [],
+        (orthosQuery.data ?? []).map((o) => o.date),
+        mapScope,
+      ),
+    [catalog.data, orthosQuery.data, mapScope],
+  )
+  const date = dates.some((d) => d.date === fields.date)
+    ? fields.date
+    : (dates.find((d) => d.traits)?.date ?? dates[0]?.date ?? "")
+  const dateTraits = useMemo(
+    () => traitsOnDate(catalog.data ?? [], mapScope, date),
+    [catalog.data, mapScope, date],
+  )
+
+  // Traits: only those measured on this date in this scope.
+  const traitsQuery = useQuery({
+    queryKey: ["analyze", "map", "traits"],
+    queryFn: () =>
+      TraitsService.apiTraitsAllGetAllTraits({ limit: 500, offset: 0 }),
+  })
+  const traits: TraitOutput[] = useMemo(
+    () =>
+      ((traitsQuery.data as TraitOutput[] | null) ?? []).filter((t) =>
+        dateTraits.has(t.trait_name ?? ""),
+      ),
+    [traitsQuery.data, dateTraits],
+  )
+  const selectedTrait = useMemo(
+    () => traits.find((t) => idAsString(t.id) === fields.traitId) ?? null,
+    [traits, fields.traitId],
+  )
+
+  // Per-plot values of the chosen trait on this date.
+  const valuesQuery = usePlotTraitValues({
+    traitId: selectedTrait ? idAsString(selectedTrait.id) : null,
+    experimentName: ctx.experimentName || null,
+    seasonName: ctx.seasonName || null,
+    siteName: ctx.siteName || null,
+    populationName: ctx.populationName || null,
+    collectionDate: date || null,
+  })
+  const traitValues = valuesQuery.data?.values ?? null
+
+  // Boundaries: the version active for this date (the plots as drawn on
+  // that flight's map); the scope's saved plots when the date has none.
+  const polygonsQuery = usePlotPolygons({
+    experimentId: ctx.experimentId,
+    seasonId: ctx.seasonId,
+    siteId: ctx.siteId,
+    populationId: ctx.populationId,
+  })
+  const folders = useMemo(
+    () => (date ? dateFolders(files, date) : []),
+    [files, date],
+  )
+  const boundaryQueries = useQueries({
+    queries: folders.map((directory) => ({
+      queryKey: ["analyze", "map", "date-boundaries", directory],
+      queryFn: async () => {
+        try {
+          const r =
+            (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+              requestBody: { directory },
+            })) as { state_snapshot?: unknown }
+          return boundaryPlots(r.state_snapshot)
+        } catch {
+          return []
+        }
+      },
+      staleTime: 60_000,
+    })),
+  })
+  const boundaryStamp = boundaryQueries.map((q) => q.dataUpdatedAt).join()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: boundaryStamp changes whenever a query's data does
+  const dateBoundaries = useMemo(() => {
+    const features = boundaryQueries.flatMap((q) => q.data ?? [])
+    return features.length
+      ? ({ type: "FeatureCollection", features } as unknown as NonNullable<
+          typeof polygonsQuery.data
+        >)
+      : null
+  }, [boundaryStamp])
+  const boundariesLoading = boundaryQueries.some((q) => q.isLoading)
+  const polygonsFc = dateBoundaries ?? polygonsQuery.data ?? null
+  const hasPolygons = polygonsFc !== null && polygonsFc.features.length > 0
+  // Population narrows the join so plot_number alone is the key (it is unique
+  // within a population, and within a saved boundary version's field design).
+  const joinKeyMode = ctx.populationId || dateBoundaries ? "plot" : "plotrc"
+
+  // Underlay: every orthomosaic of this date (one per treatment block, say),
+  // each flight's latest.
+  const allRuns = useAllRuns()
+  const latestJobs = useMemo(
+    () =>
+      new Set(
+        allRuns
+          .map((r) => r.steps.orthomosaic?.jobIds?.at(-1))
+          .filter((j): j is string => Boolean(j)),
+      ),
+    [allRuns],
+  )
+  const dayOrthos = useMemo(
+    () => (date ? dateOrthos(files, date, latestJobs) : []),
+    [files, date, latestJobs],
+  )
+  const [showOrtho, setShowOrtho] = useState(true)
+  const tileUrls = useMemo(
+    () =>
+      showOrtho
+        ? dayOrthos.map((o) =>
+            buildTitilerTileUrl(
+              `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`,
+            ),
+          )
+        : [],
+    [showOrtho, dayOrthos],
+  )
   const [fillOpacity, setFillOpacity] = useState(0.8)
   const [orthoOpacity, setOrthoOpacity] = useState(1)
-  const underlay =
-    underlayChoice === "__none__"
-      ? null
-      : (orthos.find((o) => o.s3Url === underlayChoice) ?? orthos[0] ?? null)
+
+  // Per-plot PNGs for the click-through, from this date's flight.
+  const datePlotImages = useMemo(
+    () => (date ? plotImagesForDate(files, date) : new Map<number, string>()),
+    [files, date],
+  )
   const [clickedPlot, setClickedPlot] = useState<{
     plot: number
     props: Record<string, unknown>
   } | null>(null)
 
-  // Hover: every trait this experiment has, per plot, so the tooltip can
-  // list them all while the colour shows one. Capped so a wide experiment
-  // doesn't turn the tooltip into a wall.
-  const expTraitsQuery = useQuery({
-    queryKey: ["analyze", "map", "exp-traits", ctx.experimentId],
-    queryFn: () =>
-      ExperimentsService.apiExperimentsIdExperimentIdTraitsGetExperimentTraits({
-        experimentId: ctx.experimentId as string,
-      }),
-    enabled: Boolean(ctx.experimentId),
-  })
+  // Hover: the other traits of this date, per plot, so the tooltip can list
+  // them while the colour shows one. Capped so it stays readable.
   const hoverTraits = useMemo(
     () =>
-      ((expTraitsQuery.data as TraitOutput[] | null) ?? [])
-        .map((t) => t.trait_name ?? "")
-        .filter(Boolean)
+      [...dateTraits]
         .sort((a, b) => a.localeCompare(b))
         .slice(0, HOVER_TRAIT_LIMIT),
-    [expTraitsQuery.data],
+    [dateTraits],
   )
   const hoverQuery = useQuery({
     queryKey: [
@@ -189,6 +284,7 @@ export function AnalyzeMap() {
       ctx.seasonName,
       ctx.siteName,
       ctx.populationName,
+      date,
       hoverTraits.join("\u0000"),
     ],
     queryFn: () =>
@@ -198,12 +294,13 @@ export function AnalyzeMap() {
         season_names: [ctx.seasonName as string],
         site_names: [ctx.siteName as string],
         ...(ctx.populationName ? { populations: [ctx.populationName] } : {}),
-        aggregation: "mean",
+        aggregation: "date",
+        aggregation_date: date,
       }),
     enabled:
       hasPolygons &&
       hoverTraits.length > 0 &&
-      Boolean(ctx.experimentName && ctx.seasonName && ctx.siteName),
+      Boolean(date && ctx.experimentName && ctx.seasonName && ctx.siteName),
   })
 
   // Join the values onto the polygons. When no trait is chosen we just
@@ -276,6 +373,46 @@ export function AnalyzeMap() {
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1">
           <Label
+            htmlFor="analyze-map-date"
+            className="text-xs text-muted-foreground"
+          >
+            Date
+          </Label>
+          <Select
+            value={date || "__none__"}
+            onValueChange={(v) =>
+              setFields((f) => ({ ...f, date: v === "__none__" ? "" : v }))
+            }
+            disabled={dates.length === 0}
+          >
+            <SelectTrigger
+              id="analyze-map-date"
+              data-testid="analyze-map-date"
+              className="w-56"
+            >
+              <SelectValue
+                placeholder={catalog.isLoading ? "Loading dates…" : "No dates"}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {dates.map((d) => (
+                <SelectItem key={d.date} value={d.date}>
+                  {d.date}
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {d.traits && d.ortho
+                      ? "traits · image"
+                      : d.traits
+                        ? "traits"
+                        : "image only"}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label
             htmlFor="analyze-map-trait"
             className="text-xs text-muted-foreground"
           >
@@ -294,7 +431,11 @@ export function AnalyzeMap() {
             >
               <SelectValue
                 placeholder={
-                  traitsQuery.isLoading ? "Loading traits…" : "Outline only"
+                  traitsQuery.isLoading
+                    ? "Loading traits…"
+                    : traits.length
+                      ? "Outline only"
+                      : "No traits on this date"
                 }
               />
             </SelectTrigger>
@@ -318,8 +459,9 @@ export function AnalyzeMap() {
             Ortho underlay
           </Label>
           <Select
-            value={underlay ? underlay.s3Url : "__none__"}
-            onValueChange={setUnderlayChoice}
+            value={showOrtho && dayOrthos.length ? "date" : "__none__"}
+            onValueChange={(v) => setShowOrtho(v === "date")}
+            disabled={dayOrthos.length === 0}
           >
             <SelectTrigger
               id="analyze-map-underlay"
@@ -327,16 +469,21 @@ export function AnalyzeMap() {
               className="w-72"
             >
               <SelectValue
-                placeholder={orthosQuery.isLoading ? "Loading orthos…" : "None"}
+                placeholder={
+                  listing.isLoading ? "Loading orthos…" : "None for this date"
+                }
               />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">None</SelectItem>
-              {orthos.map((o) => (
-                <SelectItem key={o.s3Url} value={o.s3Url}>
-                  {o.label}
+              {dayOrthos.length > 0 && (
+                <SelectItem value="date">
+                  {date}
+                  {dayOrthos.length > 1
+                    ? ` (${dayOrthos.length} orthomosaics)`
+                    : ""}
                 </SelectItem>
-              ))}
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -347,7 +494,7 @@ export function AnalyzeMap() {
           value={fillOpacity}
           onChange={setFillOpacity}
         />
-        {underlay && (
+        {tileUrls.length > 0 && (
           <OpacitySlider
             id="analyze-map-ortho-opacity"
             label="Ortho"
@@ -366,7 +513,7 @@ export function AnalyzeMap() {
         </p>
       )}
 
-      {hasScopeIds && polygonsQuery.isLoading && (
+      {hasScopeIds && (polygonsQuery.isLoading || boundariesLoading) && (
         <p
           className="text-sm text-muted-foreground"
           data-testid="analyze-map-loading"
@@ -375,15 +522,18 @@ export function AnalyzeMap() {
         </p>
       )}
 
-      {hasScopeIds && !polygonsQuery.isLoading && !hasPolygons && (
-        <p
-          className="text-sm text-muted-foreground"
-          data-testid="analyze-map-no-polygons"
-        >
-          No plot boundaries saved for this scope yet. Run the Plot Boundary
-          Prep tool in the Process pipeline first.
-        </p>
-      )}
+      {hasScopeIds &&
+        !polygonsQuery.isLoading &&
+        !boundariesLoading &&
+        !hasPolygons && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="analyze-map-no-polygons"
+          >
+            No plot boundaries saved for this scope yet. Run the Plot Boundary
+            Prep tool in the Process pipeline first.
+          </p>
+        )}
 
       {overlap && (
         <p
@@ -417,9 +567,7 @@ export function AnalyzeMap() {
               : undefined
           }
           onPlotClick={(plot, props) => setClickedPlot({ plot, props })}
-          orthoTileUrl={
-            underlay ? buildTitilerTileUrl(underlay.s3Url) : undefined
-          }
+          orthoTileUrl={tileUrls}
           orthoOpacity={orthoOpacity}
           fillOpacity={fillOpacity}
         />
@@ -431,11 +579,9 @@ export function AnalyzeMap() {
         plot={clickedPlot?.plot ?? null}
         properties={clickedPlot?.props}
         objectPath={
-          clickedPlot
-            ? (plotImagesQuery.data?.get(clickedPlot.plot) ?? null)
-            : null
+          clickedPlot ? (datePlotImages.get(clickedPlot.plot) ?? null) : null
         }
-        loading={plotImagesQuery.isLoading}
+        loading={listing.isLoading}
       />
     </div>
   )

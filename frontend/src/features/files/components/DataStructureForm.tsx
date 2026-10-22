@@ -160,11 +160,16 @@ export function DataStructureForm({
               isLoading={opt.isLoading}
               required={!config?.optionalFields?.includes(field)}
               disabled={disabled}
+              presets={
+                field === "population"
+                  ? [{ name: "Mixed", hint: "several crops in one upload" }]
+                  : undefined
+              }
               description={
                 disabled
                   ? "Pick or create an experiment first."
                   : field === "population"
-                    ? "Several crops in one upload (a flight or a day's rover logs over neighbouring trials)? Use one population such as Mixed: the field design's crop column files each plot's results under its own crop."
+                    ? "Several crops in one upload (a flight or a day's rover logs over neighbouring trials)? Pick Mixed: the field design's crop column files each plot's results under its own crop."
                     : field === "platform"
                       ? "Decides the processing: rovers and handheld cameras go through the ground pipeline (plot marking, stitching); drones, with built-in or mounted sensors, through the aerial one (orthomosaic)."
                       : undefined

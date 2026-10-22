@@ -34,7 +34,7 @@ const OSM_TILES = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"]
  *  `/titiler` proxy handles auth and out-of-footprint 404 rewrites). */
 function buildStyle(
   basemap: "esri" | "osm",
-  orthoTileUrl: string | undefined,
+  orthoTileUrl: string | string[] | undefined,
   orthoOpacity = 1,
 ): StyleSpecification {
   const baseTiles = basemap === "esri" ? ESRI_TILES : OSM_TILES
@@ -57,19 +57,21 @@ function buildStyle(
     },
     layers: [{ id: "base", type: "raster", source: "base" }],
   }
-  if (orthoTileUrl) {
-    style.sources.ortho = {
-      type: "raster",
-      tiles: [orthoTileUrl],
-      tileSize: 256,
-    }
+  // Several orthomosaics of one date (one flight per treatment block, say)
+  // each get their own layer; outside its footprint a layer is transparent.
+  const urls = (
+    Array.isArray(orthoTileUrl) ? orthoTileUrl : [orthoTileUrl]
+  ).filter((u): u is string => Boolean(u))
+  urls.forEach((url, i) => {
+    const id = i === 0 ? "ortho" : `ortho-${i}`
+    style.sources[id] = { type: "raster", tiles: [url], tileSize: 256 }
     style.layers.push({
-      id: "ortho",
+      id,
       type: "raster",
-      source: "ortho",
+      source: id,
       paint: { "raster-opacity": orthoOpacity },
     })
-  }
+  })
   return style
 }
 
@@ -136,7 +138,8 @@ export type TraitMapProps = {
   /** TiTiler XYZ tile URL template (`/titiler/cog/tiles/.../{z}/{x}/{y}?url=…`).
    *  When supplied, the ortho is rendered as a raster layer beneath the
    *  polygons. */
-  orthoTileUrl?: string
+  /** One TiTiler tile URL, or several (all orthomosaics of one date). */
+  orthoTileUrl?: string | string[]
   /** Basemap layer behind the ortho/polygons. Default Esri (satellite). */
   basemap?: "esri" | "osm"
   /**

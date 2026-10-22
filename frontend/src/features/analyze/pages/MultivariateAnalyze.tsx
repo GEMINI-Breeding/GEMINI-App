@@ -16,13 +16,14 @@ import {
 } from "@/client"
 import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useTraitRecords } from "@/features/dashboard/hooks/useTraitData"
 import { pinWidget } from "@/features/dashboard/store"
 import { correlationSentence } from "@/features/dashboard/widgets/AnalysisWidget"
-
 import { AggregationControl } from "../components/AggregationControl"
 import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
 import { ManovaTable } from "../components/ManovaTable"
 import { PcaBiplot } from "../components/PcaBiplot"
+import { comparable } from "../lib/mapDate"
 import {
   type Aggregation,
   type CorrelationResponse,
@@ -77,10 +78,40 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const traitOptions = useMemo(
-    () => traits.map((t) => t.trait_name).filter((n): n is string => !!n),
-    [traits],
+  // Only traits that can be compared here: with records in the filters, and
+  // on the chosen date when one date is analysed. Traits from another field,
+  // season or date have no plots in common with these.
+  const catalog = useTraitRecords()
+  const scopeData = useMemo(
+    () =>
+      catalog.data
+        ? comparable(
+            catalog.data,
+            { experiments, seasons, sites, populations },
+            aggregation === "date" ? aggregationDate : null,
+          )
+        : null,
+    [
+      catalog.data,
+      experiments,
+      seasons,
+      sites,
+      populations,
+      aggregation,
+      aggregationDate,
+    ],
   )
+  const traitOptions = useMemo(
+    () =>
+      traits
+        .map((t) => t.trait_name)
+        .filter((n): n is string => !!n)
+        .filter((n) => !scopeData || scopeData.traits.has(n)),
+    [traits, scopeData],
+  )
+  // Picks that the filters no longer allow are left out of the analysis.
+  const usable = (picked: Set<string>) =>
+    [...picked].filter((t) => traitOptions.includes(t))
 
   // *GetAll* endpoints return the full set without a search predicate. The
   // *Get* variants 400 when no filter param is supplied.
@@ -138,11 +169,11 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
   // trait list so the Run button can enable and the request payload is
   // explicit about which traits to compute over.
   const effectiveCorrTraits =
-    corrTraits.size === 0 ? traitOptions : [...corrTraits]
+    usable(corrTraits).length === 0 ? traitOptions : usable(corrTraits)
   const effectivePcaTraits =
-    pcaTraits.size === 0 ? traitOptions : [...pcaTraits]
+    usable(pcaTraits).length === 0 ? traitOptions : usable(pcaTraits)
   const effectiveManovaTraits =
-    manovaTraits.size === 0 ? traitOptions : [...manovaTraits]
+    usable(manovaTraits).length === 0 ? traitOptions : usable(manovaTraits)
 
   function baseRequest(
     traitNames: string[],
@@ -268,6 +299,7 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
                 onChange={setAggregation}
                 date={aggregationDate}
                 onDateChange={setAggregationDate}
+                dates={scopeData?.dates}
               />
             </div>
           )}

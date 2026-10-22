@@ -84,4 +84,33 @@ describe("fileUploadAsRun", () => {
   it("ignores uploads that are not field data", () => {
     expect(fileUploadAsRun({ path: "Reference/Cowpea/design.csv" })).toBeNull()
   })
+
+  it("puts a date's treatments in one run; another run of the day apart", () => {
+    const ww = fileUploadAsRun({
+      path: `${P}/Drone/RGB/aaaaaaaa/`,
+      treatment: "well-watered",
+      runOfDay: "",
+    })
+    const dr = fileUploadAsRun({
+      path: `${P}/Drone/RGB/bbbbbbbb/`,
+      treatment: "drought",
+      runOfDay: "",
+    })
+    expect(dr?.created).toBe(false)
+    expect(dr?.run.id).toBe(ww?.run.id)
+    const run = getState().runs.find((r) => r.id === ww?.run.id)
+    expect(run?.name).toBe("2024-07-15 · Drone/RGB")
+    expect(run?.uploadScope?.datasetShortIds).toEqual(["aaaaaaaa", "bbbbbbbb"])
+    expect(run?.uploadScope?.treatments).toEqual([
+      { datasetShortId: "aaaaaaaa", label: "well-watered" },
+      { datasetShortId: "bbbbbbbb", label: "drought" },
+    ])
+    // the afternoon flight is its own run
+    const pm = fileUploadAsRun({
+      path: `${P}/Drone/RGB/cccccccc/`,
+      treatment: "drought",
+      runOfDay: "2",
+    })
+    expect(pm?.created).toBe(true)
+  })
 })

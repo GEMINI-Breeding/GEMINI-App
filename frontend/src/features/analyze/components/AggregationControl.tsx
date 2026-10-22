@@ -12,6 +12,9 @@ interface Props {
   onChange: (value: Aggregation) => void
   date: string | null
   onDateChange: (date: string | null) => void
+  /** Dates that have records in the current filters: the date is chosen from
+   *  these (a date with no measurements would compare nothing). */
+  dates?: string[]
 }
 
 const LABELS: Record<Aggregation, string> = {
@@ -28,6 +31,7 @@ export function AggregationControl({
   onChange,
   date,
   onDateChange,
+  dates,
 }: Props) {
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -67,14 +71,41 @@ export function AggregationControl({
           >
             Collection date
           </label>
-          <input
-            id="mv-aggregation-date"
-            type="date"
-            data-testid="mv-aggregation-date"
-            className="h-9 rounded-md border bg-background px-3 text-sm"
-            value={date ?? ""}
-            onChange={(e) => onDateChange(e.target.value || null)}
-          />
+          {dates ? (
+            <Select
+              value={date ?? undefined}
+              onValueChange={(v) => onDateChange(v || null)}
+              disabled={dates.length === 0}
+            >
+              <SelectTrigger
+                id="mv-aggregation-date"
+                className="w-44"
+                data-testid="mv-aggregation-date"
+              >
+                <SelectValue
+                  placeholder={
+                    dates.length ? "Pick a date" : "No dates with records"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {dates.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <input
+              id="mv-aggregation-date"
+              type="date"
+              data-testid="mv-aggregation-date"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={date ?? ""}
+              onChange={(e) => onDateChange(e.target.value || null)}
+            />
+          )}
         </div>
       )}
     </div>

@@ -62,6 +62,9 @@ export interface TraitDialogProps {
   thermalOptions?: RasterOption[]
   /** For the live threshold preview: the chosen ortho and the plots. */
   preview?: { s3Url: string; plots: PreviewPlot[] } | null
+  /** A date flown in parts: every treatment's orthomosaic is used, one job
+   *  each, with the plots nearest it and its own elevation model. */
+  treatmentOrthos?: { label: string; filename: string }[]
 }
 
 export function TraitExtractionDialog({
@@ -76,8 +79,10 @@ export function TraitExtractionDialog({
   demOptions = [],
   thermalOptions = [],
   preview = null,
+  treatmentOrthos = [],
 }: TraitDialogProps) {
-  const orthoOptions = orthoVersions.length > 0
+  const multi = treatmentOrthos.length > 1
+  const orthoOptions = orthoVersions.length > 0 || multi
   const boundaryOptions = boundaryVersions.length > 0
   const boundaryReady = state.boundaryVersion !== null
 
@@ -96,9 +101,28 @@ export function TraitExtractionDialog({
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label className="text-sm" htmlFor="trait-ortho-version">
-              Orthomosaic version
+              {multi ? "Orthomosaics" : "Orthomosaic version"}
             </Label>
-            {orthoOptions ? (
+            {multi ? (
+              <div
+                className="space-y-1 rounded-md border px-3 py-2 text-xs"
+                data-testid="trait-treatment-orthos"
+              >
+                {treatmentOrthos.map((t) => (
+                  <p key={t.filename} className="flex gap-2">
+                    <span className="font-medium">{t.label}</span>
+                    <span className="text-muted-foreground truncate font-mono">
+                      {t.filename}
+                    </span>
+                  </p>
+                ))}
+                <p className="text-muted-foreground pt-1">
+                  One job per treatment: each plot is measured on the
+                  orthomosaic whose centre it is nearest, with that flight's
+                  elevation model for canopy height.
+                </p>
+              </div>
+            ) : orthoOptions ? (
               <Select
                 value={
                   state.orthoVersion != null ? String(state.orthoVersion) : ""
@@ -180,14 +204,17 @@ export function TraitExtractionDialog({
             </p>
           )}
 
-          <RasterPicker
-            id="trait-dem"
-            label="DEM (canopy height)"
-            none="No DEM — skip canopy height"
-            options={demOptions}
-            value={state.demPath}
-            onChange={(demPath) => onChange({ ...state, demPath })}
-          />
+          {/* Several treatments: each job uses its own flight's DEM. */}
+          {!multi && (
+            <RasterPicker
+              id="trait-dem"
+              label="DEM (canopy height)"
+              none="No DEM — skip canopy height"
+              options={demOptions}
+              value={state.demPath}
+              onChange={(demPath) => onChange({ ...state, demPath })}
+            />
+          )}
 
           <RasterPicker
             id="trait-thermal"
@@ -246,7 +273,7 @@ export function TraitExtractionDialog({
             onClick={onSubmit}
             disabled={
               !orthoOptions ||
-              state.orthoVersion === null ||
+              (!multi && state.orthoVersion === null) ||
               !boundaryReady ||
               submitting
             }

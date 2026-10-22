@@ -106,6 +106,11 @@ import {
 } from "@/features/process/lib/groundTrack"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import {
+  assignNearest,
+  type FolderOrtho,
+  folderOrthos,
+} from "@/features/process/lib/multiOrtho"
+import {
   buildOrthoVersions,
   mergeOrthoVersionFromJobResult,
   readOrthoOutputs,
@@ -132,6 +137,7 @@ import {
 } from "@/features/process/lib/runEvents"
 import {
   getRun,
+  type RunTreatment,
   setStepState,
   updateRun,
   usePipeline,
@@ -150,6 +156,7 @@ import {
 } from "@/features/process/lib/traitInputs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
+import { titilerBase } from "@/lib/stack"
 
 /** A step's panel, kept from taking the whole page down if it fails. */
 function boundPanel(what: string, key: string, panel: React.ReactNode) {
@@ -752,12 +759,25 @@ function StepRow(props: StepRowProps) {
 function RunScopeSummary({
   scope,
   images,
+  treatments = [],
 }: {
   scope: AerialScope
   /** "14,968 images found", or a loading note. */
   images: string
+  /** A date flown in parts: the uploads this run processes together. */
+  treatments?: RunTreatment[]
 }) {
   const fields: Array<[string, string]> = [
+    ...(treatments.length > 1
+      ? ([
+          [
+            "Treatments",
+            treatments
+              .map((t) => `${t.label} (${t.datasetShortId})`)
+              .join(" · "),
+          ],
+        ] as Array<[string, string]>)
+      : []),
     ["Experiment", scope.experiment],
     ["Site", scope.location],
     ["Population", scope.population],
@@ -1328,7 +1348,11 @@ export function RunDetail() {
     const desired = new Map<string, string>() // jobId → stepKey
     for (const [stepKey, st] of Object.entries(run.steps)) {
       if (st.status === "running" && st.jobIds.length > 0) {
-        desired.set(st.jobIds[st.jobIds.length - 1], stepKey)
+        // Jobs started together (one per treatment): follow every one.
+        for (const j of st.batch?.length
+          ? st.batch
+          : [st.jobIds.at(-1) as string])
+          desired.set(j, stepKey)
       }
     }
     // Subscribe to new jobs.
@@ -1348,8 +1372,72 @@ export function RunDetail() {
         queryClient.invalidateQueries({
           queryKey: ["files", "list", scope ? processedPrefix(scope) : null],
         })
+      const batchOf = () => {
+        const b = getRun(runId)?.steps?.[stepKey]?.batch
+        return b && b.length > 1 && b.includes(jobId) ? b : null
+      }
+      // One of several jobs started together finished: keep its output, and
+      // settle the step once every job of the batch has.
+      const settleBatch = async (job: JobOutput, batch: string[]) => {
+        const status = String(job.status ?? "")
+        if (!["COMPLETED", "FAILED", "CANCELLED"].includes(status)) return
+        refreshProcessedListing()
+        if (stepKey === "orthomosaic" && status === "COMPLETED") {
+          const r = getRun(runId)
+          const merged = mergeOrthoVersionFromJobResult(
+            readOrthoOutputs(r),
+            job,
+          )
+          if (merged)
+            setStepState(runId, stepKey, {
+              outputs: {
+                ...(r?.steps?.orthomosaic?.outputs ?? {}),
+                versions: merged,
+              },
+            })
+        }
+        const jobs = await Promise.all(
+          batch.map((id) =>
+            id === jobId
+              ? Promise.resolve(job)
+              : (
+                  JobsService.apiJobsJobIdGetJob({
+                    jobId: id,
+                  }) as Promise<JobOutput>
+                ).catch(() => null),
+          ),
+        )
+        const states = jobs.map((j) => String(j?.status ?? ""))
+        if (
+          states.some((x) => !["COMPLETED", "FAILED", "CANCELLED"].includes(x))
+        )
+          return
+        const failed = jobs.filter((j) => String(j?.status) !== "COMPLETED")
+        setStepState(runId, stepKey, {
+          status: failed.length ? "failed" : "completed",
+          completedAt: new Date().toISOString(),
+          ...(failed.length
+            ? {
+                error: `${failed.length} of ${batch.length} jobs did not finish: ${failed
+                  .map((j) =>
+                    String(
+                      (j as { error_message?: string } | null)?.error_message ??
+                        j?.status ??
+                        "unknown",
+                    ),
+                  )
+                  .join("; ")}`,
+              }
+            : {}),
+        })
+      }
       const settleFromJobStatus = (job: JobOutput | null | undefined) => {
         if (!job) return
+        const batch = batchOf()
+        if (batch) {
+          void settleBatch(job, batch)
+          return
+        }
         const status = String(job.status ?? "")
         if (status === "COMPLETED") {
           refreshProcessedListing()
@@ -1419,7 +1507,10 @@ export function RunDetail() {
         // getStepStatus flips off "running" and the StepRow's spinner /
         // disabled state clear. Without this the WebSocket update only
         // moves the bottom ProcessPanel forward — the step row stays stuck.
-        if (evt.terminal) {
+        if (evt.terminal && batchOf()) {
+          // Part of a batch: the poll settles the step from all its jobs.
+          pollOnce()
+        } else if (evt.terminal) {
           if (evt.event === "complete") {
             if (stepKey === "orthomosaic") {
               // RUN_ODM landed. Trigger a fresh poll so settleFromJobStatus
@@ -1940,9 +2031,23 @@ export function RunDetail() {
     [run, navigate, workspaceId],
   )
 
+  // A date flown in parts: each treatment with its current orthomosaic.
+  const treatmentParts = useMemo(() => {
+    const treatments = run?.uploadScope?.treatments ?? []
+    if (!scope || treatments.length < 2) return []
+    const all = folderOrthos(orthoFiles, processedPrefix(scope))
+    return treatments
+      .map((t) => ({
+        t,
+        o: all.find((o) => o.jobId != null && o.jobId === t.orthoJobId),
+      }))
+      .filter((x): x is { t: RunTreatment; o: FolderOrtho } => Boolean(x.o))
+  }, [run?.uploadScope?.treatments, scope, orthoFiles])
+
   const handleSubmitTraits = useCallback(async () => {
     if (!run || !workspace || !scope) return
-    if (traitDialogState.orthoVersion === null) return
+    const multiParts = treatmentParts.length > 1
+    if (traitDialogState.orthoVersion === null && !multiParts) return
     if (traitDialogState.boundaryVersion === null) {
       showErrorToast("Pick a plot-boundary version")
       return
@@ -1951,13 +2056,13 @@ export function RunDetail() {
     const ortho = versions.find(
       (v) => v.version === traitDialogState.orthoVersion,
     )
-    if (!ortho) {
+    if (!ortho && !multiParts) {
       showErrorToast("Selected ortho version not found")
       return
     }
     // Strip leading bucket segment for the worker (it adds the bucket
     // back from STORAGE_BUCKET).
-    const orthoMinioPath = ortho.path.replace(/^[^/]+\//, "")
+    const orthoMinioPath = (ortho?.path ?? "").replace(/^[^/]+\//, "")
     const outputPath = `${processedPrefix(scope)}traits/v${traitDialogState.orthoVersion}-b${traitDialogState.boundaryVersion}-traits.geojson`
     const boundaryPath = plotBoundariesPath(
       scope,
@@ -2017,6 +2122,80 @@ export function RunDetail() {
         )
         return
       }
+
+      // A date flown in parts (one flight per treatment): one job per
+      // treatment's orthomosaic, each with the plots nearest its centre
+      // and its own elevation model for plant height.
+      const parts = treatmentParts
+      if (parts.length > 1) {
+        const centres = await Promise.all(
+          parts.map(async ({ o }) => {
+            const url = `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`
+            const res = await fetch(
+              `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(url)}&tilesize=256`,
+            )
+            if (!res.ok)
+              throw new Error(
+                `Could not read the ${o.path.split("/").pop()} extent (map tiles: ${res.status})`,
+              )
+            const tj = (await res.json()) as {
+              bounds: [number, number, number, number]
+            }
+            const [w, so, e, n] = tj.bounds
+            return [(w + e) / 2, (so + n) / 2] as [number, number]
+          }),
+        )
+        const groups = assignNearest(fc.features as GeoJSON.Feature[], centres)
+        const inputs = []
+        for (let i = 0; i < parts.length; i++) {
+          const { t, o } = parts[i]
+          if (groups[i].length === 0) continue
+          const tag = (o.jobId ?? t.datasetShortId).slice(0, 8)
+          const bPath = `${directory}traits/boundaries-v${boundaryVersion}-${tag}.geojson`
+          const part = new File(
+            [JSON.stringify({ ...fc, features: groups[i] })],
+            `boundaries-${tag}.geojson`,
+            { type: "application/geo+json" },
+          )
+          // eslint-disable-next-line no-await-in-loop
+          await FilesService.apiFilesUploadUploadFile({
+            formData: { file: part, bucket_name: "gemini", object_name: bPath },
+          })
+          inputs.push({
+            orthomosaicPath: o.path,
+            boundaryGeojsonPath: bPath,
+            outputTraitsGeojsonPath: `${directory}traits/traits-v${boundaryVersion}-${tag}.geojson`,
+            exgThreshold: traitDialogState.exgThreshold,
+            ...(o.dsmPath ? { demPath: o.dsmPath } : {}),
+            datasetLabel: `flight ${t.datasetShortId}`,
+          })
+        }
+        const result = await executeStep({
+          runId: run.id,
+          stepKey: "trait_extraction",
+          scope,
+          experimentId,
+          traitExtractions: inputs,
+        })
+        if (result.jobId) {
+          addProcess({
+            type: "processing",
+            title: `trait_extraction — ${pipeline?.name ?? "pipeline"} (${inputs.length} treatments)`,
+            status: "running",
+            items: [],
+            runId: result.jobId,
+            link: `/process/${workspaceId}/run/${run.id}`,
+          })
+          showSuccessToast(
+            `Trait extraction queued for ${inputs.length} treatments: ${parts
+              .map(({ t }, i) => `${t.label} (${groups[i].length} plots)`)
+              .join(", ")}`,
+          )
+        }
+        setTraitDialogOpen(false)
+        return
+      }
+
       const result = await executeStep({
         runId: run.id,
         stepKey: "trait_extraction",
@@ -2065,6 +2244,7 @@ export function RunDetail() {
     showErrorToast,
     workspaceId,
     pipeline?.name,
+    treatmentParts,
   ])
 
   if (!workspace) {
@@ -2147,6 +2327,7 @@ export function RunDetail() {
             <div className="mb-6 space-y-4">
               <RunScopeSummary
                 scope={scope}
+                treatments={run.uploadScope?.treatments}
                 images={
                   rawImagesQuery.isLoading
                     ? "Looking for images…"
@@ -2328,6 +2509,10 @@ export function RunDetail() {
         onClose={() => setTraitDialogOpen(false)}
         orthoVersions={buildOrthoVersions(run, scope, orthoFiles)}
         boundaryVersions={boundaryVersions}
+        treatmentOrthos={treatmentParts.map(({ t, o }) => ({
+          label: t.label,
+          filename: o.path.split("/").pop() ?? o.path,
+        }))}
         state={traitDialogState}
         onChange={(next) =>
           setTraitDialogState(
