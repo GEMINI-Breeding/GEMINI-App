@@ -232,7 +232,10 @@ export function AnalyzeMap() {
     () =>
       new Set(
         allRuns
-          .map((r) => r.steps.orthomosaic?.jobIds?.at(-1))
+          .flatMap((r) => [
+            r.steps.orthomosaic?.jobIds?.at(-1),
+            ...(r.uploadScope?.treatments ?? []).map((t) => t.orthoJobId),
+          ])
           .filter((j): j is string => Boolean(j)),
       ),
     [allRuns],

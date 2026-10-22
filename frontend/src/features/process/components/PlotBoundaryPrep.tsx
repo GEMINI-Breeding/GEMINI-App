@@ -656,7 +656,11 @@ export function PlotBoundaryPrep({
             u.platform === scope.platform
           )
         })
-        .map((r) => r.steps.orthomosaic?.jobIds?.at(-1))
+        // A run of several treatments has one current orthomosaic each.
+        .flatMap((r) => [
+          r.steps.orthomosaic?.jobIds?.at(-1),
+          ...(r.uploadScope?.treatments ?? []).map((t) => t.orthoJobId),
+        ])
         .filter((j): j is string => Boolean(j)),
     )
     const kept = all.filter((o) => o.jobId && latest.has(o.jobId))
@@ -715,8 +719,14 @@ export function PlotBoundaryPrep({
         const r = allRuns.find((x) =>
           (x.steps.orthomosaic?.jobIds ?? []).includes(o.jobId ?? "—"),
         )
+        const t = r?.uploadScope?.treatments?.find(
+          (x) => x.orthoJobId && x.orthoJobId === o.jobId,
+        )
         return (
-          r?.uploadScope?.batchLabel || o.jobId?.slice(0, 8) || "orthomosaic"
+          t?.label ||
+          r?.uploadScope?.batchLabel ||
+          o.jobId?.slice(0, 8) ||
+          "orthomosaic"
         )
       }),
     [folderOrthoList, allRuns],
