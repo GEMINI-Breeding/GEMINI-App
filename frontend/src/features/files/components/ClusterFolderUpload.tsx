@@ -6,7 +6,7 @@
  * administrators (the cluster is reached with this computer's SSH access).
  */
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { FolderSearch, Loader2, Server, Upload } from "lucide-react"
+import { FolderSearch, Loader2, Upload } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -16,7 +16,7 @@ import { agentApi } from "@/features/agent/lib/agentApi"
 import type { EntityChoice } from "./EntitySelectField"
 
 /** The Files page's data types the cluster upload handles, by the uploader's name. */
-const CLUSTER_DATA_TYPES: Record<string, string> = {
+export const CLUSTER_DATA_TYPES: Record<string, string> = {
   "Image Data": "images",
   "Farm-ng Binary File": "amiga_bin",
   Orthomosaic: "orthomosaic",
@@ -31,6 +31,23 @@ function label(
   if (c && (c.kind === "existing" || c.kind === "new") && c.name.trim())
     return c.name.trim()
   return (values[field] ?? "").trim()
+}
+
+/** The run's settings for the agent's uploader, from the Files page form. */
+export function uploadSettings(
+  dataType: string | null,
+  formValues: Record<string, string>,
+  scope: Record<string, EntityChoice>,
+): Record<string, string> {
+  return {
+    experiment: label("experiment", formValues, scope),
+    site: label("location", formValues, scope),
+    population: label("population", formValues, scope),
+    date: label("date", formValues, scope),
+    platform: label("platform", formValues, scope),
+    sensor: label("sensor", formValues, scope),
+    data_type: CLUSTER_DATA_TYPES[dataType ?? ""],
+  }
 }
 
 export function ClusterFolderUpload({
@@ -61,13 +78,7 @@ export function ClusterFolderUpload({
     mutationFn: () => {
       const settings: Record<string, string> = {
         folder: folder.trim(),
-        experiment: label("experiment", formValues, scope),
-        site: label("location", formValues, scope),
-        population: label("population", formValues, scope),
-        date: label("date", formValues, scope),
-        platform: label("platform", formValues, scope),
-        sensor: label("sensor", formValues, scope),
-        data_type: CLUSTER_DATA_TYPES[dataType ?? ""],
+        ...uploadSettings(dataType, formValues, scope),
       }
       if (nameEnds.trim()) settings.name_ends = nameEnds.trim()
       return agentApi.clusterIngest(settings)
@@ -80,22 +91,10 @@ export function ClusterFolderUpload({
 
   const kind = CLUSTER_DATA_TYPES[dataType ?? ""]
   if (!compute?.cluster || !kind) return null
-  const spaced = ["experiment", "location", "population", "platform", "sensor"]
-    .map((f) => label(f, formValues, scope))
-    .some((v) => /\s/.test(v))
   const absolute = folder.trim().startsWith("/")
 
   return (
-    <div
-      className="space-y-3 rounded-lg border p-4"
-      data-testid="cluster-folder-upload"
-    >
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <p className="text-sm font-medium">
-          Or upload a folder that is on {compute.cluster}
-        </p>
-      </div>
+    <div className="space-y-3" data-testid="cluster-folder-upload">
       <p className="text-xs text-muted-foreground">
         Type the folder's full path on the cluster (or its parent folder). The
         app looks only there, never through the cluster's storage, and the files
@@ -139,9 +138,7 @@ export function ClusterFolderUpload({
       />
       <div className="flex items-center gap-3">
         <Button
-          disabled={
-            disabled || !absolute || !peek.data || spaced || ingest.isPending
-          }
+          disabled={disabled || !absolute || !peek.data || ingest.isPending}
           onClick={() => ingest.mutate()}
           data-testid="cluster-folder-ingest"
         >
@@ -157,9 +154,7 @@ export function ClusterFolderUpload({
             ? disabledReason
             : !peek.data
               ? "Look at the folder first."
-              : spaced
-                ? "Names with spaces cannot be sent to the cluster yet."
-                : null}
+              : null}
         </span>
       </div>
       {ingest.data && (

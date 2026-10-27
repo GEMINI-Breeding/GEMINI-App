@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import re
 import warnings
 from pathlib import Path
@@ -79,9 +80,7 @@ class Ortho:
         Image.MAX_IMAGE_PIXELS = None
         self.path = path
         WORK.mkdir(parents=True, exist_ok=True)
-        local = WORK / (re.sub(r"[^A-Za-z0-9._-]", "_", path)[-150:])
-        if not local.exists():
-            local.write_bytes(client().download(path))
+        local = _raster_copy(path, max_side, mask=True)
         im = Image.open(local)
         tags = im.tag_v2
         scale, tie, keys = tags.get(33550), tags.get(33922), tags.get(34735)
@@ -90,8 +89,10 @@ class Ortho:
         epsg = None
         if keys:
             for i in range(4, len(keys), 4):
-                if keys[i] == 3072:
+                if keys[i] == 3072:                        # projected CRS
                     epsg = int(keys[i + 3])
+                elif keys[i] == 2048 and epsg is None and int(keys[i + 3]) == 4326:   # geographic
+                    epsg = 4326
         self.epsg = epsg
         full_w, full_h = im.size
         frame = 0
@@ -434,6 +435,52 @@ def _coverage_check():
     return covers
 
 
+def _titiler() -> Optional[str]:
+    """The stack's TiTiler, when this computer reaches it (gemi-hpc app tunnels one)."""
+    url = os.environ.get("GEMI_TITILER_URL") or os.environ.get("GEMI_TITILER_TARGET")
+    return url.rstrip("/") if url else None
+
+
+def _raster_copy(path: str, max_side: int = 5000, mask: bool = False) -> Path:
+    """A raster from storage, on this computer. When the stack's TiTiler is reachable and the
+    file is larger than needed, TiTiler sends a copy reduced to `max_side` pixels and
+    reprojected to UTM (what the furrow and plot fitting work in): tens of MB instead of a
+    multi-GB orthomosaic. Otherwise the whole file."""
+    import json
+    import urllib.parse
+    import urllib.request
+
+    tiler = _titiler()
+    if not tiler:
+        return _local_copy(path)
+    WORK.mkdir(parents=True, exist_ok=True)
+    local = WORK / (re.sub(r"[^A-Za-z0-9._-]", "_", path)[-120:] + f".{max_side}{'m' if mask else ''}.tif")
+    if local.exists():
+        return local
+    url = urllib.parse.quote(f"s3://gemini/{path.removeprefix('gemini/')}", safe="")
+    try:
+        with urllib.request.urlopen(f"{tiler}/cog/info?url={url}", timeout=120) as r:
+            info = json.loads(r.read())
+    except Exception:
+        return _local_copy(path)
+    if max(info.get("width", 0), info.get("height", 0)) <= max_side and "326" in str(info.get("crs", "")):
+        return _local_copy(path)
+    crs = str(info.get("crs", ""))
+    m = re.search(r"(?:EPSG[:/](?:0/)?)(32[67]\d\d)$", crs)
+    if m:
+        epsg = int(m.group(1))
+    else:
+        west, south, east, north = info["bounds"]           # geographic when the file is
+        lon, lat = (west + east) / 2, (south + north) / 2
+        epsg = (32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1
+    q = f"url={url}&max_size={max_side}&return_mask={'true' if mask else 'false'}&dst_crs=EPSG:{epsg}"
+    with urllib.request.urlopen(f"{tiler}/cog/preview.tif?{q}", timeout=900) as r:
+        tmp = local.with_suffix(".part")
+        tmp.write_bytes(r.read())
+    tmp.replace(local)
+    return local
+
+
 def _local_copy(path: str) -> Path:
     WORK.mkdir(parents=True, exist_ok=True)
     local = WORK / (re.sub(r"[^A-Za-z0-9._-]", "_", path)[-150:])
@@ -555,7 +602,7 @@ def furrow_track(dsm_file, ortho: "Ortho", long_is_rows: bool, windows: list, u_
 def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", border_tiers: Optional[int] = None,
                 block: int = 0, plot_length_m: Optional[float] = None, bed_pitch_m: Optional[float] = None,
                 border_beds: Optional[list] = None, border_beds_at: Optional[str] = None,
-                dsm_file=None) -> dict:
+                dsm_file=None, tier_pitch_m: Optional[float] = None, tier_shift_m: float = 0.0) -> dict:
     """Locate the planted block and its tier strips from vegetation.
 
     Tiers are the strips separated by alleys along the field's long axis;
@@ -602,7 +649,13 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
 
     # Along the field, inside that block: strips of plants separated by alleys.
     along = _smooth(v[:, u0:u1].mean(axis=1), 0.25 / m)
-    used, found, note = _tier_strips(along, m, tiers, border_tiers)
+    used, found, note = _tier_strips(along, m, tiers, border_tiers, tier_pitch_m)
+    if tier_shift_m:
+        # Moved along the field: + toward the image's bottom (south) when beds run north-south,
+        # toward its right (east) otherwise.
+        d = int(round(tier_shift_m / m))
+        used = [(a_ + d, b + d) for a_, b in used]
+        note = (note + "; " if note else "") + f"tiers moved {tier_shift_m:+.2f} m along the field"
 
     # Beds from the furrows between them, not an even split of the block.
     # Inside the plots the canopy can hide the furrows; bare ground in the
@@ -684,8 +737,12 @@ def find_layout(ortho: Ortho, beds: int, tiers: int, bed_axis: str = "auto", bor
             "tier_length_m": round(sum(b - a_ for a_, b in used) / len(used) * m, 2), "_veg": v}
 
 
-def _tier_strips(along, m: float, tiers: int, border_tiers: Optional[int]) -> tuple[list, int, str]:
-    """The tiers along a vegetation profile: (strips used, strips found, note)."""
+def _tier_strips(along, m: float, tiers: int, border_tiers: Optional[int],
+                 tier_pitch_m: Optional[float] = None) -> tuple[list, int, str]:
+    """The tiers along a vegetation profile: (strips used, strips found, note).
+    With the tier spacing known (`tier_pitch_m`: plot plus alley, from the field
+    map), a count that does not match the design is solved by placing the design's
+    tiers at that spacing where the alleys fall, rather than spreading them evenly."""
     import numpy as np
 
     strips = [r for r in _runs(along > 0.30 * along.max()) if (r[1] - r[0]) * m > 0.8]
@@ -735,6 +792,10 @@ def _tier_strips(along, m: float, tiers: int, border_tiers: Optional[int]) -> tu
         used = strips[border_tiers: found - border_tiers] if border_tiers else strips
         if border_tiers:
             note = f"{found} strips found; the first and last {border_tiers} taken as border, not plots"
+    elif tier_pitch_m:
+        used = _tiers_at_pitch(along, strips, tiers, tier_pitch_m / m)
+        note = (f"{found} strips found, the design has {tiers} tiers: placed at the given spacing "
+                f"({tier_pitch_m:.2f} m) where the alleys fit, centred on the planted strips")
     else:
         # Counts do not match the design: fall back to even spacing between the outermost strips.
         lo, hi = strips[0][0], strips[-1][1]
@@ -743,6 +804,30 @@ def _tier_strips(along, m: float, tiers: int, border_tiers: Optional[int]) -> tu
         note = (f"WARNING: {found} strips found but the design has {tiers} tiers "
                 f"(with border_tiers={border_tiers}); evenly spaced cells were used instead - check the overlay")
     return used, found, note
+
+
+def _tiers_at_pitch(along, strips: list, tiers: int, pitch: float) -> list:
+    """`tiers` cells at a known spacing: centred on the planted strips, then slid by up
+    to half a spacing to where the cells hold the most canopy (alleys between them)."""
+    import numpy as np
+
+    lo, hi = strips[0][0], strips[-1][1]
+    centre = (lo + hi) / 2 - tiers * pitch / 2
+    cell = 0.65 * pitch
+    best, best_score = centre, -1.0
+    for off in np.arange(centre - pitch / 2, centre + pitch / 2, max(1.0, pitch / 40)):
+        score = 0.0
+        for i in range(tiers):
+            a_ = int(off + i * pitch + (pitch - cell) / 2)
+            b_ = int(a_ + cell)
+            if a_ < 0 or b_ > len(along):
+                score = -1.0
+                break
+            score += float(along[a_:b_].mean())
+        if score > best_score:
+            best, best_score = off, score
+    return [(int(best + i * pitch + (pitch - cell) / 2), int(best + i * pitch + (pitch + cell) / 2))
+            for i in range(tiers)]
 
 
 # Space left between two plots along a bed when nobody gave the plot length (metres).
@@ -839,11 +924,12 @@ ALIASES = {"row": ("tier", "row", "range", "row_num"), "col": ("bed", "col", "co
            "accession": ("genotype", "accession", "entry", "variety", "line", "name")}
 
 
-def read_design(path: str) -> dict:
+def read_design(path: str, scope: Optional[dict] = None) -> dict:
     """A field design in any of the shapes breeders keep (see field_layout):
     one row per plot with its tier (row), bed (column), plot label, genotype
-    and crop. Only plots with a position are returned."""
-    from .field_layout import read_layout
+    and crop. Only plots with a position are returned. `scope` (year,
+    location, experiment): keep that field's rows of a master sheet."""
+    from .field_layout import read_for_field
 
     p = Path(path).expanduser()
     if not p.exists():
@@ -855,7 +941,10 @@ def read_design(path: str) -> dict:
         if not here.exists():
             raise ValueError(f"field design not found: {path}")
         p = here
-    layout = read_layout(str(p))
+    # A master sheet of several fields: the run's field (year, site, experiment).
+    sc = scope or {}
+    layout, _, _ = read_for_field(str(p), year=sc.get("year"), location=sc.get("location"),
+                                  experiment=sc.get("experiment"))
     rows = []
     for q in layout["plots"]:
         if q.get("border") or q.get("tier") is None or q.get("bed") is None:
@@ -1168,7 +1257,7 @@ def plot_boundaries(args: dict) -> dict:
     scope = scope_from_path(path)
     if scope is None:
         raise ValueError("orthomosaic_path must be under Processed/{year}/{experiment}/{site}/{population}/{date}/…")
-    design = read_design(args["design_path"])
+    design = read_design(args["design_path"], scope)
     crops = [str(c) for c in (args.get("crops") or [])]
     beds = [int(b) for b in args["beds"]] if args.get("beds") else design["beds"]
     if crops and not args.get("beds"):
@@ -1203,7 +1292,7 @@ def plot_boundaries(args: dict) -> dict:
     dsm = args.get("dsm_path") or (path.replace("odm_orthophoto-", "odm_dsm-") if "odm_orthophoto-" in path else None)
     if dsm:
         try:
-            dsm_file = _local_copy(dsm)
+            dsm_file = _raster_copy(dsm, 5000)
         except Exception:
             dsm_file = None
     # Bed spacing: given, else measured on an earlier date of this field
@@ -1215,7 +1304,9 @@ def plot_boundaries(args: dict) -> dict:
                       plot_length_m=_plot_length(args.get("plot_length_m"), None),
                       bed_pitch_m=float(pitch_m) if pitch_m else None,
                       border_beds=args.get("border_beds"), border_beds_at=args.get("border_beds_at"),
-                      dsm_file=dsm_file)
+                      dsm_file=dsm_file,
+                      tier_pitch_m=float(args["tier_pitch_m"]) if args.get("tier_pitch_m") else None,
+                      tier_shift_m=float(args.get("tier_shift_m") or 0.0))
     if lay.get("bed_source") in ("furrows at the field's ends", "furrows in the elevation model") \
             and not args.get("bed_pitch_m"):
         _keep_bed_pitch(scope, beds, lay["bed_pitch_m"], lay["bed_source"])
@@ -1223,7 +1314,6 @@ def plot_boundaries(args: dict) -> dict:
                                                  args.get("plot_length_m"))
     feats = _cells(ortho, lay, design, beds, str(args.get("first_tier_at") or "south"),
                    str(args.get("first_bed_at") or "west"), float(args.get("shrink_m") or 0.0))
-    image = _overlay(ortho, feats, name, lay)
     corners = {f"{ns}-{ew}": None for ns in ("north", "south") for ew in ("west", "east")}
     t, b = lay["tiers"], len(beds)
     idx = {"north-west": 0, "north-east": b - 1, "south-west": (len(t) - 1) * b, "south-east": len(t) * b - 1}
@@ -1231,6 +1321,10 @@ def plot_boundaries(args: dict) -> dict:
         idx = {"north-west": 0, "south-west": b - 1, "north-east": (len(t) - 1) * b, "south-east": len(t) * b - 1}
     for kname, i in idx.items():
         corners[kname] = feats[i]["properties"]["plot_label"]
+    if args.get("design_plots_only"):
+        # Grid positions the design lists no plot for (a short bed, an unplanted corner): left out.
+        feats = [f for f in feats if f["properties"].get("plot_label") != f"{f['properties']['row']}-{f['properties']['col']}"]
+    image = _overlay(ortho, feats, name, lay)
     result: dict[str, Any] = {
         "plots": len(feats), "beds": beds, "tiers": len(t), "layout": {k: lay[k] for k in (
             "strips_found", "blocks_found", "block_width_m", "field_length_m", "tier_length_m", "note")},
@@ -1240,6 +1334,10 @@ def plot_boundaries(args: dict) -> dict:
                         f"fitted to the furrows on this image ({lay.get('bed_source')})" if lay.get("bed_fit") == "furrows" else
                         "even split of the block (no furrows found)"),
         "plots_at_corners": corners,
+        # Where each tier's centre landed along the field, in the map's coordinates (northing when
+        # beds run north-south, easting otherwise): for checking against a field map's distances.
+        "tier_centres": [round((ortho.y0 - (a_ + b) / 2 * ortho.px_y) if lay["long_is_rows"]
+                               else (ortho.x0 + (a_ + b) / 2 * ortho.px_x), 2) for a_, b in t],
         "assumed": {"first_tier_at": args.get("first_tier_at") or "south (default - confirm with the person)",
                     "first_bed_at": args.get("first_bed_at") or "west (default)"},
         **({"sizes_by_crop": crop_notes} if crop_notes else {}),
@@ -1319,6 +1417,18 @@ def split_plots(args: dict) -> dict:
         plan = multiortho.assign(boundaries["features"], orthos, _coverage_check())
     exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
     jobs = []
+    if args.get("source") == "frames":
+        # Each plot's best raw frames, picked by the ODM run's camera positions: one job for all the
+        # date's orthomosaics (the boundaries were placed on them), as the app's Plot images step does.
+        paths = list(plan)
+        params = {**{k: scope[k] for k in ("year", "experiment", "location", "population", "date", "platform", "sensor")},
+                  "boundaries": boundaries, "source": "frames", "orthomosaic_path": paths[0],
+                  "orthomosaic_paths": paths, "frames_per_plot": int(args.get("frames_per_plot") or 3)}
+        job = c.submit_job("SPLIT_ORTHOMOSAIC", params, str(exp["id"]) if exp else None)
+        process_tab(lambda pr: pr.record_job(scope, job))
+        return {"result": {"jobs": [{"job_id": job.get("id"), "orthomosaics": paths,
+                                     "plots": len(boundaries["features"])}],
+                           "plots": len(boundaries["features"]), "output": directory + "PlotFrames/"}}
     for path, feats in plan.items():
         if not feats:
             continue
@@ -1557,11 +1667,18 @@ _field(plot_boundaries, "Find the plots on an orthomosaic from its vegetation (t
                      "the orthomosaic)"},
         "bed_pitch_m": {**_num, "description": "bed spacing (centre to centre) in metres. Default: measured from "
                         "the furrows on this field's earliest date already done, else from this image"},
+        "tier_shift_m": {**_num, "description": "move the tiers along the field by this many metres (+ south when "
+                         "beds run north-south, + east otherwise), after checking `tier_centres` against the map"},
+        "tier_pitch_m": {**_num, "description": "tier spacing along the beds (plot plus alley) in metres, from the "
+                         "field map, e.g. 10 ft plots with 5 ft alleys = 4.572. Places the design's tiers at that "
+                         "spacing when the strips seen do not match the design (border rows, gaps)"},
         "add_to_active": {**_bool, "description": "keep the other plots of the active version (second flight of the same field)"},
         "crops": {"type": "array", "items": _str, "description": "only the plots of these crops (a flight of one crop)"},
         "plot_length_m": {"description": "plot length without the alley, metres: one number, or per crop "
                           "{\"Sorghum\": 3.0, \"Cowpea\": 3.5} (default: worked out; boxes are the same size within a crop)"},
         "fresh": {**_bool, "description": "draw this date on its own instead of moving the earliest date's boundaries"},
+        "design_plots_only": {**_bool, "description": "leave out grid positions the design lists no plot for "
+                              "(e.g. a bed shorter than the others); default keeps them, labelled tier-bed"},
         "preview": _bool, "name": _str}, ["orthomosaic_path", "design_path"])
 
 
@@ -1594,7 +1711,11 @@ _field(move_boundaries, "Bring plot boundaries saved for another date of the sam
 _field(split_plots, "Cut a date's orthomosaics into one image per plot using the active plot boundaries "
        "(SPLIT_ORTHOMOSAIC; needs the geo worker). path: any path in the date's folder (all its orthomosaics; "
        "with several, e.g. one per treatment, each plot from the one whose centre it is nearest), or "
-       "orthomosaic_path for one.", {"path": _str, "orthomosaic_path": _str}, [])
+       "orthomosaic_path for one. source='frames': each plot's best raw frames instead (picked by the ODM "
+       "run's camera positions; needs an orthomosaic built with them kept, e.g. the Quick preset), "
+       "frames_per_plot of them (default 3).",
+       {"path": _str, "orthomosaic_path": _str, "source": {"type": "string", "enum": ["orthomosaic", "frames"]},
+        "frames_per_plot": _num}, [])
 _field(extract_traits, "Per-plot traits for a date's orthomosaics and active plot boundaries (EXTRACT_TRAITS): "
        "vegetation fraction and plant height from each orthomosaic's elevation model (ODM's DSM) when present. "
        "Several orthomosaics: each plot from the nearest one. path: any path in the date's folder.",

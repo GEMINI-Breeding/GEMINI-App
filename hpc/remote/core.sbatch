@@ -50,6 +50,7 @@ GEMINI_REST_API_PORT=$API_PORT
 GEMINI_REST_API_URL=http://$IP:$API_PORT
 PYTHONDONTWRITEBYTECODE=1
 PYTHONUNBUFFERED=1
+GEMINI_PASSWORDLESS_LOGIN=$(share_flag PASSWORDLESS && echo true || echo false)
 EOF
 
 APT="apptainer run --cleanenv --no-home --writable-tmpfs"
@@ -187,6 +188,8 @@ REDIS_PORT=$REDIS_PORT
 SESSION_LOGS=$SLOG
 STARTED=$(date -Is)
 EOF
+share_perms   # a shared session: the group reads what joining and their workers need
+rm -f "$RUN/share/start-request"
 log "core up: API http://$IP:$API_PORT (session.env written)"
 
 # Stay up until a service dies or a signal arrives.

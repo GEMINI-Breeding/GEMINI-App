@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import threading
 import time
 import urllib.parse
@@ -329,6 +330,9 @@ class Handler(BaseHTTPRequestHandler):
         except _Raw as raw:
             self._send(200, raw.data, raw.content_type)
         except Exception as e:  # never take the server down for one request
+            from . import activity
+
+            activity.note(f"{method} {self.path.split('?')[0]} failed: {type(e).__name__}: {e}", "ERROR")
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
     def do_GET(self) -> None:  # noqa: N802
@@ -366,6 +370,16 @@ class Handler(BaseHTTPRequestHandler):
         if route == ["tools"]:
             return [{"name": n, "group": t.get("group"), "description": t["description"],
                      "destructive": bool(t.get("destructive"))} for n, t in TOOLS.items()]
+        if route == ["logs"] and method == "GET":
+            # The Console: what this service is doing (uploads, copies, cluster jobs).
+            from . import activity, compute
+            from .hpc_tools import active_cluster
+
+            activity.poll_local_work()
+            if active_cluster() and time.time() - compute._cache["t"] > 20 and not _queue_read.locked():
+                threading.Thread(target=_read_queue, daemon=True).start()
+            since = (query.get("since") or [None])[0]
+            return activity.lines(since=float(since) if since else None)
         if route == ["status"]:
             if user.get("setup"):
                 return {"setup": True, "jobs_active": [], "workers_busy": [], "uploads": [], "experiments": [],
@@ -422,11 +436,24 @@ class Handler(BaseHTTPRequestHandler):
 
             if not user.get("setup"):
                 use_client(Client(token=token))
+            if route == ["compute", "join"] and method == "POST":
+                # Uses this computer's SSH login: only from this computer.
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    raise HttpError(403, "joining uses this computer's SSH login: from the computer running the app")
+                b = self._body()
+                try:
+                    return compute.join(str(b.get("login") or ""), str(b.get("folder") or ""), str(b.get("key") or ""))
+                except (ValueError, RuntimeError) as e:
+                    raise HttpError(400, str(e)) from None
+            here = self.client_address[0] in ("127.0.0.1", "::1")
             if route == ["compute"] and method == "GET":
-                return compute.overview(fresh=bool(query.get("fresh")), with_jobs=not user.get("setup"))
-            # Starting and stopping cluster jobs uses this computer's SSH access: administrators only.
-            if not user.get("is_superuser"):
-                raise HttpError(403, "only an administrator can start or stop what runs on the cluster")
+                return {**compute.overview(fresh=bool(query.get("fresh")), with_jobs=not user.get("setup")),
+                        "you_can_manage": bool(user.get("is_superuser") or user.get("setup") or here)}
+            # Starting and stopping cluster jobs uses this computer's SSH login (and allocation): whoever
+            # uses the app on this computer, or an administrator from elsewhere.
+            if not (user.get("is_superuser") or here):
+                raise HttpError(403, "only an administrator, or the person on the computer running the app, "
+                                     "can start or stop what runs on the cluster")
             body = self._body()
             try:
                 if route == ["compute", "start"] and method == "POST":
@@ -442,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
                     from .hpc_tools import cluster_folder
 
                     return cluster_folder({**{k: v for k, v in body.items() if isinstance(v, str)}, "upload": True})
+                if route == ["compute", "share"] and method == "POST":
+                    return compute.set_share(bool(body.get("on")), bool(body.get("passwordless")))
                 if route == ["compute", "reconnect"] and method == "POST":
                     return compute.reconnect()
                 if route == ["compute", "prefs"] and method == "PUT":
@@ -452,6 +481,43 @@ class Handler(BaseHTTPRequestHandler):
                     out = set_ssh_key(str(body.get("key") or ""))
                     compute._cache["t"] = 0.0
                     return out
+            except (ValueError, RuntimeError) as e:
+                raise HttpError(400, str(e)) from None
+        if route[:1] == ["cloud"] and not user.get("setup"):
+            # Online storage (Box, Google Drive, S3, …) copied to where the stack runs: the
+            # cluster when one is set up, else this computer. Connecting stores a sign-in and
+            # copies start jobs: administrators only; listing is for anyone signed in.
+            from . import cloud
+            from .hpc_tools import active_cluster
+
+            cluster = active_cluster()
+            where = "cluster" if cluster else "local"
+            try:
+                if route == ["cloud"] and method == "GET":
+                    return {**cloud.remotes(where, cluster), "cluster": cluster, "providers": cloud.PROVIDERS}
+                if route == ["cloud", "ls"] and method == "GET":
+                    return cloud.browse((query.get("name") or [""])[0], (query.get("path") or [""])[0],
+                                        where, cluster)
+                if route == ["cloud", "fetches"] and method == "GET":
+                    return cloud.fetches(where, cluster)
+                if len(route) == 3 and route[1] == "fetches" and method == "GET":
+                    return cloud.fetch_state(route[2], where, cluster)
+                if not user.get("is_superuser"):
+                    raise HttpError(403, "only an administrator can connect online storage or start copies")
+                body = self._body()
+                if route == ["cloud", "connect"] and method == "POST":
+                    if self.client_address[0] not in ("127.0.0.1", "::1") and body.get("type") in (
+                            "box", "drive", "dropbox"):
+                        raise HttpError(403, "signing in opens a browser on the computer running the app")
+                    return cloud.connect(str(body.get("name") or ""), str(body.get("type") or ""),
+                                         body.get("fields") or {}, where, cluster)
+                if route == ["cloud", "remove"] and method == "POST":
+                    return cloud.remove(str(body.get("name") or ""), where, cluster)
+                if route == ["cloud", "fetch"] and method == "POST":
+                    client = Client(token=token)
+                    return cloud.fetch(str(body.get("name") or ""), str(body.get("path") or ""), where=where,
+                                       cluster=cluster, settings=body.get("settings") or None,
+                                       keep=bool(body.get("keep")), token=client.token(), api=client.base)
             except (ValueError, RuntimeError) as e:
                 raise HttpError(400, str(e)) from None
         if route == ["next_step"] and method == "GET" and not user.get("setup"):
@@ -480,21 +546,38 @@ class Handler(BaseHTTPRequestHandler):
             import base64
             import tempfile
 
-            from .field_layout import read_layout, summarize, write_csv
+            from .field_layout import read_for_field, summarize, write_csv
 
             body = self._body()
-            name = Path(str(body.get("name") or "design.csv")).name
+            name = Path(str(body.get("name") or body.get("path") or "design.csv")).name
             if Path(name).suffix.lower() not in (".csv", ".tsv", ".txt", ".xlsx", ".xlsm"):
                 raise HttpError(400, "a field design is a .csv or .xlsx file")
             with tempfile.TemporaryDirectory(prefix="gemi-design-") as tmp:
                 src = Path(tmp) / name
-                src.write_bytes(base64.b64decode(str(body.get("content_base64") or "")))
+                if body.get("path"):
+                    # A design the agent already holds (its field_layouts folder): no upload.
+                    from .client import AGENT_DIR
+
+                    folder = (AGENT_DIR / "work" / "field_layouts").resolve()
+                    held = Path(str(body["path"])).resolve()
+                    if folder not in held.parents or not held.is_file():
+                        raise HttpError(404, "no such field design held by the agent")
+                    src.write_bytes(held.read_bytes())
+                else:
+                    src.write_bytes(base64.b64decode(str(body.get("content_base64") or "")))
+                # A master sheet (several years, sites, trials): keep the run's
+                # field; a filter that would keep nothing is dropped and said.
+                want = {k: str(body.get(k) or "").strip() or None for k in ("year", "location", "experiment")}
                 try:
-                    layout = read_layout(str(src))
+                    layout, whole, ignored = read_for_field(str(src), **want)
                 except ValueError as e:
                     raise HttpError(400, str(e)) from None
                 out = write_csv(layout, Path(tmp) / "layout.csv")
-                return {"csv": out.read_text(encoding="utf-8"), "summary": summarize(layout)}
+                summary = summarize(layout)
+                summary["environments_in_file"] = summarize(whole).get("environments")
+                summary["kept"] = {k: v for k, v in want.items() if v and k not in ignored}
+                summary["filter_ignored"] = ignored or None
+                return {"csv": out.read_text(encoding="utf-8"), "summary": summary}
         if route == ["automark"] and method == "POST" and not user.get("setup"):
             # The Plot Marking screen's "Mark automatically": the same call the
             # agent would make for this run (with the facts recorded for it),
@@ -510,6 +593,58 @@ class Handler(BaseHTTPRequestHandler):
                 return TOOLS["mark_plots_auto"]["fn"]({**do["args"], "save": True})["result"]
             except (ValueError, RuntimeError) as e:
                 raise HttpError(400, str(e)) from None
+        if route == ["field_designs"] and not user.get("setup"):
+            # Field design files the agent can use (its field_layouts folder),
+            # the one another run of the same field already uses, and saving
+            # a file the page picked (a browser gives no path on this computer).
+            import base64
+
+            from . import guide
+            from .client import AGENT_DIR
+
+            folder = AGENT_DIR / "work" / "field_layouts"
+            if method == "POST":
+                body = self._body()
+                name = re.sub(r"[^A-Za-z0-9._ +-]", "_", Path(str(body.get("name") or "")).name).strip()
+                if Path(name).suffix.lower() not in (".csv", ".xlsx", ".xlsm"):
+                    raise HttpError(400, "a field design is a .csv or .xlsx file")
+                folder.mkdir(parents=True, exist_ok=True)
+                dest = folder / name
+                dest.write_bytes(base64.b64decode(str(body.get("content_base64") or "")))
+                return {"path": str(dest), "name": name}
+            files = sorted(
+                ({"name": f.name, "path": str(f), "modified": round(f.stat().st_mtime)}
+                 for f in (folder.glob("*") if folder.exists() else [])
+                 if f.suffix.lower() in (".csv", ".xlsx", ".xlsm")),
+                key=lambda r: -r["modified"])
+            suggested = None
+            run_id = (query.get("run") or [""])[0]
+            facts = {k: v for k, v in guide.facts_of(run_id).items()
+                     if k in ("design_path", "first_tier_at", "first_bed_at", "beds")} if run_id else {}
+            if run_id:
+                try:
+                    from .process_runs import ProcessRuns
+
+                    runs = ProcessRuns(Client(token=token)).state()["runs"]
+                    me = next((r for r in runs if r["id"] == run_id), None)
+                    keys = ("experiment", "location", "population")
+                    if me and me.get("uploadScope"):
+                        here = [str(me["uploadScope"].get(k)) for k in keys]
+                        for r in sorted(runs, key=lambda r: str((r.get("uploadScope") or {}).get("date"))):
+                            if r["id"] == run_id or [str((r.get("uploadScope") or {}).get(k)) for k in keys] != here:
+                                continue
+                            d = guide.facts_of(r["id"]).get("design_path")
+                            if d and d != "stand-in":
+                                suggested = {"path": d, "name": Path(str(d)).name, "run_id": r["id"],
+                                             "from": r.get("name") or (r.get("uploadScope") or {}).get("date")}
+                                break
+                except Exception:
+                    suggested = None
+            if suggested and not facts.get("design_path"):
+                # The same field's other run: its orientation too, for the boundary editor.
+                facts = {k: v for k, v in guide.facts_of(suggested.get("run_id", "")).items()
+                         if k in ("design_path", "first_tier_at", "first_bed_at", "beds")} or facts
+            return {"files": files, "suggested": suggested, "facts": facts}
         if len(route) == 2 and route[0] == "facts" and not user.get("setup"):
             from . import guide
 
@@ -640,6 +775,20 @@ def _exit_with_parent(pid: int) -> None:
     os._exit(0)      # tunnels and cluster jobs are separate processes and are left as they are
 
 
+_queue_read = threading.Lock()
+
+
+def _read_queue() -> None:
+    """Read the cluster's queue (notes jobs that came, changed or went), one read at a time."""
+    from . import compute
+
+    with _queue_read:
+        try:
+            compute.overview(with_jobs=False)
+        except Exception:
+            pass
+
+
 def serve(argv: list[str]) -> None:
     port, host = 7790, "127.0.0.1"
     for i, a in enumerate(argv):
@@ -651,7 +800,9 @@ def serve(argv: list[str]) -> None:
             # Started by the desktop app: stop when the app is gone, however it ended
             # (a crash or a forced quit never reaches the app's own cleanup).
             threading.Thread(target=_exit_with_parent, args=(int(argv[i + 1]),), daemon=True).start()
-    from . import compute
+    from . import activity, compute
+
+    activity.install()
 
     threading.Thread(target=compute.watch, daemon=True).start()
     cfg = load_config()

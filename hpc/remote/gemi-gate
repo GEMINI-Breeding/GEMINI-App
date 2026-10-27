@@ -19,6 +19,13 @@
 #   worker <amiga|stitch|geo|ml|odm> [where=…] | stop-worker <name>
 #   llm-up [model] [where=…] | llm-down | llm-env | llm-status | llm-ready [model]
 #   pull-images [name…] | pull-mldeps | pull-llm [model…]
+#   folder-peek <folder> | ingest <folder> <setting=…>…   (data already on the cluster)
+#   ingest-cancel <job id|pending>   (drop an upload job of this tooling)
+#   cloud-remotes | cloud-add <name> <type> (settings on stdin) | cloud-rm <name>
+#   cloud-ls <name> <path64> | cloud-cat <name> <path64> | cloud-fetch <name> <path64> <dest> [include=…] [keep=1] [<setting=…>…]
+#   cloud-state [job]  | pull-rclone          (online storage, copied straight here with rclone)
+#   share on [passwordless] | off | status | clear-request   (the folder's group joins this session)
+#   my-places [partition:account …]      (your own placements, for your jobs on a shared session)
 #   recv <backend|hpc>            (a tar stream on stdin, into a staging folder)
 #   sync-finish <cluster> <rev>   (move the staged folders into place)
 #
@@ -58,6 +65,20 @@ main() {
   # Output marker: the login shell prints a banner first; the client cuts above this line.
   echo "@@gemi@@"
 
+  # A member of a shared session (not the folder's owner): only while the owner shares it, and
+  # not the commands that set the session up, stop it, or hand out the owner's secrets.
+  if ! is_owner; then
+    case "$first" in
+      selftest) ;;
+      *) shared || refuse "this GEMI session is $OWNER's and is not shared (they can turn sharing on)" ;;
+    esac
+    case "$first" in
+      down|recv|sync-finish|login|pull-images|pull-mldeps|pull-llm|pull-llm-cancel|pull-rclone|llm-up|llm-down|cloud-*)
+        refuse "only $OWNER (who runs this session) can do $first" ;;
+      share) [ "${rest[0]:-}" = status ] || refuse "only $OWNER can change sharing" ;;
+    esac
+  fi
+
   # where=partition:account[:gres] -> must be a placement the cluster's launch.conf names.
   local WHERE=""
   local -a words=()
@@ -72,13 +93,34 @@ main() {
   one_of() { local x=$1; shift; local o; for o in "$@"; do [ "$x" = "$o" ] && return 0; done; return 1; }
   nwords() { [ "${#words[@]}" -ge "$1" ] && [ "${#words[@]}" -le "$2" ] || refuse "wrong number of arguments"; }
   gemi_jobs() { squeue -h -u "$USER" -o '%i %j' | awk '$2 ~ /^gemi-/'; }
+  # The settings an upload into the session takes (ingest, cloud-fetch). Values with spaces
+  # and other characters come as b64:<url-safe base64>, decoded by the uploader.
+  upload_setting() {
+    [[ "$1" =~ ^(experiment|site|population|date|platform|sensor|data_type|name_ends|run_of_day|treatment|parallel)=[A-Za-z0-9_.,:@%+-]{1,200}$ ]]
+  }
+  # A remote path (or pattern list) as one word: url-safe base64, "." for the remote's top.
+  b64word() {
+    local v="$1"
+    [ "$v" = . ] && return 0
+    [[ "$v" =~ ^[A-Za-z0-9_-]+$ ]] && [ "${#v}" -le 1400 ] || refuse "bad encoded path"
+    v="${v//-/+}"; v="${v//_//}"
+    while [ $(( ${#v} % 4 )) -ne 0 ]; do v="$v="; done
+    local out; out=$(printf '%s' "$v" | base64 -d 2>/dev/null) || refuse "bad encoded path"
+    printf '%s' "$out" | LC_ALL=C grep -q '[[:cntrl:]]' && refuse "control characters in the path"
+    printf '%s' "$out"
+  }
+  remote_name() { [[ "$1" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] || refuse "bad connection name"; }
+  have_remote() { grep -qx "\[$1\]" "$RCLONE_CONF" 2>/dev/null || refuse "no connection named $1"; }
 
   case "$first" in
     ps)
       nwords 0 0; audit ALLOW
       squeue -h -u "$USER" -o 'job|%i|%j|%P|%T|%M|%l|%N|%r' | awk -F'|' '$3 ~ /^gemi-/'
+      # A member sees the session's core (the owner's job) too.
+      is_owner || squeue -h -u "$OWNER" -n gemi-core -o 'job|%i|%j|%P|%T|%M|%l|%N|%r' 2>/dev/null
       [ -s "$RUN/session.env" ] && echo 'up|session'
       [ -s "$RUN/llm.env" ] && echo 'up|llm'
+      echo "share|$OWNER|$(shared && echo yes || echo no)|$USER|$( [ -s "$RUN/share/start-request" ] && cut -d' ' -f1 "$RUN/share/start-request")"
       true
       ;;
     status)
@@ -159,8 +201,10 @@ main() {
       [ "${#words[@]}" -ge 1 ] || refuse "name the folder"
       local src="${words[0]}" root ok=""
       [[ "$src" == /* ]] || refuse "the folder must be an absolute path"
-      [ -n "${GEMI_DATA_ROOTS:-}" ] || refuse "no GEMI_DATA_ROOTS in launch.conf: name the folders data may be read from"
-      for root in $GEMI_DATA_ROOTS; do case "$src/" in "${root%/}"/*) ok=1 ;; esac; done
+      # Copies from online storage (cloud-fetch) land in INCOMING, which is always allowed.
+      case "$src/" in "$INCOMING"/?*) ok=1 ;; esac
+      [ -n "$ok" ] || [ -n "${GEMI_DATA_ROOTS:-}" ] || refuse "no GEMI_DATA_ROOTS in launch.conf: name the folders data may be read from"
+      for root in ${GEMI_DATA_ROOTS:-}; do case "$src/" in "${root%/}"/*) ok=1 ;; esac; done
       [ -n "$ok" ] || refuse "not under GEMI_DATA_ROOTS"
       [ -d "$src" ] || refuse "no such folder"
       if [ "$first" = folder-peek ]; then
@@ -175,15 +219,14 @@ main() {
         [ "${#words[@]}" -ge 3 ] || refuse "ingest <folder> experiment=… site=… …"
         local kv
         for kv in "${words[@]:1}"; do
-          [[ "$kv" =~ ^(experiment|site|population|date|platform|sensor|data_type|name_ends|run_of_day|treatment|parallel)=[A-Za-z0-9_.,:@%+-]{1,80}$ ]] \
-            || refuse "bad setting $kv"
+          upload_setting "$kv" || refuse "bad setting $kv"
         done
         [ -s "$RUN/session.env" ] || refuse "no session up"
         check_job 4 8G 0 "${INGEST_TIME:-12:00:00}" || refuse "over the job limits"
         audit SUBMIT
         local args="$RUN/ingest-$(date +%s%N).args"
         printf '%s\n' "${words[@]:1}" > "$args"; chmod 600 "$args"
-        sbatch --partition="$CORE_PARTITION" --account="$CORE_ACCOUNT" --cpus-per-task=4 --mem=8G \
+        sbatch_soonest "${WHERE:-$(light_places)}" --cpus-per-task=4 --mem=8G \
           --time="${INGEST_TIME:-12:00:00}" --job-name="$JOB_PREFIX-ingest" --output="$LOGS/ingest-%j.log" \
           --export=ALL,GEMI_HPC_ROOT="$ROOT",GEMI_INGEST_DIR="$src",GEMI_INGEST_ARGS="$args" "$HPC/remote/ingest.sbatch"
       fi
@@ -197,6 +240,8 @@ main() {
         f="$(ls -td "$LOGS"/session-*/ 2>/dev/null | head -1)$what.log"
       elif [ "$what" = gate ]; then
         f="$LOG"
+      elif [ -f "$LOGS/$what.log" ]; then
+        f="$LOGS/$what.log"             # one job's own log, e.g. ingest-<job id>
       else
         f="$(ls -t "$LOGS/$what"-*.log 2>/dev/null | head -1)"
       fi
@@ -205,6 +250,17 @@ main() {
       ;;
     core-submit)
       nwords 0 0
+      if ! is_owner; then
+        # The core holds the owner's database: only they can run it. Ask them (their app, or
+        # their keeper job, starts it).
+        if squeue -h -u "$OWNER" -n gemi-core -o %i 2>/dev/null | grep -q .; then
+          audit ALLOW; echo "the session's core job already exists ($OWNER's):"; squeue -u "$OWNER" -n gemi-core -o '%i %P %T %M %N'; exit 0
+        fi
+        audit REQUEST
+        printf '%s %s\n' "$USER" "$(date -Is)" > "$RUN/share/start-request"
+        echo "start requested: the session's core runs as $OWNER, so their GEMI starts it (asked $(date '+%H:%M'))"
+        exit 0
+      fi
       if squeue -h -u "$USER" -n gemi-core -o %i | grep -q .; then
         audit ALLOW; echo "a core job already exists:"; squeue -u "$USER" -n gemi-core -o '%i %P %T %M %N'; exit 0
       fi
@@ -219,7 +275,7 @@ main() {
       ;;
     core-state)
       nwords 0 0; audit ALLOW
-      squeue -h -u "$USER" -n gemi-core -o '%T %r'
+      squeue -h -u "$OWNER" -n gemi-core -o '%T %r'
       ;;
     core-log)
       nwords 0 0; audit ALLOW
@@ -243,6 +299,23 @@ main() {
       one_of "${words[0]}" amiga stitch geo ml odm || refuse "unknown worker"
       audit SUBMIT
       GEMI_WORKER_TRY="$WHERE" bash "$HPC/remote/submit-worker.sh" "${words[0]}"
+      ;;
+    ingest-cancel)
+      # One upload job by id, or every one still waiting ("pending"). Only gemi-ingest
+      # jobs of this user: anything else is refused.
+      nwords 1 1
+      local w="${words[0]}" ids
+      if [ "$w" = pending ]; then
+        ids=$(squeue -h -u "$USER" -n "$JOB_PREFIX-ingest" -t PENDING -o %i)
+      else
+        [[ "$w" =~ ^[0-9]+$ ]] || refuse "ingest-cancel <job id|pending>"
+        ids=$(squeue -h -u "$USER" -n "$JOB_PREFIX-ingest" -o %i | grep -xF "$w" || true)
+        [ -n "$ids" ] || refuse "no upload job $w"
+      fi
+      audit STOP
+      # shellcheck disable=SC2086
+      [ -n "$ids" ] && scancel $ids
+      echo "cancelled: ${ids:-none}" | tr '\n' ' '; echo
       ;;
     stop-worker)
       nwords 1 1
@@ -315,6 +388,159 @@ main() {
     pull-llm-cancel)
       nwords 0 0; audit STOP
       scancel -u "$USER" -n gemi-pull-llm; echo "download job dropped (files already fetched are kept)"
+      ;;
+    share)
+      # share on [passwordless] | off | status | clear-request: whether the GEMI folder's group can
+      # join this session (their own workers, their own allocation), and sign-in without passwords.
+      nwords 1 2
+      local what="${words[0]}" grp
+      grp=$(stat -c %G "$GEMI_HPC_ROOT")
+      case "$what" in
+        on)
+          [ "${#words[@]}" -eq 1 ] || [ "${words[1]}" = passwordless ] || refuse "share on [passwordless]"
+          audit CONFIG
+          { echo "SHARE=1"; [ "${words[1]:-}" = passwordless ] && echo "PASSWORDLESS=1"; } > "$SHARE_CONF"
+          share_perms
+          echo "shared with group $grp: its members can join (their own workers, on their own allocation)."
+          echo "They can use the session's database and storage like you (workers sign in with its settings)."
+          [ "${words[1]:-}" = passwordless ] && echo "Sign-in without passwords is on from the next session start."
+          ;;
+        off)
+          nwords 1 1; audit CONFIG
+          rm -f "$SHARE_CONF" "$RUN/share/start-request"; share_perms
+          echo "not shared: only $OWNER can use this session" ;;
+        status)
+          nwords 1 1; audit ALLOW
+          echo "owner=$OWNER group=$grp shared=$(shared && echo yes || echo no) passwordless=$(share_flag PASSWORDLESS && echo yes || echo no) me=$USER"
+          [ -s "$RUN/share/start-request" ] && echo "start-request=$(tr ' ' '@' < "$RUN/share/start-request")"
+          true ;;
+        clear-request)
+          nwords 1 1; audit ALLOW; rm -f "$RUN/share/start-request"; echo cleared ;;
+        *) refuse "share on|off|status|clear-request" ;;
+      esac
+      ;;
+    my-places)
+      # Your own placements (partition:account[:gres]) for the jobs you submit here: kept in your
+      # home (~/.gemi/places), used for your workers on a session shared with you. No words: show them.
+      local pl
+      for pl in "${words[@]}"; do
+        [[ "$pl" =~ ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(:[A-Za-z0-9_.:-]+)?$ ]] || refuse "bad placement $pl"
+      done
+      if [ "${#words[@]}" -gt 0 ]; then
+        audit CONFIG; mkdir -p "$HOME/.gemi"; printf '%s\n' "${words[@]}" > "$HOME/.gemi/places"
+      else
+        audit ALLOW
+      fi
+      echo "your placements: $(tr '\n' ' ' < "$HOME/.gemi/places" 2>/dev/null)"
+      ;;
+    pull-rclone)
+      nwords 0 0; audit SUBMIT
+      sbatch_soonest "${WHERE:-$(light_places)}" --output="$LOGS/slurm-pull-rclone-%j.log" \
+        --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/pull-rclone.sbatch"
+      ;;
+    cloud-remotes)
+      # The connections to online storage: name|type, never their settings.
+      nwords 0 0; audit ALLOW
+      echo "rclone=$([ -x "$RCLONE" ] && echo yes || echo no) incoming=$INCOMING"
+      [ -f "$RCLONE_CONF" ] && awk '/^\[.*\]$/ {n=substr($0,2,length($0)-2)} /^type = / && n {print "remote|" n "|" $3}' "$RCLONE_CONF"
+      true
+      ;;
+    cloud-add)
+      # A connection's settings on stdin, one "key = value" line each (a token from the
+      # browser sign-in on the person's computer, keys, a URL). Only known keys are taken.
+      nwords 2 2
+      local name="${words[0]}" type="${words[1]}" body line
+      remote_name "$name"
+      one_of "$type" box drive dropbox onedrive s3 webdav http sftp pcloud || refuse "unknown storage type"
+      body=$(head -c 32768)
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        [[ "$line" =~ ^(token|client_id|client_secret|box_sub_type|root_folder_id|scope|drive_id|drive_type|team_drive|provider|access_key_id|secret_access_key|region|endpoint|location_constraint|url|vendor|user|pass|host|port|key_file|shared_with_me)\ =\ [^[:cntrl:]]*$ ]] && [ "${#line}" -le 8000 ] \
+          || refuse "setting not allowed: ${line%% =*}"
+      done <<< "$body"
+      audit CONFIG
+      umask 077
+      local tmp="$RCLONE_CONF.tmp"
+      # Drop an older connection of that name, then add this one.
+      [ -f "$RCLONE_CONF" ] && awk -v s="[$name]" '/^\[.*\]$/ {skip = ($0 == s)} !skip' "$RCLONE_CONF" > "$tmp" || : > "$tmp"
+      { echo "[$name]"; echo "type = $type"; printf '%s\n' "$body" | grep -v '^$'; echo; } >> "$tmp"
+      mv -f "$tmp" "$RCLONE_CONF"; chmod 600 "$RCLONE_CONF"
+      echo "connection $name ($type) saved"
+      ;;
+    cloud-rm)
+      nwords 1 1; remote_name "${words[0]}"; have_remote "${words[0]}"; audit CONFIG
+      awk -v s="[${words[0]}]" '/^\[.*\]$/ {skip = ($0 == s)} !skip' "$RCLONE_CONF" > "$RCLONE_CONF.tmp" \
+        && mv -f "$RCLONE_CONF.tmp" "$RCLONE_CONF" && chmod 600 "$RCLONE_CONF"
+      echo "connection ${words[0]} removed"
+      ;;
+    cloud-ls)
+      # One folder of a connection, as rclone's JSON (a listing over the network: light).
+      nwords 2 2; remote_name "${words[0]}"; have_remote "${words[0]}"
+      [ -x "$RCLONE" ] || refuse "rclone is not installed here yet (pull-rclone)"
+      local path; path=$(b64word "${words[1]}") || exit 77
+      audit ALLOW
+      timeout 120 "$RCLONE" --config "$RCLONE_CONF" lsjson --max-depth 1 --no-mimetype "${words[0]}:$path" | head -c 4000000
+      ;;
+    cloud-cat)
+      # One small file of a connection (a field design, a map), base64 on one line: at most 20 MB.
+      nwords 2 2; remote_name "${words[0]}"; have_remote "${words[0]}"
+      [ -x "$RCLONE" ] || refuse "rclone is not installed here yet (pull-rclone)"
+      local path; path=$(b64word "${words[1]}") || exit 77
+      audit ALLOW
+      timeout 120 "$RCLONE" --config "$RCLONE_CONF" cat --count 20971520 "${words[0]}:$path" | base64 -w0; echo
+      ;;
+    cloud-fetch)
+      # Copy a folder of a connection into INCOMING/<dest> in a job; with upload settings, the
+      # same job uploads it into the session (then drops the copy unless keep=1).
+      [ "${#words[@]}" -ge 3 ] || refuse "cloud-fetch <name> <path64> <dest> [include=…] [keep=1] [settings…]"
+      local name="${words[0]}" dest="${words[2]}" path include="" keep=0 kv
+      remote_name "$name"; have_remote "$name"
+      [ -x "$RCLONE" ] || refuse "rclone is not installed here yet (pull-rclone)"
+      path=$(b64word "${words[1]}") || exit 77
+      [[ "$dest" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$ ]] || refuse "bad destination name"
+      local -a settings=()
+      for kv in "${words[@]:3}"; do
+        case "$kv" in
+          include=*) include=$(b64word "${kv#include=}") || exit 77 ;;
+          keep=1) keep=1 ;;
+          *) upload_setting "$kv" || refuse "bad setting $kv"; settings+=("$kv") ;;
+        esac
+      done
+      [ "${#settings[@]}" -eq 0 ] || [ -s "$RUN/session.env" ] || refuse "no session up to upload into"
+      check_job 2 4G 0 "${FETCH_TIME:-24:00:00}" || refuse "over the job limits"
+      audit SUBMIT
+      mkdir -p "$INCOMING"
+      local args="$RUN/fetch-$(date +%s%N).args"
+      { printf '%s\n' "$name:$path" "$INCOMING/$dest" "$include" "$keep"
+        [ "${#settings[@]}" -gt 0 ] && printf '%s\n' "${settings[@]}"; } > "$args"
+      chmod 600 "$args"
+      sbatch_soonest "${WHERE:-$(light_places)}" --cpus-per-task=2 --mem=4G \
+        --time="${FETCH_TIME:-24:00:00}" --job-name="$JOB_PREFIX-fetch" --output="$LOGS/slurm-fetch-%j.log" \
+        --export=ALL,GEMI_HPC_ROOT="$ROOT",GEMI_FETCH_ARGS="$args" "$HPC/remote/fetch.sbatch"
+      ;;
+    cloud-state)
+      # Copy jobs: without a job id, the recent ones (job|id|state|last line); with one, its log.
+      nwords 0 1; audit ALLOW
+      if [ "${#words[@]}" -eq 1 ]; then
+        [[ "${words[0]}" =~ ^[0-9]+$ ]] || refuse "bad job id"
+        tail -n 40 "$LOGS/fetch-${words[0]}.log" 2>/dev/null || echo "(no log for job ${words[0]})"
+      else
+        local f id st seen=""
+        # Queued ones first (no log yet), then the recent logs.
+        for id in $(squeue -h -u "$USER" -n "$JOB_PREFIX-fetch" -o %i 2>/dev/null) \
+                  $(ls -t "$LOGS"/fetch-*.log 2>/dev/null | head -10 | sed 's|.*/fetch-||; s|\.log$||'); do
+          case " ${seen:-} " in *" $id "*) continue ;; esac; seen="${seen:-} $id"
+          f="$LOGS/fetch-$id.log"
+          st=$(squeue -h -j "$id" -o %T 2>/dev/null)
+          [ -f "$f" ] || { printf 'job|%s|%s|\n' "$id" "${st:-ENDED}"; continue; }
+          if [ -z "$st" ]; then
+            if tail -n 3 "$f" | grep -q '\] done'; then st=COMPLETED
+            elif grep -q 'FAILED' "$f"; then st=FAILED; else st=ENDED; fi
+          fi
+          printf 'job|%s|%s|%s\n' "$id" "$st" "$(grep -v '^\s*$' "$f" | tail -n 1 | cut -c1-300)"
+        done
+        true
+      fi
       ;;
     recv)
       # A tar stream on stdin into a staging folder; nothing live is touched until sync-finish.

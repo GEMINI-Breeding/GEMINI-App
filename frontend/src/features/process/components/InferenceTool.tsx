@@ -73,6 +73,7 @@ import {
 } from "@/features/process/lib/inferenceSummary"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
+  plotFramesPrefix,
   plotImagesPrefix,
   processedPrefix,
   rawImagesPrefix,
@@ -296,8 +297,21 @@ export function InferenceTool({
       {
         label: "Plot images (split or associated)",
         prefix: plotImagesPrefix(scope),
+        plots: true,
       },
-      { label: "Raw drone images", prefix: rawPrefix },
+      { label: "Raw drone images", prefix: rawPrefix, plots: false },
+      // From the raw frames (placed by camera positions): each plot's frame crops
+      // and its best frame straightened to a top-down view.
+      {
+        label: "Plot crops from the raw frames",
+        prefix: `${plotFramesPrefix(scope)}crops/`,
+        plots: true,
+      },
+      {
+        label: "Straightened plot views from the raw frames",
+        prefix: `${plotFramesPrefix(scope)}straightened/`,
+        plots: true,
+      },
     ]
   }, [scope, datasetShortIds])
   const [sourceIdx, setSourceIdx] = useState(0)
@@ -495,10 +509,9 @@ export function InferenceTool({
         returnRunId: String(run.id),
       },
     })
-  const plotImageNames =
-    sourceIdx === 0
-      ? images.map((f) => f.object_name ?? "").filter(Boolean)
-      : []
+  const plotImageNames = sources[sourceIdx].plots
+    ? images.map((f) => f.object_name ?? "").filter(Boolean)
+    : []
 
   if (labeling && plotImageNames.length > 0) {
     return (
@@ -677,7 +690,9 @@ export function InferenceTool({
               inferred in a single job, with detections counted per plot.
               {sourceIdx === 0
                 ? " Counts are saved as traits for this plot layout, so they appear in Analyze."
-                : " Raw frames have no plot identity, so counts aren't saved as traits."}
+                : sources[sourceIdx].plots
+                  ? " Counts from the raw frames are kept with the results but not saved as traits (traits come from the orthomosaic's plot images)."
+                  : " Raw frames have no plot identity, so counts aren't saved as traits."}
             </p>
           )}
         </CardContent>

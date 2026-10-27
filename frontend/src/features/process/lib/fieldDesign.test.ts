@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   applyLabelsToFeatures,
+  describeFacts,
   dimensionsFromDesign,
   FD_TRANSFORM_IDENTITY,
   type FieldDesign,
   mergeLabelsIntoExisting,
+  transformFromFacts,
 } from "./fieldDesign"
 
 function gridFeature(
@@ -196,5 +198,74 @@ describe("mergeLabelsIntoExisting", () => {
       features: [],
     }
     expect(mergeLabelsIntoExisting(fc, FD)).toBe(fc)
+  })
+})
+
+describe("a design that does not start at row/col 1", () => {
+  // Plots in tiers 2–3 and beds 2, 3 and 5 (bed 4 a buffer).
+  const OFF: FieldDesign = {
+    ...FD,
+    rows: [
+      { Tier: "2", Bed: "2", PlotNum: "501", Line: "A" },
+      { Tier: "2", Bed: "3", PlotNum: "502", Line: "B" },
+      { Tier: "2", Bed: "5", PlotNum: "503", Line: "C" },
+      { Tier: "3", Bed: "2", PlotNum: "504", Line: "D" },
+      { Tier: "3", Bed: "5", PlotNum: "505", Line: "E" },
+    ],
+  }
+  it("draws its range, gaps included, not from 1", () => {
+    expect(dimensionsFromDesign(OFF)).toEqual({ rows: 2, cols: 4 })
+  })
+  it("labels grid cell (1,1) as the design's first row and bed", () => {
+    const out = applyLabelsToFeatures(
+      [gridFeature(1, 1, 1), gridFeature(1, 4, 4), gridFeature(1, 3, 3)],
+      OFF,
+    )
+    expect(out[0].properties?.PlotNum).toBe("501")
+    expect(out[1].properties?.PlotNum).toBe("503")
+    expect(out[2].properties?.PlotNum).toBeUndefined() // the buffer bed
+  })
+  it("turns the grid when the axes are swapped", () => {
+    const swapped = {
+      ...OFF,
+      transform: { ...FD_TRANSFORM_IDENTITY, swapAxes: true },
+    }
+    expect(dimensionsFromDesign(swapped)).toEqual({ rows: 4, cols: 2 })
+    // grid row 4, col 1 = design bed 5, tier 2
+    const out = applyLabelsToFeatures([gridFeature(4, 1, 7)], swapped)
+    expect(out[0].properties?.PlotNum).toBe("503")
+  })
+  it("relabels from the grid place after a change, not the design's row/col", () => {
+    const first = applyLabelsToFeatures([gridFeature(1, 1, 1)], OFF)
+    const flipped = {
+      ...OFF,
+      transform: { ...FD_TRANSFORM_IDENTITY, flipRows: true },
+    }
+    const again = applyLabelsToFeatures(first, flipped)
+    expect(again[0].properties?.PlotNum).toBe("504")
+  })
+})
+
+describe("transformFromFacts", () => {
+  it("leaves a field with tier 1 north and bed 1 west as drawn", () => {
+    expect(
+      transformFromFacts({ first_tier_at: "north", first_bed_at: "west" }),
+    ).toEqual({ swapAxes: false, flipRows: false, flipCols: false })
+  })
+  it("flips tiers counted from the south and beds from the east", () => {
+    expect(
+      transformFromFacts({ first_tier_at: "south", first_bed_at: "east" }),
+    ).toEqual({ swapAxes: false, flipRows: true, flipCols: true })
+  })
+  it("swaps axes when tiers run east-west", () => {
+    expect(
+      transformFromFacts({ first_tier_at: "east", first_bed_at: "north" }),
+    ).toEqual({ swapAxes: true, flipRows: true, flipCols: false })
+  })
+  it("says how the field lies", () => {
+    expect(
+      describeFacts({ first_tier_at: "north", first_bed_at: "west" }),
+    ).toBe("tier 1 at the north end, bed 1 on the west side")
+    expect(describeFacts({})).toBeNull()
   })
 })

@@ -13,7 +13,9 @@ exec > >(tee -a "$LOGS/upload-$SLURM_JOB_ID.log") 2>&1
 load_apptainer
 wait_for 600 "core session" test -s "$RUN/session.env" || exit 1
 source "$RUN/session.env"
-source "$RUN/secrets.env"
+# The upload's sign-in: the owner's secrets; a member of a shared session reads the session's
+# settings (group-readable when it is shared), which carry the same sign-in.
+if [ -r "$RUN/secrets.env" ]; then source "$RUN/secrets.env"; else source "$RUN/stack.env"; fi
 
 WTMP=/tmp/gemi-$USER-$SLURM_JOB_ID
 mkdir -p "$WTMP/home"

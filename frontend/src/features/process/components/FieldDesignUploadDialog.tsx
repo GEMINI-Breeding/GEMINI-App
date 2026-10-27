@@ -13,6 +13,7 @@ import {
   agentApi,
   type FieldLayoutSummary,
 } from "@/features/agent/lib/agentApi"
+import { FieldMapPicker } from "@/features/process/components/FieldMapPicker"
 import {
   autoDetect,
   parseCSV,
@@ -23,6 +24,7 @@ import {
   FD_TARGET_COLS,
   FD_TRANSFORM_IDENTITY,
   type FdTargetKey,
+  type FdTransform,
   type FieldDesign,
   type FieldDesignRow,
 } from "@/features/process/lib/fieldDesign"
@@ -32,6 +34,17 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved: (fd: FieldDesign) => void
+  /** The run's field: a master sheet keeps only its rows. */
+  keep?: { year?: string; location?: string; experiment?: string }
+  /** The design this field already has (held by the agent), with the grid
+   *  orientation its recorded layout gives: one click instead of an upload. */
+  preset?: {
+    path: string
+    name: string
+    transform: FdTransform
+    /** "tier 1 at the north end, bed 1 on the west side" */
+    described: string | null
+  } | null
 }
 
 /**
@@ -44,14 +57,25 @@ interface Props {
  * save). That's intentional: GEMINIbase has no field-design endpoint, and
  * the design rides on PlotGeometryStateSnapshot anyway.
  */
-export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
-  const [step, setStep] = useState<"upload" | "map">("upload")
+export function FieldDesignUploadDialog({
+  open,
+  onClose,
+  onSaved,
+  keep,
+  preset,
+}: Props) {
+  const [step, setStep] = useState<"upload" | "map" | "fieldmap">("upload")
   const [headers, setHeaders] = useState<string[]>([])
   const [parsedRows, setParsedRows] = useState<FieldDesignRow[]>([])
   const [mapping, setMapping] = useState<Partial<Record<FdTargetKey, string>>>(
     {},
   )
   const [fileName, setFileName] = useState<string | null>(null)
+  // The orientation the field's recorded layout gives (when its preset design is used).
+  const [presetTransform, setPresetTransform] = useState<FdTransform | null>(
+    null,
+  )
+  const [presetLoading, setPresetLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { showErrorToast } = useCustomToast()
 
@@ -61,7 +85,28 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
     setParsedRows([])
     setMapping({})
     setFileName(null)
+    setPresetTransform(null)
     if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  async function applyPreset() {
+    if (!preset) return
+    setPresetLoading(true)
+    try {
+      const got = await agentApi.fieldLayoutAt(preset.path, keep)
+      setFileName(preset.name)
+      loadText(got.csv)
+      setLayoutNote(got.summary)
+      setPresetTransform(preset.transform)
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error
+          ? `Couldn't read ${preset.name}: ${err.message}`
+          : `Couldn't read ${preset.name}`,
+      )
+    } finally {
+      setPresetLoading(false)
+    }
   }
 
   const [layoutNote, setLayoutNote] = useState<FieldLayoutSummary | null>(null)
@@ -86,7 +131,7 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
         r.onerror = () => reject(r.error)
         r.readAsDataURL(file)
       })
-      const got = await agentApi.fieldLayout(file.name, b64)
+      const got = await agentApi.fieldLayout(file.name, b64, keep)
       loadText(got.csv)
       setLayoutNote(got.summary)
       return
@@ -129,7 +174,7 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
       csv_text: remapAndSerialize(parsedRows, mapping),
       mapping,
       rows: parsedRows,
-      transform: FD_TRANSFORM_IDENTITY,
+      transform: presetTransform ?? FD_TRANSFORM_IDENTITY,
     }
     onSaved(fd)
     reset()
@@ -144,17 +189,51 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
       <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle>
-            {step === "upload" ? "Upload field design CSV" : "Map columns"}
+            {step === "upload"
+              ? "Upload field design"
+              : step === "fieldmap"
+                ? "Field design from a field map"
+                : "Map columns"}
           </DialogTitle>
           <DialogDescription>
             {step === "upload"
               ? "Upload a CSV mapping plot grid (row, col) coordinates to plot metadata. The design's rows/cols auto-populate the grid; metadata tags each generated polygon."
-              : `Match your CSV's columns to the expected pipeline fields. ${parsedRows.length} rows detected.`}
+              : step === "fieldmap"
+                ? "Open the field map sheet, then click the plot cells at two opposite corners of this field. Border and empty cells are skipped."
+                : `Match your CSV's columns to the expected pipeline fields. ${parsedRows.length} rows detected.`}
           </DialogDescription>
         </DialogHeader>
 
         {step === "upload" && (
           <div className="space-y-3">
+            {preset && (
+              <div
+                className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm"
+                data-testid="fd-preset"
+              >
+                <div className="min-w-0 flex-1">
+                  <p>
+                    This field's design:{" "}
+                    <span className="font-medium break-all">{preset.name}</span>
+                  </p>
+                  {preset.described && (
+                    <p className="text-muted-foreground text-xs">
+                      Laid out with {preset.described}: the grid is turned to
+                      match.
+                    </p>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  disabled={presetLoading}
+                  onClick={() => void applyPreset()}
+                  data-testid="fd-use-preset"
+                >
+                  {presetLoading ? "Reading…" : "Use it"}
+                </Button>
+              </div>
+            )}
             <Label htmlFor="fd-file-button">
               Select the field design (.csv or Excel: a plot list, or a drawn
               field map)
@@ -185,7 +264,32 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
                 onChange={handleFileChange}
               />
             </div>
+            <p className="text-muted-foreground text-xs">
+              Or{" "}
+              <button
+                type="button"
+                className="text-primary underline-offset-2 hover:underline"
+                data-testid="fd-use-field-map"
+                onClick={() => setStep("fieldmap")}
+              >
+                use a field map
+              </button>
+              : a sheet of plot numbers laid out as in the field, where you
+              click the corners of the plot area (with genotypes from a plot
+              list, if you have one).
+            </p>
           </div>
+        )}
+
+        {step === "fieldmap" && (
+          <FieldMapPicker
+            onCancel={() => setStep("upload")}
+            onDone={(csv, note) => {
+              setFileName(note)
+              setLayoutNote(null)
+              loadText(csv)
+            }}
+          />
         )}
 
         {step === "map" && (
@@ -215,10 +319,29 @@ export function FieldDesignUploadDialog({ open, onClose, onSaved }: Props) {
                     this file (a plot list without the field map).
                   </p>
                 )}
+                {layoutNote.environments_in_file &&
+                  Object.keys(layoutNote.environments_in_file).length > 1 &&
+                  layoutNote.kept &&
+                  Object.keys(layoutNote.kept).length > 0 && (
+                    <p className="mt-1 text-xs">
+                      A master sheet of{" "}
+                      {Object.keys(layoutNote.environments_in_file).length}{" "}
+                      fields: kept this run's (
+                      {Object.values(layoutNote.kept).join(" · ")}).
+                    </p>
+                  )}
+                {layoutNote.filter_ignored && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    No rows for this run's{" "}
+                    {layoutNote.filter_ignored.join(", ")} in the sheet, so that
+                    column was not used to choose rows: check these are the
+                    right plots.
+                  </p>
+                )}
                 {layoutNote.environments &&
                   Object.keys(layoutNote.environments).length > 1 && (
                     <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                      This file covers several seasons or sites (
+                      The rows kept still cover several seasons or sites (
                       {Object.keys(layoutNote.environments).join(", ")}): plot
                       numbers repeat between them. Use a file for one season and
                       site.

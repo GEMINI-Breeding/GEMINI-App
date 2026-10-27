@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createFileRoute,
   Link as RouterLink,
@@ -27,7 +27,7 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
-import { login } from "@/lib/auth"
+import { login, loginAsGuest, loginOptions } from "@/lib/auth"
 import {
   autoSignIn,
   clearSignedOut,
@@ -38,7 +38,8 @@ import { checkBackend } from "@/lib/connection"
 
 const formSchema = z.object({
   username: z.email(),
-  password: z.string().min(1, { message: "Password is required" }),
+  // Empty for an account made without a password (when the server allows those).
+  password: z.string(),
 })
 
 type FormData = z.infer<typeof formSchema>
@@ -112,6 +113,12 @@ function Login() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const capabilities = useCapabilities()
+  const options = useQuery({
+    queryKey: ["login-options"],
+    queryFn: loginOptions,
+    staleTime: 60_000,
+  })
+  const passwordless = options.data?.passwordless ?? false
   const [loginError, setLoginError] = useState<LoginError | null>(null)
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -143,8 +150,24 @@ function Login() {
 
   const onSubmit = (data: FormData) => {
     setLoginError(null)
+    if (!data.password && !passwordless) {
+      form.setError("password", { message: "Password is required" })
+      return
+    }
     loginMutation.mutate(data)
   }
+
+  const guestMutation = useMutation({
+    mutationFn: loginAsGuest,
+    onSuccess: async () => {
+      clearSignedOut()
+      markManualSignIn()
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      navigate({ to: "/" })
+    },
+    onError: (err: unknown) =>
+      toast.error(err instanceof Error ? err.message : "Guest sign-in failed"),
+  })
 
   return (
     <AuthLayout>
@@ -204,7 +227,11 @@ function Login() {
                   <FormControl>
                     <PasswordInput
                       data-testid="password-input"
-                      placeholder="Password"
+                      placeholder={
+                        passwordless
+                          ? "Password (none for an account made without one)"
+                          : "Password"
+                      }
                       {...field}
                     />
                   </FormControl>
@@ -233,6 +260,17 @@ function Login() {
             <LoadingButton type="submit" loading={isPending}>
               Log In
             </LoadingButton>
+            {options.data?.guest && (
+              <LoadingButton
+                type="button"
+                variant="outline"
+                loading={guestMutation.isPending}
+                onClick={() => guestMutation.mutate()}
+                data-testid="continue-as-guest"
+              >
+                Continue as guest
+              </LoadingButton>
+            )}
           </div>
 
           {/* After a deliberate sign-out: back in without a password, as

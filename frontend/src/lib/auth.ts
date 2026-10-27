@@ -78,6 +78,38 @@ export async function login(email: string, password: string): Promise<string> {
   return token
 }
 
+/** What the sign-in page may offer: accounts without passwords, a guest
+ *  sign-in (a lab's test setup; off unless the server turns it on). */
+export async function loginOptions(): Promise<{
+  passwordless: boolean
+  guest: boolean
+}> {
+  try {
+    const base = (OpenAPI.BASE ?? "").replace(/\/$/, "")
+    const r = await fetch(`${base}/api/users/login/options`)
+    if (!r.ok) return { passwordless: false, guest: false }
+    return await r.json()
+  } catch {
+    return { passwordless: false, guest: false }
+  }
+}
+
+/** Sign in to the shared guest account (only when the server allows it). */
+export async function loginAsGuest(): Promise<string> {
+  const base = (OpenAPI.BASE ?? "").replace(/\/$/, "")
+  const r = await fetch(`${base}/api/users/login/guest`, { method: "POST" })
+  const body = (await r.json().catch(() => ({}))) as {
+    access_token?: string
+    error_description?: string
+  }
+  if (!r.ok || !body.access_token)
+    throw new Error(
+      body.error_description || `Guest sign-in failed (${r.status})`,
+    )
+  setToken(body.access_token)
+  return body.access_token
+}
+
 /**
  * Wire OpenAPI.TOKEN to read from localStorage on every request, and
  * install a 401 interceptor that forces logout when the backend rejects

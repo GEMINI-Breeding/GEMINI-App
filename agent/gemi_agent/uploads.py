@@ -121,14 +121,22 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
                              "data_type_label": kind["label"], "season": year, "site": site, "population": population,
                              "collection_date": date, "platform": platform, "sensor": sensor, **labels}})
         ds_id = str(ds["id"])
-    prefix = f"Raw/{year}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}/{ds_id[:8]}/{kind['subdir']}"
+    scope_dir = f"Raw/{year}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}"
+    if data_type == "orthomosaic":
+        # Where the app's upload puts them and its run page looks: no dataset folder, and the
+        # elevation model beside the RGB in Orthomosaic-DEM/ (one is not offered as the other).
+        prefix = f"{scope_dir}/Orthomosaic"
+    else:
+        prefix = f"{scope_dir}/{ds_id[:8]}/{kind['subdir']}"
     task_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     task = {
         "id": task_id, "status": "running", "created": time.time(), "heartbeat": time.time(),
         "parallel": max(1, min(int(parallel), 8)), "prefix": prefix, "dataset_id": ds_id,
         "experiment_id": str(exp["id"]), "extract": kind["extract"] if extract is None else bool(extract),
         "batch_label": batch_label(run_of_day, treatment),
-        "files": [{"path": str(f), "name": f.name, "size": f.stat().st_size, "sent": 0, "status": "pending"}
+        "files": [{"path": str(f), "name": f.name, "size": f.stat().st_size, "sent": 0, "status": "pending",
+                   **({"prefix": f"{scope_dir}/Orthomosaic-DEM"}
+                      if data_type == "orthomosaic" and is_elevation(f.name) else {})}
                   for f in files],
     }
     TASKS.mkdir(parents=True, exist_ok=True)
@@ -145,6 +153,33 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
                      stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags,
                      start_new_session=os.name != "nt")
     return summary(task)
+
+
+_PLAIN = re.compile(r"[A-Za-z0-9_.,:@%+-]{1,80}")
+
+
+def encode_setting(value: str) -> str:
+    """A setting as one word the cluster's gate lets through: as it is when it
+    is plain, else `b64:` and its URL-safe base64 (names with spaces, …)."""
+    import base64
+
+    if _PLAIN.fullmatch(value) and not value.startswith("b64:"):
+        return value
+    return "b64:" + base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
+
+
+def decode_setting(value: str) -> str:
+    import base64
+
+    if not value.startswith("b64:"):
+        return value
+    v = value[4:]
+    return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)).decode()
+
+
+def is_elevation(name: str) -> bool:
+    """An elevation model by its name (2022-08-23-DEM.tif, odm_dem_dsm.tif, …_DSM.tif)."""
+    return re.search(r"(^|[^a-z])(dem|dsm|dtm|elevation)([^a-z]|$)", name.lower()) is not None
 
 
 def batch_label(run_of_day: Any, treatment: Any) -> str:
@@ -192,7 +227,7 @@ def run(task_id: str) -> None:
         f["status"] = "uploading"
         size = f["size"]
         total = max(1, -(-size // CHUNK))
-        object_name = f"{task['prefix']}/{f['name']}"
+        object_name = f"{f.get('prefix') or task['prefix']}/{f['name']}"
         ident = f"agent:{object_name}:{size}"
         try:
             have = set(client.post_json("/api/files/check_uploaded_chunks", {

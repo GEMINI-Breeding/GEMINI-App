@@ -297,6 +297,21 @@ export interface ComputeOverview {
   error?: string | null
   note?: string
   connection?: { api: boolean; model: boolean }
+  /** A session shared with the GEMI folder's group (see share on/off). */
+  share?: ComputeShare | null
+  /** This person may start and stop jobs (on this computer, or an administrator). */
+  you_can_manage?: boolean
+}
+
+export interface ComputeShare {
+  /** Whose session this is (the cluster login that runs the core). */
+  owner: string
+  shared: boolean
+  /** This computer's cluster login. */
+  me: string
+  role: "owner" | "member"
+  /** A member asked for the core to start (the owner's GEMI starts it). */
+  start_requested_by: string | null
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -346,6 +361,16 @@ export interface InstallJob {
   note: string | null
 }
 
+/** What is recorded about a field (the agent's run facts). */
+export interface FieldFacts {
+  design_path?: string
+  /** Which end of the field the design's first tier is at. */
+  first_tier_at?: "north" | "south" | "east" | "west"
+  /** Which side the design's first bed is on. */
+  first_bed_at?: "north" | "south" | "east" | "west"
+  beds?: number[]
+}
+
 export interface FieldLayoutSummary {
   plots: number
   crops: { crop: string; plots: number; beds: string; tiers: string }[]
@@ -353,6 +378,11 @@ export interface FieldLayoutSummary {
   without_position: number
   position_conflicts: number | null
   bed_tier_swapped: string | null
+  /** Every field in the file, before keeping the run's. */
+  environments_in_file?: Record<string, number> | null
+  /** The filters applied, and those that matched nothing (dropped). */
+  kept?: Record<string, string>
+  filter_ignored?: string[] | null
 }
 
 export interface DiskSpace {
@@ -387,6 +417,54 @@ export interface AgentMode {
   require_sign_in?: boolean
 }
 
+/** Online storage the app can copy from (rclone), where copies run. */
+export interface CloudProviderField {
+  key: string
+  label: string
+  options?: string[]
+  secret?: boolean
+  optional?: boolean
+}
+export interface CloudProvider {
+  type: string
+  label: string
+  /** Signs in in the browser (Box, Google Drive, Dropbox). */
+  oauth?: boolean
+  fields?: CloudProviderField[]
+}
+export interface CloudRemote {
+  name: string
+  type: string
+  label: string
+}
+export interface CloudFetch {
+  id: string
+  where: "local" | "cluster"
+  /** local: copying | uploading | done | failed; cluster: Slurm's state, COMPLETED, FAILED, ENDED. */
+  state: string
+  /** rclone's progress ("1.2 GiB / 6.3 GiB, 19%, …") or what happens now. */
+  line?: string
+  source?: string
+  dest?: string
+  error?: string
+  note?: string
+  log?: string
+}
+export interface CloudOverview {
+  where: "local" | "cluster"
+  cluster: string | null
+  rclone: boolean
+  remotes: CloudRemote[]
+  providers: CloudProvider[]
+}
+export interface CloudItem {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number | null
+  modified: string | null
+}
+
 export const agentApi = {
   mode: () => call<AgentMode>("/mode"),
   /** A session for the stack's own account; only answered on this computer. */
@@ -409,6 +487,11 @@ export const agentApi = {
     ),
   skills: () => call<AgentSkill[]>("/skills"),
   status: () => call<AgentStackStatus>("/status"),
+  /** What the agent service is doing (uploads, copies, cluster jobs), for the Console. */
+  logs: () =>
+    call<{ level: string; message: string; ts: number; source: string }[]>(
+      "/logs",
+    ),
   runs: () => call<AgentRunBrief[]>("/runs"),
   run: (id: string) => call<AgentRun>(`/runs/${id}`),
   start: (input: { text: string; skill?: string; track?: string }) =>
@@ -429,6 +512,28 @@ export const agentApi = {
   /** A cluster job uploads that folder into the session, as one batch. */
   clusterIngest: (settings: Record<string, string>) =>
     call<{ result: string }>("/compute/ingest", post(settings)),
+  /** Connections to online storage and the recent copies (where the stack runs). */
+  cloud: () => call<CloudOverview>("/cloud"),
+  /** Add a connection; Box, Google Drive and Dropbox open a sign-in in the browser. */
+  cloudConnect: (input: {
+    name: string
+    type: string
+    fields?: Record<string, string>
+  }) => call<CloudRemote>("/cloud/connect", post(input)),
+  cloudRemove: (name: string) => call<unknown>("/cloud/remove", post({ name })),
+  cloudBrowse: (name: string, path: string) =>
+    call<{ name: string; path: string; items: CloudItem[] }>(
+      `/cloud/ls?name=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}`,
+    ),
+  /** Copy a folder (or file) to where the stack runs; with settings, upload it too. */
+  cloudFetch: (input: {
+    name: string
+    path: string
+    settings?: Record<string, string>
+    keep?: boolean
+  }) => call<CloudFetch>("/cloud/fetch", post(input)),
+  cloudFetchState: (id: string) =>
+    call<CloudFetch>(`/cloud/fetches/${encodeURIComponent(id)}`),
   install: () => call<InstallOverview>("/install"),
   installOllama: () => call<InstallOverview>("/install/ollama", post()),
   installDocker: () => call<InstallOverview>("/install/docker", post()),
@@ -439,6 +544,12 @@ export const agentApi = {
   computeStop: (name: string) =>
     call<{ started: boolean }>("/compute/stop", post({ name })),
   computeReconnect: () => call<unknown>("/compute/reconnect", post({})),
+  /** Let the GEMI folder's group join this session (owner only), or stop sharing. */
+  computeShare: (on: boolean, passwordless = false) =>
+    call<{ result: string }>("/compute/share", post({ on, passwordless })),
+  /** Join a session someone in your group shares: your login, their GEMI folder. */
+  computeJoin: (login: string, folder: string, key?: string) =>
+    call<{ result: string }>("/compute/join", post({ login, folder, key })),
   /** Another identity file for the cluster's SSH login; checked before it is saved. */
   computeSshKey: (key: string) =>
     call<{ ssh_key: string; login: string }>("/compute/ssh_key", {
@@ -471,10 +582,40 @@ export const agentApi = {
    * clean CSV (plot, row = tier, col = bed, accession, crop, …), with a summary
    * of the crops and where they are.
    */
-  fieldLayout: (name: string, contentBase64: string) =>
+  /** Field design files the agent holds, and the one another run of the
+   *  same field uses. */
+  fieldDesigns: (runId?: string) =>
+    call<{
+      files: { name: string; path: string; modified: number }[]
+      suggested: { path: string; name: string; from: string } | null
+      /** This field's facts: its design and which way it lies. */
+      facts?: FieldFacts
+    }>(`/field_designs${runId ? `?run=${encodeURIComponent(runId)}` : ""}`),
+  /** Keep a design file picked in the page with the agent; returns its path. */
+  saveFieldDesign: (name: string, contentBase64: string) =>
+    call<{ path: string; name: string }>(
+      "/field_designs",
+      post({ name, content_base64: contentBase64 }),
+    ),
+  /** `keep`: the run's field, for a master sheet of several years, sites
+   *  or trials (a filter that matches nothing is dropped and said). */
+  fieldLayout: (
+    name: string,
+    contentBase64: string,
+    keep?: { year?: string; location?: string; experiment?: string },
+  ) =>
     call<{ csv: string; summary: FieldLayoutSummary }>(
       "/field_layout",
-      post({ name, content_base64: contentBase64 }),
+      post({ name, content_base64: contentBase64, ...(keep ?? {}) }),
+    ),
+  /** The same, for a design the agent already holds (no upload). */
+  fieldLayoutAt: (
+    path: string,
+    keep?: { year?: string; location?: string; experiment?: string },
+  ) =>
+    call<{ csv: string; summary: FieldLayoutSummary }>(
+      "/field_layout",
+      post({ path, ...(keep ?? {}) }),
     ),
   /**
    * Plot boundaries saved for another date, moved onto this date's

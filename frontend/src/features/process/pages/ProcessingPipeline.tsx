@@ -185,6 +185,7 @@ type OdmPreset =
   | "High Quality"
   | "Ultra"
   | "Detailed map"
+  | "Quick (boundaries + raw frames)"
   | "Custom"
 
 const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
@@ -207,6 +208,10 @@ const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string }> = {
   "Detailed map": {
     label: "Detailed map",
     desc: "Fine map, light 3D — 1 cm/px orthophoto for plant counts and plot images; matching, point cloud and mesh kept light, no textured 3D model. Fits where Ultra runs out of memory.",
+  },
+  "Quick (boundaries + raw frames)": {
+    label: "Quick (boundaries + raw frames)",
+    desc: "Quick map for placing plot boundaries and picking raw frames per plot — 5 cm/px from the sparse reconstruction (no dense point cloud, so wind-blown plants do not smear it); fast. Use when the full orthomosaic falls apart in wind.",
   },
   Custom: {
     label: "Custom",

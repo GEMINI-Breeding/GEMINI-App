@@ -71,7 +71,7 @@ import {
 import { DataSyncPanel } from "@/features/process/components/DataSyncPanel"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
-import { PlotImageGrid } from "@/features/process/components/PlotImageGrid"
+import { PlotImagesStepPanel } from "@/features/process/components/PlotImagesStepPanel"
 import { StitchResultsPanel } from "@/features/process/components/StitchResultsPanel"
 import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import {
@@ -117,8 +117,10 @@ import {
 } from "@/features/process/lib/orthoVersions"
 import {
   type AerialScope,
+  inFolder,
   isAerialScopeComplete,
   plotBoundariesPath,
+  plotFramesPrefix,
   plotImagesPrefix,
   processedPrefix,
   rawScopePrefix,
@@ -128,6 +130,7 @@ import {
   executeStep,
   markStepSkipped,
   type OrthomosaicParams,
+  type SplitOrthomosaicParams,
   stopStep,
 } from "@/features/process/lib/runApi"
 import {
@@ -423,9 +426,29 @@ const STEP_JOB_TYPE: Record<string, string> = {
 
 /** Narrowing a step run: only some plots (re-stitching the failed ones), or
  *  settings that override the pipeline's for this run. */
+/** The plot images job: a cut of the ortho, or the raw frames (by the camera
+ *  positions of the ortho and of each treatment's own). */
+function splitParams(
+  boundaries: GeoJSON.FeatureCollection,
+  orthomosaicPath: string | undefined,
+  source: "ortho" | "frames" | undefined,
+  treatmentOrthos: string[],
+): SplitOrthomosaicParams {
+  if (source !== "frames") return { boundaries, orthomosaicPath }
+  const orthomosaicPaths = [
+    ...new Set([
+      ...(orthomosaicPath ? [orthomosaicPath] : []),
+      ...treatmentOrthos,
+    ]),
+  ]
+  return { boundaries, orthomosaicPath, source, orthomosaicPaths }
+}
+
 interface RunStepOptions {
   plotIds?: number[]
   settings?: Record<string, unknown>
+  /** Plot images: cut from the orthomosaic, or each plot's best raw frames. */
+  plotSource?: "ortho" | "frames"
 }
 
 interface StepRowProps {
@@ -820,6 +843,7 @@ const RECONSTRUCTION_QUALITY = [
   "High Quality",
   "Ultra",
   "Detailed map",
+  "Quick (boundaries + raw frames)",
   "Custom",
 ] as const
 
@@ -834,6 +858,8 @@ const QUALITY_HINTS: Record<(typeof RECONSTRUCTION_QUALITY)[number], string> = {
     "Maximum quality, very slow — use for critical analysis (1 cm/px, pc-quality ultra, feature-quality ultra).",
   "Detailed map":
     "Fine map, light 3D — the orthophoto at 1 cm/px for plant counts and plot images; image matching, point cloud and mesh kept light, no textured 3D model, 5 cm surface model. Fits where Ultra runs out of memory.",
+  "Quick (boundaries + raw frames)":
+    "Quick map for placing plot boundaries and picking raw frames per plot — 5 cm/px from the sparse reconstruction (no dense point cloud, so wind-blown plants do not smear it); fast. Use when the full orthomosaic falls apart in wind.",
   Custom: "Use the textbox below to pass raw NodeODM CLI flags.",
 }
 
@@ -1178,11 +1204,11 @@ export function RunDetail() {
     queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null],
     queryFn: async () => {
       if (!scope) return []
-      const path = `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`
+      const prefix = uploadedOrthosPrefix(scope)
       const res = await FilesService.apiFilesListFilePathListFiles({
-        filePath: path,
+        filePath: `${DEFAULT_BUCKET}/${prefix}`,
       })
-      return (res as FileMetadata[] | null) ?? []
+      return inFolder(res as FileMetadata[] | null, prefix)
     },
     enabled: isLoggedIn() && Boolean(scope),
     staleTime: 30_000,
@@ -1585,7 +1611,22 @@ export function RunDetail() {
   const hasOrtho =
     pipeline?.type !== "ground" &&
     buildOrthoVersions(run, scope, orthoFiles).length > 0
-  const hasPlotImages = plotImageFiles.length > 0
+  const hasPlotFrames = (processedFilesQuery.data ?? []).some((f) =>
+    (f.object_name ?? "").endsWith("/PlotFrames/manifest.json"),
+  )
+  // The run's orthomosaic kept the camera positions that place raw frames.
+  const orthoHasCameras = (() => {
+    if (!scope) return false
+    const latest = buildOrthoVersions(run, scope, orthoFiles)[0]
+    const job = latest?.jobId
+    return Boolean(
+      job &&
+        (processedFilesQuery.data ?? []).some((f) =>
+          (f.object_name ?? "").endsWith(`/odm_shots-${job}.geojson`),
+        ),
+    )
+  })()
+  const hasPlotImages = plotImageFiles.length > 0 || hasPlotFrames
   const recorded: Record<string, { status: string }> = run?.steps ?? {}
   const stepsState: Record<string, { status: string }> = { ...recorded }
   for (const [key, present] of [
@@ -1599,6 +1640,43 @@ export function RunDetail() {
     )
       stepsState[key] = { status: "completed" }
   }
+  // A run that starts from an uploaded orthomosaic (no drone images): the
+  // image steps are not needed, and the next step is plot boundaries.
+  const uploadedOrthoFiles = (uploadedOrthosQuery.data ?? []).filter((f) =>
+    /\.tiff?$/i.test(f.object_name ?? ""),
+  )
+  const fromUploadedOrtho =
+    pipeline?.type === "aerial" &&
+    rawImagesQuery.isSuccess &&
+    imageFiles.length === 0 &&
+    uploadedOrthoFiles.length > 0
+  if (fromUploadedOrtho) {
+    for (const key of ["data_sync", "image_review", "gcp_selection"]) {
+      if (!["completed", "running"].includes(stepsState[key]?.status ?? ""))
+        stepsState[key] = { status: "skipped" }
+    }
+    if (stepsState.orthomosaic?.status !== "running")
+      stepsState.orthomosaic = { status: "completed" }
+  }
+  // Record it on the run too, so the agent (which reads the run) agrees.
+  const recordedStart = useRef(false)
+  useEffect(() => {
+    if (!fromUploadedOrtho || !run || recordedStart.current) return
+    recordedStart.current = true
+    for (const key of ["data_sync", "image_review", "gcp_selection"]) {
+      if (
+        !["completed", "running", "skipped"].includes(
+          run.steps[key]?.status ?? "",
+        )
+      )
+        setStepState(run.id, key, { status: "skipped" })
+    }
+    if (!["completed", "running"].includes(run.steps.orthomosaic?.status ?? ""))
+      setStepState(run.id, "orthomosaic", { status: "completed" })
+  }, [fromUploadedOrtho, run])
+  const uploadedDem = (rawImagesQuery.data ?? []).some((f) =>
+    /Orthomosaic-DEM\/.*\.tiff?$/i.test(f.object_name ?? ""),
+  )
   const nextKey = getNextStep(steps, stepsState)
   // Where a queued job stands: which worker would take it and whether this
   // app can reach the cluster at all. A job that will not start for a while
@@ -1898,17 +1976,34 @@ export function RunDetail() {
           dataSync,
           splitOrthomosaic:
             stepKey === "split_orthomosaic" && splitBoundariesRef.current
-              ? {
-                  boundaries: splitBoundariesRef.current,
+              ? splitParams(
+                  splitBoundariesRef.current,
                   // The same ortho the boundary tool drew over.
-                  orthomosaicPath: scope
+                  scope
                     ? buildOrthoVersions(
                         run,
                         scope,
                         orthoFiles,
                       )[0]?.path.replace(/^gemini\//, "")
                     : undefined,
-                }
+                  opts.plotSource,
+                  // Raw frames: the camera positions of every treatment's
+                  // orthomosaic of the date (flown apart, one ODM run each).
+                  scope
+                    ? (run.uploadScope?.treatments ?? [])
+                        .map(
+                          (t) =>
+                            folderOrthos(
+                              orthoFiles,
+                              processedPrefix(scope),
+                            ).find(
+                              (o) =>
+                                o.jobId != null && o.jobId === t.orthoJobId,
+                            )?.path,
+                        )
+                        .filter((x): x is string => Boolean(x))
+                    : [],
+                )
               : undefined,
         })
         if (result.jobId) {
@@ -2346,6 +2441,28 @@ export function RunDetail() {
                 ? "Drone imagery → orthomosaic → plot boundaries → traits."
                 : "Ground rover data → stitching → plot boundaries → inference."}
             </CardDescription>
+            {fromUploadedOrtho && (
+              <div
+                className="border-primary/40 bg-primary/5 mt-2 rounded-md border px-3 py-2 text-sm"
+                data-testid="run-from-uploaded-ortho"
+              >
+                This run starts from an uploaded orthomosaic (
+                {uploadedOrthoFiles
+                  .map((f) => (f.object_name ?? "").split("/").pop())
+                  .join(", ")}
+                {uploadedDem ? ", with its DEM" : ", no DEM: no plant height"}
+                ). The drone-image steps are not needed.{" "}
+                {nextKey ? (
+                  <>
+                    Next:{" "}
+                    <span className="font-medium">
+                      {steps.find((x) => x.key === nextKey)?.label}
+                    </span>
+                    .
+                  </>
+                ) : null}
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-0">
@@ -2437,9 +2554,21 @@ export function RunDetail() {
                           </div>
                         )
                       ) : step.key === "split_orthomosaic" ? (
-                        <PlotImageGrid
-                          files={plotImageFiles}
+                        <PlotImagesStepPanel
+                          plotImageFiles={plotImageFiles}
                           prefix={scope ? processedPrefix(scope) : ""}
+                          framesPrefix={scope ? plotFramesPrefix(scope) : ""}
+                          hasFrames={hasPlotFrames}
+                          hasCameraPositions={orthoHasCameras}
+                          running={
+                            starting === "split_orthomosaic" ||
+                            status === "running"
+                          }
+                          onRunFrames={() =>
+                            void handleRunStep("split_orthomosaic", {
+                              plotSource: "frames",
+                            })
+                          }
                         />
                       ) : step.key === "trait_extraction" ? (
                         <TraitRecordsPanel run={run} />

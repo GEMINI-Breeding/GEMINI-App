@@ -34,6 +34,8 @@ export type PlotGeometryStateSnapshot = {
     rows: number
     cols: number
     spacing_m: number
+    /** Gap between columns (beds), metres; unset = spacing_m. */
+    spacing_col_m?: number
     angle_deg: number
     /** Field-coordinate offsets + plot-number order (alembic-free; lives
      *  in the snapshot). Optional for back-compat with pre-offset

@@ -9,12 +9,51 @@ LOGS=$GEMI_HPC_ROOT/logs
 HPC=$GEMI_HPC_ROOT/hpc                  # these scripts
 JOB_PREFIX=gemi                         # every job this tooling submits is named gemi-*
 
+# Online storage (Box, Google Drive, S3, …) copied straight to the cluster with rclone.
+# The connections (their tokens) live in RUN, owner-only; copies land in INCOMING.
+RCLONE=$GEMI_HPC_ROOT/bin/rclone
+RCLONE_CONF=$RUN/rclone.conf
+INCOMING=$GEMI_HPC_ROOT/incoming
+RCLONE_VERSION=v1.68.2
+RCLONE_SHA256=0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c   # linux-amd64 zip
+
 # Home directories on clusters are small (a few GB): keep Apptainer's cache and temp files out of it.
 export APPTAINER_CACHEDIR=$GEMI_HPC_ROOT/apptainer_cache
 export APPTAINER_TMPDIR=${TMPDIR:-/tmp}
 
 mkdir -p "$IMAGES" "$DATA" "$RUN" "$LOGS"
-chmod 700 "$RUN" "$DATA" 2>/dev/null || true   # group dir is setgid group-writable
+# A shared session (the owner's `share on`) lets the GEMI folder's group join it: the owner
+# keeps owning everything; members run the gate as themselves, their own workers on their own
+# allocation, and read what that needs. Otherwise the run and data folders are owner-only.
+SHARE_CONF=$RUN/share.conf
+OWNER=$(stat -c %U "$RUN" 2>/dev/null || echo "$USER")
+is_owner() { [ "$USER" = "$OWNER" ]; }
+shared() { [ -r "$SHARE_CONF" ] && grep -qx 'SHARE=1' "$SHARE_CONF"; }
+share_flag() { [ -r "$SHARE_CONF" ] && grep -qx "$1=1" "$SHARE_CONF"; }
+if is_owner && ! shared; then chmod 700 "$RUN" "$DATA" 2>/dev/null || true; fi   # group dir is setgid group-writable
+
+# share_perms: what the group needs to join the session, and nothing for anyone else.
+# The service settings (stack.env) are what workers sign in with: a member who runs workers
+# can use the session's database and storage like the owner can. Secrets the session itself
+# does not need to share (storage connections, the agent model's key) stay owner-only.
+share_perms() {
+  is_owner || return 0
+  if shared; then
+    mkdir -p "$RUN/share" "$DATA/models" "$INCOMING"
+    chmod 750 "$RUN" "$DATA"
+    chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
+    chmod 600 "$RUN/secrets.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
+    chmod 2770 "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING"
+    touch "$LOGS/gate.log"; chmod 660 "$LOGS/gate.log"
+    chmod -R g+rwX "$DATA/models" 2>/dev/null
+    chmod -R g+rX "$IMAGES" "$HPC" "$SRC" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
+    chmod o-rwx "$GEMI_HPC_ROOT"
+  else
+    chmod 700 "$RUN" "$DATA"
+    chmod 600 "$RUN/session.env" "$RUN/stack.env" 2>/dev/null
+  fi
+  true
+}
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
@@ -88,8 +127,31 @@ check_job() {
 
 # Placements ("partition:account[:gres]") this cluster's launch.conf names.
 places() {
-  { echo "${CORE_PARTITION:-}:${CORE_ACCOUNT:-}"; tr ' ' '\n' <<< "${WORKER_TRY:-} ${LLM_TRY:-} ${GEMI_EXTRA_PLACES:-}"; } \
+  { echo "${CORE_PARTITION:-}:${CORE_ACCOUNT:-}"; tr ' ' '\n' <<< "${WORKER_TRY:-} ${LLM_TRY:-} ${GEMI_EXTRA_PLACES:-}"
+    # A member of a shared session also has their own accounts (one partition:account per line).
+    is_owner || grep -E '^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(:[A-Za-z0-9_.:-]+)?$' "$HOME/.gemi/places" 2>/dev/null; } \
     | grep -E '^[^:]+:[^:]+' | sort -u
+}
+# The same placements without their GPU part, each once: for jobs that need no GPU.
+light_places() { places | cut -d: -f1,2 | awk '!seen[$0]++' | tr '\n' ' '; }
+# sbatch_soonest "<partition:account …>" <sbatch options…> <script>: submit where Slurm says
+# the job starts soonest (a copy or an upload need not wait in the core's queue).
+sbatch_soonest() {
+  local try=$1; shift
+  local best="" best_wait=999999999 now entry part acct est start w
+  now=$(date +%s)
+  for entry in $try; do
+    part=${entry%%:*}; acct=${entry#*:}; acct=${acct%%:*}
+    est=$(sbatch --test-only --partition="$part" --account="$acct" "$@" 2>&1)
+    start=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}' <<< "$est" | head -1)
+    [ -n "$start" ] || continue
+    w=$(( $(date -d "$start" +%s) - now ))
+    if [ "$w" -lt "$best_wait" ]; then best="$part:$acct" best_wait=$w; fi
+    [ "$w" -le 60 ] && break
+  done
+  [ -n "$best" ] || best="${try%% *}"
+  part=${best%%:*}; acct=${best#*:}; acct=${acct%%:*}
+  sbatch --partition="$part" --account="$acct" "$@" | sed "s/$/ (on $part, account $acct)/"
 }
 # allowed_place <partition:account[:gres] ...>: every entry must be one of them (gres aside).
 allowed_place() {

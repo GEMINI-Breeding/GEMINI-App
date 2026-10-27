@@ -23,7 +23,6 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -47,6 +46,11 @@ import {
   AuthImage,
   thumbnailSrc,
 } from "@/features/genotyping/components/AuthImage"
+import {
+  type ExperimentPerson,
+  shortName,
+  useExperimentPeople,
+} from "@/features/people/api"
 import { ExperimentRuns } from "@/features/process/components/ExperimentRuns"
 import {
   legacyRunCount,
@@ -88,6 +92,19 @@ const TAG_ORDER: RunTag[] = [
   "new",
   "complete",
 ]
+
+/** The owners of the experiments this workspace's runs belong to. */
+function useWorkspaceOwners(workspaceId: string): ExperimentPerson[] {
+  const runs = useWorkspaceRuns(workspaceId)
+  const linked = useExperimentPeople()
+  const out = new Map<string, ExperimentPerson>()
+  for (const r of runs) {
+    const id = r.uploadScope?.experimentId
+    for (const p of (id && linked.data?.[String(id)]) || [])
+      if (p.role === "owner") out.set(p.user_id, p)
+  }
+  return [...out.values()]
+}
 
 function useWorkspaceStats(workspaceId: string): WorkspaceStats {
   // Match main's per-workspace "dataset" count semantics: number of
@@ -182,6 +199,7 @@ function WorkspaceCard({
 }) {
   const navigate = useNavigate()
   const stats = useWorkspaceStats(workspace.id)
+  const owners = useWorkspaceOwners(workspace.id)
 
   return (
     <div
@@ -231,6 +249,16 @@ function WorkspaceCard({
         {workspace.description && (
           <p className="text-muted-foreground text-xs truncate">
             {workspace.description}
+          </p>
+        )}
+        {owners.length > 0 && (
+          <p
+            className="text-muted-foreground text-xs truncate"
+            data-testid={`workspace-owners-${workspace.name}`}
+            title={owners.map((o) => o.email).join(", ")}
+          >
+            <span className="font-medium text-foreground/70">Owner:</span>{" "}
+            {owners.map((o) => shortName(o)).join(", ")}
           </p>
         )}
         <div className="mt-1 space-y-0.5">

@@ -20,6 +20,7 @@ import threading
 import time
 from typing import Any, Optional
 
+from . import activity
 from . import client as client_mod
 from .client import AGENT_DIR
 from .hpc_tools import API_PORT, _conf, _connect, _gemi_hpc, _port_open, _state, active_cluster
@@ -113,16 +114,28 @@ def _resources(name: str, conf: dict) -> str:
     return text + (f", {kv['gpus']} GPU" if kv.get("gpus", "0") != "0" else "")
 
 
+# A shared session (the GEMI folder's group joins the owner's session): who owns it, whether it is
+# shared, who this computer's login is, and who asked for the core to start (from the gate's `ps`).
+_share: dict = {}
+
+
 def _ps(cluster: str) -> tuple[dict[str, dict], set[str]]:
     jobs: dict[str, dict] = {}
     up: set[str] = set()
+    queue: list[dict] = []
     for line in _gemi_hpc(["ps"], cluster, timeout=90).splitlines():
         f = line.strip().split("|")
         if f[0] == "up" and len(f) > 1:
             up.add(f[1])
+        if f[0] == "share" and len(f) >= 5:
+            _share.clear()
+            _share.update({"owner": f[1], "shared": f[2] == "yes", "me": f[3], "start_requested_by": f[4] or None,
+                           "role": "owner" if f[1] == f[3] else "member"})
         if f[0] != "job" or len(f) < 9:
             continue
         job_name = f[2]
+        queue.append({"job_id": f[1], "name": job_name, "slurm_state": f[4], "node": f[7] or None,
+                      "reason": None if f[8] in ("None", "") else f[8]})
         name = {"gemi-core": "core", "gemi-llm": "llm"}.get(job_name) or \
             (job_name[len("gemi-worker-"):] if job_name.startswith("gemi-worker-") else None)
         if name is None:
@@ -133,6 +146,8 @@ def _ps(cluster: str) -> tuple[dict[str, dict], set[str]]:
         if name not in jobs or row["slurm_state"] == "RUNNING":       # a running one wins over a queued twin
             jobs[name] = row
         jobs[name]["copies"] = copies
+    activity.cluster_jobs(queue, tail=lambda j: _gemi_hpc(
+        ["logs", activity.log_name(j["name"], j["job_id"]), "3"], cluster, timeout=60).split("\n", 1)[-1])
     return jobs, up
 
 
@@ -243,6 +258,7 @@ def overview(fresh: bool = False, with_jobs: bool = True) -> dict:
     return {"cluster": cluster, "host": conf.get("HPC_HOST", "").split("@")[-1], "parts": parts,
             "login": conf.get("HPC_HOST"), "ssh_key": conf.get("HPC_KEY"),
             "auto_start": p["auto_start"], "idle_stop_minutes": p["idle_stop_minutes"], "error": snap["error"], "checked": round(_cache["t"]),
+            "share": dict(_share) or None,
             # Under `gemi-hpc app` the tunnel is that script's, on the app's own port.
             "connection": {"api": _api_answers() if os.environ.get("GEMI_TUNNEL_PIDFILE")
                            else _port_open(API_PORT) and st.get("api_pid") is not None,
@@ -285,6 +301,15 @@ def watch(period_s: int = 45) -> None:
             if ov.get("error"):
                 continue
             core_up = any(r["name"] == "core" and r["state"] == "running" for r in ov["parts"])
+            sh = ov.get("share") or {}
+            if sh.get("role") == "owner" and sh.get("start_requested_by"):
+                # A member of the shared session asked for it: the core runs as this computer's
+                # login, so it is started here (the request is cleared either way).
+                if not core_up and not _busy.get("core"):
+                    _last["core"] = {**start("core", background=True),
+                                     "message": f"started for {sh['start_requested_by']} (shared session)"}
+                    activity.note("core: " + _last["core"]["message"])
+                _gemi_hpc(["share", "clear-request"], active_cluster(), timeout=60)
             for row in ov["parts"]:
                 if row["name"] not in WORKERS or row["busy"] or row.get("idle_minutes", 0) is None:
                     continue
@@ -292,6 +317,7 @@ def watch(period_s: int = 45) -> None:
                     out = start(row["name"], background=False)
                     _last[row["name"]] = {**out, "message": (f"started for {row['jobs_waiting']} waiting job(s)"
                                                               if out["ok"] else out["message"])}
+                    activity.note(row["name"] + " worker: " + str(_last[row["name"]]["message"]))
                 elif (p["auto_start"] and core_up and row["state"] == "running" and row["jobs_waiting"]
                       and row.get("copies", 1) < row.get("max_copies", 1)
                       and time.time() - _scaled.get(row["name"], 0) > 300):
@@ -300,11 +326,38 @@ def watch(period_s: int = 45) -> None:
                     _scaled[row["name"]] = time.time()
                     out = start(row["name"], background=False)
                     _last[row["name"]] = {**out, "message": (out.get("message") or "")[:200]}
+                    activity.note(row["name"] + " worker: " + str(_last[row["name"]]["message"]))
                 elif p["idle_stop_minutes"] and (row.get("idle_minutes") or 0) >= p["idle_stop_minutes"]:
                     out = stop(row["name"], background=False)
                     _last[row["name"]] = {**out, "message": f"stopped after {p['idle_stop_minutes']} min with no jobs"}
+                    activity.note(row["name"] + " worker: " + str(_last[row["name"]]["message"]))
         except Exception:
             pass
+
+
+def set_share(on: bool, passwordless: bool = False) -> dict:
+    """Let the GEMI folder's group join this session (owner only), or stop sharing."""
+    words = ["share", "on", "passwordless"] if on and passwordless else ["share", "on"] if on else ["share", "off"]
+    out = _gemi_hpc(words, active_cluster(), timeout=180)
+    _cache["t"] = 0.0
+    return {"result": out.strip()}
+
+
+def join(login: str, folder: str, key: str = "") -> dict:
+    """This computer joins a session another person runs (their GEMI folder on the cluster, shared
+    with your group): your own login, your own jobs, their data."""
+    import re as _re
+
+    if not _re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+", login.strip()):
+        raise ValueError("your login on the cluster, as user@host")
+    if not _re.fullmatch(r"/[A-Za-z0-9_./-]+", folder.strip()) or ".." in folder:
+        raise ValueError("the shared GEMI folder: its full path on the cluster")
+    args = ["join"] + (["-i", key] if key else []) + [login.strip(), folder.strip()]
+    from .hpc_tools import _gemi_hpc as run
+
+    out = run(args, None, timeout=180)
+    _cache["t"] = 0.0
+    return {"result": out.strip().splitlines()[-1] if out.strip() else "joined"}
 
 
 # ── start / stop ─────────────────────────────────────────────────────────────
@@ -335,14 +388,17 @@ def _run(name: str, action: str, fn, background: bool) -> dict:
     if name in _busy:
         raise RuntimeError(f"{name} is already {_busy[name]['action']}")
     _busy[name] = {"action": action, "since": round(time.time())}
+    activity.note(f"{action} {name}…")
 
     def work() -> dict:
         try:
             text = fn()
             _last[name] = {"action": action, "ok": True, "at": round(time.time()),
                            "message": text.strip().splitlines()[-1][:200] if text.strip() else ""}
+            activity.note(f"{action} {name}: {_last[name]['message'] or 'done'}")
         except Exception as e:
             _last[name] = {"action": action, "ok": False, "at": round(time.time()), "message": str(e)[-300:]}
+            activity.note(f"{action} {name} failed: {_last[name]['message']}", "ERROR")
         finally:
             _busy.pop(name, None)
             _cache["t"] = 0.0

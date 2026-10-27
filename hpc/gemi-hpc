@@ -15,6 +15,7 @@
 #                            (from its last sync) so `gemi-hpc app` works here too
 #   gemi-hpc app               open the app against the cluster: tunnel + frontend on free local ports
 #   gemi-hpc tunnel [port]     only the API tunnel (default: any free port); Ctrl-C to close
+#   gemi-hpc ingest-cancel <job id|pending>   drop an upload job (or every waiting one)
 #   gemi-hpc login             print the HPC stack's app login
 #   gemi-hpc logs [service]    tail a session log (rest-api db storage logger), a job log, or `gate`
 #   gemi-hpc down              end the session: stop workers, then the core (clean shutdown)
@@ -23,6 +24,10 @@
 #   gemi-hpc llm up [model]    local LLM on a GPU (partition fallback); also: llm down | status | env
 #   gemi-hpc llm tunnel [port] make the LLM reachable at http://localhost:<port>/v1 from this PC
 #   gemi-hpc doctor            check the connection, the gate (it must refuse), limits, jobs in flight
+#   gemi-hpc share on|off|status   let the GEMI folder's group join this session (their own workers)
+#   gemi-hpc my-places p:a …   your own partition:account placements, for a session shared with you
+#   gemi-hpc pull rclone       one-time: rclone, for copies from online storage (Box, Google Drive, S3, …)
+#   gemi-hpc cloud …           those copies: remotes | add <name> <type> < settings | rm | ls | fetch | state
 #   gemi-hpc site-skills [name [file]]  the cluster admins' rules for AI agents (skills the site publishes)
 #
 # Cluster: hpc/clusters/<GEMI_CLUSTER>/launch.conf (default: the active one). Start from
@@ -167,17 +172,23 @@ case "$cmd" in
     if [ "${1:-}" = ml-deps ]; then
       gate pull-mldeps; echo "follow with: gemi-hpc logs pull-mldeps"; exit 0
     fi
+    if [ "${1:-}" = rclone ]; then
+      gate pull-rclone; echo "follow with: gemi-hpc logs pull-rclone"; exit 0
+    fi
     gate pull-images "$@"
     echo "follow with: gemi-hpc logs pull"
     ;;
   up)
     # CORE_PLACE="partition:account" starts the core somewhere else for this session.
-    gate core-submit $(where_arg "${CORE_PLACE:-}")
+    sub=$(gate core-submit $(where_arg "${CORE_PLACE:-}")); echo "$sub"
+    requested=""; grep -q "start requested" <<< "$sub" && requested=1
     echo "waiting for the core to come up (queue time varies)..."
     for _ in $(seq 1 180); do
       s=$(session)
       if [ -n "$s" ]; then echo "$s"; echo "core is up. Next: gemi-hpc worker amiga ...; gemi-hpc tunnel"; exit 0; fi
       st=$(gate core-state || true)
+      # A member asked the session's owner to start it: wait for their side to submit the job.
+      [ -z "$st" ] && [ -n "$requested" ] && { printf '  waiting for the owner to start it\n'; sleep 10; continue; }
       [ -z "$st" ] && { echo "core job is gone — it failed. Last log lines:"; gate core-log; exit 1; }
       printf '  %s\n' "$st"; sleep 10
     done
@@ -200,9 +211,30 @@ case "$cmd" in
     # A folder on the cluster the person named: what is in it (two levels at most).
     gate folder-peek "$@"
     ;;
+  share)
+    # share on [passwordless] | off | status: let the GEMI folder's group join this session.
+    gate share "${@:-status}" ;;
+  my-places)
+    gate my-places "$@" ;;
+  cloud)
+    # Online storage copied straight to the cluster: cloud remotes | add <name> <type> (settings
+    # on stdin) | rm <name> | ls <name> <path64> | fetch <name> <path64> <dest> [...] | state [job]
+    sub=${1:-}; shift || true
+    case "$sub" in
+      add) gate_in cloud-add "$@" ;;
+      remotes|rm|ls|cat|fetch|state) gate "cloud-$sub" "$@" ;;
+      *) echo "usage: gemi-hpc cloud remotes|add|rm|ls|fetch|state ..."; exit 1 ;;
+    esac
+    ;;
   ingest)
     # Upload that folder into the session from a cluster job: ingest <folder> experiment=… site=… …
-    gate ingest "$@"
+    # GEMI_INGEST_TRY="partition:account ..." picks the placement (Slurm's start estimate
+    # ignores an account's group CPU limit, so the soonest-start pick can land on a full one).
+    gate ingest "$@" $(where_arg "${GEMI_INGEST_TRY:-}")
+    ;;
+  ingest-cancel)
+    # Drop an upload job: ingest-cancel <job id>, or ingest-cancel pending for every waiting one.
+    gate ingest-cancel "$@"
     ;;
   status)
     gate status

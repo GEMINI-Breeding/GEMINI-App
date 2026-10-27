@@ -19,7 +19,10 @@
 import type { FileMetadata } from "@/client"
 
 import type { AerialScope } from "@/features/process/lib/paths"
-import { processedPrefix } from "@/features/process/lib/paths"
+import {
+  processedPrefix,
+  uploadedOrthosPrefix,
+} from "@/features/process/lib/paths"
 import type { Run } from "@/features/process/lib/runStore"
 
 export interface OrthoVersionMeta {
@@ -176,6 +179,30 @@ export function buildOrthoVersions(
         undefined,
       createdAt: lastModifiedByName.get(basename) ?? null,
       hasCog: filesByName.has(cogSiblingName(basename)),
+    })
+    knownFilenames.add(basename)
+  }
+  // An orthomosaic uploaded as it is (Files > Orthomosaic, or copied from
+  // online storage) is a version too, though nothing recorded it on the run:
+  // the boundary editor and the plot images need a map to work on.
+  const uploadedPrefix = uploadedOrthosPrefix(scope)
+  for (const f of files) {
+    const name = f.object_name ?? ""
+    const basename = name.split("/").pop() ?? ""
+    if (
+      !name.startsWith(uploadedPrefix) ||
+      name.slice(uploadedPrefix.length).includes("/")
+    )
+      continue
+    if (!isOrthoTif(basename) || knownFilenames.has(basename)) continue
+    versions.push({
+      version: 0,
+      filename: basename,
+      path: `${DEFAULT_BUCKET}/${name}`,
+      label: null,
+      source: "imported",
+      createdAt: lastModifiedByPath.get(name) ?? null,
+      hasCog: filesByPath.has(name.replace(/\.tiff?$/i, "-Pyramid.tif")),
     })
     knownFilenames.add(basename)
   }

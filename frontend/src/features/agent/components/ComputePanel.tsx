@@ -30,6 +30,7 @@ import {
 import {
   agentApi,
   type ComputePart,
+  type ComputeShare,
   type ComputeState,
 } from "@/features/agent/lib/agentApi"
 
@@ -321,7 +322,7 @@ function SshKeyRow({
 }
 
 export function ComputePanel({
-  canManage,
+  canManage: canManageProp,
   wide = false,
 }: {
   canManage: boolean
@@ -353,6 +354,9 @@ export function ComputePanel({
     onError: (e) => setError(e instanceof Error ? e.message : String(e)),
   })
   const data = compute.data
+  // On the computer running the app, its person starts their own jobs (their login, their
+  // allocation); from elsewhere, an administrator.
+  const canManage = canManageProp || Boolean(data?.you_can_manage)
   const core = data?.parts.find((p) => p.name === "core")
   const tunnelDown =
     core?.state === "running" && data?.connection && !data.connection.api
@@ -455,6 +459,14 @@ export function ComputePanel({
 
         {data?.cluster && (
           <div className="mt-2 space-y-1.5 border-t pt-2 text-xs">
+            {data.share && (
+              <ShareRow
+                share={data.share}
+                canManage={canManage}
+                onDone={refresh}
+                onError={setError}
+              />
+            )}
             <SshKeyRow
               login={data.login}
               current={data.ssh_key}
@@ -499,5 +511,85 @@ export function ComputePanel({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/** The session shared with the GEMI folder's group: the owner turns it on and
+ *  off; a member sees whose session it is and that starting the core asks the
+ *  owner's GEMI. */
+function ShareRow({
+  share,
+  canManage,
+  onDone,
+  onError,
+}: {
+  share: ComputeShare
+  canManage: boolean
+  onDone: () => void
+  onError: (e: string) => void
+}) {
+  const [passwordless, setPasswordless] = useState(false)
+  const toggle = useMutation({
+    mutationFn: (on: boolean) => agentApi.computeShare(on, passwordless),
+    onSuccess: onDone,
+    onError: (e) => onError(e instanceof Error ? e.message : String(e)),
+  })
+  if (share.role === "member")
+    return (
+      <div className="rounded border p-2" data-testid="compute-share">
+        <p>
+          <span className="font-medium">{share.owner}'s shared session</span>{" "}
+          (you are {share.me}). Your workers run as you, on your allocation.
+        </p>
+        <p className="text-muted-foreground">
+          The core holds {share.owner}'s database, so only their GEMI can start
+          it: starting it here asks theirs
+          {share.start_requested_by
+            ? ` (asked by ${share.start_requested_by})`
+            : ""}
+          .
+        </p>
+      </div>
+    )
+  return (
+    <div className="space-y-1 rounded border p-2" data-testid="compute-share">
+      <div className="flex items-start gap-2">
+        <Checkbox
+          id="compute-share"
+          className="mt-0.5"
+          checked={share.shared}
+          disabled={!canManage || toggle.isPending}
+          onCheckedChange={(v) => toggle.mutate(v === true)}
+        />
+        <label htmlFor="compute-share">
+          Share this session with my group on the cluster
+        </label>
+      </div>
+      <p className="text-muted-foreground">
+        {share.shared
+          ? "Members of the GEMI folder's group can join from their GEMI (Join a shared session): their own workers, on their own allocation, with full use of this session's data."
+          : "Only you use this session. Shared, your group joins it with their own cluster logins and runs their own workers."}
+      </p>
+      {!share.shared && (
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="compute-share-nopw"
+            className="mt-0.5"
+            checked={passwordless}
+            disabled={!canManage}
+            onCheckedChange={(v) => setPasswordless(v === true)}
+          />
+          <label htmlFor="compute-share-nopw">
+            Also allow sign-in without passwords and as a guest (for testing;
+            anyone who reaches the session could sign in)
+          </label>
+        </div>
+      )}
+      {share.start_requested_by && (
+        <p className="text-amber-600">
+          {share.start_requested_by} asked for the session to start.
+        </p>
+      )}
+    </div>
   )
 }

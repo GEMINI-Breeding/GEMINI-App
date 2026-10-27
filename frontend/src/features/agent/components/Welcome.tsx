@@ -11,7 +11,7 @@
  * usual; someone who has answered them never sees this page.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Bot, Check, Cpu, Hand, Loader2, Server } from "lucide-react"
+import { Bot, Check, Cpu, Hand, Loader2, Server, Users } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -126,7 +126,7 @@ function ProcessingStep({
   info: Onboarding
   onChosen: (where: "local" | "cluster") => void
 }) {
-  const [where, setWhere] = useState<"local" | "cluster" | null>(null)
+  const [where, setWhere] = useState<"local" | "cluster" | "join" | null>(null)
   const docker =
     info.docker === "running"
       ? "Docker is running."
@@ -166,6 +166,18 @@ function ProcessingStep({
         with an SSH key (no password prompt). Nothing is installed on this
         computer; the agent sets the cluster up with you in the next minutes.
       </Choice>
+      <Choice
+        icon={<Users className="h-5 w-5" />}
+        title="Join a shared session"
+        selected={where === "join"}
+        onClick={() => setWhere("join")}
+        testId="welcome-processing-join"
+      >
+        Someone in your group already runs GEMI on a cluster and shares it with
+        the group. You work on the same data with your own cluster login; your
+        processing runs as you, on your own allocation.
+      </Choice>
+      {where === "join" && <JoinSession onJoined={() => onChosen("cluster")} />}
       {where === "local" && info.docker !== "running" && (
         <InstallHelper what="docker" />
       )}
@@ -176,13 +188,62 @@ function ProcessingStep({
       )}
       <div>
         <Button
-          disabled={!where}
+          disabled={!where || where === "join"}
           data-testid="welcome-processing-next"
-          onClick={() => where && onChosen(where)}
+          onClick={() => where && where !== "join" && onChosen(where)}
         >
           Continue
         </Button>
       </div>
+    </div>
+  )
+}
+
+/** Join a session another person runs and shares with your group: your SSH
+ *  login on the cluster and their GEMI folder there. */
+export function JoinSession({ onJoined }: { onJoined: () => void }) {
+  const [login, setLogin] = useState("")
+  const [folder, setFolder] = useState("")
+  const join = useMutation({
+    mutationFn: () => agentApi.computeJoin(login.trim(), folder.trim()),
+    onSuccess: onJoined,
+  })
+  return (
+    <div
+      className="space-y-2 rounded-md border p-3 text-sm"
+      data-testid="join-session"
+    >
+      <Input
+        value={login}
+        onChange={(e) => setLogin(e.target.value)}
+        placeholder="Your cluster login, e.g. ana@hpc.university.edu"
+        aria-label="Your cluster login"
+      />
+      <Input
+        value={folder}
+        onChange={(e) => setFolder(e.target.value)}
+        placeholder="The shared GEMI folder on the cluster (ask whoever runs it)"
+        aria-label="The shared GEMI folder"
+      />
+      <p className="text-muted-foreground text-xs">
+        Needs an SSH key for your login (no password prompt) and membership of
+        the folder's group. Whoever runs the session turns sharing on in
+        Settings → Compute, and gives you an account in the app.
+      </p>
+      <Button
+        disabled={
+          !/^\S+@\S+$/.test(login.trim()) ||
+          !folder.trim().startsWith("/") ||
+          join.isPending
+        }
+        onClick={() => join.mutate()}
+        data-testid="join-session-go"
+      >
+        {join.isPending ? "Joining…" : "Join"}
+      </Button>
+      {join.error && (
+        <p className="text-destructive text-xs">{String(join.error)}</p>
+      )}
     </div>
   )
 }

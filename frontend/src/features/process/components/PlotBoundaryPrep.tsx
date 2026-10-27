@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { agentApi } from "@/features/agent/lib/agentApi"
 import { BoundaryImportPicker } from "@/features/process/components/BoundaryImportPicker"
 import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
@@ -78,10 +79,12 @@ import {
 import { outerFromOrthoBounds } from "@/features/process/lib/autoBoundary"
 import {
   applyLabelsToFeatures,
+  describeFacts,
   dimensionsFromDesign,
   type FdTransform,
   type FieldDesign,
   mergeLabelsIntoExisting,
+  transformFromFacts,
 } from "@/features/process/lib/fieldDesign"
 import {
   type FillPattern,
@@ -94,6 +97,7 @@ import {
 import { folderOrthos, nearestRegions } from "@/features/process/lib/multiOrtho"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
+  inFolder,
   processedPrefix,
   uploadedOrthosPrefix,
 } from "@/features/process/lib/paths"
@@ -222,6 +226,25 @@ export function PlotBoundaryPrep({
     useState<PlotGeometryStateSnapshot | null>(null)
   const [versionName, setVersionName] = useState("")
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
+  // The design this field already has (recorded with the agent for this run or
+  // another date of the same field) and the orientation its facts give.
+  const fieldInfo = useQuery({
+    queryKey: ["agent", "field_designs", run.id],
+    queryFn: () => agentApi.fieldDesigns(run.id),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const fieldPreset = useMemo(() => {
+    const facts = fieldInfo.data?.facts ?? {}
+    const path = facts.design_path ?? fieldInfo.data?.suggested?.path
+    if (!path || path === "stand-in") return null
+    return {
+      path,
+      name: path.split(/[\\/]/).pop() ?? path,
+      transform: transformFromFacts(facts),
+      described: describeFacts(facts),
+    }
+  }, [fieldInfo.data])
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [draftBanner, setDraftBanner] = useState<{
     visible: boolean
@@ -260,6 +283,7 @@ export function PlotBoundaryPrep({
         }
   const { rows, cols, angle, gapMeters, rowOffset, colOffset, fillPattern } =
     activeParams
+  const gapColMeters = activeParams.gapColMeters ?? gapMeters
 
   // History.state can change after a setter runs in this render; use a
   // ref to get the latest state inside callbacks without re-binding.
@@ -311,6 +335,7 @@ export function PlotBoundaryPrep({
   const setCols = (v: number) => updateActiveParams({ cols: v })
   const setAngle = (v: number) => updateActiveParams({ angle: v })
   const setGapMeters = (v: number) => updateActiveParams({ gapMeters: v })
+  const setGapColMeters = (v: number) => updateActiveParams({ gapColMeters: v })
   const setRowOffset = (v: number) => updateActiveParams({ rowOffset: v })
   const setColOffset = (v: number) => updateActiveParams({ colOffset: v })
   const setFillPattern = (v: FillPattern) =>
@@ -572,9 +597,12 @@ export function PlotBoundaryPrep({
     queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null],
     queryFn: async () =>
       scope
-        ? (((await FilesService.apiFilesListFilePathListFiles({
-            filePath: `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`,
-          })) as FileMetadata[] | null) ?? [])
+        ? inFolder(
+            (await FilesService.apiFilesListFilePathListFiles({
+              filePath: `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`,
+            })) as FileMetadata[] | null,
+            uploadedOrthosPrefix(scope),
+          )
         : [],
     enabled: Boolean(scope),
   })
@@ -822,6 +850,7 @@ export function PlotBoundaryPrep({
           cols: grid?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
           angle: grid?.angle_deg ?? DEFAULT_BLOCK_PARAMS.angle,
           gapMeters: grid?.spacing_m ?? DEFAULT_BLOCK_PARAMS.gapMeters,
+          gapColMeters: grid?.spacing_col_m ?? undefined,
           rowOffset: grid?.row_offset ?? DEFAULT_BLOCK_PARAMS.rowOffset,
           colOffset: grid?.col_offset ?? DEFAULT_BLOCK_PARAMS.colOffset,
           fillPattern: grid?.fill_pattern ?? DEFAULT_BLOCK_PARAMS.fillPattern,
@@ -866,6 +895,23 @@ export function PlotBoundaryPrep({
     buildNextStateForFeatures,
   ])
 
+  // Field-design mode: the grid the design needs, and the active block's
+  // drawn grid when it differs (after a swap of axes, or one drawn in Manual).
+  const fdSize = fieldDesign ? dimensionsFromDesign(fieldDesign) : null
+  const fdMismatch = (() => {
+    if (!fdSize || !activeBlockId) return null
+    let r = 0
+    let c = 0
+    for (const f of features) {
+      const p = (f.properties ?? {}) as Record<string, unknown>
+      if (p.role === "outer" || p.blockId !== activeBlockId) continue
+      r = Math.max(r, Number(p._grid_row ?? p.row) || 0)
+      c = Math.max(c, Number(p._grid_col ?? p.col) || 0)
+    }
+    if (!r || !c || (r === fdSize.rows && c === fdSize.cols)) return null
+    return { rows: r, cols: c }
+  })()
+
   function regenerateGrid() {
     if (!activeBlockId) {
       showErrorToast("Draw a boundary first, then generate the grid.")
@@ -883,11 +929,17 @@ export function PlotBoundaryPrep({
       )
       return
     }
+    // Field-design mode draws the grid the design needs; Manual mode its
+    // own rows and columns.
+    const size =
+      gridMode === "fd" && fieldDesign
+        ? dimensionsFromDesign(fieldDesign)
+        : { rows, cols }
     const grid = generateGridFeatures(outer.geometry, {
-      rows,
-      cols,
+      rows: size.rows,
+      cols: size.cols,
       angleDeg: angle,
-      gapXMeters: gapMeters,
+      gapXMeters: gapColMeters,
       gapYMeters: gapMeters,
       // Field-coordinate offsets + plot-number order. In field-design
       // mode the CSV is authoritative for plot/row/col, so don't apply
@@ -967,28 +1019,12 @@ export function PlotBoundaryPrep({
     setFdDialogOpen(false)
     const s = stateRef.current
     const dims = dimensionsFromDesign(fd)
-    let next: PlotBoundaryEditorState = {
+    // The design sets the grid's size in field-design mode; the Manual tab's
+    // rows and columns are its own and stay as they were.
+    const next: PlotBoundaryEditorState = {
       ...s,
       fieldDesign: fd,
       gridMode: "fd",
-    }
-    if (s.activeBlockId && next.blocks[s.activeBlockId]) {
-      next = {
-        ...next,
-        blocks: {
-          ...next.blocks,
-          [s.activeBlockId]: {
-            ...next.blocks[s.activeBlockId],
-            rows: dims.rows,
-            cols: dims.cols,
-          },
-        },
-      }
-    } else {
-      next = {
-        ...next,
-        pendingDefaultParams: { rows: dims.rows, cols: dims.cols },
-      }
     }
     const plotFeatures = next.features.filter(
       (f) => f.properties?.role !== "outer",
@@ -1074,6 +1110,7 @@ export function PlotBoundaryPrep({
         rows,
         cols,
         spacing_m: gapMeters,
+        spacing_col_m: gapColMeters,
         angle_deg: angle,
         row_offset: rowOffset,
         col_offset: colOffset,
@@ -1464,7 +1501,7 @@ export function PlotBoundaryPrep({
                     </div>
                     <div>
                       <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
-                        Gap (m)
+                        Gap between rows (m)
                       </Label>
                       <NumberField
                         id="grid-gap"
@@ -1473,6 +1510,19 @@ export function PlotBoundaryPrep({
                         step={0.1}
                         value={gapMeters}
                         onCommit={setGapMeters}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="grid-gap-cols" className="mb-1.5 text-xs">
+                        Gap between columns (m)
+                      </Label>
+                      <NumberField
+                        id="grid-gap-cols"
+                        data-testid="boundary-gap-cols"
+                        min={0}
+                        step={0.1}
+                        value={gapColMeters}
+                        onCommit={setGapColMeters}
                       />
                     </div>
                     <div>
@@ -1553,17 +1603,20 @@ export function PlotBoundaryPrep({
                       <>
                         <p className="mb-1.5">
                           Field design:{" "}
-                          <strong>{fieldDesign.rows.length}</strong> plots
-                          loaded (
-                          {activeBlockId
-                            ? rows
-                            : (pendingDefaultParams?.rows ?? rows)}{" "}
-                          ×{" "}
-                          {activeBlockId
-                            ? cols
-                            : (pendingDefaultParams?.cols ?? cols)}
-                          )
+                          <strong>{fieldDesign.rows.length}</strong> plots on a{" "}
+                          {fdSize?.rows} × {fdSize?.cols} grid (rows × columns,
+                          from the design)
                         </p>
+                        {fdMismatch && (
+                          <p
+                            className="mb-1.5 text-amber-600"
+                            data-testid="field-design-mismatch"
+                          >
+                            The drawn grid is {fdMismatch.rows} ×{" "}
+                            {fdMismatch.cols}: Generate plot grid again to match
+                            the design.
+                          </p>
+                        )}
                         <div className="mb-2 flex items-center gap-3">
                           <Label
                             htmlFor="fd-flip-rows"
@@ -1628,17 +1681,34 @@ export function PlotBoundaryPrep({
                       </>
                     ) : (
                       <>
-                        <p className="text-muted-foreground mb-1.5">
-                          Upload a CSV mapping (row, col) coordinates to plot
-                          metadata. Rows/cols come from the design.
-                        </p>
+                        {fieldPreset ? (
+                          <p
+                            className="mb-1.5"
+                            data-testid="field-design-known"
+                          >
+                            This field's design is{" "}
+                            <strong>{fieldPreset.name}</strong>
+                            {fieldPreset.described
+                              ? ` (${fieldPreset.described})`
+                              : ""}
+                            . Use it, then draw the outer boundary around the
+                            design's plots and generate the grid.
+                          </p>
+                        ) : (
+                          <p className="text-muted-foreground mb-1.5">
+                            Upload a CSV mapping (row, col) coordinates to plot
+                            metadata. Rows/cols come from the design.
+                          </p>
+                        )}
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant={fieldPreset ? "default" : "outline"}
                           data-testid="field-design-upload"
                           onClick={() => setFdDialogOpen(true)}
                         >
-                          Upload field design
+                          {fieldPreset
+                            ? "Use this field's design"
+                            : "Upload field design"}
                         </Button>
                       </>
                     )}
@@ -1659,7 +1729,7 @@ export function PlotBoundaryPrep({
                     </div>
                     <div>
                       <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
-                        Gap (m)
+                        Gap between rows (m)
                       </Label>
                       <NumberField
                         id="grid-gap-fd"
@@ -1668,6 +1738,22 @@ export function PlotBoundaryPrep({
                         step={0.1}
                         value={gapMeters}
                         onCommit={setGapMeters}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="grid-gap-cols-fd"
+                        className="mb-1.5 text-xs"
+                      >
+                        Gap between columns (m)
+                      </Label>
+                      <NumberField
+                        id="grid-gap-cols-fd"
+                        data-testid="boundary-gap-fd-cols"
+                        min={0}
+                        step={0.1}
+                        value={gapColMeters}
+                        onCommit={setGapColMeters}
                       />
                     </div>
                   </div>
@@ -1813,6 +1899,16 @@ export function PlotBoundaryPrep({
         open={fdDialogOpen}
         onClose={() => setFdDialogOpen(false)}
         onSaved={handleFieldDesignSaved}
+        preset={fieldPreset}
+        keep={
+          scope
+            ? {
+                year: scope.year,
+                location: scope.location,
+                experiment: scope.experiment,
+              }
+            : undefined
+        }
       />
 
       <Dialog

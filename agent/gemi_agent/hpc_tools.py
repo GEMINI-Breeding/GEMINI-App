@@ -601,13 +601,15 @@ def cluster_folder(args: dict) -> dict:
         return {"result": _gemi_hpc(["folder-peek", folder], cluster, timeout=120),
                 "next": "to upload it: cluster_folder upload=true with experiment, site, population, date, "
                         "platform, sensor, data_type (and name_ends to keep only some files)"}
+    from .uploads import encode_setting
+
     words = []
     for k in _INGEST_KEYS:
         v = str(args.get(k) or "").strip()
         if v:
-            if not re.fullmatch(r"[A-Za-z0-9_.,:@%+-]{1,80}", v):
-                raise ValueError(f"{k}={v!r}: letters, digits and _ . , : @ % + - only (no spaces)")
-            words.append(f"{k}={v}")
+            if len(v) > 120 or "\n" in v:
+                raise ValueError(f"{k}={v!r}: at most 120 characters, one line")
+            words.append(f"{k}={encode_setting(v)}")   # names with spaces go encoded
     missing = [k for k in _INGEST_KEYS[:7] if not args.get(k)]
     if missing:
         raise ValueError(f"missing {', '.join(missing)}")

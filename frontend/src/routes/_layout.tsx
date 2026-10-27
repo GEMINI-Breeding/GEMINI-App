@@ -16,6 +16,7 @@ import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
 import { ConnectionNotice } from "@/components/System/ConnectionNotice"
 import { WorkersNotice } from "@/components/System/WorkersNotice"
+import { Button } from "@/components/ui/button"
 import {
   SidebarInset,
   SidebarProvider,
@@ -96,6 +97,24 @@ function Layout() {
     setTourStep(0)
   }, [location.pathname, location.search])
   const closeTour = useCallback(() => setTourSteps(null), [])
+  // First open: offer the guided tour once (it also stays under Help).
+  const TOUR_OFFERED = "gemini.tour.offered"
+  const [tourInvite, setTourInvite] = useState(() => {
+    try {
+      return localStorage.getItem(TOUR_OFFERED) !== "1"
+    } catch {
+      return false
+    }
+  })
+  const answerInvite = (take: boolean) => {
+    try {
+      localStorage.setItem(TOUR_OFFERED, "1")
+    } catch {
+      // no storage: it is offered again next time
+    }
+    setTourInvite(false)
+    if (take) startTour()
+  }
   const nextTourStep = useCallback(
     () =>
       setTourStep((s) =>
@@ -174,6 +193,33 @@ function Layout() {
         onClose={() => setHelpOpen(false)}
         onStartTour={startTour}
       />
+
+      {tourInvite && tourSteps === null && (
+        <div
+          className="bg-background fixed right-6 bottom-20 z-50 w-80 rounded-lg border p-4 shadow-lg"
+          data-testid="tour-invite"
+          role="dialog"
+          aria-label="Take the tour"
+        >
+          <p className="font-medium">New to GEMI?</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            A short tour shows where things are on this page. It is always under
+            Help (?) later.
+          </p>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => answerInvite(false)}
+            >
+              Not now
+            </Button>
+            <Button size="sm" onClick={() => answerInvite(true)}>
+              Take the tour
+            </Button>
+          </div>
+        </div>
+      )}
 
       {tourSteps !== null && (
         <OnboardingTour

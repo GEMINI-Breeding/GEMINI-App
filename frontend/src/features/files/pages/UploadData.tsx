@@ -13,6 +13,7 @@ import {
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
+import { CloudImport } from "../components/CloudImport"
 import { ClusterFolderUpload } from "../components/ClusterFolderUpload"
 import type { EntityChoice } from "../components/EntitySelectField"
 import { GeoTiffValidationCard } from "../components/GeoTiffValidationCard"
@@ -23,6 +24,7 @@ import {
 import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog"
 import { type RecentUpload, RecentUploads } from "../components/RecentUploads"
 import { ReferenceDataUploadDialog } from "../components/ReferenceDataUploadDialog"
+import { UploadSourceTabs } from "../components/UploadSourceTabs"
 import { UploadZone } from "../components/UploadZone"
 import { useResolveScope } from "../hooks/useUploadScope"
 import { readExifAutofill } from "../lib/exifAutofill"
@@ -251,6 +253,9 @@ export function UploadData() {
     })
   }, [])
 
+  const [rgbCount, setRgbCount] = useState(0)
+  const [demCount, setDemCount] = useState(0)
+  const [demSignal, setDemSignal] = useState(0)
   const handleRgbUploadComplete = useCallback((destPaths: string[]) => {
     const tif = destPaths.find((p) => /\.(tif|tiff)$/i.test(p))
     if (tif) setRgbTifPath(tif)
@@ -308,89 +313,128 @@ export function UploadData() {
           </div>
 
           <div className="space-y-6">
-            {selectedFileType === "Orthomosaic" ? (
-              <div className="space-y-6">
-                <div>
-                  <UploadList
+            <UploadSourceTabs dataType={selectedFileType}>
+              {{
+                computer:
+                  selectedFileType === "Orthomosaic" ? (
+                    <div className="space-y-4" data-testid="ortho-upload">
+                      <p className="text-muted-foreground text-sm">
+                        Both files are filed under the fields on the left. Add
+                        the RGB orthomosaic and, if you have it, its elevation
+                        model (DEM); one Upload sends both.
+                      </p>
+                      <div>
+                        <UploadList
+                          dataType={selectedFileType}
+                          formValues={formValues}
+                          scope={scope}
+                          onFilesSelected={handleFilesSelected}
+                          onUploadComplete={(paths) => {
+                            handleRgbUploadComplete(paths)
+                            // The DEM follows with the same fields.
+                            if (demCount > 0) setDemSignal((n) => n + 1)
+                          }}
+                          onSelectionChange={setRgbCount}
+                          uploadLabel={
+                            demCount > 0
+                              ? "Upload orthomosaic + DEM"
+                              : "Upload orthomosaic"
+                          }
+                          label="1. RGB orthomosaic (.tif) — required"
+                          disabled={uploadDisabled}
+                          disabledReason={uploadDisabledReason}
+                        />
+                        {rgbTifPath && (
+                          <GeoTiffValidationCard
+                            key={rgbTifPath}
+                            destPath={rgbTifPath}
+                          />
+                        )}
+                      </div>
+                      <div className="rounded-md border border-dashed p-3">
+                        <UploadList
+                          dataType="Orthomosaic DEM"
+                          formValues={formValues}
+                          scope={scope}
+                          onUploadComplete={handleDemUploadComplete}
+                          onSelectionChange={setDemCount}
+                          // With an orthomosaic queued, its Upload sends this too;
+                          // alone (a DEM for an earlier orthomosaic) it has its own.
+                          hideUploadButton={rgbCount > 0}
+                          uploadSignal={demSignal}
+                          uploadLabel="Upload DEM"
+                          label="2. DEM / elevation model (.tif) — optional, for plant height"
+                          disabled={uploadDisabled}
+                          disabledReason={uploadDisabledReason}
+                        />
+                        {demTifPath && (
+                          <GeoTiffValidationCard
+                            key={demTifPath}
+                            destPath={demTifPath}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ) : wizardKind ? (
+                    <div
+                      className="space-y-3"
+                      data-testid="import-wizard-dropzone"
+                    >
+                      <p className="text-muted-foreground text-sm">
+                        Drop a file to launch the import wizard.
+                      </p>
+                      <UploadZone
+                        onFilesAdded={handleWizardFilesDropped}
+                        disabled={uploadDisabled}
+                        disabledReason={uploadDisabledReason}
+                      />
+                      {wizardScopeError && (
+                        <p
+                          className="text-destructive text-sm"
+                          data-testid="wizard-scope-error"
+                        >
+                          {wizardScopeError}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    // Thermal-data detection + calibration picker now lives
+                    // INSIDE UploadList — it probes file bytes after the user
+                    // drops a batch, so we don't depend on a manual "this is
+                    // thermal" toggle here. See UploadList.addFiles().
+                    <UploadList
+                      dataType={selectedFileType}
+                      formValues={formValues}
+                      scope={scope}
+                      onFilesSelected={handleFilesSelected}
+                      onUploadComplete={handleUploadComplete}
+                      disabled={uploadDisabled}
+                      disabledReason={uploadDisabledReason}
+                    />
+                  ),
+                cluster: (
+                  <ClusterFolderUpload
                     dataType={selectedFileType}
                     formValues={formValues}
                     scope={scope}
-                    onFilesSelected={handleFilesSelected}
-                    onUploadComplete={handleRgbUploadComplete}
-                    label="RGB Orthomosaic (.tif) — required"
                     disabled={uploadDisabled}
                     disabledReason={uploadDisabledReason}
                   />
-                  {rgbTifPath && (
-                    <GeoTiffValidationCard
-                      key={rgbTifPath}
-                      destPath={rgbTifPath}
-                    />
-                  )}
-                </div>
-                <div className="border-t pt-6">
-                  <UploadList
-                    dataType="Orthomosaic DEM"
+                ),
+                online: (
+                  <CloudImport
+                    dataType={selectedFileType}
                     formValues={formValues}
                     scope={scope}
-                    onUploadComplete={handleDemUploadComplete}
-                    label="DEM (.tif) — optional (required for plant height)"
                     disabled={uploadDisabled}
                     disabledReason={uploadDisabledReason}
                   />
-                  {demTifPath && (
-                    <GeoTiffValidationCard
-                      key={demTifPath}
-                      destPath={demTifPath}
-                    />
-                  )}
-                </div>
-              </div>
-            ) : wizardKind ? (
-              <div className="space-y-3" data-testid="import-wizard-dropzone">
-                <p className="text-muted-foreground text-sm">
-                  Drop a file to launch the import wizard.
-                </p>
-                <UploadZone
-                  onFilesAdded={handleWizardFilesDropped}
-                  disabled={uploadDisabled}
-                  disabledReason={uploadDisabledReason}
-                />
-                {wizardScopeError && (
-                  <p
-                    className="text-destructive text-sm"
-                    data-testid="wizard-scope-error"
-                  >
-                    {wizardScopeError}
-                  </p>
-                )}
-              </div>
-            ) : (
-              // Thermal-data detection + calibration picker now lives
-              // INSIDE UploadList — it probes file bytes after the user
-              // drops a batch, so we don't depend on a manual "this is
-              // thermal" toggle here. See UploadList.addFiles().
-              <UploadList
-                dataType={selectedFileType}
-                formValues={formValues}
-                scope={scope}
-                onFilesSelected={handleFilesSelected}
-                onUploadComplete={handleUploadComplete}
-                disabled={uploadDisabled}
-                disabledReason={uploadDisabledReason}
-              />
-            )}
-            <ClusterFolderUpload
-              dataType={selectedFileType}
-              formValues={formValues}
-              scope={scope}
-              disabled={uploadDisabled}
-              disabledReason={uploadDisabledReason}
-            />
+                ),
+              }}
+            </UploadSourceTabs>
           </div>
         </div>
       </div>
-
       {refDataFile && (
         <ReferenceDataUploadDialog
           open

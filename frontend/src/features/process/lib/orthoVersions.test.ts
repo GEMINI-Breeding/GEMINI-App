@@ -282,3 +282,26 @@ describe("mergeOrthoVersionFromJobResult", () => {
     expect(merged?.[1].jobId).toBe("job-A")
   })
 })
+
+describe("buildOrthoVersions: orthomosaics uploaded as they are", () => {
+  const raw = (rest: string) =>
+    ({
+      object_name: `Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/${rest}`,
+      size: 0,
+      last_modified: "2026-04-29T00:00:00Z",
+    }) as unknown as FileMetadata
+
+  it("offers an uploaded orthomosaic, not its DEM or pyramid", () => {
+    const got = buildOrthoVersions(undefined, scope, [
+      raw("Orthomosaic/2026-04-28-RGB.tif"),
+      raw("Orthomosaic/2026-04-28-RGB-Pyramid.tif"),
+      raw("Orthomosaic-DEM/2026-04-28-DEM.tif"),
+    ])
+    expect(got).toHaveLength(1)
+    expect(got[0].path).toBe(
+      "gemini/Raw/2026/GEMINI/Davis/Cowpea/2026-04-28/Drone/RGB/Orthomosaic/2026-04-28-RGB.tif",
+    )
+    expect(got[0].source).toBe("imported")
+    expect(got[0].hasCog).toBe(true)
+  })
+})

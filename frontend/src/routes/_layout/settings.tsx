@@ -4,6 +4,7 @@ import ApplicationSettings from "@/components/UserSettings/ApplicationSettings"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
 import UserInformation from "@/components/UserSettings/UserInformation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PeopleSettings } from "@/features/people/PeopleSettings"
 
 export const Route = createFileRoute("/_layout/settings")({
   component: UserSettings,
@@ -34,6 +35,9 @@ function UserSettings() {
           <TabsTrigger value="account" data-testid="settings-tab-account">
             Account
           </TabsTrigger>
+          <TabsTrigger value="people" data-testid="settings-tab-people">
+            People
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="application" className="min-h-0 flex-1">
           <ApplicationSettings />
@@ -44,6 +48,9 @@ function UserSettings() {
         >
           <UserInformation />
           <ChangePassword />
+        </TabsContent>
+        <TabsContent value="people" className="overflow-y-auto px-6 pb-6 pt-3">
+          <PeopleSettings />
         </TabsContent>
       </Tabs>
     </div>

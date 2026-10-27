@@ -36,6 +36,20 @@ export default defineConfig({
     }),
     react(),
     tailwindcss(),
+    {
+      // Node ends any request still arriving after 5 minutes (a bare 400).
+      // Upload chunks through the proxy over a slow tunnel can take that
+      // long; the API and the uploader have their own limits and retries.
+      name: "no-request-timeout",
+      configureServer(server) {
+        if (server.httpServer && "requestTimeout" in server.httpServer)
+          server.httpServer.requestTimeout = 0
+      },
+      configurePreviewServer(server) {
+        if ("requestTimeout" in server.httpServer)
+          server.httpServer.requestTimeout = 0
+      },
+    },
   ],
   server: {
     // The Rust shell's build output (src-tauri/target) is thousands of

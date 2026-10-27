@@ -22,7 +22,16 @@ description: Upload local files or folders (rover .bin logs, images, orthomosaic
 When the files sit on the cluster's storage (a session runs there), do not copy them here. Ask the person for the folder's full path on the cluster (or its parent): never search the cluster's storage for data. Then:
 
 1. `{"tool": "cluster_folder", "args": {"folder": "<the path they named>"}}` shows what is in it (two levels).
-2. `{"tool": "cluster_folder", "args": {"folder": "<path>", "upload": true, "experiment": "…", "site": "…", "population": "…", "date": "YYYY-MM-DD", "platform": "Drone", "sensor": "RGB", "data_type": "images"}}` submits a cluster job that uploads it as one batch (asks the person first). Add `"name_ends": "_V.JPG"` to keep only some files. Values have no spaces.
+2. `{"tool": "cluster_folder", "args": {"folder": "<path>", "upload": true, "experiment": "…", "site": "…", "population": "…", "date": "YYYY-MM-DD", "platform": "Drone", "sensor": "RGB", "data_type": "images"}}` submits a cluster job that uploads it as one batch (asks the person first). Add `"name_ends": "_V.JPG"` to keep only some files. Names with spaces are fine.
+
+## Data in online storage (Box, Google Drive, Dropbox, S3, WebDAV, a web folder, SFTP)
+
+Never download it to this computer first. The person connects the storage once on the Files page (Upload > Online storage > Connect storage; Box, Google Drive and Dropbox sign in in their browser). Then:
+
+1. `{"tool": "online_storage", "args": {"action": "list"}}`: the connections. None yet: tell the person where to connect, and stop.
+2. `{"tool": "online_storage", "args": {"action": "browse", "name": "<connection>", "path": "<folder they named>"}}` shows that folder (browse up from the top if the path is unclear; ask, do not guess).
+3. `{"tool": "online_storage", "args": {"action": "copy", "name": "…", "path": "…", "experiment": "…", "site": "…", "population": "…", "date": "YYYY-MM-DD", "platform": "…", "sensor": "…", "data_type": "orthomosaic"}}` copies it to where the stack runs (on a cluster, a cluster job copies straight from the storage) and uploads it as one batch (asks first). An orthomosaic folder may hold the DEM too: files named …DEM / DSM are filed as the elevation model.
+4. `{"tool": "online_storage", "args": {"action": "state", "id": "<id>"}}` until it is done; one copy per date.
 3. Follow it with `hpc` action=logs service=upload; the run then shows on the Process tab.
 
 Only folders under the cluster's data roots (`GEMI_DATA_ROOTS` in its launch.conf) are accepted.

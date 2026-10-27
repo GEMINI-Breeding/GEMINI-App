@@ -36,7 +36,6 @@ const AERIAL: Field[] = [
   {
     key: "design_path",
     label: "Field design file",
-    hint: "Path on this computer (.xlsx or .csv)",
     kind: "text",
   },
   {
@@ -56,7 +55,7 @@ const GROUND: Field[] = [
   {
     key: "design_path",
     label: "Field design file",
-    hint: "Path on this computer (.xlsx or .csv); empty if there is none yet",
+    hint: "Empty if there is none yet",
     kind: "text",
   },
   { key: "plots_per_bed", label: "Plots per bed", kind: "number" },
@@ -137,7 +136,46 @@ export function RunAgentCard({
   const [draft, setDraft] = useState<Record<string, string>>({})
   // null: not toggled yet; the form then shows while facts are still missing,
   // so they are given once, up front, rather than at whichever step stops.
-  const [toggled, setOpen] = useState<boolean | null>(null)
+  // Closing it is remembered for this run, so it does not open again.
+  const closedKey = `gemi.runFacts.closed.${runId}`
+  const [toggled, setToggled] = useState<boolean | null>(() => {
+    try {
+      return localStorage.getItem(closedKey) === "1" ? false : null
+    } catch {
+      return null
+    }
+  })
+  const setOpen = (v: boolean) => {
+    setToggled(v)
+    try {
+      if (v) localStorage.removeItem(closedKey)
+      else localStorage.setItem(closedKey, "1")
+    } catch {
+      // no storage: it stays closed for this visit
+    }
+  }
+  const designs = useQuery({
+    queryKey: ["agent", "field_designs", runId],
+    queryFn: () => agentApi.fieldDesigns(runId),
+    retry: false,
+  })
+  const pickDesign = useMutation({
+    mutationFn: async (file: File) => {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] ?? "")
+        r.onerror = () => reject(r.error)
+        r.readAsDataURL(file)
+      })
+      return agentApi.saveFieldDesign(file.name, b64)
+    },
+    onSuccess: (r) => {
+      setDraft((d) => ({ ...d, design_path: r.path }))
+      queryClient.invalidateQueries({
+        queryKey: ["agent", "field_designs", runId],
+      })
+    },
+  })
   useEffect(() => {
     if (!facts.data) return
     const f: Facts = facts.data.facts
@@ -150,6 +188,16 @@ export function RunAgentCard({
       ),
     )
   }, [facts.data, fields])
+  // The design another run of this field uses, when this one has none yet.
+  const suggested = designs.data?.suggested ?? null
+  useEffect(() => {
+    if (!facts.data || !suggested) return
+    const f: Facts = facts.data.facts
+    if (!f.design_path)
+      setDraft((d) =>
+        d.design_path ? d : { ...d, design_path: suggested.path },
+      )
+  }, [facts.data, suggested])
   const save = useMutation({
     mutationFn: () =>
       agentApi.saveFacts(
@@ -252,9 +300,76 @@ export function RunAgentCard({
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               {fields.map((f) => (
-                <div key={f.key} className="grid gap-1">
+                <div key={f.key} className="grid min-w-0 gap-1">
                   <Label className="text-xs">{f.label}</Label>
-                  {"options" in f ? (
+                  {f.key === "design_path" ? (
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Select
+                        value={draft.design_path || UNSET}
+                        onValueChange={(v) =>
+                          set("design_path", v === UNSET ? "" : v)
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-8 min-w-0 flex-1 [&>span]:min-w-0 [&>span]:truncate"
+                          data-testid="run-fact-design_path"
+                          title={
+                            draft.design_path
+                              ? draft.design_path.split(/[\\/]/).pop()
+                              : undefined
+                          }
+                        >
+                          <SelectValue placeholder="No design yet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNSET}>No design yet</SelectItem>
+                          {[
+                            ...(designs.data?.files ?? []),
+                            ...(draft.design_path &&
+                            !(designs.data?.files ?? []).some(
+                              (x) => x.path === draft.design_path,
+                            )
+                              ? [
+                                  {
+                                    name:
+                                      draft.design_path.split(/[\\/]/).pop() ??
+                                      draft.design_path,
+                                    path: draft.design_path,
+                                  },
+                                ]
+                              : []),
+                          ].map((x) => (
+                            <SelectItem
+                              key={x.path}
+                              value={x.path}
+                              className="max-w-[min(32rem,90vw)] break-all"
+                            >
+                              {x.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0"
+                        disabled={pickDesign.isPending}
+                        onClick={() => {
+                          const input = document.createElement("input")
+                          input.type = "file"
+                          input.accept = ".csv,.xlsx,.xlsm"
+                          input.onchange = () => {
+                            const file = input.files?.[0]
+                            if (file) pickDesign.mutate(file)
+                          }
+                          input.click()
+                        }}
+                      >
+                        {pickDesign.isPending ? "Adding…" : "Choose file…"}
+                      </Button>
+                    </div>
+                  ) : "options" in f ? (
                     <Select
                       value={draft[f.key] || UNSET}
                       onValueChange={(v) => set(f.key, v === UNSET ? "" : v)}
@@ -283,6 +398,15 @@ export function RunAgentCard({
                       onChange={(e) => set(f.key, e.target.value)}
                     />
                   )}
+                  {f.key === "design_path" &&
+                    suggested &&
+                    draft.design_path === suggested.path &&
+                    !(facts.data?.facts as Facts | undefined)?.design_path && (
+                      <span className="text-[11px] text-sky-700 dark:text-sky-400">
+                        The design {suggested.name} of {suggested.from} (same
+                        field): Save to use it here.
+                      </span>
+                    )}
                   {f.hint && (
                     <span className="text-muted-foreground text-[11px]">
                       {f.hint}

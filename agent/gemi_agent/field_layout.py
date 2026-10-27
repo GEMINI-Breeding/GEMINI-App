@@ -26,6 +26,7 @@ Shapes understood (any sheet of an .xlsx, or a .csv):
 from __future__ import annotations
 
 import csv
+import itertools
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -332,7 +333,7 @@ def _grid(sheet: dict) -> Optional[dict]:
 
 
 def read_layout(paths: list[str] | str, sheet: Optional[str] = None, year: Optional[str] = None,
-                location: Optional[str] = None) -> dict:
+                location: Optional[str] = None, experiment: Optional[str] = None) -> dict:
     """Every plot the files describe, with how each file was read.
 
     Tables with a year and site keep plots of different seasons and sites
@@ -356,10 +357,18 @@ def read_layout(paths: list[str] | str, sheet: Optional[str] = None, year: Optio
         raise ValueError("no plots found: no sheet has a recognisable plot table (plot / bed / tier columns) or "
                          "field map (a 'Tier/bed #' or 'Bed | Tier 1 …' header)")
 
+    def related(a: Any, b: Any) -> bool:
+        x, y = _norm(a), _norm(b)
+        return bool(x and y and (x in y or y in x))
+
     def keep(p: dict) -> bool:
         if year and p.get("year") and str(year) not in str(p["year"]):
             return False
-        if location and p.get("location") and str(location).lower() not in str(p["location"]).lower():
+        if location and p.get("location") and not related(location, p["location"]):
+            return False
+        # A master sheet of several trials: its experiment / trial column.
+        named = [p.get(k) for k in ("crop_hint", "trial") if p.get(k)]
+        if experiment and named and not any(related(experiment, n) for n in named):
             return False
         return True
 
@@ -420,6 +429,28 @@ def read_layout(paths: list[str] | str, sheet: Optional[str] = None, year: Optio
             "swap_suspected": (len(swapped) > 0.8 * len(conflicts) and len(swapped) >= 3),
             "parts": [{k: v for k, v in part.items() if k != "plots"} | {"plots": len(part["plots"])}
                       for part in parts]}
+
+
+def read_for_field(paths: list[str] | str, year: Optional[str] = None, location: Optional[str] = None,
+                   experiment: Optional[str] = None) -> tuple[dict, dict, list[str]]:
+    """The plots of one field from a file that may hold many (a master sheet
+    of years, sites and trials). A filter that would keep nothing is dropped.
+    Returns (layout, the whole file's layout, filters dropped)."""
+    whole = read_layout(paths)
+    want = {"year": year, "location": location, "experiment": experiment}
+    if not any(want.values()):
+        return whole, whole, []
+    layout = read_layout(paths, **want)
+    if layout["plots"]:
+        return layout, whole, []
+    # Drop as few filters as will find the field, the experiment first.
+    given = [k for k in ("experiment", "location", "year") if want[k]]
+    for n in range(1, len(given) + 1):
+        for drop in itertools.combinations(given, n):
+            layout = read_layout(paths, **{k: (None if k in drop else v) for k, v in want.items()})
+            if layout["plots"]:
+                return layout, whole, list(drop)
+    return whole, whole, given
 
 
 def _merge(cur: dict, p: dict, source: str, conflicts: list[dict]) -> None:

@@ -163,6 +163,15 @@ export interface SplitOrthomosaicParams {
    * discovery (Processed/…/odm_orthophoto*) never finds.
    */
   orthomosaicPath?: string
+  /**
+   * "frames": each plot's best raw frames instead of a cut of the ortho,
+   * placed with the camera positions of the ODM run(s) that made these
+   * orthos (one per treatment flown apart). Written under PlotFrames/.
+   */
+  source?: "ortho" | "frames"
+  orthomosaicPaths?: string[]
+  /** Frames kept per plot (default 3). */
+  framesPerPlot?: number
 }
 
 export interface ExecuteStepInput {
@@ -505,6 +514,13 @@ export async function executeStep(
         boundaries: input.splitOrthomosaic.boundaries,
         ...(input.splitOrthomosaic.orthomosaicPath
           ? { orthomosaic_path: input.splitOrthomosaic.orthomosaicPath }
+          : {}),
+        ...(input.splitOrthomosaic.source === "frames"
+          ? {
+              source: "frames",
+              orthomosaic_paths: input.splitOrthomosaic.orthomosaicPaths,
+              frames_per_plot: input.splitOrthomosaic.framesPerPlot ?? 3,
+            }
           : {}),
       }
       const job = (await JobsService.apiJobsSubmitSubmitJob({

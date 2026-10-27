@@ -46,6 +46,7 @@ import {
 } from "@/features/process/lib/orthoVersions"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
+  inFolder,
   uploadedDemsPrefix,
   uploadedOrthosPrefix,
 } from "@/features/process/lib/paths"
@@ -92,7 +93,7 @@ export function ImportOrthoDialog({
       const res = await FilesService.apiFilesListFilePathListFiles({
         filePath: `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`,
       })
-      return (res as FileMetadata[] | null) ?? []
+      return inFolder(res as FileMetadata[] | null, uploadedOrthosPrefix(scope))
     },
     enabled: open && isLoggedIn() && Boolean(scope),
   })

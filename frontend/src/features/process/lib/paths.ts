@@ -68,6 +68,15 @@ export function uploadedOrthosPrefix(scope: AerialScope): string {
   return `${rawScopePrefix(scope)}Orthomosaic/`
 }
 
+/** The files of a listing that are inside `prefix`. The files API matches a
+ *  bare prefix, so listing …/Orthomosaic/ also returns …/Orthomosaic-DEM/. */
+export function inFolder<T extends { object_name?: string | null }>(
+  files: T[] | null | undefined,
+  prefix: string,
+): T[] {
+  return (files ?? []).filter((f) => (f.object_name ?? "").startsWith(prefix))
+}
+
 /** …and the DEM uploaded alongside it. */
 export function uploadedDemsPrefix(scope: AerialScope): string {
   return `${rawScopePrefix(scope)}Orthomosaic-DEM/`
@@ -117,6 +126,12 @@ export function rawImagesPrefix(
 
 export function plotImagesPrefix(scope: AerialScope): string {
   return `${processedPrefix(scope)}PlotImages/`
+}
+
+/** Plot images from the raw frames (placed by the ODM run's camera positions):
+ *  crops/, straightened/, manifest.json. */
+export function plotFramesPrefix(scope: AerialScope): string {
+  return `${processedPrefix(scope)}PlotFrames/`
 }
 
 export function orthomosaicPath(scope: AerialScope): string {

@@ -126,8 +126,11 @@ export function toCoco(set: LabelSet): object {
   return { images, annotations, categories }
 }
 
-/** …/PlotImages/plot_1.png → …/labels/{name} */
+/** …/PlotImages/plot_1.png → …/labels/{name};
+ *  …/PlotFrames/crops/x.jpg → …/PlotFrames/labels/{name} (its own set: other pictures). */
 export function labelSetDirectory(imagePath: string, name = "default"): string {
+  const f = imagePath.lastIndexOf("/PlotFrames/")
+  if (f >= 0) return `${imagePath.slice(0, f)}/PlotFrames/labels/${name}`
   const i = imagePath.lastIndexOf("/PlotImages/")
   const base =
     i >= 0

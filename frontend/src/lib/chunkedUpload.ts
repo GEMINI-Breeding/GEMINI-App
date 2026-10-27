@@ -29,8 +29,21 @@
  */
 import { OpenAPI } from "@/client/core/OpenAPI"
 import { getToken } from "@/lib/auth"
+import { noteBackendAnswered } from "@/lib/connection"
 
 const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024 // 8 MiB (>= S3 5 MiB minimum)
+// S3 caps a multipart upload at 10,000 parts; stay well under it.
+const MAX_PARTS = 9000
+const MIB = 1024 * 1024
+
+/** 8 MiB parts, larger only when a file would need more than MAX_PARTS.
+ *  Small parts on purpose: each one is a single request, and over a slow
+ *  link (an SSH tunnel at a few hundred KB/s, four parts in flight) a
+ *  32 MiB part took over five minutes and hit proxy request timeouts. */
+export function chunkSizeFor(bytes: number): number {
+  const needed = Math.ceil(bytes / MAX_PARTS / MIB) * MIB
+  return Math.max(DEFAULT_CHUNK_SIZE, needed)
+}
 const DEFAULT_PARALLEL_PARTS = 4
 /**
  * Delays before each retry of a failed chunk. The tail is long on purpose:
@@ -40,6 +53,14 @@ const DEFAULT_PARALLEL_PARTS = 4
 const CHUNK_RETRY_DELAYS_MS = [
   1_000, 3_000, 10_000, 30_000, 60_000, 60_000, 120_000,
 ]
+/**
+ * How long one part may take before it is sent again. A request can stall
+ * with no error at all (a connection through a proxy or SSH tunnel that
+ * stops moving): without a limit the upload waits on it for ever, the bar
+ * frozen. An 8 MiB part needs ~2 minutes even at 70 KB/s.
+ */
+const CHUNK_TIMEOUT_MS = 10 * 60_000
+const CHECK_TIMEOUT_MS = 2 * 60_000
 
 export type ChunkedUploadProgress = {
   /** Bytes uploaded so far across all chunks (including already-resumed ones). */
@@ -94,6 +115,8 @@ export type ChunkedUploadOptions = {
   signal?: AbortSignal
   /** Delays before each retry of a failed chunk (tests shorten these). */
   retryDelaysMs?: readonly number[]
+  /** Time one part may take before it is sent again (tests shorten it). */
+  chunkTimeoutMs?: number
 }
 
 export type ChunkedUploadResult = {
@@ -128,6 +151,7 @@ async function checkUploadedPartNumbers(
       object_name: objectName,
       ...(bucketName ? { bucket_name: bucketName } : {}),
     }),
+    signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
   })
   if (!resp.ok) return new Set()
   try {
@@ -168,6 +192,7 @@ async function uploadOneChunk({
   experimentId,
   datasetId,
   signal,
+  timeoutMs = CHUNK_TIMEOUT_MS,
 }: {
   chunk: Blob
   chunkIndex: number
@@ -178,7 +203,8 @@ async function uploadOneChunk({
   experimentId?: string
   datasetId?: string
   signal?: AbortSignal
-}): Promise<void> {
+  timeoutMs?: number
+}): Promise<boolean | null> {
   const form = new FormData()
   form.append("file_chunk", chunk, `${fileIdentifier}.part${chunkIndex}`)
   form.append("chunk_index", String(chunkIndex))
@@ -189,19 +215,49 @@ async function uploadOneChunk({
   if (experimentId) form.append("experiment_id", experimentId)
   if (datasetId) form.append("dataset_id", datasetId)
 
-  const token = getToken()
-  const resp = await fetch(resolveApiUrl("/api/files/upload_chunk"), {
-    method: "POST",
-    body: form,
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    signal,
-  })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "")
-    throw new ChunkError(
-      `Chunk ${chunkIndex + 1}/${totalChunks} failed: ${resp.status} ${text.slice(0, 200)}`,
-      resp.status === 408 || resp.status === 429 || resp.status >= 500,
-    )
+  // The caller's abort, or this part's time running out.
+  const stop = new AbortController()
+  const onAbort = () => stop.abort()
+  signal?.addEventListener("abort", onAbort, { once: true })
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    stop.abort()
+  }, timeoutMs)
+  try {
+    const token = getToken()
+    const resp = await fetch(resolveApiUrl("/api/files/upload_chunk"), {
+      method: "POST",
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: stop.signal,
+    })
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "")
+      throw new ChunkError(
+        `Chunk ${chunkIndex + 1}/${totalChunks} failed: ${resp.status} ${text.slice(0, 200)}`,
+        resp.status === 408 || resp.status === 429 || resp.status >= 500,
+      )
+    }
+    noteBackendAnswered()
+    // True when this chunk was the one that had the file assembled; null
+    // when the server does not say (an older one).
+    try {
+      const body = (await resp.json()) as { complete?: boolean }
+      return typeof body?.complete === "boolean" ? body.complete : null
+    } catch {
+      return null
+    }
+  } catch (err) {
+    if (timedOut && !signal?.aborted)
+      throw new ChunkError(
+        `Chunk ${chunkIndex + 1}/${totalChunks} got no answer in ${Math.round(timeoutMs / 60_000)} min`,
+        true,
+      )
+    throw err
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener("abort", onAbort)
   }
 }
 
@@ -237,11 +293,10 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 async function uploadChunkWithRetry(
   args: Parameters<typeof uploadOneChunk>[0],
   delaysMs: readonly number[],
-): Promise<void> {
+): Promise<boolean | null> {
   for (let attempt = 0; ; attempt++) {
     try {
-      await uploadOneChunk(args)
-      return
+      return await uploadOneChunk(args)
     } catch (err) {
       const retryable =
         err instanceof ChunkError ? err.retryable : err instanceof TypeError
@@ -271,11 +326,12 @@ export async function uploadFileChunked(
     bucketName,
     experimentId,
     datasetId,
-    chunkSize = DEFAULT_CHUNK_SIZE,
+    chunkSize = chunkSizeFor(opts.file.size),
     parallelParts = DEFAULT_PARALLEL_PARTS,
     onProgress,
     signal,
     retryDelaysMs = CHUNK_RETRY_DELAYS_MS,
+    chunkTimeoutMs = CHUNK_TIMEOUT_MS,
   } = opts
 
   const total = file.size
@@ -303,6 +359,9 @@ export async function uploadFileChunked(
 
   let cursor = 0
   let firstError: unknown = null
+  let assembled = false
+  // Whether the server says per chunk if the file was assembled.
+  let reported = false
 
   async function worker() {
     while (true) {
@@ -315,7 +374,7 @@ export async function uploadFileChunked(
       const end = Math.min(start + chunkSize, total)
       const chunk = file.slice(start, end)
       try {
-        await uploadChunkWithRetry(
+        const done = await uploadChunkWithRetry(
           {
             chunk,
             chunkIndex,
@@ -326,9 +385,12 @@ export async function uploadFileChunked(
             experimentId,
             datasetId,
             signal,
+            timeoutMs: chunkTimeoutMs,
           },
           retryDelaysMs,
         )
+        if (done === true) assembled = true
+        if (done !== null) reported = true
       } catch (err) {
         if (!firstError) firstError = err
         return
@@ -344,9 +406,42 @@ export async function uploadFileChunked(
     }
   }
 
-  const workerCount = Math.min(Math.max(1, parallelParts), pending.length || 1)
-  const workers = Array.from({ length: workerCount }, () => worker())
-  await Promise.all(workers)
+  const runAll = async () => {
+    cursor = 0
+    const workerCount = Math.min(
+      Math.max(1, parallelParts),
+      pending.length || 1,
+    )
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  }
+  await runAll()
+
+  // Every chunk is sent, yet no reply said the file was assembled: the
+  // server may lack some parts. Ask which it holds and send the rest
+  // again, rather than leave the upload hanging without an error.
+  for (
+    let round = 0;
+    round < 3 && reported && !assembled && !firstError;
+    round++
+  ) {
+    if (signal?.aborted || alreadyUploaded.size === totalChunks) break
+    const held = await checkUploadedPartNumbers(
+      fileIdentifier,
+      totalChunks,
+      objectName,
+      bucketName,
+    )
+    // No session left: the last reply was lost after assembly.
+    if (held.size === 0) break
+    const missing: number[] = []
+    for (let i = 0; i < totalChunks; i++) if (!held.has(i + 1)) missing.push(i)
+    if (missing.length === 0) {
+      // All held but not assembled: re-send the last part to trigger it.
+      missing.push(totalChunks - 1)
+    }
+    pending.splice(0, pending.length, ...missing)
+    await runAll()
+  }
 
   if (signal?.aborted) {
     abortUpload(fileIdentifier).catch(() => {})
@@ -355,6 +450,18 @@ export async function uploadFileChunked(
   if (firstError) {
     abortUpload(fileIdentifier).catch(() => {})
     throw firstError
+  }
+  if (reported && !assembled && pending.length > 0) {
+    const held = await checkUploadedPartNumbers(
+      fileIdentifier,
+      totalChunks,
+      objectName,
+      bucketName,
+    )
+    if (held.size > 0)
+      throw new Error(
+        `${objectName.split("/").pop()} was sent but not assembled on the server: ${totalChunks - held.size} of ${totalChunks} parts are missing. Upload it again to resume.`,
+      )
   }
 
   return { objectName, bucketName, bytes: total, chunkCount: totalChunks }

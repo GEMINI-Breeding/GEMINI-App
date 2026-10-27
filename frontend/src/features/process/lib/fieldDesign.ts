@@ -103,6 +103,47 @@ export type FieldDesign = {
 }
 
 /**
+ * The grid transform for a field that lies as recorded (the agent's field
+ * facts): the design's rows are tiers and its columns beds; the editor's
+ * grid puts row 1 at the top (north) and column 1 at the left (west).
+ *  - tiers along north-south: first tier at the south → rows flipped;
+ *    first bed on the east → columns flipped.
+ *  - tiers along east-west: axes swapped (grid columns are tiers); first
+ *    tier at the east → tiers flipped; first bed at the south → beds flipped.
+ * Unknown sides leave that axis as it is.
+ */
+export function transformFromFacts(facts: {
+  first_tier_at?: string
+  first_bed_at?: string
+}): FdTransform {
+  const tier = facts.first_tier_at
+  const bed = facts.first_bed_at
+  if (tier === "east" || tier === "west")
+    return {
+      swapAxes: true,
+      flipRows: tier === "east",
+      flipCols: bed === "south",
+    }
+  return {
+    swapAxes: false,
+    flipRows: tier === "south",
+    flipCols: bed === "east",
+  }
+}
+
+/** "tier 1 at the north end, bed 1 on the west side" — or null if unknown. */
+export function describeFacts(facts: {
+  first_tier_at?: string
+  first_bed_at?: string
+}): string | null {
+  const parts = [
+    facts.first_tier_at && `tier 1 at the ${facts.first_tier_at} end`,
+    facts.first_bed_at && `bed 1 on the ${facts.first_bed_at} side`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(", ") : null
+}
+
+/**
  * Pull (row, col) from a CSV row using the mapping. Returns null if either
  * is missing or non-numeric — caller should treat as "no design row here".
  */
@@ -119,42 +160,62 @@ function rowColOf(
   return { r, c }
 }
 
+/** The design's range of rows and columns (it need not start at 1: a design
+ *  may number its plots' rows 2–26 inside border rows). */
+export function designExtent(fd: FieldDesign): {
+  minR: number
+  maxR: number
+  minC: number
+  maxC: number
+} {
+  let minR = Number.POSITIVE_INFINITY
+  let maxR = 0
+  let minC = Number.POSITIVE_INFINITY
+  let maxC = 0
+  for (const row of fd.rows) {
+    const rc = rowColOf(row, fd.mapping)
+    if (!rc) continue
+    minR = Math.min(minR, rc.r)
+    maxR = Math.max(maxR, rc.r)
+    minC = Math.min(minC, rc.c)
+    maxC = Math.max(maxC, rc.c)
+  }
+  if (!Number.isFinite(minR)) return { minR: 1, maxR: 1, minC: 1, maxC: 1 }
+  return { minR, maxR, minC, maxC }
+}
+
 /**
- * Compute (rows, cols) from the design's max row/col after mapping. Used
- * to auto-populate the wizard's Rows/Cols inputs.
+ * The grid (rows, cols) the design needs: its range of rows and columns
+ * (gaps inside it, e.g. buffer beds, are cells without a plot), turned
+ * when the axes are swapped. Field-design mode draws exactly this grid.
  */
 export function dimensionsFromDesign(fd: FieldDesign): {
   rows: number
   cols: number
 } {
-  let maxR = 0
-  let maxC = 0
-  for (const row of fd.rows) {
-    const rc = rowColOf(row, fd.mapping)
-    if (!rc) continue
-    if (rc.r > maxR) maxR = rc.r
-    if (rc.c > maxC) maxC = rc.c
-  }
-  return { rows: Math.max(1, maxR), cols: Math.max(1, maxC) }
+  const e = designExtent(fd)
+  const rows = Math.max(1, e.maxR - e.minR + 1)
+  const cols = Math.max(1, e.maxC - e.minC + 1)
+  return fd.transform?.swapAxes ? { rows: cols, cols: rows } : { rows, cols }
 }
 
 /**
- * Apply the transform to a (r, c) lookup: returns the (r, c) we should
- * search the CSV for given a polygon's geometric (r, c). The CSV is
- * conceptually fixed; the user is reorienting how we walk into it.
+ * The design (r, c) a grid cell (1-based, in the grid drawn for this
+ * design) stands for: swap the axes, flip within the design's range, then
+ * shift to where the design's numbering starts.
  */
 function transformLookup(
   geom: { r: number; c: number },
-  maxRow: number,
-  maxCol: number,
-  t: FdTransform,
+  fd: FieldDesign,
 ): { r: number; c: number } {
+  const e = designExtent(fd)
+  const t = fd.transform
   let r = geom.r
   let c = geom.c
-  if (t.flipRows) r = maxRow - r + 1
-  if (t.flipCols) c = maxCol - c + 1
   if (t.swapAxes) [r, c] = [c, r]
-  return { r, c }
+  if (t.flipRows) r = e.maxR - e.minR + 2 - r
+  if (t.flipCols) c = e.maxC - e.minC + 2 - c
+  return { r: r + e.minR - 1, c: c + e.minC - 1 }
 }
 
 /**
@@ -182,21 +243,17 @@ export function applyLabelsToFeatures(
 ): GeoJSON.Feature[] {
   if (features.length === 0) return features
   const index = indexByRowCol(fd)
-  const dims = dimensionsFromDesign(fd)
   let unmatched = 0
   const out = features.map((f) => {
     const props = f.properties ?? {}
-    const gr = Number(props.row)
-    const gc = Number(props.col)
-    const gPlot = props.plot
+    // The cell's place in the grid: kept under _grid_* once labelled (the
+    // design's own row/col then replace row/col), so labels can be redone.
+    const gr = Number(props._grid_row ?? props.row)
+    const gc = Number(props._grid_col ?? props.col)
+    const gPlot = props._grid_plot ?? props.plot
     if (!Number.isFinite(gr) || !Number.isFinite(gc)) return f
 
-    const lookup = transformLookup(
-      { r: gr, c: gc },
-      dims.rows,
-      dims.cols,
-      fd.transform,
-    )
+    const lookup = transformLookup({ r: gr, c: gc }, fd)
     const csvRow = index.get(`${lookup.r},${lookup.c}`)
     const merged: Record<string, unknown> = {
       _grid_row: gr,
@@ -204,6 +261,10 @@ export function applyLabelsToFeatures(
       _grid_plot: gPlot,
       ...props,
       ...(csvRow ?? {}),
+      // The editor labels its grids "Block 1" under `block`; keep the design's own block.
+      ...(csvRow && (csvRow.block ?? csvRow.Block)
+        ? { design_block: csvRow.block ?? csvRow.Block }
+        : {}),
     }
     if (!csvRow) unmatched += 1
     return { ...f, properties: merged }
@@ -246,9 +307,15 @@ export function mergeLabelsIntoExisting(
         if (!designRow) return feature
         const rc = rowColOf(designRow, fd.mapping)
         if (!rc) return feature
+        // Its place in the design's grid (numbered from the design's start).
+        const e = designExtent(fd)
         return {
           ...feature,
-          properties: { ...feature.properties, row: rc.r, col: rc.c },
+          properties: {
+            ...feature.properties,
+            row: rc.r - e.minR + 1,
+            col: rc.c - e.minC + 1,
+          },
         }
       })
 

@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronDown, ChevronUp, File, X } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { DatasetsService, type FileMetadata, FilesService } from "@/client"
@@ -95,6 +95,15 @@ interface UploadListProps {
    *  scope fields (data type, experiment). */
   disabled?: boolean
   disabledReason?: string
+  /** Another list's Upload button sends these files too (the DEM beside an
+   *  orthomosaic): no button of its own. */
+  hideUploadButton?: boolean
+  /** Upload now: the parent bumps this (e.g. once the orthomosaic is in). */
+  uploadSignal?: number
+  /** How many files are waiting to upload. */
+  onSelectionChange?: (count: number) => void
+  /** Text for the Upload button (default "Upload N file(s)"). */
+  uploadLabel?: string
 }
 
 /**
@@ -184,8 +193,15 @@ export function UploadList({
   subDir,
   disabled = false,
   disabledReason,
+  hideUploadButton = false,
+  uploadSignal = 0,
+  onSelectionChange,
+  uploadLabel,
 }: UploadListProps) {
   const [selected, setSelected] = useState<File[]>([])
+  useEffect(() => {
+    onSelectionChange?.(selected.length)
+  }, [selected.length, onSelectionChange])
   const [isExpanded, setIsExpanded] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [resolveStatus, setResolveStatus] = useState<string | null>(null)
@@ -732,6 +748,14 @@ export function UploadList({
       setResolveStatus(null)
     }
   }
+  // Uploaded together with another list (the parent signals when).
+  const lastSignal = useRef(uploadSignal)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once per signal
+  useEffect(() => {
+    if (uploadSignal === lastSignal.current) return
+    lastSignal.current = uploadSignal
+    if (selected.length > 0 && !isUploading) void handleUploadClick()
+  }, [uploadSignal])
 
   /**
    * Translate the per-form-field scope map into the EntityChoice map the
@@ -954,6 +978,7 @@ export function UploadList({
           <div className="mt-4 flex gap-2">
             <Button
               variant="outline"
+              className={hideUploadButton ? "hidden" : undefined}
               onClick={handleUploadClick}
               disabled={
                 isUploading ||
@@ -969,7 +994,7 @@ export function UploadList({
                 ? resolveStatus
                   ? `Registering entities…`
                   : "Uploading…"
-                : `Upload ${selected.length} file(s)`}
+                : (uploadLabel ?? `Upload ${selected.length} file(s)`)}
             </Button>
             <Button
               variant="ghost"

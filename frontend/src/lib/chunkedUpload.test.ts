@@ -288,4 +288,70 @@ describe("uploadFileChunked", () => {
       bucket_name: "gemini",
     })
   })
+
+  it("re-sends the parts the server lacks when no reply says assembled", async () => {
+    const file = makeFile(2500) // 3 chunks
+    let statusCalls = 0
+    const sent: string[] = []
+    const calls = mockFetch((c) => {
+      if (c.url.includes("check_uploaded_chunks")) {
+        statusCalls += 1
+        // First (resume) check: nothing. After the first pass: part 2 missing.
+        const held = statusCalls === 1 ? [] : [1, 3]
+        return new Response(
+          JSON.stringify({ uploaded_part_numbers: held, total_chunks: 3 }),
+          { status: 200 },
+        )
+      }
+      const idx = String((c.body as FormData).get("chunk_index"))
+      sent.push(idx)
+      // The re-sent part 2 completes the file.
+      const complete = sent.length > 3 && idx === "1"
+      return new Response(JSON.stringify({ complete }), { status: 201 })
+    })
+    const result = await uploadFileChunked({
+      file,
+      fileIdentifier: "fid-missing",
+      objectName: "bucket/path/test.bin",
+      chunkSize: 1000,
+      parallelParts: 1,
+    })
+    expect(result.chunkCount).toBe(3)
+    expect(sent).toEqual(["0", "1", "2", "1"])
+    expect(calls.some((c) => c.url.includes("abort_upload"))).toBe(false)
+  })
+
+  it("sends a part again when its request stalls with no answer", async () => {
+    const file = makeFile(2500) // 3 chunks
+    const sent: string[] = []
+    global.fetch = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).includes("check_uploaded_chunks"))
+          return new Response(JSON.stringify({ uploaded_part_numbers: [] }))
+        const idx = String((init?.body as FormData).get("chunk_index"))
+        sent.push(idx)
+        // The first try of part 2 never answers, as a stalled tunnel would.
+        if (idx === "1" && sent.filter((s) => s === "1").length === 1)
+          return new Promise<Response>((_, reject) =>
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            ),
+          )
+        return new Response(JSON.stringify({ complete: idx === "1" }), {
+          status: 201,
+        })
+      },
+    ) as unknown as typeof fetch
+    const result = await uploadFileChunked({
+      file,
+      fileIdentifier: "fid-stall",
+      objectName: "bucket/path/test.bin",
+      chunkSize: 1000,
+      parallelParts: 1,
+      retryDelaysMs: [0],
+      chunkTimeoutMs: 50,
+    })
+    expect(result.chunkCount).toBe(3)
+    expect(sent).toEqual(["0", "1", "1", "2"])
+  })
 })

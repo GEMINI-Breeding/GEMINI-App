@@ -6,7 +6,10 @@ export type BlockParams = {
   rows: number
   cols: number
   angle: number
+  /** Gap between rows of plots (the alley between tiers), metres. */
   gapMeters: number
+  /** Gap between columns (beds), metres; unset = the same as between rows. */
+  gapColMeters?: number
   /** Field-row/col of this block's top-left plot (0 = field origin).
    *  Lets a grid drawn over a subset of the field emit field-coordinate
    *  row/col so trait records keyed by field position join. */

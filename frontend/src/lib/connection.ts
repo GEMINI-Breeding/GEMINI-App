@@ -39,10 +39,24 @@ export async function checkBackend(timeoutMs = 4000): Promise<boolean> {
 let misses = 0
 const MISSES_FOR_DOWN = 2
 
+// A large upload fills a slow link (an SSH tunnel to a cluster): the health
+// check then waits behind the upload's parts and times out while the stack
+// answers every part. A part that arrived recently proves the connection.
+let lastAnswer = 0
+const ANSWER_COUNTS_MS = 120_000
+
+/** Call when the API answered a request (e.g. an upload part was stored). */
+export function noteBackendAnswered(): void {
+  lastAnswer = Date.now()
+}
+
 async function checkSteady(): Promise<boolean> {
   const ok = await checkBackend(8000)
   misses = ok ? 0 : misses + 1
-  return ok || misses < MISSES_FOR_DOWN
+  if (ok) lastAnswer = Date.now()
+  return (
+    ok || misses < MISSES_FOR_DOWN || Date.now() - lastAnswer < ANSWER_COUNTS_MS
+  )
 }
 
 /**

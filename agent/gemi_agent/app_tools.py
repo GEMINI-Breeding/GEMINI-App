@@ -850,6 +850,49 @@ _app(look_at_folder, "Look at a folder on this computer before uploading it: whi
      "Use it whenever the person names a folder; a wrong path returns what is there instead.",
      {"path": {**_str, "description": "the folder (or file) as the person gave it"},
       "depth": {**_int, "description": "how many folder levels down to look (default 4)"}}, ["path"], "upload")
+def online_storage(args: dict) -> dict:
+    """Online storage (Box, Google Drive, S3, …) copied to where the stack runs, then uploaded."""
+    from . import cloud
+    from .hpc_tools import active_cluster
+
+    cluster = active_cluster()
+    where = "cluster" if cluster else "local"
+    action = str(args.get("action") or "list")
+    if action == "list":
+        out = cloud.remotes(where, cluster)
+        if not out["remotes"]:
+            out["next"] = ("no connection yet: the person adds one on the Files page (Upload > Copy from online "
+                           "storage > Connect), signing in in their browser")
+        return {"result": out}
+    if action == "browse":
+        return {"result": cloud.browse(str(args.get("name") or ""), str(args.get("path") or ""), where, cluster)}
+    if action == "copy":
+        c = client()
+        settings = {k: args.get(k) for k in ("experiment", "site", "population", "date", "platform", "sensor",
+                                             "data_type", "name_ends", "run_of_day", "treatment") if args.get(k)}
+        out = cloud.fetch(str(args.get("name") or ""), str(args.get("path") or ""), where=where, cluster=cluster,
+                          settings=settings or None, keep=bool(args.get("keep")), token=c.token(), api=c.base)
+        return {"result": out, "next": "follow it with online_storage action=state id=" + str(out["id"])}
+    if action == "state":
+        fid = str(args.get("id") or "")
+        return {"result": cloud.fetch_state(fid, where, cluster) if fid else cloud.fetches(where, cluster)}
+    raise ValueError("action: list | browse | copy | state")
+
+
+_app(online_storage, "Data in online storage (Box, Google Drive, Dropbox, S3, WebDAV, a web folder, SFTP) that the "
+     "person connected on the Files page. action=list: the connections. browse: one folder (name, path). copy: "
+     "copy a folder or file (name, path) to where the stack runs (a cluster job when the stack is on a cluster, "
+     "never through this computer) and, with the run's settings, upload it as one batch (asks first). state: a "
+     "copy's progress (id), or the recent ones.",
+     {"action": {**_str, "description": "list | browse | copy | state"},
+      "name": {**_str, "description": "the connection's name"},
+      "path": {**_str, "description": "folder or file inside the connection, e.g. Kearney 2022/orthos"},
+      "id": _str, "keep": {**_bool, "description": "keep the copy after uploading (default: remove it)"},
+      "experiment": _str, "site": _str, "population": _str, "date": {**_str, "description": "YYYY-MM-DD"},
+      "platform": _str, "sensor": _str,
+      "data_type": {**_str, "description": "images | amiga_bin | orthomosaic"},
+      "name_ends": {**_str, "description": "keep only files whose names end so, comma separated"},
+      "run_of_day": _str, "treatment": _str}, ["action"], "upload")
 _app(tasks, "Progress of background uploads: one task (task_id) or the latest ones.",
      {"task_id": _str, "limit": _int}, [], "upload")
 _app(wait_task, "Wait for a background upload: returns when it finishes or after timeout_s (default 300, max "

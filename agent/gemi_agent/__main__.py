@@ -35,7 +35,7 @@ def _ingest(argv: list[str]) -> int:
               "data_type=images|amiga_bin|orthomosaic [name_ends=_V.JPG] [run_of_day=…] [treatment=…]")
         return 2
     folder = Path(argv[0])
-    opts = dict(a.split("=", 1) for a in argv[1:] if "=" in a)
+    opts = {k: uploads.decode_setting(v) for k, v in (a.split("=", 1) for a in argv[1:] if "=" in a)}
     kind = uploads.DATA_TYPES.get(opts.get("data_type", ""))
     if kind is None:
         raise SystemExit(f"data_type must be one of {', '.join(uploads.DATA_TYPES)}")
@@ -69,6 +69,10 @@ def main(argv: list[str]) -> int:
 
         uploads.run(argv[1])
         return 0
+    if argv[0] == "_fetch":         # a copy from online storage, then its upload (cloud.fetch, local stack)
+        from . import cloud
+
+        return cloud.run_fetch(argv[1])
     if argv[0] in ("chat", "run"):
         from .runner import main_cli
 

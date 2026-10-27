@@ -863,6 +863,9 @@ class Run:
                         (given if isinstance(given, list) else [given])]}
         SUBMITTED.cb = lambda job: self.current["jobs"].append(str(job.get("id"))) \
             if self.current and job.get("id") else None
+        from . import activity
+
+        activity.note(f"agent running {name}…")
         try:
             out = TOOLS[name]["fn"](dict(args))
             result, images = out.get("result"), list(out.get("images") or [])
@@ -883,9 +886,11 @@ class Run:
             elif name == "run_facts" and args.get("set"):
                 self._waits_for_person = (-1, "")          # answers recorded: the run can go on
             self.event("tool", tool=name, args=args, result=text[:4000], images=images, seconds=round(time.time() - t, 1))
+            activity.note(f"agent ran {name} ({round(time.time() - t, 1)} s)")
         except Exception as e:
             text, images = f"ERROR {type(e).__name__}: {e}", []
             self.event("tool", tool=name, args=args, error=text, seconds=round(time.time() - t, 1))
+            activity.note(f"agent's {name} failed: {type(e).__name__}: {e}", "ERROR")
         finally:
             SUBMITTED.cb = None
             self.current = None
