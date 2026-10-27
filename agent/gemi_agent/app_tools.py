@@ -24,6 +24,11 @@ JOB_KEEP = ("id", "job_type", "status", "progress", "progress_detail", "error_me
             "created_at", "started_at", "completed_at")
 
 
+# Platform and sensor come from a fixed list (uploads.check_kit): they choose the processing.
+_PLATFORM = {"type": "string", "description": "Drone | Rover | Handheld (chooses the pipeline: aerial or ground)"}
+_SENSOR = {"type": "string", "description": "RGB | Thermal; another camera of that type than the platform's own: "
+                                           "<type>-<camera>, e.g. RGB-SonyA7R"}
+
 def _slim(job: dict, with_result: bool = False) -> dict:
     out = {k: job.get(k) for k in JOB_KEEP}
     if with_result:
@@ -190,7 +195,7 @@ def check_platform(args: dict) -> None:
     """Rover logs are Amiga data. For images the platform must be said: filing
     drone photos as rover data (the old default) puts them in the wrong pipeline."""
     if args.get("data_type") == "amiga_bin":
-        args.setdefault("platform", "Amiga")
+        args.setdefault("platform", "Rover")
     elif not args.get("platform"):
         raise ValueError("platform is needed for images: Drone for drone photos, or the rover's name (e.g. Amiga). "
                          "Add platform and call upload again.")
@@ -391,7 +396,7 @@ def upload(args: dict) -> dict:
             continue
         started_all.append(uploads.start(
             client(), p["files"], experiment=args["experiment"], site=args["site"], population=args["population"],
-            date=args["date"], platform=args.get("platform") or "Amiga", sensor=args.get("sensor") or "RGB",
+            date=args["date"], platform=args.get("platform") or "Rover", sensor=args.get("sensor") or "RGB",
             data_type=args["data_type"], parallel=int(args.get("parallel") or 3),
             dataset_id=args.get("dataset_id") if len(parts) == 1 else None, extract=args.get("extract"),
             run_of_day=p["run_of_day"], treatment=p["treatment"], source_folder=p["folder"]))
@@ -835,7 +840,7 @@ _app(upload, "Start a background upload of local files or folders into the app; 
       "experiment": {**_str, "description": "the experiment / project name"},
       "site": {**_str, "description": "where the field is (the location)"},
       "population": {**_str, "description": "the trial or crop: which set of plots, e.g. Sorghum"},
-      "date": {**_str, "description": "collection date, YYYY-MM-DD"}, "platform": _str, "sensor": _str,
+      "date": {**_str, "description": "collection date, YYYY-MM-DD"}, "platform": _PLATFORM, "sensor": _SENSOR,
       "data_type": _str, "parallel": {**_int, "description": "files in flight at once, 1-8 (default 3)"},
       "run_of_day": {**_str, "description": "only for diurnal data (the field covered more than once that day): "
                                             "which run this is, e.g. 1, 2, morning"},
@@ -869,7 +874,8 @@ def online_storage(args: dict) -> dict:
     if action == "copy":
         c = client()
         settings = {k: args.get(k) for k in ("experiment", "site", "population", "date", "platform", "sensor",
-                                             "data_type", "name_ends", "run_of_day", "treatment") if args.get(k)}
+                                             "data_type", "name_ends", "name_has", "run_of_day", "treatment")
+                    if args.get(k)}
         out = cloud.fetch(str(args.get("name") or ""), str(args.get("path") or ""), where=where, cluster=cluster,
                           settings=settings or None, keep=bool(args.get("keep")), token=c.token(), api=c.base)
         return {"result": out, "next": "follow it with online_storage action=state id=" + str(out["id"])}
@@ -889,9 +895,11 @@ _app(online_storage, "Data in online storage (Box, Google Drive, Dropbox, S3, We
       "path": {**_str, "description": "folder or file inside the connection, e.g. Kearney 2022/orthos"},
       "id": _str, "keep": {**_bool, "description": "keep the copy after uploading (default: remove it)"},
       "experiment": _str, "site": _str, "population": _str, "date": {**_str, "description": "YYYY-MM-DD"},
-      "platform": _str, "sensor": _str,
+      "platform": _PLATFORM, "sensor": _SENSOR,
       "data_type": {**_str, "description": "images | amiga_bin | orthomosaic"},
       "name_ends": {**_str, "description": "keep only files whose names end so, comma separated"},
+      "name_has": {**_str, "description": "keep only files whose names contain this, e.g. one date's files of a "
+                                          "folder of several dates: 2023-06-15 (copy each date with its own date)"},
       "run_of_day": _str, "treatment": _str}, ["action"], "upload")
 _app(tasks, "Progress of background uploads: one task (task_id) or the latest ones.",
      {"task_id": _str, "limit": _int}, [], "upload")
@@ -909,7 +917,7 @@ _app(cancel_job, "Cancel a pending or running job.", {"job_id": _str}, ["job_id"
 _app(submit_job, "Submit any job type with raw parameters (see the pipeline skills for each type's parameters).",
      {"job_type": _str, "parameters": _obj, "experiment_id": _str}, ["job_type", "parameters"], "jobs")
 _app(run_orthomosaic, "Aerial: build the orthomosaic (RUN_ODM) for one scope.",
-     {"experiment": _str, "location": _str, "population": _str, "date": _str, "platform": _str, "sensor": _str,
+     {"experiment": _str, "location": _str, "population": _str, "date": _str, "platform": _PLATFORM, "sensor": _SENSOR,
       "dataset_short_ids": _strs, "reconstruction_quality": _str, "custom_options": _str, "skip_gcps": _bool,
       "experiment_id": _str}, ["experiment", "location", "population", "date", "platform", "sensor"], "aerial")
 _app(run_inference, "Run a detection / segmentation / classification model on plot images. Simplest: run = words "

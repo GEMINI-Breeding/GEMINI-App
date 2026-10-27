@@ -82,6 +82,29 @@ def summary(t: dict) -> dict:
     }
 
 
+# The platforms and sensors data is uploaded as (the app's sensorKit.ts): they choose the
+# processing. A sensor is the platform's own camera ("RGB") or another one mounted on it,
+# named after it ("RGB-SonyA7R"), so two cameras tested on one date stay apart.
+PLATFORMS = ("Drone", "Rover", "Handheld")
+SENSOR_TYPES = ("RGB", "Thermal")
+
+
+def check_kit(platform: str, sensor: str) -> tuple[str, str]:
+    """The platform and sensor as stored, from what was given ("drone", "rgb - Sony A7R" →
+    "Drone", "RGB-SonyA7R"); anything outside the lists is refused, saying what is allowed."""
+    p = next((x for x in PLATFORMS if x.lower() == str(platform or "").strip().lower()), None)
+    if p is None:
+        raise ValueError(f"platform {platform!r}: use one of {', '.join(PLATFORMS)} (it chooses the processing: "
+                         "drones the aerial pipeline, rovers and handheld cameras the ground one)")
+    head, _, camera = str(sensor or "").strip().partition("-")
+    t = next((x for x in SENSOR_TYPES if x.lower() == head.strip().lower()), None)
+    if t is None:
+        raise ValueError(f"sensor {sensor!r}: use one of {', '.join(SENSOR_TYPES)}, or another camera of that type as "
+                         "<type>-<camera>, e.g. RGB-SonyA7R")
+    slug = "".join(w[:1].upper() + w[1:] for w in re.split(r"[^A-Za-z0-9]+", camera) if w)
+    return p, (f"{t}-{slug}" if slug else t)
+
+
 def start(client: Client, files: list[Path], *, experiment: str, site: str, population: str, date: str,
           platform: str, sensor: str, data_type: str, parallel: int = 3, dataset_id: Optional[str] = None,
           extract: Optional[bool] = None, run_of_day: str = "", treatment: str = "", source_folder: str = "",
@@ -91,6 +114,7 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
     kind = DATA_TYPES.get(data_type)
     if kind is None:
         raise ValueError(f"data_type must be one of {', '.join(DATA_TYPES)}")
+    platform, sensor = check_kit(platform, sensor)
     if not files:
         raise ValueError("no files to upload")
     year = date[:4]

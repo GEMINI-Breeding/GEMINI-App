@@ -172,6 +172,26 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
     [liveBackendJobs],
   )
 
+  // Jobs found running elsewhere leave once the backend no longer lists them as
+  // live: a finish the job's event stream missed (a restart, a closed socket)
+  // kept them "queued" in the panel for good.
+  useEffect(() => {
+    if (!liveBackendJobs) return
+    const live = new Set(liveBackendJobs.map((j) => String(j.id ?? "")))
+    setProcesses((prev) => {
+      const next = prev.filter(
+        (p) =>
+          !(
+            p.background &&
+            p.runId &&
+            (p.status === "pending" || p.status === "running") &&
+            !live.has(p.runId)
+          ),
+      )
+      return next.length === prev.length ? prev : next
+    })
+  }, [liveBackendJobs])
+
   useEffect(() => {
     if (!runsLoaded || !liveBackendJobs || liveBackendJobs.length === 0) return
     setProcesses((prev) => {

@@ -25,9 +25,12 @@ const PER_PAGE = 24
 export function PlotImageGrid({
   files,
   prefix,
+  download = true,
 }: {
   files: FileMetadata[]
   prefix: string
+  /** Its own "Download all" button; off where the page has its own downloads. */
+  download?: boolean
 }) {
   const pngFiles = useMemo(
     () => files.filter((f) => /\.(png|jpe?g)$/i.test(f.object_name ?? "")),
@@ -98,16 +101,18 @@ export function PlotImageGrid({
             </>
           )}
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={downloadAll}
-          disabled={zipping}
-          data-testid="plot-images-zip"
-        >
-          <Download className="mr-1.5 h-3.5 w-3.5" />
-          {zipping ? "Preparing…" : "Download all (.zip)"}
-        </Button>
+        {download && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={downloadAll}
+            disabled={zipping}
+            data-testid="plot-images-zip"
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            {zipping ? "Preparing…" : "Download all (.zip)"}
+          </Button>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {pngFiles.slice(page * PER_PAGE, (page + 1) * PER_PAGE).map((f) => (

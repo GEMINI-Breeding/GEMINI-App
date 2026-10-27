@@ -33,8 +33,15 @@ common=(--job-name="$NAME" --cpus-per-task="$cpus" --mem="$mem" --time="$WORKER_
         --output="$LOGS/worker-$W-%j.log" --export=ALL,GEMI_HPC_ROOT="$GEMI_HPC_ROOT",GEMI_WORKER="$W",GEMI_GPUS="$gpus")
 
 chosen=""
+n_try=$(wc -w <<< "$WORKER_TRY")
 for entry in $WORKER_TRY; do
   part=${entry%%:*} acct=${entry#*:}
+  # Slurm's estimate ignores group limits: where this user's jobs already wait on one (QOSGrp*),
+  # the place is full whatever it says. Skipped unless it is the only one.
+  if [ "$n_try" -gt 1 ] && squeue -h -u "$USER" -p "$part" -A "${acct%%:*}" -t PENDING -o %r 2>/dev/null | grep -q '^QOSGrp'; then
+    echo "  $part: skipped (its account's CPU allowance is full: jobs already wait there)"
+    continue
+  fi
   opts=(--partition="$part" --account="$acct")
   [ "$gpus" -gt 0 ] && opts+=(--gres=gpu:"$gpus")
   est=$(sbatch --test-only "${opts[@]}" "${common[@]}" "$HPC/remote/worker.sbatch" 2>&1)

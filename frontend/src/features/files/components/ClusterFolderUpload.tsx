@@ -11,8 +11,10 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { agentApi } from "@/features/agent/lib/agentApi"
+import { agentApi, type SameFlightFolder } from "@/features/agent/lib/agentApi"
+import { friendlyError } from "@/features/agent/lib/friendlyError"
 import type { EntityChoice } from "./EntitySelectField"
 
 /** The Files page's data types the cluster upload handles, by the uploader's name. */
@@ -47,6 +49,13 @@ export function uploadSettings(
     platform: label("platform", formValues, scope),
     sensor: label("sensor", formValues, scope),
     data_type: CLUSTER_DATA_TYPES[dataType ?? ""],
+    // Same-day batches are told apart by these (one upload per run or treatment).
+    ...(formValues.treatment?.trim()
+      ? { treatment: formValues.treatment.trim() }
+      : {}),
+    ...(formValues.run_of_day?.trim()
+      ? { run_of_day: formValues.run_of_day.trim() }
+      : {}),
   }
 }
 
@@ -71,26 +80,71 @@ export function ClusterFolderUpload({
   })
   const [folder, setFolder] = useState("")
   const [nameEnds, setNameEnds] = useState("")
+  // The flight's other cameras found beside the folder, by folder: upload it too, as which sensor.
+  const [also, setAlso] = useState<
+    Record<string, { on: boolean; sensor: string }>
+  >({})
   const peek = useMutation({
     mutationFn: () => agentApi.clusterFolder(folder.trim()),
+    onSuccess: (d) =>
+      setAlso(
+        Object.fromEntries(
+          (d.same_flight ?? []).map((f) => [
+            f.folder,
+            { on: true, sensor: f.sensor },
+          ]),
+        ),
+      ),
   })
+  const sameFlight: SameFlightFolder[] = peek.data?.same_flight ?? []
   const ingest = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      const base = uploadSettings(dataType, formValues, scope)
       const settings: Record<string, string> = {
         folder: folder.trim(),
-        ...uploadSettings(dataType, formValues, scope),
+        ...base,
       }
       if (nameEnds.trim()) settings.name_ends = nameEnds.trim()
-      return agentApi.clusterIngest(settings)
+      const first = await agentApi.clusterIngest(settings)
+      const more: string[] = []
+      // Each other camera as its own sensor, with the same labels (date, treatment, run).
+      for (const f of sameFlight) {
+        const pick = also[f.folder]
+        if (!pick?.on || !pick.sensor.trim()) continue
+        const r = await agentApi.clusterIngest({
+          ...base,
+          folder: f.folder,
+          sensor: pick.sensor.trim(),
+          ...(f.name_ends ? { name_ends: f.name_ends } : {}),
+        })
+        more.push(`${pick.sensor}: ${r.result.trim().split("\n").pop()}`)
+      }
+      return {
+        result: [first.result.trim(), ...more].join("\n"),
+        others: more.length,
+      }
     },
-    onSuccess: () =>
+    onSuccess: (d) =>
       toast.success(
-        "Submitted: a cluster job is uploading the folder. The run shows on the Process tab when it is done.",
+        d.others
+          ? `Submitted: cluster jobs are uploading the folder and ${d.others} other camera${d.others > 1 ? "s" : ""} of the flight. The runs show on the Process tab when they are done.`
+          : "Submitted: a cluster job is uploading the folder. The run shows on the Process tab when it is done.",
       ),
   })
 
   const kind = CLUSTER_DATA_TYPES[dataType ?? ""]
   if (!compute?.cluster || !kind) return null
+  if (formValues.date_mode === "files")
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="cluster-folder-upload"
+      >
+        Dates read from the files work for uploads from this computer and from
+        online storage. A folder on the cluster goes up with one date: choose
+        "One date" on the left, and upload each date's folder on its own.
+      </p>
+    )
   const absolute = folder.trim().startsWith("/")
 
   return (
@@ -129,7 +183,53 @@ export function ClusterFolderUpload({
         </pre>
       )}
       {peek.error && (
-        <p className="text-sm text-destructive">{String(peek.error)}</p>
+        <p className="text-sm text-destructive">{friendlyError(peek.error)}</p>
+      )}
+      {sameFlight.length > 0 && (
+        <div
+          className="space-y-2 rounded-md border p-3"
+          data-testid="cluster-same-flight"
+        >
+          <p className="text-sm font-medium">Other cameras of this flight</p>
+          <p className="text-xs text-muted-foreground">
+            Frames beside this folder taken at the same moments. Uploaded with
+            the same labels as their own sensor, they come out of the plot
+            images step with the RGB frames, cut per plot (a thermal camera also
+            gives each plot's canopy temperature).
+          </p>
+          {sameFlight.map((f) => (
+            <div key={f.folder} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={also[f.folder]?.on ?? false}
+                onCheckedChange={(v) =>
+                  setAlso((a) => ({
+                    ...a,
+                    [f.folder]: { ...a[f.folder], on: v === true },
+                  }))
+                }
+                aria-label={`Upload ${f.folder} too`}
+              />
+              <span className="min-w-0 flex-1 truncate" title={f.folder}>
+                {f.folder.split("/").pop()} — {f.files} frames
+                {f.name_ends ? ` (${f.name_ends})` : ""}
+              </span>
+              <span className="text-xs text-muted-foreground">as sensor</span>
+              <Input
+                className="h-8 w-36"
+                value={also[f.folder]?.sensor ?? f.sensor}
+                onChange={(e) =>
+                  setAlso((a) => ({
+                    ...a,
+                    [f.folder]: {
+                      on: a[f.folder]?.on ?? true,
+                      sensor: e.target.value,
+                    },
+                  }))
+                }
+              />
+            </div>
+          ))}
+        </div>
       )}
       <Input
         value={nameEnds}
@@ -163,7 +263,9 @@ export function ClusterFolderUpload({
         </pre>
       )}
       {ingest.error && (
-        <p className="text-sm text-destructive">{String(ingest.error)}</p>
+        <p className="text-sm text-destructive">
+          {friendlyError(ingest.error)}
+        </p>
       )}
     </div>
   )

@@ -20,7 +20,7 @@
 #   llm-up [model] [where=…] | llm-down | llm-env | llm-status | llm-ready [model]
 #   pull-images [name…] | pull-mldeps | pull-llm [model…]
 #   folder-peek <folder> | ingest <folder> <setting=…>…   (data already on the cluster)
-#   ingest-cancel <job id|pending>   (drop an upload job of this tooling)
+#   ingest-cancel <job id|pending>   (drop an upload or online-storage copy job of this tooling)
 #   cloud-remotes | cloud-add <name> <type> (settings on stdin) | cloud-rm <name>
 #   cloud-ls <name> <path64> | cloud-cat <name> <path64> | cloud-fetch <name> <path64> <dest> [include=…] [keep=1] [<setting=…>…]
 #   cloud-state [job]  | pull-rclone          (online storage, copied straight here with rclone)
@@ -301,16 +301,17 @@ main() {
       GEMI_WORKER_TRY="$WHERE" bash "$HPC/remote/submit-worker.sh" "${words[0]}"
       ;;
     ingest-cancel)
-      # One upload job by id, or every one still waiting ("pending"). Only gemi-ingest
-      # jobs of this user: anything else is refused.
+      # One upload or copy job by id, or every one still waiting ("pending"). Only this
+      # tooling's upload (gemi-ingest) and online-storage copy (gemi-fetch) jobs of this
+      # user: anything else is refused.
       nwords 1 1
-      local w="${words[0]}" ids
+      local w="${words[0]}" ids names="$JOB_PREFIX-ingest,$JOB_PREFIX-fetch"
       if [ "$w" = pending ]; then
-        ids=$(squeue -h -u "$USER" -n "$JOB_PREFIX-ingest" -t PENDING -o %i)
+        ids=$(squeue -h -u "$USER" -n "$names" -t PENDING -o %i)
       else
         [[ "$w" =~ ^[0-9]+$ ]] || refuse "ingest-cancel <job id|pending>"
-        ids=$(squeue -h -u "$USER" -n "$JOB_PREFIX-ingest" -o %i | grep -xF "$w" || true)
-        [ -n "$ids" ] || refuse "no upload job $w"
+        ids=$(squeue -h -u "$USER" -n "$names" -o %i | grep -xF "$w" || true)
+        [ -n "$ids" ] || refuse "no upload or copy job $w"
       fi
       audit STOP
       # shellcheck disable=SC2086

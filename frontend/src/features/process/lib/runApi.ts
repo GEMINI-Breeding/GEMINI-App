@@ -172,6 +172,10 @@ export interface SplitOrthomosaicParams {
   orthomosaicPaths?: string[]
   /** Frames kept per plot (default 3). */
   framesPerPlot?: number
+  /** A labelled run of the day: its own output folder (framesRunKey) and the
+   * label its canopy-temperature trait carries. */
+  runKey?: string
+  runLabel?: string
 }
 
 export interface ExecuteStepInput {
@@ -520,6 +524,12 @@ export async function executeStep(
               source: "frames",
               orthomosaic_paths: input.splitOrthomosaic.orthomosaicPaths,
               frames_per_plot: input.splitOrthomosaic.framesPerPlot ?? 3,
+              ...(input.splitOrthomosaic.runKey
+                ? {
+                    run_key: input.splitOrthomosaic.runKey,
+                    run_label: input.splitOrthomosaic.runLabel,
+                  }
+                : {}),
             }
           : {}),
       }

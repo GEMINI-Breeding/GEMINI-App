@@ -32,6 +32,8 @@ export function isFieldFilled(
   formValues: Record<string, string>,
   scope: Record<string, EntityChoice> | undefined,
 ): boolean {
+  // Dates read from the files: each upload gets its own, checked before it goes.
+  if (field === "date" && formValues.date_mode === "files") return true
   if (formValues[field]?.trim()) return true
   const c = scope?.[field]
   if (!c) return false

@@ -41,6 +41,10 @@ assert cloud.progress_line("2024/11/20 10:00:00 INFO  : a.tif: Copied (new)") is
 assert "*.tif" in cloud.includes("orthomosaic") and "*.bin" not in cloud.includes("orthomosaic")
 assert cloud.includes("images", "_V.JPG, _N.JPG") == ["*_V.JPG", "*_N.JPG"]
 assert cloud.includes("") == []
+# One date's files of a folder of several dates.
+assert cloud.includes("orthomosaic", "", "2023-06-15") == ["*2023-06-15*.tif", "*2023-06-15*.tiff"]
+assert cloud.includes("orthomosaic", "_DEM.tif", "2023-06-15") == ["*2023-06-15*_DEM.tif"]
+assert cloud.includes("", "", "20230615") == ["*20230615*"]
 
 # Connection names.
 assert cloud.check_name(" KBox ") == "kbox"
@@ -65,3 +69,46 @@ for p in cloud.PROVIDERS:
         assert f["key"] in gate.split("cloud-add)")[1].split("audit CONFIG")[0], f["key"]
 
 print("cloud ok")
+
+# Platform and sensor come from a fixed list (they choose the processing).
+from gemi_agent.uploads import check_kit  # noqa: E402
+
+assert check_kit("drone", "rgb") == ("Drone", "RGB")
+assert check_kit("Rover", "RGB - Sony A7R") == ("Rover", "RGB-SonyA7R")
+for bad in (("P4", "RGB"), ("Drone", "FC6310"), ("Amiga", "RGB")):
+    try:
+        check_kit(*bad)
+        raise AssertionError(f"{bad} accepted")
+    except ValueError:
+        pass
+print("kit ok")
+
+# A cluster copy refused for want of a job slot waits, and starts by itself once one frees.
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+cloud.WAITING = Path(tempfile.mkdtemp())
+cloud._WAIT_SECONDS = 0
+calls = {"n": 0}
+
+
+def fake_submit(words, cluster):
+    calls["n"] += 1
+    if calls["n"] < 3:
+        raise cloud.JobSlotsFull("refused by the job limits")
+    return "4242"
+
+
+cloud._submit_cluster_copy = fake_submit
+rec = cloud._wait_for_slot(["cloud", "fetch", "box", "x", "d"], "c", "d", "box:x", "2023-07-20")
+assert rec["state"] == "WAITING" and rec["id"].startswith("w") and "words" not in rec
+import time as _t  # noqa: E402
+
+for _ in range(50):
+    if calls["n"] >= 3:
+        break
+    _t.sleep(0.05)
+_t.sleep(0.1)
+saved = __import__("json").loads((cloud.WAITING / f"{rec['id']}.json").read_text())
+assert saved["job_id"] == "4242" and saved["state"] == "QUEUED", saved
+print("waiting ok")

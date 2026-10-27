@@ -33,6 +33,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import uuid
@@ -313,12 +314,16 @@ def _dest_name(path: str) -> str:
     return f"{base[:50]}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 
-def includes(data_type: str = "", name_ends: str = "") -> list[str]:
-    """rclone --include patterns: the files the upload would take (any when no data type)."""
+def includes(data_type: str = "", name_ends: str = "", name_has: str = "") -> list[str]:
+    """rclone --include patterns: the files the upload would take (any when no data type).
+    ``name_has``: only names containing it (one date's files of a folder of several dates,
+    e.g. "2023-06-15")."""
     ends = [e.strip() for e in name_ends.split(",") if e.strip()]
-    if ends:
-        return [f"*{e}" for e in ends]
-    return list(_KEEP.get(data_type, ()))
+    pats = [f"*{e}" for e in ends] if ends else list(_KEEP.get(data_type, ()))
+    has = re.sub(r"[*?\[\]{}]", "", name_has.strip())
+    if has:
+        pats = [f"*{has}*{p[1:] if p.startswith('*') else p}" for p in pats] or [f"*{has}*"]
+    return pats
 
 
 def fetch(name: str, path: str, *, where: str = "local", cluster: Optional[str] = None,
@@ -329,12 +334,17 @@ def fetch(name: str, path: str, *, where: str = "local", cluster: Optional[str] 
     name = check_name(name)
     path = path.strip().strip("/")
     settings = {k: str(v).strip() for k, v in (settings or {}).items() if str(v or "").strip()}
+    # Which files of the folder to copy (one date's, say): a copy filter, not an upload setting.
+    name_has = settings.pop("name_has", "")
     if settings:
         missing = [k for k in ("experiment", "site", "population", "date", "platform", "sensor", "data_type")
                    if not settings.get(k)]
         if missing:
             raise ValueError(f"to upload after copying, give: {', '.join(missing)}")
-    pats = includes(settings.get("data_type", ""), settings.get("name_ends", ""))
+        from .uploads import check_kit
+
+        settings["platform"], settings["sensor"] = check_kit(settings["platform"], settings["sensor"])
+    pats = includes(settings.get("data_type", ""), settings.get("name_ends", ""), name_has)
     dest = _dest_name(path)
     if where == "cluster":
         from .hpc_tools import _gemi_hpc
@@ -348,11 +358,13 @@ def fetch(name: str, path: str, *, where: str = "local", cluster: Optional[str] 
         if keep:
             words.append("keep=1")
         words += [f"{k}={encode_setting(v)}" for k, v in settings.items()]
-        out = _gemi_hpc(words, cluster, timeout=180)
-        m = re.search(r"Submitted batch job (\d+)", out)
-        if not m:
-            raise RuntimeError(out.strip()[-400:] or "the copy job was not submitted")
-        return {"where": "cluster", "id": m.group(1), "dest": dest, "state": "QUEUED",
+        try:
+            jid = _submit_cluster_copy(words, cluster)
+        except JobSlotsFull:
+            # Every job slot of the cluster tooling is taken: the copy waits here and starts by
+            # itself when one frees (as uploads queued by the agent do).
+            return _wait_for_slot(words, cluster, dest, f"{name}:{path}", settings.get("date"))
+        return {"where": "cluster", "id": jid, "dest": dest, "state": "QUEUED",
                 "note": "a cluster job copies the folder to the cluster" + (" and uploads it" if settings else "")}
     rclone_path()                           # installed before the copy process needs it
     fid = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
@@ -457,9 +469,101 @@ def run_fetch(fid: str) -> int:
     return 0 if ok else 1
 
 
+# -- cluster copies waiting for a free job slot ------------------------------------------------------
+
+WAITING = WORK / "fetches_waiting"
+_WAIT_SECONDS = 60
+
+
+class JobSlotsFull(RuntimeError):
+    """The cluster tooling's job limit is reached: nothing else can start until a job ends."""
+
+
+def _submit_cluster_copy(words: list[str], cluster: Optional[str]) -> str:
+    from .hpc_tools import _gemi_hpc
+
+    try:
+        out = _gemi_hpc(words, cluster, timeout=180)
+    except RuntimeError as e:
+        if "job limits" in str(e):
+            raise JobSlotsFull(str(e)) from None
+        raise
+    m = re.search(r"Submitted batch job (\d+)", out)
+    if not m:
+        raise RuntimeError(out.strip()[-400:] or "the copy job was not submitted")
+    return m.group(1)
+
+
+def _wait_path(wid: str) -> Path:
+    if not re.fullmatch(r"w[0-9a-z-]+", wid):
+        raise ValueError("bad waiting copy id")
+    return WAITING / f"{wid}.json"
+
+
+def _wait_for_slot(words: list[str], cluster: Optional[str], dest: str, source: str,
+                   date: Optional[str]) -> dict:
+    WAITING.mkdir(parents=True, exist_ok=True)
+    wid = "w" + time.strftime("%m%d%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    rec = {"id": wid, "where": "cluster", "state": "WAITING", "source": source, "dest": dest, "date": date,
+           "created": time.time(), "words": words, "cluster": cluster,
+           "line": "waiting for a free cluster job slot; starts by itself when one frees"}
+    _wait_path(wid).write_text(json.dumps(rec))
+    threading.Thread(target=_keep_trying, args=(wid,), daemon=True).start()
+    return {k: v for k, v in rec.items() if k not in ("words", "cluster")}
+
+
+def _keep_trying(wid: str) -> None:
+    p = _wait_path(wid)
+    while p.exists():
+        rec = json.loads(p.read_text())
+        if rec.get("job_id") or rec.get("state") == "FAILED":
+            return
+        try:
+            rec["job_id"] = _submit_cluster_copy(rec["words"], rec.get("cluster"))
+            rec.update(state="QUEUED", line="submitted to the cluster")
+            p.write_text(json.dumps(rec))
+            return
+        except JobSlotsFull:
+            time.sleep(_WAIT_SECONDS)
+        except Exception as e:                    # noqa: BLE001 — reported on the copy
+            rec.update(state="FAILED", error=str(e)[-400:])
+            p.write_text(json.dumps(rec))
+            return
+
+
+def resume_waiting() -> None:
+    """Copies still waiting for a slot when this service stopped: keep trying (at start)."""
+    if not WAITING.exists():
+        return
+    for p in WAITING.glob("w*.json"):
+        try:
+            rec = json.loads(p.read_text())
+        except Exception:
+            continue
+        if not rec.get("job_id") and rec.get("state") == "WAITING":
+            threading.Thread(target=_keep_trying, args=(rec["id"],), daemon=True).start()
+
+
+def _waiting(cluster: Optional[str]) -> list[dict]:
+    if not WAITING.exists():
+        return []
+    out = []
+    for p in WAITING.glob("w*.json"):
+        try:
+            rec = json.loads(p.read_text())
+        except Exception:
+            continue
+        if time.time() - rec.get("created", 0) > 3 * 86400:
+            continue
+        out.append(rec)
+    return out
+
+
 def fetches(where: str = "local", cluster: Optional[str] = None) -> list[dict]:
     """The recent copies, newest first."""
     if where == "cluster":
+        waiting = [{k: v for k, v in r.items() if k not in ("words", "cluster")}
+                   for r in _waiting(cluster) if not r.get("job_id")]
         from .hpc_tools import _gemi_hpc
 
         out = _gemi_hpc(["cloud", "state"], cluster, timeout=120)
@@ -468,7 +572,7 @@ def fetches(where: str = "local", cluster: Optional[str] = None) -> list[dict]:
             if ln.startswith("job|"):
                 _, jid, st, last = (ln.split("|", 3) + [""])[:4]
                 rows.append({"id": jid, "where": "cluster", "state": st, "line": progress_line(last) or last})
-        return rows
+        return waiting + rows
     if not FETCHES.exists():
         return []
     rows = [json.loads(p.read_text()) for p in FETCHES.glob("*.json")]
@@ -479,6 +583,12 @@ def fetch_state(fid: str, where: str = "local", cluster: Optional[str] = None) -
     if where == "cluster":
         from .hpc_tools import _gemi_hpc
 
+        if fid.startswith("w"):
+            # A copy that waited for a job slot: its own state until submitted, the job's after.
+            rec = json.loads(_wait_path(fid).read_text())
+            if not rec.get("job_id"):
+                return {k: v for k, v in rec.items() if k not in ("words", "cluster")}
+            return {**fetch_state(rec["job_id"], where, cluster), "id": fid, "date": rec.get("date")}
         if not re.fullmatch(r"\d+", fid):
             raise ValueError("bad job id")
         log = _gemi_hpc(["cloud", "state", fid], cluster, timeout=120)

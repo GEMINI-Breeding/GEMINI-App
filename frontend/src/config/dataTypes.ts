@@ -99,11 +99,11 @@ export const dataTypes: Record<string, DataTypeConfig> = {
       "Location",
       "Population",
       "Date",
-      "Amiga",
+      "Rover",
       "RGB",
       "Images",
     ],
-    defaultPlatform: "Amiga",
+    defaultPlatform: "Rover",
     defaultSensor: "RGB",
   },
   Orthomosaic: {

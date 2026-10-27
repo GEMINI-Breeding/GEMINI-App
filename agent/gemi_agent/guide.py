@@ -385,7 +385,7 @@ def _extracting(run: dict) -> list[dict]:
     is "done" as soon as the files are in; nothing after it can start until
     these jobs finish."""
     scope = run.get("uploadScope") or {}
-    if "amiga" not in str(scope.get("platform") or "").lower():
+    if not any(w in str(scope.get("platform") or "").lower() for w in ("amiga", "rover")):
         return []
     want = [str(scope.get(k) or "") for k in ("experiment", "location", "population", "date")]
     try:
@@ -410,6 +410,10 @@ def _row(pr, run: dict, pipelines: dict) -> dict:
                 "step": "Extraction (rover log to images)", "state": "running", "jobs": extracting,
                 "do": {"tool": "wait_jobs", "args": {"job_ids": [j["job_id"] for j in extracting]}},
                 "then": "when it has finished: continue_run (plot marking comes next)"}
+    if d.get("with_run"):
+        # Another camera's frames, processed with the RGB run of the same flight.
+        return {"run": _label(d), "run_id": run["id"], "state": "processed with the RGB run",
+                "with_run": d["with_run"], "note": d["note"]}
     kind, order = d["pipeline"], (GROUND_STEPS if d["pipeline"] == "ground" else AERIAL_STEPS)
     row: dict[str, Any] = {"run": _label(d), "run_id": run["id"],
                            "done": [STEP_TITLE[k] for k in order if d["steps"][k] in ("completed", "skipped")]}

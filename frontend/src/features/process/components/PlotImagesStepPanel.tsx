@@ -20,6 +20,7 @@ export function PlotImagesStepPanel({
   framesPrefix,
   hasFrames,
   hasCameraPositions,
+  offerFrames = true,
   running,
   onRunFrames,
 }: {
@@ -30,12 +31,21 @@ export function PlotImagesStepPanel({
   hasFrames: boolean
   /** The orthomosaic's ODM run kept its camera positions. */
   hasCameraPositions: boolean
+  /** An orthomosaic of this run was built here from raw images: false when it
+   * was uploaded, and then only the orthomosaic's plot images are offered. */
+  offerFrames?: boolean
   running: boolean
   onRunFrames: () => void
 }) {
   const [source, setSource] = useState<"ortho" | "frames">(
     hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho",
   )
+  if (!offerFrames)
+    return (
+      <div className="space-y-3" data-testid="plot-images-step">
+        <PlotImageGrid files={plotImageFiles} prefix={prefix} />
+      </div>
+    )
   return (
     <div className="space-y-3" data-testid="plot-images-step">
       <div className="inline-flex rounded-md border bg-muted p-0.5 text-sm">
@@ -68,7 +78,10 @@ export function PlotImagesStepPanel({
             when wind smears the orthomosaic: a Quick orthomosaic is enough to
             place the boundaries. You get a crop of each frame, the best frame
             straightened to a top-down view, and the full frames, all named by
-            plot and accession.
+            plot and accession. The flight's other cameras (thermal), uploaded
+            for this date as their own sensor, are matched to these frames by
+            capture time and cut the same way; a thermal camera also gives each
+            plot's canopy temperature.
           </p>
           <div className="flex items-center gap-3">
             <Button

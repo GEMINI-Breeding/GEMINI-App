@@ -1,9 +1,11 @@
+import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Ban, ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { useProcess } from "@/contexts/ProcessContext"
+import { agentApi } from "@/features/agent/lib/agentApi"
 import {
   mapUploadProgress,
   mapWorkerProgress,
@@ -194,10 +196,21 @@ export function ProcessPanel() {
     if (startedHere > 0) setIsOpen(true)
   }, [startedHere])
 
-  const queuedCount = processes.filter((p) => p.status === "pending").length
-  const runningCount = processes.filter(
-    (p) => p.status === "running" || p.status === "pending",
-  ).length
+  // Uploads and copies the app's service runs (on the cluster, or waiting for
+  // a free cluster job slot): they are work in flight too.
+  const work = useQuery({
+    queryKey: ["agent", "work"],
+    queryFn: () => agentApi.work(),
+    refetchInterval: 20_000,
+    retry: false,
+  })
+  const transfers = work.data ?? []
+  const queuedCount =
+    processes.filter((p) => p.status === "pending").length +
+    transfers.filter((t) => t.state !== "running").length
+  const runningCount =
+    processes.filter((p) => p.status === "running" || p.status === "pending")
+      .length + transfers.length
 
   // A job that finished successfully leaves the panel after a while: the
   // open panel (or its pill) sits over the bottom-right of every page — it
@@ -216,7 +229,8 @@ export function ProcessPanel() {
     return () => clearTimeout(t)
   }, [doneIds])
 
-  if (!hasBeenActive || processes.length === 0) return null
+  if ((!hasBeenActive || processes.length === 0) && transfers.length === 0)
+    return null
 
   if (!isOpen) {
     return (
@@ -280,6 +294,31 @@ export function ProcessPanel() {
               }}
             />
           ))}
+          {transfers.length > 0 && (
+            <div className="border-t" data-testid="process-transfers">
+              <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
+                Uploads and copies
+              </p>
+              {transfers.map((t) => (
+                <div key={t.id} className="px-3 py-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full ${t.state === "running" ? "bg-green-500" : "bg-amber-500 animate-pulse"}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {t.title}
+                    </span>
+                    <span className="text-muted-foreground">{t.state}</span>
+                  </div>
+                  {t.detail && (
+                    <p className="ml-4 truncate text-muted-foreground">
+                      {t.detail}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

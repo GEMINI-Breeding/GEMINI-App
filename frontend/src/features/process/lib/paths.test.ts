@@ -97,3 +97,25 @@ describe("isAerialScopeComplete", () => {
     expect(isAerialScopeComplete({})).toBe(false)
   })
 })
+
+describe("raw-frame plot images per run", async () => {
+  const { framesRunKey, plotFramesPrefix } = await import("./paths")
+  const scope = {
+    year: "2026",
+    experiment: "GEMINI-26",
+    location: "Davis",
+    population: "Sorghum",
+    date: "2026-07-23",
+    platform: "Drone",
+    sensor: "RGB",
+  }
+  it("a labelled run of the day has its own folder", () => {
+    expect(framesRunKey("run 12:54 · well-watered")).toBe(
+      "run-12-54-well-watered",
+    )
+    expect(plotFramesPrefix(scope as never, "run 12:54 · drought")).toBe(
+      "Processed/2026/GEMINI-26/Davis/Sorghum/2026-07-23/Drone/RGB/PlotFrames/run-12-54-drought/",
+    )
+    expect(plotFramesPrefix(scope as never)).toMatch(/PlotFrames\/$/)
+  })
+})

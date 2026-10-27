@@ -1169,6 +1169,10 @@ def shift_boundaries(args: dict) -> dict:
     if args.get("align", True):
         prev = Ortho(_ortho_in(src))
         shift = _measure_shift(prev, new, cells, float(args.get("max_shift_m") or 8.0))
+        if shift.get("match") is not None and shift["match"] < 0.05:
+            # No real match: flights of one field (RTK) agree to centimetres, so the plots stay put
+            # rather than move by a guess; the result says so.
+            shift = {**shift, "dx": 0.0, "dy": 0.0, "not_applied": True}
     moved = []
     for f in cells:
         ring = []
@@ -1186,7 +1190,8 @@ def shift_boundaries(args: dict) -> dict:
     weak = shift["match"] is not None and shift["match"] < 0.05
     return {"result": {"plots": len(moved), "crops": crops, "shift": {k: (round(v, 2) if isinstance(v, float) else v)
                                                                       for k, v in shift.items()},
-                       "check": ("the match is weak: look closely at the overlay, the plots may need moving by hand"
+                       "check": ("the maps could not be lined up (weak match): the plots were kept where they "
+                                 "were saved; look closely at the overlay, they may need moving by hand"
                                  if weak else "look at the overlay before saving"),
                        "state_snapshot": snapshot, "_ortho": new}}
 
@@ -1406,6 +1411,28 @@ def split_plots(args: dict) -> dict:
     if not boundaries.get("features"):
         raise ValueError("no active plot boundaries for this scope: run plot_boundaries first")
     orthos = multiortho.orthos_in(c, directory)
+    exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
+    jobs = []
+    if args.get("source") == "frames":
+        # Each plot's best raw frames, picked by the ODM run's camera positions: one job for the
+        # run's own orthomosaics (one per treatment flown apart), never another run's of that day
+        # (a diurnal flight): their frames are of another time.
+        mine, run = _frames_orthos(orthos, args.get("orthomosaic_path"), scope)
+        label = str(((run or {}).get("uploadScope") or {}).get("batchLabel") or "")
+        params = {**{k: scope[k] for k in ("year", "experiment", "location", "population", "date", "platform", "sensor")},
+                  "boundaries": boundaries, "source": "frames", "orthomosaic_path": mine[0],
+                  "orthomosaic_paths": mine, "frames_per_plot": int(args.get("frames_per_plot") or 3),
+                  **({"run_key": frames_run_key(label), "run_label": label} if label else {}),
+                  **({"companions": False} if args.get("companions") is False else {})}
+        job = c.submit_job("SPLIT_ORTHOMOSAIC", params, str(exp["id"]) if exp else None)
+        ids = ((run or {}).get("uploadScope") or {}).get("datasetShortIds") or []
+        on_run = {**scope, **({"datasetShortIds": list(ids)} if ids else {}), **({"batchLabel": label} if label else {})}
+        process_tab(lambda pr: pr.record_job(on_run, job))
+        out_dir = directory + "PlotFrames/" + (frames_run_key(label) + "/" if label else "")
+        return {"result": {"jobs": [{"job_id": job.get("id"), "orthomosaics": mine,
+                                     "plots": len(boundaries["features"])}],
+                           "plots": len(boundaries["features"]), "output": out_dir,
+                           **({"run": label} if label else {})}}
     if args.get("orthomosaic_path"):
         chosen = [o for o in orthos if o["path"] == args["orthomosaic_path"]] or [{"path": args["orthomosaic_path"]}]
         groups = multiortho.assign(boundaries["features"], orthos, _coverage_check()).get(args["orthomosaic_path"]) \
@@ -1415,20 +1442,6 @@ def split_plots(args: dict) -> dict:
         if not orthos:
             raise ValueError(f"no orthomosaic in {directory}")
         plan = multiortho.assign(boundaries["features"], orthos, _coverage_check())
-    exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == scope["experiment"]), None)
-    jobs = []
-    if args.get("source") == "frames":
-        # Each plot's best raw frames, picked by the ODM run's camera positions: one job for all the
-        # date's orthomosaics (the boundaries were placed on them), as the app's Plot images step does.
-        paths = list(plan)
-        params = {**{k: scope[k] for k in ("year", "experiment", "location", "population", "date", "platform", "sensor")},
-                  "boundaries": boundaries, "source": "frames", "orthomosaic_path": paths[0],
-                  "orthomosaic_paths": paths, "frames_per_plot": int(args.get("frames_per_plot") or 3)}
-        job = c.submit_job("SPLIT_ORTHOMOSAIC", params, str(exp["id"]) if exp else None)
-        process_tab(lambda pr: pr.record_job(scope, job))
-        return {"result": {"jobs": [{"job_id": job.get("id"), "orthomosaics": paths,
-                                     "plots": len(boundaries["features"])}],
-                           "plots": len(boundaries["features"]), "output": directory + "PlotFrames/"}}
     for path, feats in plan.items():
         if not feats:
             continue
@@ -1444,6 +1457,45 @@ def split_plots(args: dict) -> dict:
     return {"result": {"jobs": jobs, "plots": sum(j["plots"] for j in jobs), "output": directory + "PlotImages/",
                        "note": "one job per orthomosaic, each plot from the one whose centre it is nearest"
                        if len(jobs) > 1 else None}}
+
+
+def frames_run_key(label: str) -> str:
+    """The folder a labelled run's raw-frame plot images go in ("run 12:54 · drought" →
+    "run-12-54-drought"); the app names it the same way."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-").lower()
+
+
+def _frames_orthos(orthos: list[dict], chosen: Optional[str], scope: dict) -> tuple[list[str], Optional[dict]]:
+    """The orthomosaics of one run (by the upload batches they were built from) and that
+    run: the run holding ``chosen``'s batches, else the only run there is. Several runs and
+    none chosen: which one is asked for."""
+    if not orthos:
+        raise ValueError("no orthomosaic built here in this folder (raw frames need one built from them)")
+    runs = process_tab(lambda pr: [r for r in pr.state()["runs"]
+                                   if all(str((r.get("uploadScope") or {}).get(k)) == str(scope[k])
+                                          for k in ("experiment", "location", "population", "date", "platform",
+                                                    "sensor"))])
+    def batches(r):
+        return set((r.get("uploadScope") or {}).get("datasetShortIds") or [])
+    target = next((o for o in orthos if o["path"] == chosen), None) if chosen else None
+    if target is None and chosen:
+        target = {"path": chosen, "uploads": []}
+    labelled = [r for r in runs if (r.get("uploadScope") or {}).get("batchLabel")]
+    if target is None and len(labelled) > 0 and len(runs) > 1:
+        raise ValueError("this date has several runs (" + ", ".join(
+            sorted(str(r["uploadScope"]["batchLabel"]) for r in labelled)) + ", …): give orthomosaic_path, the "
+            "orthomosaic of the run to cut")
+    run = None
+    if target is not None and target.get("uploads"):
+        run = next((r for r in runs if batches(r) & set(target["uploads"])), None)
+    elif len(runs) == 1:
+        run = runs[0]
+    if run is not None and batches(run):
+        mine = [o["path"] for o in orthos if set(o.get("uploads") or []) & batches(run)] or \
+            ([target["path"]] if target else [])
+    else:
+        mine = [target["path"]] if target else [o["path"] for o in orthos]
+    return mine, run
 
 
 def extract_traits(args: dict) -> dict:
@@ -1713,9 +1765,11 @@ _field(split_plots, "Cut a date's orthomosaics into one image per plot using the
        "with several, e.g. one per treatment, each plot from the one whose centre it is nearest), or "
        "orthomosaic_path for one. source='frames': each plot's best raw frames instead (picked by the ODM "
        "run's camera positions; needs an orthomosaic built with them kept, e.g. the Quick preset), "
-       "frames_per_plot of them (default 3).",
+       "frames_per_plot of them (default 3). With frames, the flight's other cameras uploaded for the same date "
+       "and platform (a Thermal sensor) are matched by capture time and cut per plot too, and a thermal camera's "
+       "°C frames give each plot's canopy temperature (trait Temp_veg_avg_C); companions: false leaves them out.",
        {"path": _str, "orthomosaic_path": _str, "source": {"type": "string", "enum": ["orthomosaic", "frames"]},
-        "frames_per_plot": _num}, [])
+        "frames_per_plot": _num, "companions": {"type": "boolean"}}, [])
 _field(extract_traits, "Per-plot traits for a date's orthomosaics and active plot boundaries (EXTRACT_TRAITS): "
        "vegetation fraction and plant height from each orthomosaic's elevation model (ODM's DSM) when present. "
        "Several orthomosaics: each plot from the nearest one. path: any path in the date's folder.",

@@ -80,6 +80,7 @@ import { outerFromOrthoBounds } from "@/features/process/lib/autoBoundary"
 import {
   applyLabelsToFeatures,
   describeFacts,
+  designFromFeatures,
   dimensionsFromDesign,
   type FdTransform,
   type FieldDesign,
@@ -225,6 +226,8 @@ export function PlotBoundaryPrep({
   const [importedSnapshot, setImportedSnapshot] =
     useState<PlotGeometryStateSnapshot | null>(null)
   const [versionName, setVersionName] = useState("")
+  // Bumped when boundaries are loaded or imported: the map zooms to them.
+  const [fitSignal, setFitSignal] = useState(0)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
   // The design this field already has (recorded with the agent for this run or
   // another date of the same field) and the orientation its facts give.
@@ -874,6 +877,14 @@ export function PlotBoundaryPrep({
       (fd as { transform?: unknown }).transform
     ) {
       nextState = { ...nextState, fieldDesign: fd, gridMode: "fd" }
+    } else if (fc?.features) {
+      // Boundaries saved without the editor's design (by the agent, or brought
+      // from another date) whose plots carry their design labels: the design is
+      // rebuilt from those, so the Field design panel opens filled in. Unflipped:
+      // each plot keeps exactly its own labels.
+      const rebuilt = designFromFeatures(nextState.features)
+      if (rebuilt)
+        nextState = { ...nextState, fieldDesign: rebuilt, gridMode: "fd" }
     }
     // Run the reconciled features through buildNextStateForFeatures so
     // cellIds get stamped on loaded cells (older snapshots predate the
@@ -886,6 +897,7 @@ export function PlotBoundaryPrep({
     history.clearHistory(nextState)
     draftApi.discardDraft()
     setDraftBanner({ visible: false })
+    setFitSignal((n) => n + 1) // the map zooms to what was loaded
   }, [
     loaded.data,
     importedSnapshot,
@@ -900,15 +912,28 @@ export function PlotBoundaryPrep({
   const fdSize = fieldDesign ? dimensionsFromDesign(fieldDesign) : null
   const fdMismatch = (() => {
     if (!fdSize || !activeBlockId) return null
-    let r = 0
-    let c = 0
+    // The grid's span, as the design's size is measured: a design may number
+    // its plots from above 1 (tiers 2–26, beds 20–24), and plots brought from
+    // another date keep those numbers.
+    let minR = Number.POSITIVE_INFINITY
+    let maxR = 0
+    let minC = Number.POSITIVE_INFINITY
+    let maxC = 0
     for (const f of features) {
       const p = (f.properties ?? {}) as Record<string, unknown>
       if (p.role === "outer" || p.blockId !== activeBlockId) continue
-      r = Math.max(r, Number(p._grid_row ?? p.row) || 0)
-      c = Math.max(c, Number(p._grid_col ?? p.col) || 0)
+      const gr = Number(p._grid_row ?? p.row)
+      const gc = Number(p._grid_col ?? p.col)
+      if (!gr || !gc) continue
+      minR = Math.min(minR, gr)
+      maxR = Math.max(maxR, gr)
+      minC = Math.min(minC, gc)
+      maxC = Math.max(maxC, gc)
     }
-    if (!r || !c || (r === fdSize.rows && c === fdSize.cols)) return null
+    if (!maxR || !maxC) return null
+    const r = maxR - minR + 1
+    const c = maxC - minC + 1
+    if (r === fdSize.rows && c === fdSize.cols) return null
     return { rows: r, cols: c }
   })()
 
@@ -1221,6 +1246,7 @@ export function PlotBoundaryPrep({
           <CardContent>
             <BoundaryMap
               features={features}
+              fitSignal={fitSignal}
               onFeaturesChange={setFeatures}
               orthoTileUrl={multi ? undefined : orthoTileUrl}
               orthoLayers={orthoLayers}

@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { platformFromMaker } from "@/features/files/lib/sensorKit"
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
@@ -247,10 +248,21 @@ export function UploadData() {
       const next = { ...prev }
       // Never clobber something the user already typed.
       if (meta.date && !next.date) next.date = meta.date
-      if (meta.platform && !next.platform) next.platform = meta.platform
-      if (meta.sensor && !next.sensor) next.sensor = meta.sensor
+      // The device the files came from (maker, model): kept on the upload's
+      // record, for processing that depends on it (proprietary formats, say).
+      // Platform and sensor themselves come from the fixed list on the form.
+      if (meta.platform) next.device_make = meta.platform
+      if (meta.sensor) next.device_model = meta.sensor
       return next
     })
+    // A drone maker's photos: suggest the Drone platform when none is picked.
+    const suggested = platformFromMaker(meta.platform)
+    if (suggested)
+      setScope((prev) =>
+        prev.platform && prev.platform.kind !== "none"
+          ? prev
+          : { ...prev, platform: { kind: "new", name: suggested } },
+      )
   }, [])
 
   const [rgbCount, setRgbCount] = useState(0)

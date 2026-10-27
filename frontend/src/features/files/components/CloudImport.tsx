@@ -33,9 +33,18 @@ import {
 import {
   agentApi,
   type CloudFetch,
+  type CloudItem,
   type CloudProvider,
 } from "@/features/agent/lib/agentApi"
+import { friendlyError } from "@/features/agent/lib/friendlyError"
+import {
+  dateFromFolder,
+  dateOf,
+  dateTokenIn,
+  groupByDate,
+} from "@/features/files/lib/fileDates"
 import { CLUSTER_DATA_TYPES, uploadSettings } from "./ClusterFolderUpload"
+import { DateCheckDialog, type DateCheckGroup } from "./DateCheckDialog"
 import type { EntityChoice } from "./EntitySelectField"
 
 const FINISHED = new Set(["done", "failed", "COMPLETED", "FAILED", "ENDED"])
@@ -94,7 +103,12 @@ export function CloudImport({
   const [nameEnds, setNameEnds] = useState("")
   const [keep, setKeep] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [fetchId, setFetchId] = useState<string | null>(null)
+  // The copies started (one per date when dates come from the files).
+  const [fetchIds, setFetchIds] = useState<{ id: string; date: string }[]>([])
+  const [datePrompt, setDatePrompt] = useState<{
+    groups: DateCheckGroup[]
+    resolve: (dates: string[] | null) => void
+  } | null>(null)
 
   const remotes = overview.data?.remotes ?? []
   useEffect(() => {
@@ -119,33 +133,101 @@ export function CloudImport({
   })
 
   const start = useMutation({
-    mutationFn: () => {
-      const settings = uploadSettings(dataType, formValues, scope)
-      if (nameEnds.trim()) settings.name_ends = nameEnds.trim()
-      return agentApi.cloudFetch({
-        name: remote,
-        path: picked ?? path,
-        settings,
-        keep,
-      })
+    mutationFn: async (): Promise<{ id: string; date: string }[]> => {
+      const base = uploadSettings(dataType, formValues, scope)
+      if (nameEnds.trim()) base.name_ends = nameEnds.trim()
+      const target = picked ?? path
+      if (formValues.date_mode !== "files") {
+        const f = await agentApi.cloudFetch({
+          name: remote,
+          path: target,
+          settings: base,
+          keep,
+        })
+        return [{ id: f.id, date: base.date }]
+      }
+      // Dates from the files: list them (and dated folders one level down),
+      // one copy per date, after the person has checked the dates.
+      const files = await filesToCopy(
+        remote,
+        target,
+        picked,
+        listing.data?.items,
+      )
+      const wanted = files.filter(
+        (f) =>
+          keepsType(base.data_type, f.name) &&
+          (!base.name_ends ||
+            base.name_ends
+              .split(",")
+              .some((e) => e.trim() && f.name.endsWith(e.trim()))),
+      )
+      if (wanted.length === 0)
+        throw new Error("No files of this data type in that folder.")
+      const fallback =
+        formValues.date?.trim() || new Date().toISOString().slice(0, 10)
+      const groups = groupByDate(
+        wanted,
+        (f) => dateOf({ name: f.name, folder: f.folder, modified: f.modified }),
+        fallback,
+      )
+      const dates = await new Promise<string[] | null>((resolve) =>
+        setDatePrompt({
+          groups: groups.map((g) => ({
+            date: g.date,
+            source: g.source,
+            count: g.items.length,
+            samples: g.items.slice(0, 3).map((f) => f.name),
+            label:
+              [...new Set(g.items.map((f) => f.folder).filter(Boolean))]
+                .slice(0, 2)
+                .join(", ") || undefined,
+          })),
+          resolve,
+        }),
+      )
+      if (!dates) return []
+      const out: { id: string; date: string }[] = []
+      const failed: string[] = []
+      for (const [i, g] of groups.entries()) {
+        const settings: Record<string, string> = { ...base, date: dates[i] }
+        const names = g.items.map((f) => f.name)
+        const folders = [...new Set(g.items.map((f) => f.folder))]
+        let from = target
+        if (folders.length === 1 && folders[0] && dateFromFolder(folders[0])) {
+          // A dated folder: copy it whole.
+          from = [target, folders[0]].filter(Boolean).join("/")
+        } else {
+          const token = dateTokenIn(names, g.date)
+          if (token) settings.name_has = token
+          else if (names.join(",").length <= 190)
+            settings.name_ends = names.join(",")
+          else
+            throw new Error(
+              `The ${g.items.length} files of ${g.date} cannot be picked out of the folder by name. Put each date's files in its own folder, or upload them with one date.`,
+            )
+        }
+        // Each date on its own: one that cannot start does not stop the others.
+        try {
+          const f = await agentApi.cloudFetch({
+            name: remote,
+            path: from,
+            settings,
+            keep,
+          })
+          out.push({ id: f.id, date: dates[i] })
+        } catch (e) {
+          failed.push(`${dates[i]}: ${friendlyError(e)}`)
+        }
+      }
+      if (failed.length)
+        toast.error(
+          `${failed.length} of ${groups.length} dates did not start — ${failed.join("; ")}`,
+        )
+      return out
     },
-    onSuccess: (f) => setFetchId(f.id),
+    onSuccess: (list) => setFetchIds(list),
   })
-
-  const progress = useQuery({
-    queryKey: ["agent", "cloud", "fetch", fetchId],
-    queryFn: () => agentApi.cloudFetchState(fetchId as string),
-    enabled: Boolean(fetchId),
-    refetchInterval: (q) =>
-      q.state.data && isFinished(q.state.data) ? false : 5000,
-  })
-  const finished = progress.data && isFinished(progress.data)
-  useEffect(() => {
-    if (!progress.data || !isFinished(progress.data)) return
-    if (isFailure(progress.data))
-      toast.error("The copy did not finish; see the details under it.")
-    else toast.success("Copied and uploaded. The run shows on the Process tab.")
-  }, [progress.data])
 
   const kind = CLUSTER_DATA_TYPES[dataType ?? ""]
   if (!kind) return null
@@ -337,9 +419,7 @@ export function CloudImport({
           </div>
           <div className="flex items-center gap-3">
             <Button
-              disabled={
-                disabled || start.isPending || Boolean(fetchId && !finished)
-              }
+              disabled={disabled || start.isPending}
               onClick={() => start.mutate()}
               data-testid="cloud-fetch"
             >
@@ -357,28 +437,119 @@ export function CloudImport({
             )}
           </div>
           {start.error && (
-            <p className="text-sm text-destructive">{String(start.error)}</p>
+            <p className="text-sm text-destructive">
+              {friendlyError(start.error)}
+            </p>
           )}
         </div>
       )}
 
-      {fetchId && progress.data && (
-        <div
-          className="space-y-1 rounded bg-muted p-2 text-xs"
-          data-testid="cloud-progress"
-        >
-          <p className="flex items-center gap-2 font-medium">
-            {!finished && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {stateLabel(progress.data)}
-          </p>
-          {progress.data.line && <p>{progress.data.line}</p>}
-          {progress.data.error && (
-            <p className="text-destructive">{progress.data.error}</p>
-          )}
-        </div>
+      {fetchIds.map((f) => (
+        <FetchProgress key={f.id} id={f.id} date={f.date} />
+      ))}
+      <DateCheckDialog
+        groups={datePrompt?.groups ?? null}
+        onConfirm={(dates) => {
+          datePrompt?.resolve(dates)
+          setDatePrompt(null)
+        }}
+        onCancel={() => {
+          datePrompt?.resolve(null)
+          setDatePrompt(null)
+        }}
+      />
+    </div>
+  )
+}
+
+/** One copy's progress (one per date when dates come from the files). */
+function FetchProgress({ id, date }: { id: string; date: string }) {
+  const progress = useQuery({
+    queryKey: ["agent", "cloud", "fetch", id],
+    queryFn: () => agentApi.cloudFetchState(id),
+    refetchInterval: (q) =>
+      q.state.data && isFinished(q.state.data) ? false : 5000,
+  })
+  const finished = progress.data && isFinished(progress.data)
+  useEffect(() => {
+    if (!progress.data || !isFinished(progress.data)) return
+    if (isFailure(progress.data))
+      toast.error(
+        `The copy of ${date} did not finish; see the details under it.`,
+      )
+    else
+      toast.success(
+        `${date}: copied and uploaded. The run shows on the Process tab.`,
+      )
+  }, [progress.data, date])
+  if (!progress.data) return null
+  return (
+    <div
+      className="space-y-1 rounded bg-muted p-2 text-xs"
+      data-testid="cloud-progress"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        {!finished && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {date}: {stateLabel(progress.data)}
+      </p>
+      {progress.data.line && <p>{progress.data.line}</p>}
+      {progress.data.error && (
+        <p className="text-destructive">{progress.data.error}</p>
       )}
     </div>
   )
+}
+
+/** The data types' file kinds, as the upload after the copy takes them. */
+const TYPE_EXT: Record<string, RegExp> = {
+  images: /\.(jpe?g|png|tiff?)$/i,
+  amiga_bin: /\.bin$/i,
+  orthomosaic: /\.tiff?$/i,
+}
+
+export function keepsType(dataType: string | undefined, name: string): boolean {
+  const re = TYPE_EXT[dataType ?? ""]
+  return re ? re.test(name) : true
+}
+
+interface CopyFile {
+  name: string
+  /** The folder under the chosen one it is in ("" when directly in it). */
+  folder: string
+  modified: string | null
+}
+
+/** The files a copy of ``target`` takes: the chosen file, or the folder's files
+ * and those of its folders one level down (date folders, say). */
+async function filesToCopy(
+  remote: string,
+  target: string,
+  picked: string | null,
+  shown: CloudItem[] | undefined,
+): Promise<CopyFile[]> {
+  if (picked) {
+    const it = (shown ?? []).find((i) => i.path === picked)
+    return [
+      {
+        name: picked.split("/").pop() ?? picked,
+        folder: "",
+        modified: it?.modified ?? null,
+      },
+    ]
+  }
+  const top = await agentApi.cloudBrowse(remote, target)
+  const out: CopyFile[] = top.items
+    .filter((i) => !i.is_dir)
+    .map((i) => ({ name: i.name, folder: "", modified: i.modified }))
+  for (const dir of top.items.filter((i) => i.is_dir).slice(0, 60)) {
+    const sub = await agentApi.cloudBrowse(remote, dir.path)
+    out.push(
+      ...sub.items
+        .filter((i) => !i.is_dir)
+        .map((i) => ({ name: i.name, folder: dir.name, modified: i.modified })),
+    )
+  }
+  return out
 }
 
 function stateLabel(f: CloudFetch): string {
@@ -394,6 +565,8 @@ function stateLabel(f: CloudFetch): string {
     case "FAILED":
     case "ENDED":
       return "The copy did not finish"
+    case "WAITING":
+      return "Waiting for a free cluster job slot (starts by itself)…"
     case "PENDING":
     case "QUEUED":
       return "Waiting for the cluster to start the copy job…"

@@ -14,12 +14,10 @@ import {
   MoreVertical,
   Navigation,
   Plane,
-  Play,
   Plus,
   Trash2,
 } from "lucide-react"
 import { useState } from "react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -42,15 +40,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useProcess } from "@/contexts/ProcessContext"
-import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { NewRunDialog } from "@/features/process/components/NewRunDialog"
-import {
-  runState,
-  TAG_CLASS,
-  TAG_HINT,
-  TAG_LABEL,
-} from "@/features/process/lib/runStatus"
+import { RunGroupList } from "@/features/process/components/RunGroupList"
 import {
   deletePipeline,
   deleteRun,
@@ -71,7 +62,6 @@ function PipelineCard({
 }) {
   const navigate = useNavigate()
   const runs = useRuns(pipeline.id)
-  const { queuedJobIds } = useProcess()
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false)
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<Run | null>(null)
   const [newRunOpen, setNewRunOpen] = useState(false)
@@ -149,91 +139,52 @@ function PipelineCard({
         </CardHeader>
         {runs.length > 0 && (
           <CardContent>
-            <div className="space-y-2">
-              {[...runs]
-                .sort((a, b) =>
-                  (a.uploadScope?.date ?? a.createdAt).localeCompare(
-                    b.uploadScope?.date ?? b.createdAt,
-                  ),
-                )
-                .map((run) => (
-                  <div
-                    key={run.id}
-                    className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded-md p-2 transition-colors"
-                    onClick={() =>
-                      navigate({
-                        to: "/process/$workspaceId/run/$runId",
-                        params: { workspaceId, runId: run.id },
-                      })
-                    }
+            {/* One row per flight day (every sensor flown); a day with several runs
+                — diurnal flights, treatments, thermal beside RGB — expands to them. */}
+            <RunGroupList
+              runs={runs}
+              experiment={
+                runs.find((r) => r.uploadScope?.experiment)?.uploadScope
+                  ?.experiment
+              }
+              typeOf={() => pipeline.type}
+              onOpen={(run) =>
+                navigate({
+                  to: "/process/$workspaceId/run/$runId",
+                  params: { workspaceId, runId: run.id },
+                })
+              }
+              actions={(run) => (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      aria-label="Run actions"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center gap-3">
-                      <Play className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="flex items-center gap-1.5 text-sm font-medium">
-                          {run.name ?? `Run ${run.id.slice(0, 8)}`}
-                          <AgentRunMark run={run} />
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {run.uploadScope?.location
-                            ? `${run.uploadScope.location} · ${run.uploadScope.population ?? ""} · `
-                            : ""}
-                          added {new Date(run.createdAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        className={
-                          TAG_CLASS[
-                            runState(run, pipeline.type, queuedJobIds).tag
-                          ]
-                        }
-                        title={
-                          TAG_HINT[
-                            runState(run, pipeline.type, queuedJobIds).tag
-                          ]
-                        }
-                        variant="secondary"
-                      >
-                        {
-                          TAG_LABEL[
-                            runState(run, pipeline.type, queuedJobIds).tag
-                          ]
-                        }
-                      </Badge>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label="Run actions"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <MoreVertical className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <DropdownMenuItem
-                            className="text-red-600"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmDeleteRun(run)
-                            }}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete Run
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                ))}
-            </div>
+                    <DropdownMenuItem
+                      className="text-red-600"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteRun(run)
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Run
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            />
           </CardContent>
         )}
       </Card>

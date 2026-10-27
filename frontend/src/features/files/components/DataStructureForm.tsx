@@ -7,9 +7,17 @@ import { Label } from "@/components/ui/label"
 import { dataTypes } from "@/config/dataTypes"
 import {
   type EntityChoice,
+  type EntityOption,
   EntitySelectField,
 } from "@/features/files/components/EntitySelectField"
 import { useScopeOptions } from "@/features/files/hooks/useUploadScope"
+import {
+  PLATFORM_HINT,
+  PLATFORMS,
+  parseSensorName,
+  SENSOR_TYPES,
+  sensorName,
+} from "@/features/files/lib/sensorKit"
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
@@ -107,20 +115,69 @@ export function DataStructureForm({
 
       <div className="space-y-4">
         {fields.map((field) => {
-          // Date stays a free-text date input — it's not an entity.
+          // Date: one for the upload, or each file's own (one upload per date).
           if (field === "date") {
+            const fromFiles = values.date_mode === "files"
             return (
               <div key={field} className="space-y-1.5">
                 <Label htmlFor="date">
                   Date<span className="ml-0.5 text-destructive">*</span>
                 </Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={values.date ?? ""}
-                  onChange={(e) => onValueChange("date", e.target.value)}
-                />
+                <div
+                  className="inline-flex rounded-md border bg-muted p-0.5 text-xs"
+                  data-testid="upload-date-mode"
+                >
+                  {(
+                    [
+                      ["files", "From the files"],
+                      ["", "One date"],
+                    ] as const
+                  ).map(([mode, text]) => (
+                    <button
+                      key={mode || "one"}
+                      type="button"
+                      onClick={() => onValueChange("date_mode", mode)}
+                      className={`rounded px-2.5 py-1 ${(values.date_mode ?? "") === mode ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+                {fromFiles ? (
+                  <p className="text-muted-foreground text-xs">
+                    Each file's date is read from its name (2023-06-15,
+                    20230615, DJI_20230615…), else its folder's name, its photo
+                    date, or its file date. Files of one date make one upload;
+                    you check the dates before anything is sent.
+                  </p>
+                ) : (
+                  <Input
+                    id="date"
+                    type="date"
+                    value={values.date ?? ""}
+                    onChange={(e) => onValueChange("date", e.target.value)}
+                  />
+                )}
               </div>
+            )
+          }
+
+          // Platform and sensor: a fixed list (they choose the processing).
+          if (field === "platform" || field === "sensor") {
+            if (field === "sensor" && fields.includes("platform")) return null
+            return (
+              <PlatformSensorFields
+                key="platform-sensor"
+                withPlatform={fields.includes("platform")}
+                withSensor={fields.includes("sensor")}
+                values={values}
+                scope={scope}
+                disabled={!experimentChosen}
+                platformOptions={options.sensorPlatform.options}
+                sensorOptions={options.sensor.options}
+                onScopeChange={onScopeChange}
+                onValueChange={onValueChange}
+              />
             )
           }
 
@@ -235,6 +292,164 @@ export function DataStructureForm({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** The entity choice for a name: the existing row of that name, else a new one. */
+function choiceFor(name: string, options: EntityOption[]): EntityChoice {
+  const hit = options.find(
+    (o) => o.name.trim().toLowerCase() === name.trim().toLowerCase(),
+  )
+  return hit
+    ? { kind: "existing", id: hit.id, name: hit.name }
+    : { kind: "new", name }
+}
+
+/**
+ * Platform (Drone, Rover, Handheld) and sensor (RGB, Thermal; the platform's
+ * own camera, or another one named here) from a fixed list: they decide how
+ * the data is processed. Another camera is stored as "RGB-SonyA7R", so two
+ * cameras of one type on the same date stay apart.
+ */
+function PlatformSensorFields({
+  withPlatform,
+  withSensor,
+  values,
+  scope,
+  disabled,
+  platformOptions,
+  sensorOptions,
+  onScopeChange,
+  onValueChange,
+}: {
+  withPlatform: boolean
+  withSensor: boolean
+  values: Record<string, string>
+  scope: Record<string, EntityChoice>
+  disabled: boolean
+  platformOptions: EntityOption[]
+  sensorOptions: EntityOption[]
+  onScopeChange: (key: string, choice: EntityChoice) => void
+  onValueChange: (key: string, value: string) => void
+}) {
+  const platform =
+    scope.platform && scope.platform.kind !== "none" ? scope.platform.name : ""
+  const sensorNow =
+    scope.sensor && scope.sensor.kind !== "none" ? scope.sensor.name : ""
+  const parsed = parseSensorName(sensorNow)
+  const type = parsed.type ?? ""
+  const other = values.sensor_camera_mode === "other" || Boolean(parsed.camera)
+  const camera = values.sensor_camera ?? parsed.camera
+
+  const setSensor = (t: string, isOther: boolean, cam: string) => {
+    if (!t) return
+    const name = sensorName(t, isOther ? cam : "")
+    onScopeChange("sensor", choiceFor(name, sensorOptions))
+  }
+  const pill = (on: boolean) =>
+    `rounded px-2.5 py-1 text-xs ${on ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`
+
+  return (
+    <div className="space-y-3" data-testid="upload-platform-sensor">
+      {withPlatform && (
+        <div className="space-y-1.5">
+          <Label>
+            Sensor platform<span className="ml-0.5 text-destructive">*</span>
+          </Label>
+          <div className="inline-flex rounded-md border bg-muted p-0.5">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                disabled={disabled}
+                data-testid={`upload-platform-${p}`}
+                onClick={() =>
+                  onScopeChange("platform", choiceFor(p, platformOptions))
+                }
+                className={pill(platform.toLowerCase() === p.toLowerCase())}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            {disabled
+              ? "Pick or create an experiment first."
+              : platform &&
+                  PLATFORM_HINT[platform as keyof typeof PLATFORM_HINT]
+                ? `Processed in the ${PLATFORM_HINT[platform as keyof typeof PLATFORM_HINT]}.`
+                : "Decides the processing: drones go through the aerial pipeline (orthomosaic), rovers and handheld cameras through the ground one."}
+          </p>
+        </div>
+      )}
+      {withSensor && (
+        <div className="space-y-1.5">
+          <Label>
+            Sensor<span className="ml-0.5 text-destructive">*</span>
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-md border bg-muted p-0.5">
+              {SENSOR_TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  disabled={disabled}
+                  data-testid={`upload-sensor-${t}`}
+                  onClick={() => setSensor(t, other, camera)}
+                  className={pill(type === t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-md border bg-muted p-0.5">
+              {(
+                [
+                  [
+                    "",
+                    `Onboard${platform ? ` (${platform.toLowerCase()}'s own)` : ""}`,
+                  ],
+                  ["other", "Other camera"],
+                ] as const
+              ).map(([mode, text]) => (
+                <button
+                  key={mode || "onboard"}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    onValueChange("sensor_camera_mode", mode)
+                    setSensor(type, mode === "other", camera)
+                  }}
+                  className={pill(other === (mode === "other"))}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+          {other && (
+            <Input
+              placeholder="Camera name, e.g. Sony A7R IV"
+              value={camera}
+              disabled={disabled}
+              data-testid="upload-sensor-camera"
+              onChange={(e) => {
+                onValueChange("sensor_camera", e.target.value)
+                setSensor(type, true, e.target.value)
+              }}
+            />
+          )}
+          <p className="text-muted-foreground text-xs">
+            {type
+              ? `Stored as ${sensorName(type, other ? camera : "")}${other ? ": its own folder, so another camera on the same date does not mix with it" : ""}.`
+              : "RGB images give plot images, cover and model counts; thermal images give canopy temperature."}
+            {values.device_model
+              ? ` Device in the files: ${[values.device_make, values.device_model].filter(Boolean).join(" ")}.`
+              : ""}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

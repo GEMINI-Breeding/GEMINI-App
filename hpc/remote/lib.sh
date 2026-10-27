@@ -140,8 +140,21 @@ sbatch_soonest() {
   local try=$1; shift
   local best="" best_wait=999999999 now entry part acct est start w
   now=$(date +%s)
+  # Slurm's start estimate ignores an account's group limits (QOSGrp*): a place where this
+  # user's jobs already wait on one is full, whatever the estimate says. Skipped while
+  # another place is left to try.
+  local blocked="" e2 p2 a2
+  for e2 in $try; do
+    p2=${e2%%:*}; a2=${e2#*:}; a2=${a2%%:*}
+    if squeue -h -u "$USER" -p "$p2" -A "$a2" -t PENDING -o %r 2>/dev/null | grep -q '^QOSGrp'; then
+      blocked="$blocked $p2:$a2"
+    fi
+  done
   for entry in $try; do
     part=${entry%%:*}; acct=${entry#*:}; acct=${acct%%:*}
+    if [[ " $blocked " == *" $part:$acct "* ]] && [ "$(wc -w <<< "$try")" -gt "$(wc -w <<< "$blocked")" ]; then
+      continue
+    fi
     est=$(sbatch --test-only --partition="$part" --account="$acct" "$@" 2>&1)
     start=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}' <<< "$est" | head -1)
     [ -n "$start" ] || continue

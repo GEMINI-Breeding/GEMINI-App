@@ -130,8 +130,24 @@ export function plotImagesPrefix(scope: AerialScope): string {
 
 /** Plot images from the raw frames (placed by the ODM run's camera positions):
  *  crops/, straightened/, manifest.json. */
-export function plotFramesPrefix(scope: AerialScope): string {
-  return `${processedPrefix(scope)}PlotFrames/`
+/** The folder a labelled run's raw-frame plot images go in ("run 12:54 · drought"
+ * → "run-12-54-drought"), so one day's runs (diurnal flights, treatments flown
+ * on their own) do not overwrite each other's; the agent names it the same. */
+export function framesRunKey(batchLabel?: string | null): string {
+  return (batchLabel ?? "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+}
+
+/** Plot images from the raw frames: …/PlotFrames/, or …/PlotFrames/<run key>/
+ * for a labelled run. */
+export function plotFramesPrefix(
+  scope: AerialScope,
+  batchLabel?: string | null,
+): string {
+  const key = framesRunKey(batchLabel)
+  return `${processedPrefix(scope)}PlotFrames/${key ? `${key}/` : ""}`
 }
 
 export function orthomosaicPath(scope: AerialScope): string {

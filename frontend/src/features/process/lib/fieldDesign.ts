@@ -324,3 +324,58 @@ export function mergeLabelsIntoExisting(
     features: applyLabelsToFeatures(source, fd),
   }
 }
+
+const NOT_DESIGN = new Set([
+  "cellId",
+  "blockId",
+  "block",
+  "role",
+  "label",
+  "design_block",
+])
+
+/**
+ * A field design rebuilt from labelled plots: boundaries saved elsewhere (by
+ * the agent, or imported from another date) whose cells carry their design's
+ * labels — row/col (or tier/bed), plot, accession, crop — but not the
+ * editor's own design. Lets the editor reopen them with the design in place.
+ * Null when too few cells carry a row and column.
+ */
+export function designFromFeatures(
+  features: GeoJSON.Feature[],
+  transform: FdTransform = FD_TRANSFORM_IDENTITY,
+): FieldDesign | null {
+  const cells = features.filter((f) => f.properties?.role !== "outer")
+  if (cells.length === 0) return null
+  const rows: FieldDesignRow[] = []
+  for (const f of cells) {
+    const p = (f.properties ?? {}) as Record<string, unknown>
+    const r = Number(p._grid_row ?? p.row ?? p.tier)
+    const c = Number(p._grid_col ?? p.col ?? p.bed)
+    if (!Number.isFinite(r) || !Number.isFinite(c)) continue
+    const row: FieldDesignRow = { row: String(r), col: String(c) }
+    for (const [k, v] of Object.entries(p)) {
+      if (k.startsWith("_") || NOT_DESIGN.has(k) || k === "row" || k === "col")
+        continue
+      if (v == null || typeof v === "object") continue
+      row[k] = String(v)
+    }
+    if (p.plot_label != null) row.plot = String(p.plot_label)
+    rows.push(row)
+  }
+  if (rows.length < cells.length * 0.9) return null
+  const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))]
+  const esc = (v: string) =>
+    /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
+  const csv_text = [
+    columns.join(","),
+    ...rows.map((r) => columns.map((k) => esc(r[k] ?? "")).join(",")),
+  ].join("\n")
+  const mapping: Partial<Record<FdTargetKey, string>> = {
+    row: "row",
+    col: "col",
+  }
+  for (const k of ["plot", "accession", "crop"] as const)
+    if (columns.includes(k)) mapping[k] = k
+  return { csv_text, mapping, rows, transform }
+}

@@ -269,3 +269,65 @@ describe("transformFromFacts", () => {
     expect(describeFacts({})).toBeNull()
   })
 })
+
+describe("a design rebuilt from labelled plots", async () => {
+  const { designFromFeatures, FD_TRANSFORM_IDENTITY } = await import(
+    "./fieldDesign"
+  )
+  const cell = (props: Record<string, unknown>) =>
+    ({
+      type: "Feature",
+      properties: props,
+      geometry: { type: "Polygon", coordinates: [] },
+    }) as GeoJSON.Feature
+  it("reads the agent's cells: tier as row, bed as column, plot and accession", () => {
+    const fd = designFromFeatures(
+      [
+        cell({
+          row: 26,
+          col: 20,
+          tier: "26",
+          bed: "20",
+          plot: 25,
+          plot_label: "25",
+          accession: "IT97K-499-35",
+          crop: "Cowpea",
+          block: "1",
+        }),
+        cell({
+          row: 2,
+          col: 24,
+          plot: 101,
+          accession: "MAGIC270",
+          crop: "Cowpea",
+        }),
+        cell({ role: "outer" }),
+      ],
+      { flipRows: true, flipCols: false, swapAxes: false },
+    )
+    expect(fd?.rows).toHaveLength(2)
+    expect(fd?.rows[0]).toMatchObject({
+      row: "26",
+      col: "20",
+      plot: "25",
+      accession: "IT97K-499-35",
+      crop: "Cowpea",
+    })
+    expect(fd?.rows[0]).not.toHaveProperty("block")
+    expect(fd?.mapping).toEqual({
+      row: "row",
+      col: "col",
+      plot: "plot",
+      accession: "accession",
+      crop: "crop",
+    })
+    expect(fd?.transform.flipRows).toBe(true)
+    expect(fd?.csv_text.split("\n")[0]).toContain("accession")
+  })
+  it("nothing to rebuild from unlabelled cells", () => {
+    expect(
+      designFromFeatures([cell({ plot: 1 }), cell({ plot: 2 })]),
+    ).toBeNull()
+    expect(designFromFeatures([], FD_TRANSFORM_IDENTITY)).toBeNull()
+  })
+})

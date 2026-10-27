@@ -452,11 +452,86 @@ class ProcessRuns:
         order = GROUND_STEPS if kind == "ground" else AERIAL_STEPS
         steps = {k: (run["steps"].get(k) or {}).get("status", "pending") for k in order}
         nxt = next((k for k in order if steps[k] not in ("completed", "skipped") and k not in OPTIONAL_STEPS), None)
-        return {"run_id": run["id"], "name": run.get("name"), "pipeline": kind,
-                "batch_label": (run.get("uploadScope") or {}).get("batchLabel"),
-                "scope": {k: (run.get("uploadScope") or {}).get(k) for k in SCOPE_KEYS},
-                "steps": steps, "current_step": nxt,
-                "open_in_app": f"/process/{run['workspaceId']}/run/{run['id']}"}
+        out = {"run_id": run["id"], "name": run.get("name"), "pipeline": kind,
+               "batch_label": (run.get("uploadScope") or {}).get("batchLabel"),
+               "scope": {k: (run.get("uploadScope") or {}).get(k) for k in SCOPE_KEYS},
+               "steps": steps, "current_step": nxt,
+               "open_in_app": f"/process/{run['workspaceId']}/run/{run['id']}"}
+        host = self.folded_into(run)
+        if host is not None and not any(v in ("running", "failed") for v in steps.values()):
+            # Another camera of an RGB run's flight (thermal beside RGB): processed there.
+            out["current_step"] = None
+            out["with_run"] = {"run_id": host["id"], "name": host.get("name"),
+                               "batch_label": (host.get("uploadScope") or {}).get("batchLabel")}
+            out["note"] = (f"these {(run.get('uploadScope') or {}).get('sensor')} frames are processed with the RGB "
+                           "run of the same flight: its plot images from the raw frames (split_plots source=frames) "
+                           "include them, and a thermal camera gives canopy temperature. Nothing is due here; "
+                           "this run's own steps only build this sensor's orthomosaic, if the person asks for one.")
+        return out
+
+    # -- one flight, several cameras (the app's companionRuns.ts) ------------------------------------
+
+    PRIMARY_SENSORS = ("rgb", "visible", "wide")
+
+    @staticmethod
+    def sensor_type(sensor: Any) -> str:
+        """"rgb" from "RGB" or "RGB-SonyA7R" (another camera of that type)."""
+        return str(sensor or "").strip().split("-")[0].lower()
+
+    def _batch_treatments(self) -> dict[str, str]:
+        """Upload batch (dataset short id) -> its treatment label, once per instance."""
+        if getattr(self, "_treatments", None) is None:
+            self._treatments = {}
+            try:
+                rows = self.client.get_json("/api/datasets/all?limit=5000") or []
+                rows = rows if isinstance(rows, list) else rows.get("data", [])
+                for d in rows:
+                    t = str((d.get("dataset_info") or {}).get("treatment") or "").strip()
+                    if t:
+                        self._treatments[str(d.get("id"))[:8]] = t
+            except Exception:
+                pass
+        return self._treatments
+
+    @staticmethod
+    def _split_label(label: Any) -> tuple[str, str]:
+        run_part, trt = "", ""
+        for part in (p.strip() for p in str(label or "").split("·")):
+            if part.lower().startswith("run "):
+                run_part = part[4:].strip()
+            elif part:
+                trt = part
+        return run_part, trt
+
+    def _run_treatments(self, run: dict) -> set[str]:
+        _, own = self._split_label((run.get("uploadScope") or {}).get("batchLabel"))
+        if own:
+            return {own}
+        labels = self._batch_treatments()
+        return {labels[i] for i in (run.get("uploadScope") or {}).get("datasetShortIds") or [] if i in labels}
+
+    def folded_into(self, run: dict, runs: Optional[list] = None) -> Optional[dict]:
+        """The RGB run of the same flight another camera's run folds into: same experiment,
+        site, population, date and platform, same run of the day, a treatment it holds."""
+        up = run.get("uploadScope") or {}
+        if self.sensor_type(up.get("sensor")) in self.PRIMARY_SENSORS:
+            return None
+        place = ("experiment", "location", "population", "date", "platform")
+        mine_run, _ = self._split_label(up.get("batchLabel"))
+        mine_trt = None
+        for r in runs if runs is not None else self.state()["runs"]:
+            u = r.get("uploadScope") or {}
+            if r is run or self.sensor_type(u.get("sensor")) not in self.PRIMARY_SENSORS:
+                continue
+            if any(str(u.get(k) or "") != str(up.get(k) or "") for k in place):
+                continue
+            if self._split_label(u.get("batchLabel"))[0] != mine_run:
+                continue
+            mine_trt = self._run_treatments(run) if mine_trt is None else mine_trt
+            theirs = self._run_treatments(r)
+            if not mine_trt or not theirs or mine_trt <= theirs:
+                return r
+        return None
 
     def list(self) -> list[dict]:
         st = self.state()

@@ -13,8 +13,8 @@
  * The override fields below are escape hatches for path components when the
  * data on disk doesn't have a matching entity row in the DB.
  */
-import { useEffect, useMemo } from "react"
 
+import { useEffect, useMemo } from "react"
 import type { ExperimentOutput } from "@/client"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -32,6 +32,7 @@ import {
   useExperimentSites,
   useMyExperimentIds,
 } from "@/features/experiments/hooks/useExperimentData"
+import { PLATFORMS, SENSOR_TYPES } from "@/features/files/lib/sensorKit"
 import { useAvailableScopeOptions } from "@/features/process/hooks/useAvailableScopeOptions"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { yearFromDate } from "@/features/process/lib/paths"
@@ -61,14 +62,9 @@ export type AerialScopeContext = {
   populationName: string
 }
 
-export const COMMON_PLATFORMS = ["Drone", "Amiga", "RoverM2", "DJI"] as const
-export const COMMON_SENSORS = [
-  "RGB",
-  "Thermal",
-  "Multispectral",
-  "LiDAR",
-  "FC6310S",
-] as const
+// The platforms and sensors uploads take (files/lib/sensorKit.ts).
+export const COMMON_PLATFORMS = PLATFORMS
+export const COMMON_SENSORS = SENSOR_TYPES
 
 export function useAerialScopeContext(): AerialScopeContext {
   const { experimentId, seasonId, siteId, populationId } = useProcessScope()

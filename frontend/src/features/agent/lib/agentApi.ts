@@ -465,6 +465,26 @@ export interface CloudItem {
   modified: string | null
 }
 
+/** Another camera's frames beside a folder, taken on the same flight (thermal beside RGB). */
+export interface SameFlightFolder {
+  folder: string
+  /** The sensor name suggested from the folder's name (Thermal, Multispectral, …). */
+  sensor: string
+  files: number
+  /** The ending its frames' names share, e.g. _T.tif. */
+  name_ends: string
+  seconds_apart_at_start: number
+}
+
+/** An upload or copy in flight (the process panel). */
+export interface WorkItem {
+  kind: "ingest" | "fetch" | "upload" | "pull-rclone"
+  id: string
+  title: string
+  state: "waiting" | "queued" | "running"
+  detail?: string
+}
+
 export const agentApi = {
   mode: () => call<AgentMode>("/mode"),
   /** A session for the stack's own account; only answered on this computer. */
@@ -507,8 +527,13 @@ export const agentApi = {
   compute: (fresh = false) =>
     call<ComputeOverview>(`/compute${fresh ? "?fresh=1" : ""}`),
   /** What is in a folder on the cluster the person named (two levels). */
+  /** Uploads and copies in flight: on the cluster, waiting for a job slot, and here. */
+  work: () => call<WorkItem[]>("/work"),
   clusterFolder: (folder: string) =>
-    call<{ result: string }>("/compute/folder", post({ folder })),
+    call<{ result: string; same_flight?: SameFlightFolder[] }>(
+      "/compute/folder",
+      post({ folder }),
+    ),
   /** A cluster job uploads that folder into the session, as one batch. */
   clusterIngest: (settings: Record<string, string>) =>
     call<{ result: string }>("/compute/ingest", post(settings)),

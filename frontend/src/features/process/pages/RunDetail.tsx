@@ -69,6 +69,7 @@ import {
   DataSyncDialog,
 } from "@/features/process/components/DataSyncDialog"
 import { DataSyncPanel } from "@/features/process/components/DataSyncPanel"
+import { FlightCameras } from "@/features/process/components/FlightCameras"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImagesStepPanel } from "@/features/process/components/PlotImagesStepPanel"
@@ -117,6 +118,7 @@ import {
 } from "@/features/process/lib/orthoVersions"
 import {
   type AerialScope,
+  framesRunKey,
   inFolder,
   isAerialScopeComplete,
   plotBoundariesPath,
@@ -140,6 +142,7 @@ import {
 } from "@/features/process/lib/runEvents"
 import {
   getRun,
+  type Run,
   type RunTreatment,
   setStepState,
   updateRun,
@@ -433,6 +436,8 @@ function splitParams(
   orthomosaicPath: string | undefined,
   source: "ortho" | "frames" | undefined,
   treatmentOrthos: string[],
+  /** The run's label, when it is one of several of the day. */
+  batchLabel?: string,
 ): SplitOrthomosaicParams {
   if (source !== "frames") return { boundaries, orthomosaicPath }
   const orthomosaicPaths = [
@@ -441,7 +446,14 @@ function splitParams(
       ...treatmentOrthos,
     ]),
   ]
-  return { boundaries, orthomosaicPath, source, orthomosaicPaths }
+  const runKey = framesRunKey(batchLabel)
+  return {
+    boundaries,
+    orthomosaicPath,
+    source,
+    orthomosaicPaths,
+    ...(runKey ? { runKey, runLabel: batchLabel ?? "" } : {}),
+  }
 }
 
 interface RunStepOptions {
@@ -1611,9 +1623,15 @@ export function RunDetail() {
   const hasOrtho =
     pipeline?.type !== "ground" &&
     buildOrthoVersions(run, scope, orthoFiles).length > 0
-  const hasPlotFrames = (processedFilesQuery.data ?? []).some((f) =>
-    (f.object_name ?? "").endsWith("/PlotFrames/manifest.json"),
-  )
+  // This run's raw-frame plot images (a labelled run of the day has its own folder).
+  const framesManifest = scope
+    ? `${plotFramesPrefix(scope, run?.uploadScope?.batchLabel)}manifest.json`
+    : ""
+  const hasPlotFrames =
+    !!framesManifest &&
+    (processedFilesQuery.data ?? []).some((f) =>
+      (f.object_name ?? "").endsWith(framesManifest),
+    )
   // The run's orthomosaic kept the camera positions that place raw frames.
   const orthoHasCameras = (() => {
     if (!scope) return false
@@ -1626,6 +1644,14 @@ export function RunDetail() {
         ),
     )
   })()
+  // Plot images from raw frames need an orthomosaic built here from the raw
+  // images (by ODM). Runs whose orthomosaic was uploaded have no raw frames
+  // to pick from: the option is not offered there.
+  const rawFramesPossible =
+    hasPlotFrames ||
+    (scope
+      ? buildOrthoVersions(run, scope, orthoFiles).some((v) => Boolean(v.jobId))
+      : false)
   const hasPlotImages = plotImageFiles.length > 0 || hasPlotFrames
   const recorded: Record<string, { status: string }> = run?.steps ?? {}
   const stepsState: Record<string, { status: string }> = { ...recorded }
@@ -2003,6 +2029,7 @@ export function RunDetail() {
                         )
                         .filter((x): x is string => Boolean(x))
                     : [],
+                  run.uploadScope?.batchLabel,
                 )
               : undefined,
         })
@@ -2090,6 +2117,43 @@ export function RunDetail() {
       }
     },
     [runStepNow],
+  )
+
+  // Another camera of this flight (thermal beside RGB): its orthomosaic, built
+  // with this run's settings and recorded on its own run.
+  const [buildingCompanion, setBuildingCompanion] = useState<string | null>(
+    null,
+  )
+  const buildCompanionOrtho = useCallback(
+    async (companion: Run) => {
+      const experimentId =
+        companion.uploadScope?.experimentId ?? run?.uploadScope?.experimentId
+      if (!scope || !companion.uploadScope?.sensor || !experimentId) return
+      setBuildingCompanion(companion.id)
+      try {
+        const result = await executeStep({
+          runId: companion.id,
+          stepKey: "orthomosaic",
+          scope: { ...scope, sensor: companion.uploadScope.sensor },
+          datasetShortIds: companion.uploadScope.datasetShortIds ?? [],
+          experimentId,
+          orthomosaic: orthoParams,
+        })
+        if (result.jobId)
+          showSuccessToast(
+            `${companion.uploadScope.sensor} orthomosaic submitted (same settings as this run's)`,
+          )
+      } catch (err) {
+        showErrorToast(
+          err instanceof Error
+            ? err.message
+            : "Could not start the orthomosaic",
+        )
+      } finally {
+        setBuildingCompanion(null)
+      }
+    },
+    [scope, orthoParams, run, showErrorToast, showSuccessToast],
   )
 
   const handleStopStep = useCallback(
@@ -2465,6 +2529,15 @@ export function RunDetail() {
             )}
           </CardHeader>
           <CardContent>
+            {pipeline?.type !== "ground" && (
+              <div className="mb-4">
+                <FlightCameras
+                  run={run}
+                  building={buildingCompanion}
+                  onBuildOrtho={(c) => void buildCompanionOrtho(c)}
+                />
+              </div>
+            )}
             <div className="space-y-0">
               {steps.map((step, idx) => {
                 const status = getStepStatus(step.key, stepsState, steps)
@@ -2557,9 +2630,17 @@ export function RunDetail() {
                         <PlotImagesStepPanel
                           plotImageFiles={plotImageFiles}
                           prefix={scope ? processedPrefix(scope) : ""}
-                          framesPrefix={scope ? plotFramesPrefix(scope) : ""}
+                          framesPrefix={
+                            scope
+                              ? plotFramesPrefix(
+                                  scope,
+                                  run.uploadScope?.batchLabel,
+                                )
+                              : ""
+                          }
                           hasFrames={hasPlotFrames}
                           hasCameraPositions={orthoHasCameras}
+                          offerFrames={rawFramesPossible}
                           running={
                             starting === "split_orthomosaic" ||
                             status === "running"

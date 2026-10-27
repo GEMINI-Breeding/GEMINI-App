@@ -304,16 +304,16 @@ export function InferenceTool({
       // and its best frame straightened to a top-down view.
       {
         label: "Plot crops from the raw frames",
-        prefix: `${plotFramesPrefix(scope)}crops/`,
+        prefix: `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}crops/`,
         plots: true,
       },
       {
         label: "Straightened plot views from the raw frames",
-        prefix: `${plotFramesPrefix(scope)}straightened/`,
+        prefix: `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}straightened/`,
         plots: true,
       },
     ]
-  }, [scope, datasetShortIds])
+  }, [scope, datasetShortIds, run.uploadScope?.batchLabel])
   const [sourceIdx, setSourceIdx] = useState(0)
   const activePrefix = sources[sourceIdx].prefix
   // "single" infers the previewed image; "all" hands the whole prefix to

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -6,6 +7,10 @@ import type { Process } from "@/types/process"
 let processes: Process[] = []
 const removeProcess = vi.fn()
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
+// No uploads or copies in flight from the app's service.
+vi.mock("@/features/agent/lib/agentApi", () => ({
+  agentApi: { work: () => Promise.resolve([]) },
+}))
 vi.mock("@/contexts/ProcessContext", () => ({
   useProcess: () => ({
     processes,
@@ -34,7 +39,11 @@ describe("ProcessPanel", () => {
   it("drops a job that finished successfully after a while", () => {
     removeProcess.mockClear()
     processes = [proc("completed")]
-    render(<ProcessPanel />)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProcessPanel />
+      </QueryClientProvider>,
+    )
     expect(screen.getByText("Data Sync")).toBeInTheDocument()
     act(() => {
       vi.advanceTimersByTime(AUTO_DISMISS_MS)
@@ -45,7 +54,11 @@ describe("ProcessPanel", () => {
   it("keeps a failed job until it is dismissed", () => {
     removeProcess.mockClear()
     processes = [proc("error")]
-    render(<ProcessPanel />)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProcessPanel />
+      </QueryClientProvider>,
+    )
     act(() => {
       vi.advanceTimersByTime(AUTO_DISMISS_MS * 3)
     })
@@ -55,7 +68,11 @@ describe("ProcessPanel", () => {
 
   it("stays open while a job is running", () => {
     processes = [proc("running")]
-    render(<ProcessPanel />)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProcessPanel />
+      </QueryClientProvider>,
+    )
     act(() => {
       vi.advanceTimersByTime(AUTO_DISMISS_MS * 3)
     })

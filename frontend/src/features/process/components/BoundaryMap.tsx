@@ -25,6 +25,8 @@ const ESRI_URL =
 
 export type BoundaryMapProps = {
   features: GeoJSON.Feature[]
+  /** Changed when boundaries are loaded or imported: the map zooms to them. */
+  fitSignal?: number
   onFeaturesChange: (features: GeoJSON.Feature[]) => void
   /** Optional starting view; falls back to bounds of features or a default. */
   center?: L.LatLngTuple
@@ -121,6 +123,7 @@ export function BoundaryMap({
   overlays,
   onOverlayClick,
   orthoLayers,
+  fitSignal,
 }: BoundaryMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -170,6 +173,7 @@ export function BoundaryMap({
   // polygons are added/removed — not on every pm:edit. Without this
   // guard, dragging a vertex causes a refit that yanks the view.
   const lastFitSignatureRef = useRef<string>("")
+  const lastFitSignalRef = useRef<number | undefined>(undefined)
 
   // One-time map init.
   useEffect(() => {
@@ -662,10 +666,14 @@ export function BoundaryMap({
     // Refit only on empty <-> non-empty transitions so undo back to an
     // empty state doesn't yank the user's view.
     const signature = features.length === 0 ? "empty" : "nonempty"
+    // Also on a new fitSignal: boundaries loaded or imported into the editor.
+    const asked = fitSignal !== lastFitSignalRef.current
+    lastFitSignalRef.current = fitSignal
     if (
       features.length > 0 &&
-      signature !== lastFitSignatureRef.current &&
-      lastFitSignatureRef.current === "empty"
+      (asked ||
+        (signature !== lastFitSignatureRef.current &&
+          lastFitSignatureRef.current !== "nonempty"))
     ) {
       lastFitSignatureRef.current = signature
       try {
@@ -677,7 +685,7 @@ export function BoundaryMap({
     } else {
       lastFitSignatureRef.current = signature
     }
-  }, [features, selectedBlockId, selectedCellIds])
+  }, [features, selectedBlockId, selectedCellIds, fitSignal])
 
   return (
     <div className="relative h-full w-full">

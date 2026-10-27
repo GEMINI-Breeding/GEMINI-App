@@ -180,3 +180,53 @@ def poll_local_work() -> None:
                   "ERROR" if str(f.get("state")).lower() == "failed" else "INFO")
     except Exception:
         pass
+
+
+# -- work in flight, for the app's process panel -------------------------------------------------
+
+_KIND = {"ingest": "Upload from a cluster folder", "fetch": "Copy from online storage",
+         "pull-rclone": "Installing the storage copier"}
+
+
+def work_in_flight() -> list[dict]:
+    """Uploads and copies under way or waiting: on the cluster (from the last queue read),
+    waiting for a cluster job slot, and on this computer. One row each:
+    {kind, title, state: waiting | queued | running, detail}."""
+    rows: list[dict] = []
+    for jid, r in sorted(_seen.items()):
+        name = r["name"][len("gemi-"):] if r["name"].startswith("gemi-") else r["name"]
+        if name not in _KIND:
+            continue
+        st = r.get("slurm_state")
+        state = "running" if st in ("RUNNING", "COMPLETING") else "queued"
+        why = "" if state == "running" else (
+            "waiting for the account's CPU allowance" if str(r.get("reason") or "").startswith("QOSGrp")
+            else "waiting for room on the cluster")
+        rows.append({"kind": name, "id": jid, "title": f"{_KIND[name]} (cluster job {jid})", "state": state,
+                     "detail": why or (f"on {r['node']}" if r.get("node") else "")})
+    try:
+        from . import cloud
+
+        for w in cloud._waiting(None):
+            if w.get("job_id") or w.get("state") != "WAITING":
+                continue
+            rows.append({"kind": "fetch", "id": w["id"],
+                         "title": "Copy from online storage" + (f" · {w['date']}" if w.get("date") else ""),
+                         "state": "waiting", "detail": "waiting for a free cluster job slot; starts by itself"})
+        for f in cloud.fetches("local")[:20]:
+            if f.get("state") in ("copying", "uploading"):
+                rows.append({"kind": "fetch", "id": f["id"], "title": f"Copy {f.get('source', '')}".strip(),
+                             "state": "running", "detail": f.get("line") or f.get("state")})
+    except Exception:
+        pass
+    try:
+        from . import uploads
+
+        for t in uploads.list_tasks()[:20]:
+            if t["status"] in ("running", "stalled"):
+                where = t["target"].rstrip("/").split("/")[-1] or t["target"]
+                rows.append({"kind": "upload", "id": t["task_id"], "title": f"Upload to {where}",
+                             "state": "running", "detail": f"{int(t['percent'])}%"})
+    except Exception:
+        pass
+    return rows

@@ -33,6 +33,13 @@ import {
   extractDatasetShortId,
 } from "@/features/files/lib/datasetForUpload"
 import { existingUploadNames } from "@/features/files/lib/duplicates"
+import { readExifAutofill } from "@/features/files/lib/exifAutofill"
+import {
+  dateFromFolder,
+  dateFromName,
+  dateOf,
+  groupByDate,
+} from "@/features/files/lib/fileDates"
 import {
   humanFieldLabel,
   missingFormFields,
@@ -43,7 +50,9 @@ import {
   batchLabelText,
   batchNameSuffix,
   duplicateLabels,
+  type FolderGroup,
   type FolderMeaning,
+  folderOf,
   foldersOf,
   groupByFolder,
 } from "@/features/files/lib/uploadGroups"
@@ -58,6 +67,7 @@ import type { Run } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
 import { probeFilesForThermal } from "@/lib/thermalProbe"
+import { DateCheckDialog, type DateCheckGroup } from "./DateCheckDialog"
 import { ThermalCalibrationField } from "./ThermalCalibrationField"
 import { UploadZone } from "./UploadZone"
 
@@ -183,6 +193,17 @@ type RejectionDetails = {
   remediation?: string
 }
 
+/** The device the files came from (EXIF maker and model) and the camera named on the
+ * form: kept on the upload's record for processing that depends on it. */
+function deviceInfo(values: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (values.device_make?.trim()) out.device_make = values.device_make.trim()
+  if (values.device_model?.trim()) out.device_model = values.device_model.trim()
+  if (values.sensor_camera_mode === "other" && values.sensor_camera?.trim())
+    out.camera = values.sensor_camera.trim()
+  return out
+}
+
 export function UploadList({
   dataType,
   formValues,
@@ -215,6 +236,15 @@ export function UploadList({
     earlierBatch: boolean
     resolve: (choice: "skip" | "replace" | "cancel") => void
   } | null>(null)
+  // Dates read from the files, shown for checking before the upload.
+  const [datePrompt, setDatePrompt] = useState<{
+    groups: DateCheckGroup[]
+    resolve: (dates: string[] | null) => void
+  } | null>(null)
+  const askDates = (groups: DateCheckGroup[]) =>
+    new Promise<string[] | null>((resolve) =>
+      setDatePrompt({ groups, resolve }),
+    )
   const askAboutDuplicates = (
     names: string[],
     total: number,
@@ -423,6 +453,65 @@ export function UploadList({
       return
     }
 
+    // Dates read from the files: one upload per date, checked by the person first.
+    let work: (FolderGroup & { date?: string })[] = batches.filter(
+      (b) => b.include && b.files.length > 0,
+    )
+    if (formValues.date_mode === "files") {
+      const photo = new Map<File, string>()
+      // Photo dates only where neither the name nor the folder carries one.
+      const needPhoto = work
+        .flatMap((b) => b.files)
+        .filter(
+          (f) =>
+            !dateFromName(f.name) &&
+            !dateFromFolder(folderOf(f)) &&
+            /\.(jpe?g|tiff?|dng)$/i.test(f.name),
+        )
+      for (let i = 0; i < needPhoto.length; i += 8) {
+        await Promise.all(
+          needPhoto.slice(i, i + 8).map(async (f) => {
+            const m = await readExifAutofill(f)
+            if (m.date) photo.set(f, m.date)
+          }),
+        )
+      }
+      const fallback =
+        formValues.date?.trim() || new Date().toISOString().slice(0, 10)
+      const split = work.flatMap((b) =>
+        groupByDate(
+          b.files,
+          (f) =>
+            dateOf({
+              name: f.name,
+              folder: folderOf(f),
+              photoDate: photo.get(f),
+              modified: f.lastModified,
+            }),
+          fallback,
+        ).map((g) => ({
+          ...b,
+          files: g.items,
+          date: g.date,
+          source: g.source,
+        })),
+      )
+      const dates = await askDates(
+        split.map((b) => ({
+          date: b.date,
+          source: b.source,
+          count: b.files.length,
+          samples: b.files.slice(0, 3).map((f) => f.name),
+          label:
+            [b.run && `run ${b.run}`, b.treatment, b.folder]
+              .filter(Boolean)
+              .join(" · ") || undefined,
+        })),
+      )
+      if (!dates) return
+      work = split.map((b, i) => ({ ...b, date: dates[i] }))
+    }
+
     setIsUploading(true)
     // Hoisted into the outer scope so the catch handler can decide
     // whether to auto-delete the dataset we just created. Set inside
@@ -457,9 +546,9 @@ export function UploadList({
       const allUploaded: string[] = []
       // Field data (rover logs, images) becomes a run on the Process tab.
       const filedRuns: { run: Run; created: boolean }[] = []
-      for (const batch of batches.filter(
-        (b) => b.include && b.files.length > 0,
-      )) {
+      for (const batch of work) {
+        // The batch's own date (dates read from the files), else the form's.
+        const scoped = batch.date ? { ...merged, date: batch.date } : merged
         setResolveStatus(null)
         const experimentName =
           resolved.experiment?.name ?? merged.experiment ?? ""
@@ -472,9 +561,12 @@ export function UploadList({
               dataTypeLabel: dataType,
               // Every upload records where it belongs (season, site, date…),
               // so Manage Data can list it by season and find its files.
-              info: canSplit
-                ? batchInfo(batch, merged, batch.folder || undefined)
-                : batchInfo({ run: "", treatment: "" }, merged),
+              info: {
+                ...(canSplit
+                  ? batchInfo(batch, scoped, batch.folder || undefined)
+                  : batchInfo({ run: "", treatment: "" }, scoped)),
+                ...deviceInfo(formValues),
+              },
               nameSuffix: canSplit ? batchNameSuffix(batch) : undefined,
             })
             datasetId = idAsString(ds.dataset.id) ?? undefined
@@ -506,7 +598,7 @@ export function UploadList({
 
         const targetRootDir = buildTargetRootDir(
           dataType,
-          merged,
+          scoped,
           datasetShortId,
           subDir,
         )
@@ -1012,6 +1104,17 @@ export function UploadList({
         </div>
       )}
 
+      <DateCheckDialog
+        groups={datePrompt?.groups ?? null}
+        onConfirm={(dates) => {
+          datePrompt?.resolve(dates)
+          setDatePrompt(null)
+        }}
+        onCancel={() => {
+          datePrompt?.resolve(null)
+          setDatePrompt(null)
+        }}
+      />
       <Dialog
         open={duplicatePrompt !== null}
         onOpenChange={(open) => {

@@ -66,7 +66,10 @@ export function defaultPipelineParams(
       custom_odm_options: "",
       ...common,
     }
-  const amiga = platform.toLowerCase().includes("amiga")
+  // The farm-ng rover (Amiga): uploaded as Rover now, as Amiga before.
+  const amiga = ["amiga", "rover"].some((w) =>
+    platform.toLowerCase().includes(w),
+  )
   return {
     device: "cpu",
     num_cpu: 0,

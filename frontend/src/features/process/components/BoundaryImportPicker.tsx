@@ -14,9 +14,9 @@
  * the images by the agent service); crops can be picked, for a flight of one
  * crop. Each plot keeps its label, crop and genotype from the field design.
  */
+
 import { useMutation } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
-
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -25,6 +25,7 @@ import {
   useAllPlotGeometryVersions,
   useLoadPlotGeometryVersion,
 } from "@/features/process/hooks/usePlotGeometry"
+import useCustomToast from "@/hooks/useCustomToast"
 
 /** `Processed/{season}/{exp}/{site}/{pop}/{date}/{platform}/{sensor}/` → parts. */
 export function describeDirectory(directory: string) {
@@ -137,6 +138,7 @@ export function BoundaryImportPicker({
   }, [loaded.data])
   const chosen = crops ?? available
 
+  const { showErrorToast } = useCustomToast()
   const move = useMutation({
     mutationFn: () =>
       agentApi.moveBoundaries({
@@ -148,6 +150,25 @@ export function BoundaryImportPicker({
       }),
     onSuccess: (r) => {
       const s = r.shift
+      const subset = available.length > 0 && chosen.length < available.length
+      // A weak match is no measurement: the two maps could not be lined up, and
+      // flights of one field (RTK) usually agree to centimetres. Keep the plots
+      // where they were saved rather than move them by a guess.
+      if (
+        align &&
+        s &&
+        s.match != null &&
+        s.match < 0.05 &&
+        !subset &&
+        picked
+      ) {
+        onImport(picked.directory, picked.version, picked.plotCount)
+        showErrorToast(
+          `The two orthomosaics could not be lined up reliably (match ${s.match}), so the plots were kept where they are on ${describeDirectory(picked.directory).date}. Check them on the map and move them by hand if needed.`,
+        )
+        setPicked(null)
+        return
+      }
       const moved =
         align && s
           ? ` moved ${s.dx.toFixed(2)} m east, ${s.dy.toFixed(2)} m north (match ${s.match ?? "?"})`
@@ -157,6 +178,16 @@ export function BoundaryImportPicker({
         `Imported ${r.plots} plots${moved}. ${r.check}.`,
       )
       setPicked(null)
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Aligning goes through the app's own service on this computer: when it
+      // does not answer (restarted, say), the page needs reloading.
+      showErrorToast(
+        /fetch|network|Failed to|ECONN|502|503/i.test(msg)
+          ? "Could not reach the app's service to align the boundaries. Reload the page and import again (or import without aligning)."
+          : `Import failed: ${msg}`,
+      )
     },
   })
 

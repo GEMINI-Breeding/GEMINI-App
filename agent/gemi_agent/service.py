@@ -380,6 +380,15 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_read_queue, daemon=True).start()
             since = (query.get("since") or [None])[0]
             return activity.lines(since=float(since) if since else None)
+        if route == ["work"] and method == "GET":
+            # The app's process panel: uploads and copies in flight (cluster and here).
+            from . import activity, compute
+            from .hpc_tools import active_cluster
+
+            activity.poll_local_work()
+            if active_cluster() and time.time() - compute._cache["t"] > 20 and not _queue_read.locked():
+                threading.Thread(target=_read_queue, daemon=True).start()
+            return activity.work_in_flight()
         if route == ["status"]:
             if user.get("setup"):
                 return {"setup": True, "jobs_active": [], "workers_busy": [], "uploads": [], "experiments": [],
@@ -803,6 +812,12 @@ def serve(argv: list[str]) -> None:
     from . import activity, compute
 
     activity.install()
+    try:
+        from . import cloud
+
+        cloud.resume_waiting()            # copies left waiting for a cluster job slot
+    except Exception:
+        pass
 
     threading.Thread(target=compute.watch, daemon=True).start()
     cfg = load_config()

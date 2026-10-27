@@ -23,6 +23,7 @@ When the files sit on the cluster's storage (a session runs there), do not copy 
 
 1. `{"tool": "cluster_folder", "args": {"folder": "<the path they named>"}}` shows what is in it (two levels).
 2. `{"tool": "cluster_folder", "args": {"folder": "<path>", "upload": true, "experiment": "…", "site": "…", "population": "…", "date": "YYYY-MM-DD", "platform": "Drone", "sensor": "RGB", "data_type": "images"}}` submits a cluster job that uploads it as one batch (asks the person first). Add `"name_ends": "_V.JPG"` to keep only some files. Names with spaces are fine.
+3. **The flight's other cameras.** When step 1 returns `same_flight` (a thermal camera's frames beside the RGB ones, taken at the same moments), say so in one sentence and offer to upload them too: one more `cluster_folder` upload per folder, with its `sensor` (e.g. `Thermal`), its `name_ends` (e.g. `_T.tif`), and the **same** experiment, site, population, date, platform, `treatment` and `run_of_day` as the RGB upload. Prefer converted frames that hold temperatures (°C .tif, e.g. a `thermal_conv` folder) over raw R-JPEGs. The plot images step (raw frames) then matches them to the RGB frames by capture time, cuts them per plot, and stores each plot's canopy temperature (trait `Temp_veg_avg_C`). Thermal frames uploaded after the plot images were made: run `split_plots` with `source: "frames"` again.
 
 ## Data in online storage (Box, Google Drive, Dropbox, S3, WebDAV, a web folder, SFTP)
 
@@ -60,7 +61,11 @@ storage. It runs in the background and survives the tool call; you poll it.
 | population | `Lima` | which trial / set of plots |
 | date | `2026-09-17` | collection date, `YYYY-MM-DD` — **not** today's date |
 | data_type | `amiga_bin` | `amiga_bin` (rover `.bin`), `images`, `orthomosaic` |
-| platform, sensor | `Amiga`, `RGB` | defaults for rover data; ask for drone data |
+| platform | `Drone` | one of `Drone`, `Rover`, `Handheld`: it chooses the processing (aerial or ground) |
+| sensor | `RGB` | `RGB` or `Thermal` for the platform's own camera; another camera of that type is `RGB-<camera>` (`RGB-SonyA7R`), so two cameras flown the same date stay apart |
+
+Anything else for platform or sensor is refused (the upload says what is allowed). Record the
+device when the person names it (`DJI M4T`, `Sony A7R`): the camera part of the sensor name.
 
 If the person did not give site, population or date, **ask**. A wrong one
 files the data in the wrong place. File names often contain the date

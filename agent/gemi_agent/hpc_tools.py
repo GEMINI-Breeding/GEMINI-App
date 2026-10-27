@@ -37,6 +37,11 @@ _strs = {"type": "array", "items": _str}
 
 # ── plumbing ─────────────────────────────────────────────────────────────────
 
+# Platform and sensor come from a fixed list (uploads.check_kit): they choose the processing.
+_PLATFORM = {"type": "string", "description": "Drone | Rover | Handheld (chooses the pipeline: aerial or ground)"}
+_SENSOR = {"type": "string", "description": "RGB | Thermal; another camera of that type than the platform's own: "
+                                           "<type>-<camera>, e.g. RGB-SonyA7R"}
+
 def _home() -> Path:
     return Path(os.environ.get("USERPROFILE") or Path.home())
 
@@ -598,11 +603,26 @@ def cluster_folder(args: dict) -> dict:
     if not cluster:
         raise ValueError("no cluster configured yet")
     if not args.get("upload"):
-        return {"result": _gemi_hpc(["folder-peek", folder], cluster, timeout=120),
-                "next": "to upload it: cluster_folder upload=true with experiment, site, population, date, "
-                        "platform, sensor, data_type (and name_ends to keep only some files)"}
-    from .uploads import encode_setting
+        out = _gemi_hpc(["folder-peek", folder], cluster, timeout=120)
+        result: dict[str, Any] = {"result": out,
+                                  "next": "to upload it: cluster_folder upload=true with experiment, site, population, "
+                                          "date, platform, sensor, data_type (and name_ends to keep only some files)"}
+        try:
+            same = same_flight_folders(folder, out, cluster)
+        except Exception:
+            same = []                                # a look at the neighbours is extra, never in the way
+        if same:
+            result["same_flight"] = same
+            result["next"] += ("; same_flight lists the flight's other cameras beside this folder (frames taken "
+                               "at the same moments): upload each as its own sensor (e.g. Thermal) with the same "
+                               "experiment, site, population, date, platform, treatment and run_of_day, and the "
+                               "plot images step cuts them per plot with the RGB frames (a thermal camera also "
+                               "gives canopy temperature)")
+        return result
+    from .uploads import check_kit, encode_setting
 
+    args = dict(args)
+    args["platform"], args["sensor"] = check_kit(args.get("platform", ""), args.get("sensor", ""))
     words = []
     for k in _INGEST_KEYS:
         v = str(args.get(k) or "").strip()
@@ -618,11 +638,83 @@ def cluster_folder(args: dict) -> dict:
                                    "then the run appears on the Process tab"}
 
 
+_FRAME_NAME = re.compile(r"^(.*?)(\d{14})_(\d{3,5})(_[A-Za-z0-9]+)?(\.[A-Za-z0-9]+)$")
+
+
+def _listing(peek: str) -> tuple[list[str], int]:
+    """The entries a folder-peek shows (names, before the type summary) and its entry count."""
+    lines = peek.splitlines()
+    n = next((int(l.split(":", 1)[1]) for l in lines if l.startswith("entries:")), 0)
+    names = []
+    for l in lines[2:]:
+        if l.startswith("files by type"):
+            break
+        if l.strip():
+            names.append(l.strip())
+    return names, n
+
+
+def _frames_of(names: list[str]) -> Optional[dict]:
+    """A folder of camera frames named like DJI_<14-digit time>_<sequence>_<kind>.<ext>:
+    the first frame's time and sequence, and the ending its names share (_T.tif)."""
+    hits = [m for m in (_FRAME_NAME.match(n) for n in names) if m]
+    if len(hits) < max(3, len(names) // 2):
+        return None
+    ends = {(m.group(4) or "") + m.group(5) for m in hits}
+    return {"first_time": hits[0].group(2), "first_seq": int(hits[0].group(3)),
+            "name_ends": ends.pop() if len(ends) == 1 else ""}
+
+
+def _sensor_name(folder: str) -> str:
+    n = folder.lower()
+    if "thermal" in n or n in ("ir", "lwir", "t"):
+        return "Thermal"
+    if "multispec" in n or n in ("ms", "multi"):
+        return "Multispectral"
+    if n in ("rgb", "v", "visible", "wide"):
+        return "RGB"
+    return folder
+
+
+def same_flight_folders(folder: str, peek: str, cluster: str, limit: int = 4) -> list[dict]:
+    """The flight's other cameras beside a folder of frames: sibling folders whose frames
+    start at the same moment (within 5 s) as this folder's — a thermal camera's beside the
+    RGB camera's, say. Only the folder's own parent is looked in, never further."""
+    from datetime import datetime
+
+    names, _ = _listing(peek)
+    mine = _frames_of(names)
+    if not mine:
+        return []
+    parent, here = folder.rstrip("/").rsplit("/", 1)
+    siblings, _ = _listing(_gemi_hpc(["folder-peek", parent], cluster, timeout=120))
+    t0 = datetime.strptime(mine["first_time"], "%Y%m%d%H%M%S")
+    out = []
+    for sib in [x for x in siblings if x != here and "." not in x][:limit]:
+        path = f"{parent}/{sib}"
+        try:
+            peek2 = _gemi_hpc(["folder-peek", path], cluster, timeout=120)
+        except Exception:
+            continue
+        sib_names, n = _listing(peek2)
+        theirs = _frames_of(sib_names)
+        if not theirs:
+            continue
+        dt = abs((datetime.strptime(theirs["first_time"], "%Y%m%d%H%M%S") - t0).total_seconds())
+        if dt > 5:
+            continue
+        out.append({"folder": path, "sensor": _sensor_name(sib), "files": n, "name_ends": theirs["name_ends"],
+                    "seconds_apart_at_start": dt})
+    return out
+
+
 _hpc(cluster_folder, "Data that is already on the cluster: folder = the full path the person named (never search "
      "for one). Without upload: what is in it (two levels). With upload=true and the run's settings: a cluster job "
-     "uploads it into the session as one batch, like an upload from the app (asks first).",
+     "uploads it into the session as one batch, like an upload from the app (asks first). A look at a folder of camera "
+     "frames also lists the flight's other cameras beside it (same_flight: e.g. thermal frames taken with the RGB "
+     "ones); upload each as its own sensor with the same labels.",
      {"folder": _str, "upload": _bool, "experiment": _str, "site": _str, "population": _str,
-      "date": {**_str, "description": "YYYY-MM-DD"}, "platform": _str, "sensor": _str,
+      "date": {**_str, "description": "YYYY-MM-DD"}, "platform": _PLATFORM, "sensor": _SENSOR,
       "data_type": {**_str, "description": "images | amiga_bin | orthomosaic"},
       "name_ends": {**_str, "description": "keep only files whose names end so, comma separated, e.g. _V.JPG"},
       "run_of_day": _str, "treatment": _str, "cluster": _str}, ["folder"])
