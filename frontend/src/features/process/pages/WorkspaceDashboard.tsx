@@ -42,10 +42,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useProcess } from "@/contexts/ProcessContext"
-import {
-  AuthImage,
-  thumbnailSrc,
-} from "@/features/genotyping/components/AuthImage"
+import { AuthImage } from "@/features/genotyping/components/AuthImage"
 import {
   type ExperimentPerson,
   shortName,
@@ -56,7 +53,12 @@ import {
   legacyRunCount,
   regroupAgentRuns,
 } from "@/features/process/lib/regroup"
-import { previewRuns, useRunPreview } from "@/features/process/lib/runPreview"
+import {
+  ORTHO,
+  previewRuns,
+  previewSrc,
+  useRunPreview,
+} from "@/features/process/lib/runPreview"
 import {
   type RunTag,
   runState,
@@ -145,14 +147,25 @@ function RunPicture({ run }: { run: Run }) {
         className={`bg-muted h-full w-full ${preview.isLoading ? "animate-pulse" : ""}`}
       />
     )
+  const alt = u ? `${u.location} ${u.date} ${u.platform}` : "Run image"
   return (
     <div className="relative h-full w-full">
-      <AuthImage
-        src={thumbnailSrc(preview.data, 400)}
-        alt={u ? `${u.location} ${u.date} ${u.platform}` : "Run image"}
-        className="h-full w-full rounded-none border-0 object-cover"
-        lazy
-      />
+      {preview.data.startsWith(ORTHO) ? (
+        // An orthomosaic, rendered small by the tile server.
+        <img
+          src={previewSrc(preview.data, 400)}
+          alt={alt}
+          className="h-full w-full bg-muted object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <AuthImage
+          src={previewSrc(preview.data, 400)}
+          alt={alt}
+          className="h-full w-full rounded-none border-0 object-cover"
+          lazy
+        />
+      )}
       {u && (
         <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 py-px text-[10px] text-white">
           {u.date}

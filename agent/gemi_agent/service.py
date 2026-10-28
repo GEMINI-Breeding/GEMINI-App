@@ -52,12 +52,15 @@ token (checked against the REST API):
     PUT  /agent/compute/ssh_key        {key}            the identity file for the cluster's SSH login (checked first)
     POST /agent/compute/folder         {folder}         what is in a folder on the cluster (two levels; administrators)
     POST /agent/compute/ingest         {folder, experiment, site, …}  a cluster job uploads it (administrators)
+    POST /agent/compute/cluster/check  {ssh, key?, data_root?}  first run: check the SSH login, survey (read-only)
+    POST /agent/compute/cluster/use    {ssh, key?, data_root, core, workers_try, llm_try?}  write its settings
 """
 from __future__ import annotations
 
 import json
 import mimetypes
 import re
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -453,6 +456,25 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return compute.join(str(b.get("login") or ""), str(b.get("folder") or ""), str(b.get("key") or ""))
                 except (ValueError, RuntimeError) as e:
+                    raise HttpError(400, str(e)) from None
+            # First-run cluster setup from the welcome page: this computer's SSH login, so
+            # only from this computer. The check is read-only; "use" writes the settings.
+            if route[:2] == ["compute", "cluster"] and method == "POST":
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    raise HttpError(403, "setting up the cluster uses this computer's SSH login: "
+                                         "from the computer running the app")
+                from .hpc_tools import cluster_check, cluster_use
+
+                b = self._body()
+                try:
+                    if route == ["compute", "cluster", "check"]:
+                        return cluster_check(str(b.get("ssh") or ""), str(b.get("key") or ""),
+                                             str(b.get("data_root") or ""))
+                    if route == ["compute", "cluster", "use"]:
+                        out = cluster_use(b)
+                        compute._cache["t"] = 0.0
+                        return out
+                except (ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
                     raise HttpError(400, str(e)) from None
             here = self.client_address[0] in ("127.0.0.1", "::1")
             if route == ["compute"] and method == "GET":

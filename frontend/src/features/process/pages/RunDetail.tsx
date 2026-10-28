@@ -2483,7 +2483,7 @@ export function RunDetail() {
             line says what the run is on and how many images it found. */}
         {(pipeline?.type === "aerial" || pipeline?.type === "ground") &&
           scope && (
-            <div className="mb-6 space-y-4">
+            <div className="mb-6 space-y-4" data-onboarding="run-scope">
               <RunScopeSummary
                 scope={scope}
                 treatments={run.uploadScope?.treatments}
@@ -2497,7 +2497,7 @@ export function RunDetail() {
             </div>
           )}
 
-        <Card>
+        <Card data-onboarding="run-steps">
           <CardHeader>
             <CardTitle className="text-base">Processing Steps</CardTitle>
             <CardDescription>
@@ -2530,7 +2530,7 @@ export function RunDetail() {
           </CardHeader>
           <CardContent>
             {pipeline?.type !== "ground" && (
-              <div className="mb-4">
+              <div className="mb-4" data-onboarding="run-cameras">
                 <FlightCameras
                   run={run}
                   building={buildingCompanion}

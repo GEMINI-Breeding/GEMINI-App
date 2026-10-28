@@ -236,6 +236,33 @@ export interface ModelSetup {
   job: ModelSetupJob | null
 }
 
+/** A cluster's login checked and surveyed (read-only), for the welcome page. */
+export interface ClusterCheck {
+  /** The SSH command with the key file in it, as it will be saved. */
+  ssh: string
+  name: string
+  login: string
+  ssh_key: string
+  user: string
+  slurm: string
+  containers: string
+  containers_ok: boolean
+  /** partition:account for the core; null when nothing can start it. */
+  core: string | null
+  core_wait_minutes: number | string | null
+  workers_try: string[]
+  llm_try: string[]
+  /** The suggested GEMI folder: an install already there, else roomy shared storage. */
+  data_root: string
+  data_root_candidates: string[]
+  already_installed: {
+    root: string
+    images: string[]
+    data_folders: string[]
+  } | null
+  internet: Record<string, string>
+}
+
 /** Where a model would run on a cluster, from a read-only survey. */
 export interface ClusterModelPlan {
   cluster: string
@@ -575,6 +602,22 @@ export const agentApi = {
   /** Join a session someone in your group shares: your login, their GEMI folder. */
   computeJoin: (login: string, folder: string, key?: string) =>
     call<{ result: string }>("/compute/join", post({ login, folder, key })),
+  /** First run: check the SSH login and survey the cluster (read-only). */
+  computeClusterCheck: (input: {
+    ssh: string
+    key?: string
+    data_root?: string
+  }) => call<ClusterCheck>("/compute/cluster/check", post(input)),
+  /** First run: write the cluster's settings and make it the active cluster. */
+  computeClusterUse: (input: {
+    ssh: string
+    key?: string
+    name: string
+    data_root: string
+    core: string
+    workers_try: string[]
+    llm_try: string[]
+  }) => call<{ cluster: string }>("/compute/cluster/use", post(input)),
   /** Another identity file for the cluster's SSH login; checked before it is saved. */
   computeSshKey: (key: string) =>
     call<{ ssh_key: string; login: string }>("/compute/ssh_key", {

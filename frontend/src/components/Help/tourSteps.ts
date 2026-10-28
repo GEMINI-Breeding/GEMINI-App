@@ -6,6 +6,8 @@ export interface TourStep {
   selector: string | null
   /** Navigate to this route before showing the step. */
   route?: string
+  /** Search params for that route (e.g. an Analyze tab). */
+  search?: Record<string, string>
 }
 
 export interface TourSection {
@@ -107,6 +109,89 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
           "Once a pipeline exists, click New Run to start a field data collection run. Each run corresponds to a single date of data — you can have multiple runs per pipeline to track changes over time.",
         selector: '[data-onboarding="process-new-run"]',
       },
+      {
+        id: "process-run-groups",
+        title: "Runs, One Row per Flight Day",
+        description:
+          "Runs are grouped by date and platform. A day flown with several cameras (RGB and thermal) or several times (diurnal flights, one per treatment) is one row: expand it to see each flight. A thermal flight flown beside an RGB one is folded into the RGB run rather than listed on its own. Click a run to open its steps.",
+        selector: '[data-onboarding="process-run-groups"]',
+      },
+      {
+        id: "process-panel",
+        title: "What's Running",
+        description:
+          "Jobs, uploads and copies in progress show in this panel at the bottom right, including work the agent started and copies waiting for a free cluster slot. Expand it to follow or cancel one.",
+        selector: '[data-onboarding="process-panel"]',
+      },
+    ],
+  },
+
+  "/process/run": {
+    label: "Run",
+    steps: [
+      {
+        id: "run-scope",
+        title: "What This Run Is On",
+        description:
+          "The upload this run processes: place, population, date, platform and sensor, the treatments flown, and how many images were found. The agent card below lets you hand the run to the agent to carry on with.",
+        selector: '[data-onboarding="run-scope"]',
+      },
+      {
+        id: "run-cameras",
+        title: "Cameras of This Flight",
+        description:
+          "Every camera flown on this flight, such as thermal beside RGB. One run covers all of them: build an orthomosaic per camera only if you want one. Thermal frames are matched to the RGB frames by time, so plot images and canopy temperature work without a thermal orthomosaic.",
+        selector: '[data-onboarding="run-cameras"]',
+      },
+      {
+        id: "run-steps",
+        title: "The Processing Steps",
+        description:
+          "Steps run top to bottom; the next one to do is highlighted. Each step shows its status, its progress log and, if it failed, what went wrong. A run that starts from an uploaded orthomosaic skips the drone-image steps.",
+        selector: '[data-onboarding="run-steps"]',
+      },
+      {
+        id: "run-image-review",
+        title: "Image Exclusion and GCPs",
+        description:
+          "Optional first steps for raw drone images: leave out blurry or off-field images, and mark ground control points for more accurate positions.",
+        selector: '[data-testid="step-row-image_review"]',
+      },
+      {
+        id: "run-orthomosaic",
+        title: "Orthomosaic",
+        description:
+          "Stitches the images into one map of the field, with a DEM for plant height. Pick a quality: a quick one is enough to place plot boundaries and cut plot images from the raw frames.",
+        selector: '[data-testid="step-row-orthomosaic"]',
+      },
+      {
+        id: "run-boundaries",
+        title: "Plot Boundaries",
+        description:
+          "Draw or generate the plot grid over the orthomosaic and attach the field design. Boundaries saved on another date can be imported and shifted to fit this one.",
+        selector: '[data-testid="step-row-plot_boundary_prep"]',
+      },
+      {
+        id: "run-plot-images",
+        title: "Plot Images",
+        description:
+          "One image per plot, cut from the orthomosaic or, for sharper views, from the raw frames. Raw frames also give the other cameras' views of each plot (thermal) and their canopy temperature.",
+        selector: '[data-testid="step-row-split_orthomosaic"]',
+      },
+      {
+        id: "run-traits",
+        title: "Traits",
+        description:
+          "Measures each plot: canopy cover, vegetation indices, plant height from the DEM, and temperature from thermal. The results are stored per plot and appear in Analyze.",
+        selector: '[data-testid="step-row-trait_extraction"]',
+      },
+      {
+        id: "run-inference",
+        title: "Inference",
+        description:
+          "Runs a trained model on the plot images, for example to count or detect plant organs, and stores its results as traits too.",
+        selector: '[data-testid="step-row-inference"]',
+      },
     ],
   },
 
@@ -121,18 +206,181 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         selector: '[data-onboarding="nav-analyze"]',
         route: "/analyze",
       },
+      {
+        id: "analyze-single",
+        title: "Single Trait",
+        description:
+          "Pick a trait to chart its values across dates, sites and genotypes.",
+        selector: '[data-testid="analyze-tab-single"]',
+        route: "/analyze",
+      },
+      {
+        id: "analyze-multi",
+        title: "Multivariate",
+        description:
+          "Compare several traits at once, to see how they relate across plots.",
+        selector: '[data-testid="analyze-tab-multivariate"]',
+        route: "/analyze",
+        search: { view: "multi" },
+      },
+      {
+        id: "analyze-map",
+        title: "Map",
+        description:
+          "Each date's orthomosaic with its plots coloured by a trait, labelled by treatment.",
+        selector: '[data-testid="analyze-tab-map"]',
+        route: "/analyze",
+        search: { view: "map" },
+      },
+      {
+        id: "analyze-table",
+        title: "Table",
+        description: "Every trait record in one table, to filter and download.",
+        selector: '[data-testid="analyze-tab-table"]',
+        route: "/analyze",
+        search: { view: "table" },
+      },
+    ],
+  },
+
+  "/console": {
+    label: "Console",
+    steps: [
+      {
+        id: "console",
+        title: "Console",
+        description:
+          "The log of what the app, the agent and the jobs are doing. Look here when something seems stuck.",
+        selector: '[data-onboarding="nav-console"]',
+        route: "/console",
+      },
+      {
+        id: "console-source",
+        title: "Filter by Source",
+        description:
+          "Show only one source's lines, such as the jobs on the cluster or the agent.",
+        selector: '[data-testid="console-source-filter"]',
+        route: "/console",
+      },
+    ],
+  },
+
+  "/settings": {
+    label: "Settings",
+    steps: [
+      {
+        id: "settings",
+        title: "Settings",
+        description: "How GEMI is set up on this computer.",
+        selector: '[data-onboarding="nav-settings"]',
+        route: "/settings",
+      },
+      {
+        id: "settings-home",
+        title: "Home",
+        description:
+          "Choose what Home shows: the dashboard, the agent, or both as tabs.",
+        selector: '[data-onboarding="files-tab-home"]',
+        route: "/settings",
+      },
+      {
+        id: "settings-data",
+        title: "Data & Services",
+        description:
+          "Where the data is stored and which services the app talks to.",
+        selector: '[data-onboarding="files-tab-data"]',
+        route: "/settings",
+      },
+      {
+        id: "settings-compute",
+        title: "Compute",
+        description:
+          "Where the heavy work runs: this computer or a cluster, and the workers started there for each kind of job.",
+        selector: '[data-onboarding="files-tab-compute"]',
+        route: "/settings",
+      },
+      {
+        id: "settings-signin",
+        title: "Sign-in",
+        description: "Your account, and the people you share experiments with.",
+        selector: '[data-onboarding="files-tab-signin"]',
+        route: "/settings",
+      },
     ],
   },
 
   "/": {
-    label: "Dashboard",
+    label: "App",
     steps: [
       {
-        id: "home",
-        title: "Home — Dashboard",
+        id: "app",
+        title: "Welcome to GEMI",
         description:
-          "Build a custom dashboard with KPI cards, charts, tables, and plot viewers — all pulling from your processed data without re-running any pipelines.",
+          "GEMI takes field data from upload to traits in four stages: Files (upload), Process (orthomosaics, plot boundaries, plot images, traits), Analyze (charts and maps), and Home (your dashboard and the agent). This tour visits each one. Every page also has its own tour under Help.",
+        selector: null,
+      },
+      {
+        id: "home",
+        title: "Home — Dashboard and Agent",
+        description:
+          "Build a dashboard of cards, charts, tables and plot viewers from your processed data. Beside it, the agent can upload, process and check data for you; ask it in plain words.",
         selector: '[data-onboarding="nav-home"]',
+        route: "/",
+      },
+      {
+        id: "app-files",
+        title: "1. Files — Upload",
+        description:
+          "Add drone, rover or handheld data, from this computer, a cluster folder or online storage. The date is read from the file names; you confirm it before anything is uploaded. Manage lists everything stored.",
+        selector: '[data-onboarding="nav-files"]',
+        route: "/files",
+      },
+      {
+        id: "app-process",
+        title: "2. Process — Workspaces",
+        description:
+          "A workspace holds one field experiment's pipelines. Each upload becomes a run, one row per flight day, with RGB and thermal together.",
+        selector: '[data-onboarding="nav-process"]',
+        route: "/process",
+      },
+      {
+        id: "app-workspaces",
+        title: "Your Workspaces",
+        description:
+          "Each card shows a preview of the latest run and how many runs need you. Open one, then open a run to see its steps: orthomosaic → plot boundaries → plot images → traits → inference. Start the Run tour there for each step.",
+        selector: '[data-testid^="workspace-card-"]',
+        route: "/process",
+      },
+      {
+        id: "app-analyze",
+        title: "3. Analyze — Results",
+        description:
+          "Chart one trait or several, map plots over each date's orthomosaic, or browse every record in a table.",
+        selector: '[data-onboarding="nav-analyze"]',
+        route: "/analyze",
+      },
+      {
+        id: "app-console",
+        title: "Console",
+        description:
+          "The running log of the app, the agent and the jobs, for when something seems stuck.",
+        selector: '[data-onboarding="nav-console"]',
+        route: "/console",
+      },
+      {
+        id: "app-settings",
+        title: "Settings",
+        description:
+          "Where work runs (this computer or a cluster), where data is stored, your sign-in, and what Home shows.",
+        selector: '[data-onboarding="nav-settings"]',
+        route: "/settings",
+      },
+      {
+        id: "app-help",
+        title: "Help Is Always Here",
+        description:
+          "Open Help on any page for what it does and a tour of that page. Jobs in progress show in a panel at the bottom right.",
+        selector: null,
         route: "/",
       },
     ],
@@ -467,10 +715,19 @@ export function getTourSection(pathname: string, step?: string): TourSection {
     if (step === "plot_marking") return TOUR_SECTIONS["/process/plot-marking"]
     return TOUR_SECTIONS["/process/gcp"]
   }
+  if (/^\/process\/[^/]+\/run\//.test(pathname))
+    return TOUR_SECTIONS["/process/run"]
   // Workspace detail pages (/process/{id}) get a different tour than the workspace list
   if (/^\/process\/[^/]+/.test(pathname))
     return TOUR_SECTIONS["/process/workspace"]
   if (pathname.startsWith("/process")) return TOUR_SECTIONS["/process"]
   if (pathname.startsWith("/analyze")) return TOUR_SECTIONS["/analyze"]
+  if (pathname.startsWith("/console")) return TOUR_SECTIONS["/console"]
+  if (pathname.startsWith("/settings")) return TOUR_SECTIONS["/settings"]
+  return TOUR_SECTIONS["/"]
+}
+
+/** The tour of the whole app, stage by stage (offered on first open). */
+export function appTour(): TourSection {
   return TOUR_SECTIONS["/"]
 }

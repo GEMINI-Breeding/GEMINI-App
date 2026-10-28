@@ -79,7 +79,7 @@ function getSectionForPath(pathname: string): Section {
 interface HelpSidebarProps {
   open: boolean
   onClose: () => void
-  onStartTour: () => void
+  onStartTour: (whole?: boolean) => void
 }
 
 export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
@@ -180,8 +180,22 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
             className="flex items-center justify-center gap-2 w-full rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted transition-colors"
           >
             <PlayCircle className="h-4 w-4 text-primary" />
-            Start {tourLabel} Tour
+            {tourLabel === "App"
+              ? "Tour of the whole app"
+              : `Start ${tourLabel} Tour`}
           </button>
+          {tourLabel !== "App" && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose()
+                onStartTour(true)
+              }}
+              className="mt-2 flex items-center justify-center gap-2 w-full rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Tour of the whole app
+            </button>
+          )}
         </div>
       </aside>
     </>

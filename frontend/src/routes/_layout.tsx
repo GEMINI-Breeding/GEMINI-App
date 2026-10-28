@@ -11,7 +11,11 @@ import { toast } from "sonner"
 
 import { Footer } from "@/components/Common/Footer"
 import { HelpSidebar, OnboardingTour } from "@/components/Help"
-import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
+import {
+  appTour,
+  getTourSection,
+  type TourStep,
+} from "@/components/Help/tourSteps"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
 import { ConnectionNotice } from "@/components/System/ConnectionNotice"
@@ -88,14 +92,18 @@ function Layout() {
   const [tourSteps, setTourSteps] = useState<TourStep[] | null>(null)
   const [tourStep, setTourStep] = useState<number>(0)
 
-  const startTour = useCallback(() => {
-    const section = getTourSection(
-      location.pathname,
-      (location.search as any)?.step,
-    )
-    setTourSteps(section.steps)
-    setTourStep(0)
-  }, [location.pathname, location.search])
+  // The page's own tour, or (whole) the tour of every stage of the app.
+  const startTour = useCallback(
+    (whole?: boolean) => {
+      const section =
+        whole === true
+          ? appTour()
+          : getTourSection(location.pathname, (location.search as any)?.step)
+      setTourSteps(section.steps)
+      setTourStep(0)
+    },
+    [location.pathname, location.search],
+  )
   const closeTour = useCallback(() => setTourSteps(null), [])
   // First open: offer the guided tour once (it also stays under Help).
   const TOUR_OFFERED = "gemini.tour.offered"
@@ -113,7 +121,7 @@ function Layout() {
       // no storage: it is offered again next time
     }
     setTourInvite(false)
-    if (take) startTour()
+    if (take) startTour(true)
   }
   const nextTourStep = useCallback(
     () =>

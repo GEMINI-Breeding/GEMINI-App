@@ -127,6 +127,8 @@ function ProcessingStep({
   onChosen: (where: "local" | "cluster") => void
 }) {
   const [where, setWhere] = useState<"local" | "cluster" | "join" | null>(null)
+  // The cluster saved on this page (its name), before the next onboarding poll says so.
+  const [clusterReady, setClusterReady] = useState<string | null>(null)
   const docker =
     info.docker === "running"
       ? "Docker is running."
@@ -163,8 +165,8 @@ function ProcessingStep({
         testId="welcome-processing-cluster"
       >
         For whole fields and seasons. Needs a Slurm cluster you can log in to
-        with an SSH key (no password prompt). Nothing is installed on this
-        computer; the agent sets the cluster up with you in the next minutes.
+        with an SSH key (no password prompt): you give the SSH command and the
+        key file next. Nothing is installed on this computer.
       </Choice>
       <Choice
         icon={<Users className="h-5 w-5" />}
@@ -182,19 +184,251 @@ function ProcessingStep({
         <InstallHelper what="docker" />
       )}
       {where === "cluster" && (
-        <div className="space-y-1 text-sm">
+        <div className="space-y-3 text-sm">
           <InstallHelper what="git" />
+          <ClusterSetup
+            configured={clusterReady ?? info.processing.cluster}
+            onReady={setClusterReady}
+          />
         </div>
       )}
-      <div>
+      <div className="flex items-center gap-3">
         <Button
-          disabled={!where || where === "join"}
+          disabled={
+            !where ||
+            where === "join" ||
+            (where === "cluster" && !(clusterReady ?? info.processing.cluster))
+          }
           data-testid="welcome-processing-next"
           onClick={() => where && where !== "join" && onChosen(where)}
         >
           Continue
         </Button>
+        {where === "cluster" && !(clusterReady ?? info.processing.cluster) && (
+          <button
+            type="button"
+            className="text-muted-foreground text-xs underline underline-offset-2"
+            data-testid="welcome-cluster-later"
+            onClick={() => onChosen("cluster")}
+          >
+            Set it up later with the agent
+          </button>
+        )}
       </div>
+    </div>
+  )
+}
+
+/** The cluster's SSH login and key file, checked with a read-only survey of
+ *  the cluster, then saved as its settings. Installing and starting it is
+ *  left to the agent (or Settings → Compute). */
+export function ClusterSetup({
+  configured,
+  onReady,
+}: {
+  configured: string | null
+  onReady: (name: string) => void
+}) {
+  const [changing, setChanging] = useState(false)
+  const [ssh, setSsh] = useState("")
+  const [key, setKey] = useState("")
+  const [existing, setExisting] = useState("")
+  const [folder, setFolder] = useState("")
+  const check = useMutation({
+    mutationFn: () =>
+      agentApi.computeClusterCheck({
+        ssh: ssh.trim(),
+        key: key.trim() || undefined,
+        data_root: existing.trim() || undefined,
+      }),
+    onSuccess: (c) => setFolder(c.data_root),
+  })
+  const use = useMutation({
+    mutationFn: () => {
+      const c = check.data!
+      return agentApi.computeClusterUse({
+        ssh: c.ssh,
+        name: c.name,
+        data_root: folder.trim(),
+        core: c.core!,
+        workers_try: c.workers_try,
+        llm_try: c.llm_try,
+      })
+    },
+    onSuccess: (r) => onReady(r.cluster),
+  })
+
+  if (configured && !changing)
+    return (
+      <div
+        className="flex items-center gap-2 rounded-md border p-3"
+        data-testid="cluster-configured"
+      >
+        <Check className="h-4 w-4 text-green-600" />
+        <span className="flex-1">
+          Cluster <span className="font-medium">{configured}</span> is set up on
+          this computer.
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+          Use another
+        </Button>
+      </div>
+    )
+
+  const c = check.data
+  const looksLikeLogin = /\S+@\S+/.test(ssh)
+  return (
+    <div
+      className="space-y-3 rounded-md border p-3"
+      data-testid="cluster-setup"
+    >
+      <div className="space-y-1">
+        <Label htmlFor="cluster-ssh">SSH command</Label>
+        <Input
+          id="cluster-ssh"
+          value={ssh}
+          onChange={(e) => {
+            setSsh(e.target.value)
+            check.reset()
+          }}
+          placeholder="ssh jdoe@login.cluster.edu"
+          data-testid="cluster-ssh"
+        />
+        <p className="text-muted-foreground text-xs">
+          What you type to log in to the cluster. A port (-p) is fine.
+        </p>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="cluster-key">SSH key file</Label>
+        <Input
+          id="cluster-key"
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value)
+            check.reset()
+          }}
+          placeholder="~/.ssh/id_ed25519"
+          data-testid="cluster-key"
+        />
+        <p className="text-muted-foreground text-xs">
+          The private key you log in with. Leave empty to try your usual keys
+          (~/.ssh/id_ed25519, id_rsa). No key yet: run{" "}
+          <span className="font-mono">ssh-keygen</span>, then{" "}
+          <span className="font-mono">ssh-copy-id jdoe@login.cluster.edu</span>.
+        </p>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="cluster-existing">
+          GEMI folder already on the cluster{" "}
+          <span className="text-muted-foreground font-normal">(optional)</span>
+        </Label>
+        <Input
+          id="cluster-existing"
+          value={existing}
+          onChange={(e) => {
+            setExisting(e.target.value)
+            check.reset()
+          }}
+          placeholder="/group/mylab/gemini_app"
+          data-testid="cluster-existing"
+        />
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!looksLikeLogin || check.isPending}
+        onClick={() => check.mutate()}
+        data-testid="cluster-check"
+      >
+        {check.isPending ? (
+          <>
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            Logging in and looking around (up to a few minutes)…
+          </>
+        ) : (
+          "Check the login"
+        )}
+      </Button>
+      {check.error && (
+        <p
+          className="text-destructive text-xs"
+          data-testid="cluster-check-error"
+        >
+          {check.error instanceof Error
+            ? check.error.message
+            : String(check.error)}
+        </p>
+      )}
+      {c && (
+        <div className="space-y-2" data-testid="cluster-survey">
+          <ul className="space-y-1 text-xs">
+            <li>
+              <Check className="mr-1 inline h-3 w-3 text-green-600" />
+              Logged in as {c.user || c.login} with{" "}
+              <span className="font-mono">{c.ssh_key}</span>
+              {c.slurm ? ` · Slurm ${c.slurm}` : ""}
+            </li>
+            <li className={c.containers_ok ? "" : "text-destructive"}>
+              Containers:{" "}
+              {c.containers_ok
+                ? c.containers
+                : "none found. GEMI needs Apptainer or Singularity there: ask the cluster's support."}
+            </li>
+            <li className={c.core ? "" : "text-destructive"}>
+              {c.core
+                ? `Core (database, storage) on ${c.core}${typeof c.core_wait_minutes === "number" ? `, starts in about ${c.core_wait_minutes} min` : ""}`
+                : "No partition you may use could start the core: the agent can look at it with you."}
+            </li>
+            {c.workers_try.length > 0 && (
+              <li>Processing jobs on {c.workers_try.join(", ")}</li>
+            )}
+            <li>
+              {c.llm_try.length > 0
+                ? `A GPU for the agent's model: ${c.llm_try[0].split(":").slice(0, 2).join(":")}`
+                : "No GPU found for the agent's model: use a hosted model, or one on this computer."}
+            </li>
+          </ul>
+          <div className="space-y-1">
+            <Label htmlFor="cluster-folder">GEMI folder on the cluster</Label>
+            <Input
+              id="cluster-folder"
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              data-testid="cluster-folder"
+            />
+            <p className="text-muted-foreground text-xs">
+              {c.already_installed
+                ? "GEMI is already installed here: it is reused, nothing is downloaded again."
+                : `Images and data go here; it needs hundreds of GB, never your home folder. Roomy places: ${c.data_root_candidates.join(", ") || "none found"}.`}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            disabled={
+              !c.core ||
+              !c.containers_ok ||
+              !folder.trim().startsWith("/") ||
+              use.isPending
+            }
+            onClick={() => use.mutate()}
+            data-testid="cluster-use"
+          >
+            {use.isPending ? "Saving…" : "Use this cluster"}
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            Saves these settings on this computer. Nothing is started yet: the
+            agent installs and starts GEMI there with you (Settings → Compute
+            shows it).
+          </p>
+          {use.error && (
+            <p className="text-destructive text-xs">
+              {use.error instanceof Error
+                ? use.error.message
+                : String(use.error)}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

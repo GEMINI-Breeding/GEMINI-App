@@ -62,8 +62,9 @@ export function OnboardingTour({
     let cancelled = false
 
     async function run() {
+      setRect(null)
       if (data.route) {
-        await navigate({ to: data.route })
+        await navigate({ to: data.route, search: data.search ?? {} })
         // Brief delay so the new page renders its nav items
         await new Promise((r) => setTimeout(r, 120))
       }
@@ -73,13 +74,20 @@ export function OnboardingTour({
         return
       }
 
+      let scrolled = false
       function track() {
         if (cancelled) return
         const el = document.querySelector(data.selector!)
         if (el) {
           const r = el.getBoundingClientRect()
           setRect({ x: r.left, y: r.top, w: r.width, h: r.height })
-          el.scrollIntoView({ block: "nearest", behavior: "smooth" })
+          if (!scrolled) {
+            el.scrollIntoView({ block: "nearest", behavior: "smooth" })
+            scrolled = true
+          }
+        } else {
+          // Not on this page (yet, or at all): the step shows as a centred card.
+          setRect(null)
         }
         rafRef.current = requestAnimationFrame(track)
       }

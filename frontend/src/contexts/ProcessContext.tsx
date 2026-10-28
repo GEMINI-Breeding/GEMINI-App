@@ -46,6 +46,18 @@ type ProcessContextState = {
 
 const ProcessContext = createContext<ProcessContextState | undefined>(undefined)
 
+/** The worker that takes each kind of job (the Compute panel's parts). */
+const WORKER_FOR: Record<string, string> = {
+  RUN_ODM: "orthomosaic (odm)",
+  CREATE_COG: "map tiles (geo)",
+  SPLIT_ORTHOMOSAIC: "map tiles (geo)",
+  EXTRACT_TRAITS: "models (ml)",
+  LOCATE_PLANTS: "models (ml)",
+  RUN_STITCH: "stitching",
+  ASSOCIATE_BOUNDARIES: "stitching",
+  EXTRACT_BINARY: "rover extraction",
+}
+
 export function ProcessProvider({ children }: { children: React.ReactNode }) {
   const [processes, setProcesses] = useState<Process[]>([])
   const [history, setHistory] = useState<Process[]>([])
@@ -210,6 +222,18 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         if (!owningRun) continue
         known.add(runId)
         const queued = j.status === "PENDING"
+        // A queued job says since when and which worker it waits for (one may not be
+        // running), and can be cancelled from here.
+        const since = (j as { created_at?: string }).created_at
+        const waits = WORKER_FOR[String(j.job_type)] ?? null
+        const queuedNote = queued
+          ? [
+              since && `queued since ${new Date(since).toLocaleString()}`,
+              waits && `waits for the ${waits} worker`,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : null
         additions.push({
           id: crypto.randomUUID(),
           type: "processing",
@@ -219,7 +243,12 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
           createdAt: new Date(),
           runId,
           progress: typeof j.progress === "number" ? Math.round(j.progress) : 0,
-          message: detail?.stage,
+          message: queuedNote || detail?.stage,
+          cancel: () => {
+            JobsService.apiJobsJobIdCancelCancelJob({ jobId: runId }).catch(
+              () => {},
+            )
+          },
           link: `/process/${owningRun.workspaceId}/run/${owningRun.id}`,
           background: true,
         })

@@ -138,7 +138,7 @@ function PipelineCard({
           </div>
         </CardHeader>
         {runs.length > 0 && (
-          <CardContent>
+          <CardContent data-onboarding="process-run-groups">
             {/* One row per flight day (every sensor flown); a day with several runs
                 — diurnal flights, treatments, thermal beside RGB — expands to them. */}
             <RunGroupList

@@ -19,6 +19,8 @@ import {
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import { type FileMetadata, FilesService } from "@/client"
+
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -171,6 +173,40 @@ export function CloudImport({
         (f) => dateOf({ name: f.name, folder: f.folder, modified: f.modified }),
         fallback,
       )
+      // Dates already in the app (every file, same name and size, for that date, platform
+      // and sensor): not copied again. A date partly there is copied, and the upload sends
+      // only the files the app does not hold.
+      const already: string[] = []
+      const fresh = []
+      for (const g of groups) {
+        const prefix = `Raw/${g.date.slice(0, 4)}/${base.experiment}/${base.site}/${base.population}/${g.date}/${base.platform}/${base.sensor}/`
+        let have = new Set<string>()
+        try {
+          const listed =
+            ((await FilesService.apiFilesListFilePathListFiles({
+              filePath: `gemini/${prefix}`,
+            })) as FileMetadata[] | null) ?? []
+          have = new Set(
+            listed
+              .filter((f) => (f.object_name ?? "").startsWith(prefix))
+              .map(
+                (f) =>
+                  `${(f.object_name ?? "").split("/").pop()}|${f.size ?? 0}`,
+              ),
+          )
+        } catch {
+          // Not listed: copy it; the upload skips what is there anyway.
+        }
+        if (g.items.every((f) => have.has(`${f.name}|${f.size ?? 0}`)))
+          already.push(g.date)
+        else fresh.push(g)
+      }
+      if (already.length)
+        toast.info(
+          `Already in the app, not copied again: ${already.join(", ")}.`,
+        )
+      groups.splice(0, groups.length, ...fresh)
+      if (groups.length === 0) return []
       const dates = await new Promise<string[] | null>((resolve) =>
         setDatePrompt({
           groups: groups.map((g) => ({
@@ -514,6 +550,7 @@ export function keepsType(dataType: string | undefined, name: string): boolean {
 
 interface CopyFile {
   name: string
+  size?: number | null
   /** The folder under the chosen one it is in ("" when directly in it). */
   folder: string
   modified: string | null
@@ -534,19 +571,30 @@ async function filesToCopy(
         name: picked.split("/").pop() ?? picked,
         folder: "",
         modified: it?.modified ?? null,
+        size: it?.size ?? null,
       },
     ]
   }
   const top = await agentApi.cloudBrowse(remote, target)
   const out: CopyFile[] = top.items
     .filter((i) => !i.is_dir)
-    .map((i) => ({ name: i.name, folder: "", modified: i.modified }))
+    .map((i) => ({
+      name: i.name,
+      folder: "",
+      modified: i.modified,
+      size: i.size,
+    }))
   for (const dir of top.items.filter((i) => i.is_dir).slice(0, 60)) {
     const sub = await agentApi.cloudBrowse(remote, dir.path)
     out.push(
       ...sub.items
         .filter((i) => !i.is_dir)
-        .map((i) => ({ name: i.name, folder: dir.name, modified: i.modified })),
+        .map((i) => ({
+          name: i.name,
+          folder: dir.name,
+          modified: i.modified,
+          size: i.size,
+        })),
     )
   }
   return out

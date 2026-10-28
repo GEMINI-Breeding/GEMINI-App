@@ -365,6 +365,78 @@ def hpc_configure(args: dict) -> dict:
                        "next": "hpc action=sync, then action=pull if images are not installed yet, then action=up"}}
 
 
+# ── first-run setup (the app's welcome page) ─────────────────────────────────
+# The person types their SSH command and key file; the page checks the login with the
+# read-only survey and, on their say-so, writes the settings from its recommendation.
+# Installing and starting (sync, pull, up) stay with the agent or Settings → Compute.
+
+def ssh_command(ssh: str, key: str = "") -> str:
+    """The SSH command with the key file given beside it (``-i``), checked to exist."""
+    ssh = str(ssh or "").strip()
+    if ssh and not ssh.startswith("ssh "):
+        ssh = "ssh " + ssh
+    parsed = parse_ssh(ssh)                    # raises with how to write it
+    key = str(key or "").strip()
+    m = re.match(r"^/([A-Za-z])/(.*)$", key)
+    if os.name == "nt" and m:
+        key = f"{m.group(1).upper()}:/{m.group(2)}"
+    if key:
+        if parsed["key"]:
+            raise ValueError("give the key file once: in the SSH command (-i) or in the key file box")
+        if not Path(key).expanduser().is_file():
+            raise ValueError(f"no key file at {key}")
+        ssh = f"ssh -i {shlex.quote(key)} " + ssh[len("ssh "):]
+    elif parsed["key"] and not Path(parsed["key"]).expanduser().is_file():
+        raise ValueError(f"no key file at {parsed['key']}")
+    return ssh
+
+
+def cluster_name(target: str) -> str:
+    """A short name for the cluster from its login host: jdoe@login.hive.edu → hive."""
+    labels = [x for x in target.split("@")[-1].lower().split(".") if x]
+    for x in labels:
+        if not re.fullmatch(r"(login|ssh|gateway|hpc|head)\d*", x):
+            return re.sub(r"[^a-z0-9_-]", "", x) or "cluster"
+    return re.sub(r"[^a-z0-9_-]", "", labels[0]) if labels else "cluster"
+
+
+def cluster_check(ssh: str, key: str = "", data_root: str = "") -> dict:
+    """Check the login and survey the cluster (read-only): what the welcome page shows."""
+    command = ssh_command(ssh, key)
+    survey = hpc_probe({"ssh": command, "data_root": data_root.strip()})["result"]
+    rec = survey["recommendation"]
+    existing = survey["already_installed"]
+    roots = [c.split(" (")[0] for c in rec["data_root_candidates"]]
+    folder = existing["root"] if existing else (f"{roots[0].rstrip('/')}/gemini_app" if roots else "")
+    core = rec["core"]
+    return {
+        "ssh": command, "name": cluster_name(parse_ssh(command)["target"]),
+        "login": survey["login"], "ssh_key": survey["ssh_key"], "user": survey["user"],
+        "slurm": survey["slurm"], "containers": survey["containers"],
+        "containers_ok": not survey["containers"].startswith("NOT FOUND"),
+        "core": f"{core['partition']}:{core['account']}" if core else None,
+        "core_wait_minutes": core["minutes"] if core else None,
+        "workers_try": rec["workers_try"], "llm_try": rec["llm_try"],
+        "data_root": folder, "data_root_candidates": rec["data_root_candidates"],
+        "already_installed": existing,
+        "internet": survey["internet_from_login_node"],
+    }
+
+
+def cluster_use(args: dict) -> dict:
+    """Write the settings the welcome page agreed on and make the cluster the active one."""
+    command = ssh_command(str(args.get("ssh") or ""), str(args.get("key") or ""))
+    root = str(args.get("data_root") or "").strip()
+    if not root.startswith("/"):
+        raise ValueError("the GEMI folder on the cluster: a full path, e.g. /group/mylab/gemini_app")
+    if not args.get("core") or not args.get("workers_try"):
+        raise ValueError("no partition to run on: check the login first")
+    name = str(args.get("name") or "") or cluster_name(parse_ssh(command)["target"])
+    out = hpc_configure({"name": name, "ssh": command, "data_root": root, "core": args["core"],
+                         "workers_try": args["workers_try"], "llm_try": args.get("llm_try") or []})
+    return out["result"]
+
+
 # ── running it ───────────────────────────────────────────────────────────────
 
 ACTIONS = ("status", "sync", "pull", "pull_llm", "pull_ml_deps", "up", "worker", "llm_up", "llm_status", "llm_down",

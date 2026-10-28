@@ -79,7 +79,33 @@ def summary(t: dict) -> dict:
         "extraction_jobs": [f["job_id"] for f in files if f.get("job_id")],
         "failed": [{"name": f["name"], "error": f.get("error")} for f in files if f["status"] == "failed"],
         "error": t.get("error"),
+        **({"skipped_already_uploaded": t["skipped_already_uploaded"]} if t.get("skipped_already_uploaded") else {}),
     }
+
+
+def already_uploaded(client: Client, scope_prefix: str) -> set[tuple[str, int]]:
+    """(name, size) of every file already stored under a date's platform/sensor folder,
+    whichever upload it came with. Empty when the folder cannot be listed."""
+    out: set[tuple[str, int]] = set()
+    offset = 0
+    try:
+        while True:
+            page = client.list_page(scope_prefix, 1000, offset)
+            rows = page.get("files") or []
+            for f in rows:
+                obj = str(f.get("object_name") or "")
+                # Only this exact folder: ".../RGB" as a prefix would also take ".../RGB-SonyA7R/".
+                if not obj.startswith(scope_prefix):
+                    continue
+                name = obj.rsplit("/", 1)[-1]
+                if name:
+                    out.add((name, int(f.get("size") or 0)))
+            offset += 1000
+            if not rows or offset >= int(page.get("total_count") or 0):
+                break
+    except Exception:
+        return set()
+    return out
 
 
 # The platforms and sensors data is uploaded as (the app's sensorKit.ts): they choose the
@@ -126,6 +152,21 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
     client.ensure_entity("seasons", year, experiment_name=experiment)
     client.ensure_entity("sensor_platforms", platform, experiment_name=experiment)
     client.ensure_entity("sensors", sensor, experiment_name=experiment, sensor_platform_name=platform)
+    skipped = 0
+    if not dataset_id:
+        # The same folder uploaded again (a copy restarted, a season's folder sent twice): files
+        # this experiment already holds for the date, platform and sensor, under any earlier
+        # upload, are not sent again.
+        have = already_uploaded(client, f"Raw/{year}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}/")
+        keep = [f for f in files if (f.name, f.stat().st_size) not in have]
+        skipped = len(files) - len(keep)
+        if not keep:
+            return {"task_id": None, "kind": "upload", "status": "done", "files": {"already_in_app": skipped},
+                    "bytes_sent": 0, "bytes_total": 0, "percent": 100.0, "failed": [], "error": None,
+                    "skipped_already_uploaded": skipped,
+                    "note": f"all {skipped} files are already in the app for {date} {platform}/{sensor}: "
+                            "nothing uploaded"}
+        files = keep
     if dataset_id:
         ds_id = dataset_id                     # add to an earlier batch (e.g. after a failure)
     else:
@@ -157,7 +198,7 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
         "id": task_id, "status": "running", "created": time.time(), "heartbeat": time.time(),
         "parallel": max(1, min(int(parallel), 8)), "prefix": prefix, "dataset_id": ds_id,
         "experiment_id": str(exp["id"]), "extract": kind["extract"] if extract is None else bool(extract),
-        "batch_label": batch_label(run_of_day, treatment),
+        "batch_label": batch_label(run_of_day, treatment), "skipped_already_uploaded": skipped,
         "files": [{"path": str(f), "name": f.name, "size": f.stat().st_size, "sent": 0, "status": "pending",
                    **({"prefix": f"{scope_dir}/Orthomosaic-DEM"}
                       if data_type == "orthomosaic" and is_elevation(f.name) else {})}

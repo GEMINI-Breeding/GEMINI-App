@@ -234,7 +234,10 @@ export function ProcessPanel() {
 
   if (!isOpen) {
     return (
-      <div className="fixed right-4 bottom-4 z-50">
+      <div
+        className="fixed right-4 bottom-4 z-50"
+        data-onboarding="process-panel"
+      >
         <Button
           variant="outline"
           size="sm"
@@ -251,7 +254,10 @@ export function ProcessPanel() {
   }
 
   return (
-    <div className="fixed right-4 bottom-4 z-50 w-80">
+    <div
+      className="fixed right-4 bottom-4 z-50 w-80"
+      data-onboarding="process-panel"
+    >
       <Card className="shadow-lg overflow-hidden">
         <CardHeader className="p-3">
           <div className="flex items-center gap-1">

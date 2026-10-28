@@ -112,3 +112,20 @@ _t.sleep(0.1)
 saved = __import__("json").loads((cloud.WAITING / f"{rec['id']}.json").read_text())
 assert saved["job_id"] == "4242" and saved["state"] == "QUEUED", saved
 print("waiting ok")
+
+# The same files uploaded again are not sent twice (another camera's folder does not count).
+from gemi_agent import uploads as U  # noqa: E402
+
+
+class FakeClient:
+    def list_page(self, prefix, limit, offset):
+        return {"total_count": 3, "files": [
+            {"object_name": "Raw/2023/E/K/P/2023-07-20/Drone/RGB/Orthomosaic/2023-07-20-RGB.tif", "size": 10},
+            {"object_name": "Raw/2023/E/K/P/2023-07-20/Drone/RGB/Orthomosaic-DEM/2023-07-20-DEM.tif", "size": 5},
+            {"object_name": "Raw/2023/E/K/P/2023-07-20/Drone/RGB-SonyA7R/ab12cd34/Images/x.jpg", "size": 7},
+        ]}
+
+
+have = U.already_uploaded(FakeClient(), "Raw/2023/E/K/P/2023-07-20/Drone/RGB/")
+assert have == {("2023-07-20-RGB.tif", 10), ("2023-07-20-DEM.tif", 5)}, have
+print("dedupe ok")
