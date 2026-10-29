@@ -878,13 +878,24 @@ export function PlotBoundaryPrep({
     ) {
       nextState = { ...nextState, fieldDesign: fd, gridMode: "fd" }
     } else if (fc?.features) {
+      // The agent notes which file its boundaries came from: keep that name.
+      const source = (fd as { source?: unknown } | undefined)?.source
       // Boundaries saved without the editor's design (by the agent, or brought
       // from another date) whose plots carry their design labels: the design is
       // rebuilt from those, so the Field design panel opens filled in. Unflipped:
       // each plot keeps exactly its own labels.
       const rebuilt = designFromFeatures(nextState.features)
       if (rebuilt)
-        nextState = { ...nextState, fieldDesign: rebuilt, gridMode: "fd" }
+        nextState = {
+          ...nextState,
+          fieldDesign: {
+            ...rebuilt,
+            ...(typeof source === "string" && source !== "mock"
+              ? { source }
+              : {}),
+          },
+          gridMode: "fd",
+        }
     }
     // Run the reconciled features through buildNextStateForFeatures so
     // cellIds get stamped on loaded cells (older snapshots predate the
@@ -1628,10 +1639,18 @@ export function PlotBoundaryPrep({
                     {fieldDesign ? (
                       <>
                         <p className="mb-1.5">
-                          Field design:{" "}
-                          <strong>{fieldDesign.rows.length}</strong> plots on a{" "}
-                          {fdSize?.rows} × {fdSize?.cols} grid (rows × columns,
-                          from the design)
+                          Field design
+                          {fieldDesign.source ? (
+                            <>
+                              {" "}
+                              <strong data-testid="field-design-source">
+                                {fieldDesign.source}
+                              </strong>
+                            </>
+                          ) : null}
+                          : <strong>{fieldDesign.rows.length}</strong> plots on
+                          a {fdSize?.rows} × {fdSize?.cols} grid (rows ×
+                          columns, from the design)
                         </p>
                         {fdMismatch && (
                           <p

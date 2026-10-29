@@ -672,7 +672,7 @@ export const agentApi = {
     contentBase64: string,
     keep?: { year?: string; location?: string; experiment?: string },
   ) =>
-    call<{ csv: string; summary: FieldLayoutSummary }>(
+    call<{ csv: string; summary: FieldLayoutSummary; kept_as?: string | null }>(
       "/field_layout",
       post({ name, content_base64: contentBase64, ...(keep ?? {}) }),
     ),

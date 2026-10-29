@@ -100,6 +100,8 @@ export type FieldDesign = {
   /** Parsed rows after mapping is resolved (each row keyed by source column). */
   rows: FieldDesignRow[]
   transform: FdTransform
+  /** The file it came from (as kept by the agent on this computer), when known. */
+  source?: string
 }
 
 /**

@@ -404,7 +404,7 @@ export function RunAgentCard({
                     !(facts.data?.facts as Facts | undefined)?.design_path && (
                       <span className="text-[11px] text-sky-700 dark:text-sky-400">
                         The design {suggested.name} of {suggested.from} (same
-                        field): Save to use it here.
+                        field, same year): Save to use it here.
                       </span>
                     )}
                   {f.hint && (

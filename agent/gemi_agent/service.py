@@ -168,6 +168,26 @@ def _owner_token() -> str:
     return token
 
 
+def _keep_design(src: Path) -> Optional[str]:
+    """A field design file uploaded in the app, kept in the agent's field_layouts folder
+    under its own name (another file of that name already there: a numbered name)."""
+    from .client import AGENT_DIR
+
+    folder = AGENT_DIR / "work" / "field_layouts"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        data = src.read_bytes()
+        dest, n = folder / src.name, 1
+        while dest.exists() and dest.read_bytes() != data:
+            n += 1
+            dest = folder / f"{src.stem} ({n}){src.suffix}"
+        if not dest.exists():
+            dest.write_bytes(data)
+        return dest.name
+    except OSError:
+        return None
+
+
 SETUP_USER = {"email": "local-setup", "is_superuser": True, "setup": True}
 
 
@@ -608,7 +628,10 @@ class Handler(BaseHTTPRequestHandler):
                 summary["environments_in_file"] = summarize(whole).get("environments")
                 summary["kept"] = {k: v for k, v in want.items() if v and k not in ignored}
                 summary["filter_ignored"] = ignored or None
-                return {"csv": out.read_text(encoding="utf-8"), "summary": summary}
+                # Keep the file the person gave (the agent's field designs), so the plot
+                # boundaries made from it can name it and the agent can use it later.
+                kept = Path(str(body["path"])).name if body.get("path") else _keep_design(src)
+                return {"csv": out.read_text(encoding="utf-8"), "summary": summary, "kept_as": kept}
         if route == ["automark"] and method == "POST" and not user.get("setup"):
             # The Plot Marking screen's "Mark automatically": the same call the
             # agent would make for this run (with the facts recorded for it),
@@ -650,31 +673,52 @@ class Handler(BaseHTTPRequestHandler):
                 key=lambda r: -r["modified"])
             suggested = None
             run_id = (query.get("run") or [""])[0]
-            facts = {k: v for k, v in guide.facts_of(run_id).items()
-                     if k in ("design_path", "first_tier_at", "first_bed_at", "beds")} if run_id else {}
+            keep = ("design_path", "first_tier_at", "first_bed_at", "beds")
+            facts: dict = {}
             if run_id:
                 try:
                     from .process_runs import ProcessRuns
 
+                    use_client(Client(token=token))       # the boundaries are read as this person
                     runs = ProcessRuns(Client(token=token)).state()["runs"]
                     me = next((r for r in runs if r["id"] == run_id), None)
-                    keys = ("experiment", "location", "population")
-                    if me and me.get("uploadScope"):
-                        here = [str(me["uploadScope"].get(k)) for k in keys]
-                        for r in sorted(runs, key=lambda r: str((r.get("uploadScope") or {}).get("date"))):
-                            if r["id"] == run_id or [str((r.get("uploadScope") or {}).get(k)) for k in keys] != here:
-                                continue
+                    if me:
+                        guide.design_of(me)          # its own boundaries' design, recorded if found
+                    facts = {k: v for k, v in guide.facts_of(run_id).items() if k in keep}
+                    here = (me or {}).get("uploadScope") or {}
+                    if me and here and not facts.get("design_path"):
+                        # Another run of the same field in the same year: a design is per season.
+                        siblings = [r for r in sorted(runs, key=lambda r: str((r.get("uploadScope") or {}).get("date")))
+                                    if r["id"] != run_id and guide.same_field_and_year(here, r.get("uploadScope") or {})]
+                        for r in siblings:
                             d = guide.facts_of(r["id"]).get("design_path")
                             if d and d != "stand-in":
                                 suggested = {"path": d, "name": Path(str(d)).name, "run_id": r["id"],
                                              "from": r.get("name") or (r.get("uploadScope") or {}).get("date")}
                                 break
+                        if suggested is None:
+                            # …or the design another date's saved boundaries were made from.
+                            saved = {v.get("directory") for v in (Client(token=token).get_json(
+                                "/api/plot_geometry/versions/all") or [])}
+                            for r in siblings:
+                                up = r.get("uploadScope") or {}
+                                if not all(up.get(k) for k in guide.SCOPE_KEYS):
+                                    continue
+                                sc = {k: up.get(k) for k in guide.SCOPE_KEYS}
+                                if guide._processed(sc) not in saved:
+                                    continue
+                                d = guide.design_in_boundaries(sc)
+                                if d:
+                                    suggested = {"path": d, "name": Path(d).name, "run_id": r["id"],
+                                                 "from": r.get("name") or up.get("date")}
+                                    break
                 except Exception:
                     suggested = None
+                    facts = {k: v for k, v in guide.facts_of(run_id).items() if k in keep}
             if suggested and not facts.get("design_path"):
                 # The same field's other run: its orientation too, for the boundary editor.
-                facts = {k: v for k, v in guide.facts_of(suggested.get("run_id", "")).items()
-                         if k in ("design_path", "first_tier_at", "first_bed_at", "beds")} or facts
+                facts = {**{k: v for k, v in guide.facts_of(suggested.get("run_id", "")).items() if k in keep},
+                         "design_path": suggested["path"]} if suggested.get("run_id") else facts
             return {"files": files, "suggested": suggested, "facts": facts}
         if len(route) == 2 and route[0] == "facts" and not user.get("setup"):
             from . import guide

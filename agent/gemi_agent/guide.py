@@ -122,6 +122,52 @@ def _processed(scope: dict) -> str:
     return "Processed/" + "/".join(str(scope[k]) for k in SCOPE_KEYS) + "/"
 
 
+LAYOUTS = AGENT_DIR / "work" / "field_layouts"     # field design files on this computer
+
+
+def same_field_and_year(a: dict, b: dict) -> bool:
+    """Two uploads of the same field in the same season: a field design is per year
+    (the same experiment and site can be planted differently each year)."""
+    a, b = a or {}, b or {}
+    if any(str(a.get(k)) != str(b.get(k)) for k in ("experiment", "location", "population")):
+        return False
+    year = lambda s: str(s.get("year") or str(s.get("date") or "")[:4])      # noqa: E731
+    return year(a) == year(b) and year(a) != ""
+
+
+def design_in_boundaries(scope: dict, snapshot: Optional[dict] = None) -> Optional[str]:
+    """The field design file this scope's saved plot boundaries were made from, when
+    that file is on this computer (the agent names it in the boundaries it saves)."""
+    from pathlib import Path
+
+    if snapshot is None:
+        try:
+            snapshot = client().load_version(_processed(scope)).get("state_snapshot") or {}
+        except Exception:
+            return None
+    source = str((snapshot.get("field_design") or {}).get("source") or "")
+    if not source or source.lower() in ("mock", "stand-in"):
+        return None
+    f = LAYOUTS / Path(source).name
+    return str(f) if f.is_file() else None
+
+
+def design_of(run: dict) -> Optional[str]:
+    """The run's field design: the one recorded for it, else the one its own plot
+    boundaries were made from (then recorded, so the person is not asked for it)."""
+    rid = str(run.get("id") or "")
+    known = facts_of(rid).get("design_path")
+    if known:
+        return known
+    up = run.get("uploadScope") or {}
+    if not all(up.get(k) for k in SCOPE_KEYS):
+        return None
+    found = design_in_boundaries({k: up.get(k) for k in SCOPE_KEYS})
+    if found and rid:
+        save_facts(rid, {"design_path": found})
+    return found
+
+
 def _track(run: dict) -> Optional[str]:
     up = run.get("uploadScope") or {}
     ids = up.get("datasetShortIds") or []
@@ -184,8 +230,8 @@ def _plan(kind: str, step: str, run: dict) -> dict:
     scope = {k: up.get(k) for k in SCOPE_KEYS}
     processed = _processed(scope)
     track = _track(run)
+    design = design_of(run)
     facts = facts_of(str(run.get("id")))
-    design = facts.get("design_path")
 
     def need(*pairs: tuple[Any, str]) -> list[str]:
         return [question for value, question in pairs if value in (None, "")]

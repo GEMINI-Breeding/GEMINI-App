@@ -132,6 +132,7 @@ export function FieldDesignUploadDialog({
         r.readAsDataURL(file)
       })
       const got = await agentApi.fieldLayout(file.name, b64, keep)
+      setFileName(got.kept_as ?? file.name)
       loadText(got.csv)
       setLayoutNote(got.summary)
       return
@@ -175,6 +176,7 @@ export function FieldDesignUploadDialog({
       mapping,
       rows: parsedRows,
       transform: presetTransform ?? FD_TRANSFORM_IDENTITY,
+      ...(fileName ? { source: fileName } : {}),
     }
     onSaved(fd)
     reset()
