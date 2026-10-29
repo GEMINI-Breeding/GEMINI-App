@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { InstallHelper } from "@/features/agent/components/InstallHelper"
+import { KeyUnlock, lockedKeyOf } from "@/features/agent/components/KeyUnlock"
 import { ModelSetupPanel } from "@/features/agent/components/ModelSetupDialog"
 import {
   agentApi,
@@ -349,15 +350,23 @@ export function ClusterSetup({
           "Check the login"
         )}
       </Button>
-      {check.error && (
-        <p
-          className="text-destructive text-xs"
-          data-testid="cluster-check-error"
-        >
-          {check.error instanceof Error
-            ? check.error.message
-            : String(check.error)}
-        </p>
+      {lockedKeyOf(check.error) ? (
+        // A key with a passphrase: unlocked here, then the login is checked again.
+        <KeyUnlock
+          keyPath={lockedKeyOf(check.error) as string}
+          onUnlocked={() => check.mutate()}
+        />
+      ) : (
+        check.error && (
+          <p
+            className="text-destructive text-xs"
+            data-testid="cluster-check-error"
+          >
+            {check.error instanceof Error
+              ? check.error.message
+              : String(check.error)}
+          </p>
+        )
       )}
       {c && (
         <div className="space-y-2" data-testid="cluster-survey">
@@ -490,8 +499,15 @@ export function JoinSession({ onJoined }: { onJoined: () => void }) {
       >
         {join.isPending ? "Joining…" : "Join"}
       </Button>
-      {join.error && (
-        <p className="text-destructive text-xs">{String(join.error)}</p>
+      {lockedKeyOf(join.error) ? (
+        <KeyUnlock
+          keyPath={lockedKeyOf(join.error) as string}
+          onUnlocked={() => join.mutate()}
+        />
+      ) : (
+        join.error && (
+          <p className="text-destructive text-xs">{String(join.error)}</p>
+        )
       )}
     </div>
   )

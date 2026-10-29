@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { KeyUnlock } from "@/features/agent/components/KeyUnlock"
 import {
   agentApi,
   type ComputePart,
@@ -413,10 +414,18 @@ export function ComputePanel({
         {data?.note && (
           <p className="text-muted-foreground mt-2 text-xs">{data.note}</p>
         )}
-        {data?.error && (
-          <p className="mt-2 text-xs text-red-700 dark:text-red-400">
-            The cluster did not answer: {data.error}
-          </p>
+        {data?.ssh_key_locked && data.ssh_key && canManage ? (
+          // A key with a passphrase, not unlocked since the app started: the
+          // cluster is unreachable until it is, so this comes first.
+          <div className="mt-2">
+            <KeyUnlock keyPath={data.ssh_key} onUnlocked={refresh} />
+          </div>
+        ) : (
+          data?.error && (
+            <p className="mt-2 text-xs text-red-700 dark:text-red-400">
+              The cluster did not answer: {data.error}
+            </p>
+          )
         )}
         {tunnelDown && (
           <div className="mt-2 rounded border border-amber-300 p-2 text-xs">

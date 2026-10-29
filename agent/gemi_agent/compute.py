@@ -257,12 +257,29 @@ def overview(fresh: bool = False, with_jobs: bool = True) -> dict:
         parts.append(row)
     return {"cluster": cluster, "host": conf.get("HPC_HOST", "").split("@")[-1], "parts": parts,
             "login": conf.get("HPC_HOST"), "ssh_key": conf.get("HPC_KEY"),
+            # A key with a passphrase, not unlocked since this service started: nothing on the
+            # cluster can be reached until the person enters it.
+            "ssh_key_locked": _key_locked(conf.get("HPC_KEY")),
             "auto_start": p["auto_start"], "idle_stop_minutes": p["idle_stop_minutes"], "error": snap["error"], "checked": round(_cache["t"]),
             "share": dict(_share) or None,
             # Under `gemi-hpc app` the tunnel is that script's, on the app's own port.
             "connection": {"api": _api_answers() if os.environ.get("GEMI_TUNNEL_PIDFILE")
                            else _port_open(API_PORT) and st.get("api_pid") is not None,
                            "model": bool(st.get("llm_pid")) and _port_open(int(st.get("llm_port") or 0) or 1)}}
+
+
+_locked_seen: dict = {"key": None, "t": 0.0, "locked": False}
+
+
+def _key_locked(key: Optional[str]) -> bool:
+    """Whether the cluster's key needs its passphrase entered (looked at most every 30 s)."""
+    from .hpc_tools import key_ready
+
+    if not key:
+        return False
+    if _locked_seen["key"] != key or time.time() - _locked_seen["t"] > 30:
+        _locked_seen.update(key=key, t=time.time(), locked=not key_ready(key))
+    return bool(_locked_seen["locked"])
 
 
 def _part(name: str) -> dict:
@@ -352,6 +369,13 @@ def join(login: str, folder: str, key: str = "") -> dict:
         raise ValueError("your login on the cluster, as user@host")
     if not _re.fullmatch(r"/[A-Za-z0-9_./-]+", folder.strip()) or ".." in folder:
         raise ValueError("the shared GEMI folder: its full path on the cluster")
+    # The key it would use (the one given, or the first usual one), unlocked first if it has a passphrase.
+    from .hpc_tools import KeyLocked, _home, key_ready
+
+    use = key or next((str(p) for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa", "id_ecdsa"))
+                       if p.exists()), "")
+    if use and not key_ready(use):
+        raise KeyLocked(use)
     args = ["join"] + (["-i", key] if key else []) + [login.strip(), folder.strip()]
     from .hpc_tools import _gemi_hpc as run
 

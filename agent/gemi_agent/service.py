@@ -53,6 +53,7 @@ token (checked against the REST API):
     POST /agent/compute/folder         {folder}         what is in a folder on the cluster (two levels; administrators)
     POST /agent/compute/ingest         {folder, experiment, site, …}  a cluster job uploads it (administrators)
     POST /agent/compute/cluster/check  {ssh, key?, data_root?}  first run: check the SSH login, survey (read-only)
+    POST /agent/compute/ssh_unlock     {key, passphrase, remember?}  unlock a key with a passphrase into ssh-agent
     POST /agent/compute/cluster/use    {ssh, key?, data_root, core, workers_try, llm_try?}  write its settings
 """
 from __future__ import annotations
@@ -479,6 +480,21 @@ class Handler(BaseHTTPRequestHandler):
                     raise HttpError(400, str(e)) from None
             # First-run cluster setup from the welcome page: this computer's SSH login, so
             # only from this computer. The check is read-only; "use" writes the settings.
+            # Unlock a key that has a passphrase, into ssh-agent for this session: this
+            # computer's SSH login, so only from this computer. The passphrase is not kept.
+            if route == ["compute", "ssh_unlock"] and method == "POST":
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    raise HttpError(403, "a key is unlocked on the computer running the app")
+                from .hpc_tools import unlock_key
+
+                b = self._body()
+                try:
+                    out = unlock_key(str(b.get("key") or ""), str(b.get("passphrase") or ""), bool(b.get("remember")))
+                except (ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
+                    raise HttpError(400, str(e)) from None
+                compute._cache["t"] = 0.0
+                compute._locked_seen["t"] = 0.0
+                return out
             if route[:2] == ["compute", "cluster"] and method == "POST":
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
                     raise HttpError(403, "setting up the cluster uses this computer's SSH login: "

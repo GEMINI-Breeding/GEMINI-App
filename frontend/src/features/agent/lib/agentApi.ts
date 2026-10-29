@@ -318,6 +318,8 @@ export interface ComputeOverview {
   /** The SSH login and identity file this computer uses for the cluster. */
   login?: string
   ssh_key?: string
+  /** The key has a passphrase and is not unlocked yet: nothing on the cluster answers. */
+  ssh_key_locked?: boolean
   parts: ComputePart[]
   auto_start: boolean
   idle_stop_minutes?: number
@@ -602,6 +604,12 @@ export const agentApi = {
   /** Join a session someone in your group shares: your login, their GEMI folder. */
   computeJoin: (login: string, folder: string, key?: string) =>
     call<{ result: string }>("/compute/join", post({ login, folder, key })),
+  /** Unlock an SSH key that has a passphrase, into ssh-agent for this session. */
+  computeSshUnlock: (key: string, passphrase: string, remember = false) =>
+    call<{ key: string; unlocked: boolean; remembered: boolean }>(
+      "/compute/ssh_unlock",
+      post({ key, passphrase, remember }),
+    ),
   /** First run: check the SSH login and survey the cluster (read-only). */
   computeClusterCheck: (input: {
     ssh: string

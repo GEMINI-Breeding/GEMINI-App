@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from "vitest"
 
 const check = vi.fn()
 const use = vi.fn()
+const unlock = vi.fn()
 vi.mock("@/features/agent/lib/agentApi", () => ({
   agentApi: {
     computeClusterCheck: (i: unknown) => check(i),
     computeClusterUse: (i: unknown) => use(i),
+    computeSshUnlock: (...a: unknown[]) => unlock(...a),
   },
 }))
 
@@ -88,5 +90,33 @@ describe("ClusterSetup", () => {
   it("shows a cluster already set up", () => {
     show("hive")
     expect(screen.getByTestId("cluster-configured")).toHaveTextContent("hive")
+  })
+
+  it("asks for a locked key's passphrase, then checks the login again", async () => {
+    check
+      .mockReset()
+      .mockRejectedValueOnce(
+        new Error(
+          "The key /home/u/.ssh/id_ed25519 has a passphrase: enter it to unlock the key for this session.",
+        ),
+      )
+      .mockResolvedValueOnce(survey)
+    unlock.mockResolvedValue({ unlocked: true })
+    show()
+    fireEvent.change(screen.getByTestId("cluster-ssh"), {
+      target: { value: "jdoe@hive.edu" },
+    })
+    fireEvent.click(screen.getByTestId("cluster-check"))
+    await screen.findByTestId("key-unlock")
+    fireEvent.change(screen.getByTestId("key-unlock-passphrase"), {
+      target: { value: "s3cret" },
+    })
+    fireEvent.click(screen.getByTestId("key-unlock-go"))
+    await screen.findByTestId("cluster-survey")
+    expect(unlock.mock.calls[0].slice(0, 2)).toEqual([
+      "/home/u/.ssh/id_ed25519",
+      "s3cret",
+    ])
+    expect(check).toHaveBeenCalledTimes(2)
   })
 })

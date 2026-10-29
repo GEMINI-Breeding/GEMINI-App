@@ -104,19 +104,148 @@ def _ssh_args(target: str, key: Optional[str], port: Optional[int]) -> list[str]
     return args + [target]
 
 
+# ── keys with a passphrase ───────────────────────────────────────────────────
+# Every cluster command is a fresh ssh that cannot prompt. A key locked with a passphrase
+# is unlocked once into ssh-agent (the person types the passphrase in the app); every
+# later ssh of this service finds it there. The passphrase is never written anywhere.
+
+class KeyLocked(RuntimeError):
+    """The key has a passphrase and is not unlocked in ssh-agent yet."""
+
+    def __init__(self, key: str):
+        self.key = key
+        super().__init__(f"The key {key} has a passphrase: enter it to unlock the key for this session.")
+
+
+def _key_path(key: str) -> str:
+    text = str(key).strip()
+    m = re.match(r"^/([A-Za-z])/(.*)$", text)
+    if os.name == "nt" and m:
+        text = f"{m.group(1).upper()}:/{m.group(2)}"
+    return str(Path(text).expanduser())
+
+
+def key_needs_passphrase(key: str) -> bool:
+    """Whether the private key file is encrypted (it cannot be read with an empty passphrase)."""
+    try:
+        r = subprocess.run(["ssh-keygen", "-y", "-P", "", "-f", _key_path(key)],
+                           capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    said = (r.stderr + r.stdout).lower()
+    return r.returncode != 0 and ("passphrase" in said or "incorrect" in said)
+
+
+def _agent_answers() -> bool:
+    if not os.environ.get("SSH_AUTH_SOCK"):
+        return False
+    try:
+        r = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode in (0, 1)              # 1: an agent with no keys; 2: no agent
+
+
+def key_in_agent(key: str) -> bool:
+    """Whether ssh-agent holds this key (compared by fingerprint)."""
+    if not _agent_answers():
+        return False
+    path = _key_path(key)
+    pub = path + ".pub" if Path(path + ".pub").is_file() else path
+    try:
+        fp = subprocess.run(["ssh-keygen", "-lf", pub], capture_output=True, text=True, timeout=10,
+                            stdin=subprocess.DEVNULL).stdout.split()
+        held = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True, timeout=10,
+                              stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return len(fp) > 1 and fp[1] in held
+
+
+def key_ready(key: Optional[str]) -> bool:
+    """A key ssh can use without asking: no passphrase, or unlocked in ssh-agent."""
+    return not key or not key_needs_passphrase(key) or key_in_agent(key)
+
+
+def ensure_agent() -> None:
+    """An ssh-agent this service and every ssh it starts can use: the person's own (the
+    desktop's), or one started here."""
+    if _agent_answers():
+        return
+    out = subprocess.run(["ssh-agent", "-s"], capture_output=True, text=True, timeout=20,
+                         stdin=subprocess.DEVNULL).stdout
+    for name in ("SSH_AUTH_SOCK", "SSH_AGENT_PID"):
+        m = re.search(rf"{name}=([^;]+);", out)
+        if m:
+            os.environ[name] = m.group(1)
+    if not _agent_answers():
+        raise RuntimeError("could not start ssh-agent on this computer")
+
+
+def unlock_key(key: str, passphrase: str, remember: bool = False) -> dict:
+    """Unlock a key with its passphrase into ssh-agent, for this session (and, on macOS
+    when asked, in the Keychain). The passphrase reaches ssh-add only."""
+    import sys
+    import tempfile
+
+    path = _key_path(key)
+    if not Path(path).is_file():
+        raise ValueError(f"no key file at {key}")
+    if not passphrase:
+        raise ValueError("enter the key's passphrase")
+    ensure_agent()
+    # ssh-add reads the passphrase from an "askpass" program: this one prints it from its
+    # own environment, so the passphrase is in no file and on no command line.
+    with tempfile.TemporaryDirectory(prefix="gemi-askpass-") as tmp:
+        # It answers the first prompt only: on "Bad passphrase, try again" it gives up, or
+        # ssh-add would ask it again forever.
+        if os.name == "nt":
+            helper = Path(tmp) / "askpass.cmd"
+            helper.write_text("@echo off\r\necho %* | findstr /i /c:\"try again\" >nul && exit /b 1\r\n"
+                              "setlocal EnableDelayedExpansion\r\necho(!GEMI_KEY_PASSPHRASE!\r\n")
+        else:
+            helper = Path(tmp) / "askpass.sh"
+            helper.write_text('#!/bin/sh\ncase "$*" in *"try again"*) exit 1 ;; esac\n'
+                              'printf \'%s\\n\' "$GEMI_KEY_PASSPHRASE"\n')
+            helper.chmod(0o700)
+        env = dict(os.environ, SSH_ASKPASS=str(helper), SSH_ASKPASS_REQUIRE="force",
+                   DISPLAY=os.environ.get("DISPLAY") or ":0", GEMI_KEY_PASSPHRASE=passphrase)
+        args = ["ssh-add"] + (["--apple-use-keychain"] if remember and sys.platform == "darwin" else []) + [path]
+        try:
+            r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                               start_new_session=os.name != "nt")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("unlocking the key did not finish: try again") from None
+    if r.returncode != 0 or not key_in_agent(path):
+        said = (r.stderr or r.stdout).strip().lower()
+        # The helper gives up on the second prompt, so a wrong passphrase ends with no message.
+        if not said or "passphrase" in said:
+            raise ValueError("that passphrase did not unlock the key")
+        raise RuntimeError(f"could not unlock the key: {(r.stderr or r.stdout).strip()[-200:]}")
+    return {"key": _posix(Path(path)), "unlocked": True,
+            "remembered": bool(remember and sys.platform == "darwin")}
+
+
 def _find_key(target: str, key: Optional[str], port: Optional[int]) -> Optional[str]:
     """The key that logs in without a password: the one given, the agent's
-    default, or the first of the usual files that works."""
+    default, or the first of the usual files that works. A key with a passphrase
+    that is not unlocked yet is reported (KeyLocked) rather than tried."""
     candidates: list[Optional[str]] = [key] if key else [None]
     if not key:
         candidates += [str(p) for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa", "id_ecdsa")) if p.exists()]
     last = ""
+    locked: Optional[str] = None
     for k in candidates:
+        if k and not key_ready(k):
+            locked = locked or k
+            continue
         r = subprocess.run(_ssh_args(target, k, port) + ["echo ok"], capture_output=True, text=True, timeout=60)
         if r.returncode == 0 and "ok" in r.stdout:
             return k or ""
         last = (r.stderr or r.stdout).strip().splitlines()[-1:] or [""]
         last = last[0]
+    if locked:
+        raise KeyLocked(_posix(Path(_key_path(locked))))
     raise RuntimeError(f"could not log in to {target} with a key (no password prompt is possible here): {last}. "
                        "Set up key-based SSH login first: ssh-keygen, then ssh-copy-id.")
 
