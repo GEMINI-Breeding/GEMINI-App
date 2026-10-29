@@ -12,6 +12,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { Plus, RefreshCw, X } from "lucide-react"
 import { useCallback, useState } from "react"
+import { WhereLine } from "@/components/Sidebar/WhereSwitch"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import {
@@ -316,12 +317,15 @@ export function DashboardBuilder({ embedded = false }: { embedded?: boolean }) {
           <div
             className={`${embedded ? "h-10" : "h-16"} px-4 flex items-center justify-between border-b border-border`}
           >
-            <span
-              className={
-                embedded ? "text-sm font-medium" : "text-xl font-semibold"
-              }
-            >
-              Dashboard
+            <span className="flex items-baseline gap-3">
+              <span
+                className={
+                  embedded ? "text-sm font-medium" : "text-xl font-semibold"
+                }
+              >
+                Dashboard
+              </span>
+              <WhereLine />
             </span>
             <div className="flex items-center gap-1.5">
               <Button

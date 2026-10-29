@@ -11,6 +11,7 @@
  * (lib/runPreview: one short listing per run, remembered, then a small
  * server-made thumbnail). A workspace without runs keeps the placeholder.
  */
+
 import { useNavigate } from "@tanstack/react-router"
 import {
   Bot,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
+import { WhereLine } from "@/components/Sidebar/WhereSwitch"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -406,6 +408,7 @@ export function WorkspaceDashboard() {
               Every run by experiment and date; workspaces hold pipeline
               settings
             </p>
+            <WhereLine className="mt-1" />
           </div>
           <div className="flex items-center gap-2">
             <div className="flex rounded-md border p-0.5" role="tablist">

@@ -1,4 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useSearch } from "@tanstack/react-router"
+import { z } from "zod"
 
 import ApplicationSettings from "@/components/UserSettings/ApplicationSettings"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
@@ -6,14 +7,21 @@ import UserInformation from "@/components/UserSettings/UserInformation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PeopleSettings } from "@/features/people/PeopleSettings"
 
+const settingsSearchSchema = z.object({
+  // Opens a section of the Application tab (e.g. Compute, from the sidebar's place switch).
+  section: z.enum(["home", "data", "compute", "signin", "about"]).optional(),
+})
+
 export const Route = createFileRoute("/_layout/settings")({
   component: UserSettings,
+  validateSearch: settingsSearchSchema,
   head: () => ({
     meta: [{ title: "Settings" }],
   }),
 })
 
 function UserSettings() {
+  const { section } = useSearch({ from: "/_layout/settings" })
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b">
@@ -40,7 +48,7 @@ function UserSettings() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="application" className="min-h-0 flex-1">
-          <ApplicationSettings />
+          <ApplicationSettings key={section ?? "home"} initial={section} />
         </TabsContent>
         <TabsContent
           value="account"

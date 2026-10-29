@@ -51,3 +51,22 @@ def test_logging_in_with_a_locked_key_asks_for_its_passphrase(tmp_path, own_agen
     with pytest.raises(H.KeyLocked) as e:
         H._find_key("nobody@localhost", key, None)
     assert e.value.key.endswith("id_test") and "passphrase" in str(e.value)
+
+
+@pytest.mark.parametrize("bash_in", ["bin", "usr/bin"])
+def test_windows_uses_git_for_windows_ssh_tools(tmp_path, monkeypatch, bash_in):
+    """On Windows: Git's ssh-agent (a per-user program), not System32's (a Windows service)."""
+    git = tmp_path / "Git"
+    (git / bash_in).mkdir(parents=True, exist_ok=True)
+    (git / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+    (git / bash_in / "bash.exe").write_text("")
+    for tool in ("ssh", "ssh-add", "ssh-agent", "ssh-keygen"):
+        (git / "usr" / "bin" / f"{tool}.exe").write_text("")
+    monkeypatch.setattr(H, "_bash", lambda: str(git / bash_in / "bash.exe"))
+    monkeypatch.setattr(H, "_windows", lambda: True)
+    assert H._ssh_tool("ssh-agent") == str(git / "usr" / "bin" / "ssh-agent.exe")
+    assert H._ssh_tool("ssh") == str(git / "usr" / "bin" / "ssh.exe")
+
+
+def test_elsewhere_the_ssh_tools_on_path():
+    assert H._ssh_tool("ssh-agent") == "ssh-agent"

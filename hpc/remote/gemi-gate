@@ -24,7 +24,7 @@
 #   cloud-remotes | cloud-add <name> <type> (settings on stdin) | cloud-rm <name>
 #   cloud-ls <name> <path64> | cloud-cat <name> <path64> | cloud-fetch <name> <path64> <dest> [include=…] [keep=1] [<setting=…>…]
 #   cloud-state [job]  | pull-rclone          (online storage, copied straight here with rclone)
-#   share on [passwordless] | off | status | clear-request   (the folder's group joins this session)
+#   share on [passwordless] | off | status | clear-request | check   (the folder's group joins this session)
 #   my-places [partition:account …]      (your own placements, for your jobs on a shared session)
 #   recv <backend|hpc>            (a tar stream on stdin, into a staging folder)
 #   sync-finish <cluster> <rev>   (move the staged folders into place)
@@ -391,7 +391,7 @@ main() {
       scancel -u "$USER" -n gemi-pull-llm; echo "download job dropped (files already fetched are kept)"
       ;;
     share)
-      # share on [passwordless] | off | status | clear-request: whether the GEMI folder's group can
+      # share on [passwordless] | off | status | clear-request | check: whether the GEMI folder's group can
       # join this session (their own workers, their own allocation), and sign-in without passwords.
       nwords 1 2
       local what="${words[0]}" grp
@@ -417,7 +417,19 @@ main() {
           true ;;
         clear-request)
           nwords 1 1; audit ALLOW; rm -f "$RUN/share/start-request"; echo cleared ;;
-        *) refuse "share on|off|status|clear-request" ;;
+        check)
+          # Read-only: what a member needs to read, its owner, group and permissions (and the
+          # folders above it), and the groups of whoever asks. Works for the owner and members.
+          nwords 1 1; audit ALLOW
+          echo "me=$USER groups=$(id -Gn | tr ' ' ',') folder_group=$grp"
+          local d="$GEMI_HPC_ROOT"
+          while [ "$d" != "/" ] && [ -n "$d" ]; do stat -c '%A %U %G %n' "$d" 2>&1; d=$(dirname "$d"); done | tac
+          for f in "$RUN" "$SHARE_CONF" "$RUN/session.env" "$RUN/stack.env" "$RUN/share" "$LOGS" "$DATA" \
+                   "$HPC" "$HPC/remote/gemi-gate" "$IMAGES" "$INCOMING"; do
+            stat -c '%A %U %G %n' "$f" 2>&1
+          done
+          true ;;
+        *) refuse "share on|off|status|clear-request|check" ;;
       esac
       ;;
     my-places)

@@ -10,6 +10,7 @@ import { sidebarItems } from "@/config/navigation"
 import useAuth from "@/hooks/useAuth"
 import { Main } from "./Main"
 import { User } from "./User"
+import { WhereSwitch } from "./WhereSwitch"
 
 export function AppSidebar() {
   const { user } = useAuth()
@@ -22,6 +23,7 @@ export function AppSidebar() {
         <Main items={sidebarItems} />
       </SidebarContent>
       <SidebarFooter>
+        <WhereSwitch />
         <User user={user} />
         <SidebarAppearance />
       </SidebarFooter>

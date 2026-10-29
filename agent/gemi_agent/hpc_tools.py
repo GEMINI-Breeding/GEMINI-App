@@ -61,6 +61,28 @@ def _bash() -> str:
                        "(the walkthrough's cluster choice, or Settings > Compute), or from https://git-scm.com.")
 
 
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def _ssh_tool(name: str) -> str:
+    """ssh, ssh-add, ssh-agent or ssh-keygen. On Windows, Git for Windows' own: the cluster
+    commands run in its bash with its ssh, and its ssh-agent is an ordinary per-user program.
+    Windows' built-in OpenSSH (System32) has an ssh-agent that is a Windows service, off by
+    default and needing an administrator to turn on, and keys it holds are not seen by Git's ssh."""
+    if not _windows():
+        return name
+    try:
+        bash = Path(_bash())
+    except RuntimeError:
+        return name
+    root = bash.parent.parent                       # …\Git\bin\bash.exe
+    if root.name.lower() == "usr":                  # …\Git\usr\bin\bash.exe
+        root = root.parent
+    tool = root / "usr" / "bin" / f"{name}.exe"
+    return str(tool) if tool.exists() else name
+
+
 def _posix(p: Path) -> str:
     """C:\\Users\\me\\.ssh\\id_rsa -> /c/Users/me/.ssh/id_rsa (what Git Bash's ssh and gemi-hpc want)."""
     s = str(p).replace("\\", "/")
@@ -95,7 +117,7 @@ def parse_ssh(command: str) -> dict:
 
 def _ssh_args(target: str, key: Optional[str], port: Optional[int]) -> list[str]:
     known = _home() / ".ssh" / "known_hosts"
-    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=accept-new",
+    args = [_ssh_tool("ssh"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=accept-new",
             "-o", f"UserKnownHostsFile={_posix(known)}"]
     if key:
         args += ["-i", _posix(Path(key).expanduser()), "-o", "IdentitiesOnly=yes"]
@@ -128,7 +150,7 @@ def _key_path(key: str) -> str:
 def key_needs_passphrase(key: str) -> bool:
     """Whether the private key file is encrypted (it cannot be read with an empty passphrase)."""
     try:
-        r = subprocess.run(["ssh-keygen", "-y", "-P", "", "-f", _key_path(key)],
+        r = subprocess.run([_ssh_tool("ssh-keygen"), "-y", "-P", "", "-f", _key_path(key)],
                            capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -140,7 +162,7 @@ def _agent_answers() -> bool:
     if not os.environ.get("SSH_AUTH_SOCK"):
         return False
     try:
-        r = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+        r = subprocess.run([_ssh_tool("ssh-add"), "-l"], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return r.returncode in (0, 1)              # 1: an agent with no keys; 2: no agent
@@ -153,9 +175,9 @@ def key_in_agent(key: str) -> bool:
     path = _key_path(key)
     pub = path + ".pub" if Path(path + ".pub").is_file() else path
     try:
-        fp = subprocess.run(["ssh-keygen", "-lf", pub], capture_output=True, text=True, timeout=10,
+        fp = subprocess.run([_ssh_tool("ssh-keygen"), "-lf", pub], capture_output=True, text=True, timeout=10,
                             stdin=subprocess.DEVNULL).stdout.split()
-        held = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True, timeout=10,
+        held = subprocess.run([_ssh_tool("ssh-add"), "-l"], capture_output=True, text=True, timeout=10,
                               stdin=subprocess.DEVNULL).stdout
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -172,14 +194,16 @@ def ensure_agent() -> None:
     desktop's), or one started here."""
     if _agent_answers():
         return
-    out = subprocess.run(["ssh-agent", "-s"], capture_output=True, text=True, timeout=20,
+    out = subprocess.run([_ssh_tool("ssh-agent"), "-s"], capture_output=True, text=True, timeout=20,
                          stdin=subprocess.DEVNULL).stdout
     for name in ("SSH_AUTH_SOCK", "SSH_AGENT_PID"):
         m = re.search(rf"{name}=([^;]+);", out)
         if m:
             os.environ[name] = m.group(1)
     if not _agent_answers():
-        raise RuntimeError("could not start ssh-agent on this computer")
+        raise RuntimeError("could not start ssh-agent on this computer"
+                           + (": the app uses Git for Windows' ssh-agent; install Git for Windows (the walkthrough's "
+                              "cluster choice, or Settings > Compute) and try again" if os.name == "nt" else ""))
 
 
 def unlock_key(key: str, passphrase: str, remember: bool = False) -> dict:
@@ -198,19 +222,14 @@ def unlock_key(key: str, passphrase: str, remember: bool = False) -> dict:
     # own environment, so the passphrase is in no file and on no command line.
     with tempfile.TemporaryDirectory(prefix="gemi-askpass-") as tmp:
         # It answers the first prompt only: on "Bad passphrase, try again" it gives up, or
-        # ssh-add would ask it again forever.
-        if os.name == "nt":
-            helper = Path(tmp) / "askpass.cmd"
-            helper.write_text("@echo off\r\necho %* | findstr /i /c:\"try again\" >nul && exit /b 1\r\n"
-                              "setlocal EnableDelayedExpansion\r\necho(!GEMI_KEY_PASSPHRASE!\r\n")
-        else:
-            helper = Path(tmp) / "askpass.sh"
-            helper.write_text('#!/bin/sh\ncase "$*" in *"try again"*) exit 1 ;; esac\n'
-                              'printf \'%s\\n\' "$GEMI_KEY_PASSPHRASE"\n')
-            helper.chmod(0o700)
-        env = dict(os.environ, SSH_ASKPASS=str(helper), SSH_ASKPASS_REQUIRE="force",
+        # ssh-add would ask it again forever. (On Windows, Git's ssh-add runs it too.)
+        helper = Path(tmp) / "askpass.sh"
+        helper.write_text('#!/bin/sh\ncase "$*" in *"try again"*) exit 1 ;; esac\n'
+                          'printf \'%s\\n\' "$GEMI_KEY_PASSPHRASE"\n', newline="\n")
+        helper.chmod(0o700)
+        env = dict(os.environ, SSH_ASKPASS=_posix(helper) if os.name == "nt" else str(helper), SSH_ASKPASS_REQUIRE="force",
                    DISPLAY=os.environ.get("DISPLAY") or ":0", GEMI_KEY_PASSPHRASE=passphrase)
-        args = ["ssh-add"] + (["--apple-use-keychain"] if remember and sys.platform == "darwin" else []) + [path]
+        args = [_ssh_tool("ssh-add")] + (["--apple-use-keychain"] if remember and sys.platform == "darwin" else []) + [path]
         try:
             r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
                                start_new_session=os.name != "nt")
@@ -574,7 +593,7 @@ ACTIONS = ("status", "sync", "pull", "pull_llm", "pull_ml_deps", "up", "worker",
 
 def _tunnel(conf: dict, local: int, remote_ip: str, remote_port: str) -> int:
     known = conf.get("HPC_KNOWN_HOSTS", "")
-    cmd = ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
+    cmd = [_ssh_tool("ssh"), "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
            "-o", f"UserKnownHostsFile={known}", "-i", conf["HPC_KEY"], "-o", "IdentitiesOnly=yes",
            "-L", f"127.0.0.1:{local}:{remote_ip}:{remote_port}", conf["HPC_HOST"]]
     flags = (subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0)) if os.name == "nt" else 0

@@ -10,6 +10,7 @@ import {
   mapUploadProgress,
   mapWorkerProgress,
 } from "@/features/files/lib/uploadProgressSplit"
+import { useWhere } from "@/lib/where"
 import type { Process } from "@/types/process"
 
 /**
@@ -179,6 +180,7 @@ function activeLabel(active: number, queued: number): string {
 }
 
 export function ProcessPanel() {
+  const where = useWhere()
   const {
     processes,
     hasBeenActive,
@@ -289,17 +291,42 @@ export function ProcessPanel() {
           </div>
         </CardHeader>
         <CardContent className="px-0 pt-0 pb-0 max-h-64 overflow-y-auto">
-          {processes.map((p) => (
-            <ProcessItem
-              key={p.id}
-              process={p}
-              onDismiss={() => removeProcess(p.id)}
-              onCancel={() => {
-                p.cancel?.()
-                updateProcess(p.id, { cancel: undefined })
-              }}
-            />
-          ))}
+          {/* Where each piece of work happens: processing jobs run where the
+              app's data is (this computer or the cluster); uploads and exports
+              run from this computer. */}
+          {(
+            [
+              [
+                `Jobs on ${where.place === "cluster" ? `the cluster ${where.cluster ?? ""}`.trim() : "this computer"}`,
+                processes.filter((p) => p.type === "processing"),
+                "process-section-jobs",
+              ],
+              [
+                "From this computer",
+                processes.filter((p) => p.type !== "processing"),
+                "process-section-local",
+              ],
+            ] as const
+          ).map(([title, list, testId]) =>
+            list.length === 0 ? null : (
+              <div key={testId} data-testid={testId}>
+                <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
+                  {title}
+                </p>
+                {list.map((p) => (
+                  <ProcessItem
+                    key={p.id}
+                    process={p}
+                    onDismiss={() => removeProcess(p.id)}
+                    onCancel={() => {
+                      p.cancel?.()
+                      updateProcess(p.id, { cancel: undefined })
+                    }}
+                  />
+                ))}
+              </div>
+            ),
+          )}
           {transfers.length > 0 && (
             <div className="border-t" data-testid="process-transfers">
               <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
@@ -314,7 +341,15 @@ export function ProcessPanel() {
                     <span className="min-w-0 flex-1 truncate font-medium">
                       {t.title}
                     </span>
-                    <span className="text-muted-foreground">{t.state}</span>
+                    <span className="text-muted-foreground">
+                      {/* Uploads send files from this computer; copies and
+                          folder uploads are jobs on the cluster. */}
+                      {t.kind === "upload"
+                        ? "from this computer"
+                        : "on the cluster"}
+                      {" · "}
+                      {t.state}
+                    </span>
                   </div>
                   {t.detail && (
                     <p className="ml-4 truncate text-muted-foreground">

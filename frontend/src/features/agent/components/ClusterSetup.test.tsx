@@ -5,15 +5,17 @@ import { describe, expect, it, vi } from "vitest"
 const check = vi.fn()
 const use = vi.fn()
 const unlock = vi.fn()
+const joinCall = vi.fn()
 vi.mock("@/features/agent/lib/agentApi", () => ({
   agentApi: {
     computeClusterCheck: (i: unknown) => check(i),
     computeClusterUse: (i: unknown) => use(i),
     computeSshUnlock: (...a: unknown[]) => unlock(...a),
+    computeJoin: (...a: unknown[]) => joinCall(...a),
   },
 }))
 
-import { ClusterSetup } from "./Welcome"
+import { ClusterSetup, JoinSession } from "./Welcome"
 
 const survey = {
   ssh: "ssh -i ~/.ssh/id_lab jdoe@hive.edu",
@@ -118,5 +120,26 @@ describe("ClusterSetup", () => {
       "s3cret",
     ])
     expect(check).toHaveBeenCalledTimes(2)
+  })
+
+  it("joining takes the same SSH login, the ssh command pasted too", async () => {
+    joinCall.mockResolvedValue({ result: "joined" })
+    const onJoined = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <JoinSession onJoined={onJoined} />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByLabelText("SSH login")).toBeInTheDocument()
+    expect(screen.getByLabelText("SSH key file")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("join-session-login"), {
+      target: { value: "ssh jdoe@hive.edu" },
+    })
+    fireEvent.change(screen.getByTestId("join-session-folder"), {
+      target: { value: "/group/lab/gemi" },
+    })
+    fireEvent.click(screen.getByTestId("join-session-go"))
+    await waitFor(() => expect(onJoined).toHaveBeenCalled())
+    expect(joinCall.mock.calls[0][0]).toBe("ssh jdoe@hive.edu")
   })
 })

@@ -134,8 +134,8 @@ const SETTINGS_NAV_GROUPS = [
 
 type SettingsSection = "home" | "data" | "compute" | "signin" | "about"
 
-const ApplicationSettings = () => {
-  const [active, setActive] = useState<SettingsSection>("home")
+const ApplicationSettings = ({ initial }: { initial?: SettingsSection }) => {
+  const [active, setActive] = useState<SettingsSection>(initial ?? "home")
   const { user } = useAuth()
 
   return (

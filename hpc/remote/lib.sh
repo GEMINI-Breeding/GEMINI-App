@@ -40,6 +40,12 @@ share_perms() {
   is_owner || return 0
   if shared; then
     mkdir -p "$RUN/share" "$DATA/models" "$INCOMING"
+    # Group permissions only help files that belong to the group: the owner's own files may
+    # carry the owner's personal group (a folder without setgid). Give them the GEMI folder's.
+    local grp; grp=$(stat -c %G "$GEMI_HPC_ROOT")
+    chgrp "$grp" "$RUN" "$DATA" "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING" \
+      "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
+    chgrp -R "$grp" "$IMAGES" "$HPC" "$SRC" "$DATA/models" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
     chmod 750 "$RUN" "$DATA"
     chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
     chmod 600 "$RUN/secrets.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null

@@ -376,6 +376,13 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         route: "/settings",
       },
       {
+        id: "app-where",
+        title: "Where Your Data Is",
+        description:
+          "Everything the app shows, and every job it runs, is in one place: this computer or a cluster session (yours, or one your group shares). This shows which, and whether it is answering; in the desktop app, click it to switch. Each place keeps its own experiments: switching moves nothing.",
+        selector: '[data-testid="where-current"]',
+      },
+      {
         id: "app-help",
         title: "Help Is Always Here",
         description:

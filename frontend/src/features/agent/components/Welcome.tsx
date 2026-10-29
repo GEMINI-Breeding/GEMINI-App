@@ -220,6 +220,77 @@ function ProcessingStep({
   )
 }
 
+/** The SSH login field, worded the same wherever the app asks for it (cluster
+ *  setup, joining a shared session): user@host, or the whole ssh command. */
+function SshLoginField({
+  id,
+  value,
+  onChange,
+  testId,
+  portOk = false,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+  testId: string
+  portOk?: boolean
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id}>SSH login</Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="jdoe@login.cluster.edu"
+        data-testid={testId}
+      />
+      <p className="text-muted-foreground text-xs">
+        Your username and the cluster's address, as you type them after{" "}
+        <span className="font-mono">ssh</span>. Pasting the whole ssh command
+        works too{portOk ? ", with a port (-p)" : ""}.
+      </p>
+    </div>
+  )
+}
+
+/** The SSH key file field (the private key), worded the same everywhere. */
+function SshKeyField({
+  id,
+  value,
+  onChange,
+  testId,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+  testId: string
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id}>SSH key file</Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="~/.ssh/id_ed25519"
+        data-testid={testId}
+      />
+      <p className="text-muted-foreground text-xs">
+        The private key you log in with. Leave empty to try your usual keys
+        (~/.ssh/id_ed25519, id_rsa). No key yet: run{" "}
+        <span className="font-mono">ssh-keygen</span>, then add the{" "}
+        <span className="font-mono">.pub</span> file to the cluster (for example{" "}
+        <span className="font-mono">ssh-copy-id</span>, or the cluster's account
+        page).
+      </p>
+    </div>
+  )
+}
+
+/** A login as typed: user@host, or an ssh command containing one. */
+const looksLikeLogin = (text: string) => /\S+@\S+/.test(text)
+
 /** The cluster's SSH login and key file, checked with a read-only survey of
  *  the cluster, then saved as its settings. Installing and starting it is
  *  left to the agent (or Settings → Compute). */
@@ -277,47 +348,30 @@ export function ClusterSetup({
     )
 
   const c = check.data
-  const looksLikeLogin = /\S+@\S+/.test(ssh)
   return (
     <div
       className="space-y-3 rounded-md border p-3"
       data-testid="cluster-setup"
     >
-      <div className="space-y-1">
-        <Label htmlFor="cluster-ssh">SSH command</Label>
-        <Input
-          id="cluster-ssh"
-          value={ssh}
-          onChange={(e) => {
-            setSsh(e.target.value)
-            check.reset()
-          }}
-          placeholder="ssh jdoe@login.cluster.edu"
-          data-testid="cluster-ssh"
-        />
-        <p className="text-muted-foreground text-xs">
-          What you type to log in to the cluster. A port (-p) is fine.
-        </p>
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="cluster-key">SSH key file</Label>
-        <Input
-          id="cluster-key"
-          value={key}
-          onChange={(e) => {
-            setKey(e.target.value)
-            check.reset()
-          }}
-          placeholder="~/.ssh/id_ed25519"
-          data-testid="cluster-key"
-        />
-        <p className="text-muted-foreground text-xs">
-          The private key you log in with. Leave empty to try your usual keys
-          (~/.ssh/id_ed25519, id_rsa). No key yet: run{" "}
-          <span className="font-mono">ssh-keygen</span>, then{" "}
-          <span className="font-mono">ssh-copy-id jdoe@login.cluster.edu</span>.
-        </p>
-      </div>
+      <SshLoginField
+        id="cluster-ssh"
+        value={ssh}
+        onChange={(v) => {
+          setSsh(v)
+          check.reset()
+        }}
+        testId="cluster-ssh"
+        portOk
+      />
+      <SshKeyField
+        id="cluster-key"
+        value={key}
+        onChange={(v) => {
+          setKey(v)
+          check.reset()
+        }}
+        testId="cluster-key"
+      />
       <div className="space-y-1">
         <Label htmlFor="cluster-existing">
           GEMI folder already on the cluster{" "}
@@ -337,7 +391,7 @@ export function ClusterSetup({
       <Button
         size="sm"
         variant="outline"
-        disabled={!looksLikeLogin || check.isPending}
+        disabled={!looksLikeLogin(ssh) || check.isPending}
         onClick={() => check.mutate()}
         data-testid="cluster-check"
       >
@@ -462,27 +516,31 @@ export function JoinSession({ onJoined }: { onJoined: () => void }) {
       className="space-y-2 rounded-md border p-3 text-sm"
       data-testid="join-session"
     >
-      <Input
+      <SshLoginField
+        id="join-login"
         value={login}
-        onChange={(e) => setLogin(e.target.value)}
-        placeholder="Your cluster login, e.g. ana@hpc.university.edu"
-        aria-label="Your cluster login"
-        data-testid="join-session-login"
+        onChange={setLogin}
+        testId="join-session-login"
       />
-      <Input
-        value={folder}
-        onChange={(e) => setFolder(e.target.value)}
-        placeholder="The shared GEMI folder on the cluster (ask whoever runs it)"
-        aria-label="The shared GEMI folder"
-        data-testid="join-session-folder"
-      />
-      <Input
+      <SshKeyField
+        id="join-key"
         value={key}
-        onChange={(e) => setKey(e.target.value)}
-        placeholder="Your SSH key file, e.g. ~/.ssh/id_ed25519 (empty: your usual key)"
-        aria-label="Your SSH key file"
-        data-testid="join-session-key"
+        onChange={setKey}
+        testId="join-session-key"
       />
+      <div className="space-y-1">
+        <Label htmlFor="join-folder">Shared GEMI folder</Label>
+        <Input
+          id="join-folder"
+          value={folder}
+          onChange={(e) => setFolder(e.target.value)}
+          placeholder="/group/mylab/gemini_app"
+          data-testid="join-session-folder"
+        />
+        <p className="text-muted-foreground text-xs">
+          Its full path on the cluster: ask whoever runs the session.
+        </p>
+      </div>
       <p className="text-muted-foreground text-xs">
         Needs an SSH key for your login (no password prompt) and membership of
         the folder's group. Whoever runs the session turns sharing on in
@@ -490,7 +548,7 @@ export function JoinSession({ onJoined }: { onJoined: () => void }) {
       </p>
       <Button
         disabled={
-          !/^\S+@\S+$/.test(login.trim()) ||
+          !looksLikeLogin(login) ||
           !folder.trim().startsWith("/") ||
           join.isPending
         }

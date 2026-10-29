@@ -364,19 +364,32 @@ def join(login: str, folder: str, key: str = "") -> dict:
     """This computer joins a session another person runs (their GEMI folder on the cluster, shared
     with your group): your own login, your own jobs, their data."""
     import re as _re
+    from pathlib import Path as _Path
 
-    if not _re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+", login.strip()):
-        raise ValueError("your login on the cluster, as user@host")
+    from .hpc_tools import KeyLocked, _home, _key_path, _posix, key_ready, parse_ssh
+
+    # The same SSH login as the cluster setup asks for: user@host, or the whole ssh
+    # command (ssh [-i keyfile] user@host) pasted as it is.
+    text = login.strip()
+    try:
+        ssh = parse_ssh(text if text.startswith("ssh ") else "ssh " + text)
+    except ValueError:
+        raise ValueError("your SSH login: user@host, e.g. jdoe@login.cluster.edu "
+                         "(or the ssh command you use to log in)") from None
+    if ssh["port"]:
+        raise ValueError("joining through an SSH port other than 22 is not supported yet")
     if not _re.fullmatch(r"/[A-Za-z0-9_./-]+", folder.strip()) or ".." in folder:
         raise ValueError("the shared GEMI folder: its full path on the cluster")
+    key = (key or "").strip() or ssh["key"] or ""
+    if key and not _Path(_key_path(key)).is_file():
+        raise ValueError(f"no key file at {key}")
     # The key it would use (the one given, or the first usual one), unlocked first if it has a passphrase.
-    from .hpc_tools import KeyLocked, _home, key_ready
-
-    use = key or next((str(p) for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa", "id_ecdsa"))
-                       if p.exists()), "")
+    use = _key_path(key) if key else next(
+        (str(p) for p in ((_home() / ".ssh" / n) for n in ("id_ed25519", "id_rsa", "id_ecdsa")) if p.exists()), "")
     if use and not key_ready(use):
         raise KeyLocked(use)
-    args = ["join"] + (["-i", key] if key else []) + [login.strip(), folder.strip()]
+    # The cluster commands run in bash (Git's, on Windows): the key as a path it reads (/c/Users/…).
+    args = ["join"] + (["-i", _posix(_Path(_key_path(key)))] if key else []) + [ssh["target"], folder.strip()]
     from .hpc_tools import _gemi_hpc as run
 
     out = run(args, None, timeout=180)

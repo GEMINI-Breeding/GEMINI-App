@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { KeyUnlock } from "@/features/agent/components/KeyUnlock"
+import { ClusterSetup } from "@/features/agent/components/Welcome"
 import {
   agentApi,
   type ComputePart,
@@ -413,6 +414,19 @@ export function ComputePanel({
         )}
         {data?.note && (
           <p className="text-muted-foreground mt-2 text-xs">{data.note}</p>
+        )}
+        {data && !data.cluster && canManage && (
+          // No cluster yet: set one up here (the same form as the first-run walkthrough).
+          <div className="mt-3 space-y-2" data-testid="compute-cluster-setup">
+            <p className="text-sm font-medium">Use a cluster</p>
+            <p className="text-muted-foreground text-xs">
+              Data stays where it was made: experiments on this computer are not
+              copied to the cluster, and the cluster session starts with its
+              own. Setting one up does not switch the app to it; the place
+              switch in the sidebar does.
+            </p>
+            <ClusterSetup configured={null} onReady={refresh} />
+          </div>
         )}
         {data?.ssh_key_locked && data.ssh_key && canManage ? (
           // A key with a passphrase, not unlocked since the app started: the
