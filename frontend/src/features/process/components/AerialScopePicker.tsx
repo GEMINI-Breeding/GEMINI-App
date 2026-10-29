@@ -15,7 +15,6 @@
  */
 
 import { useEffect, useMemo } from "react"
-import type { ExperimentOutput } from "@/client"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -30,14 +29,12 @@ import {
   useExperimentPopulations,
   useExperimentSeasons,
   useExperimentSites,
-  useMyExperimentIds,
 } from "@/features/experiments/hooks/useExperimentData"
 import { PLATFORMS, SENSOR_TYPES } from "@/features/files/lib/sensorKit"
 import { useAvailableScopeOptions } from "@/features/process/hooks/useAvailableScopeOptions"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { yearFromDate } from "@/features/process/lib/paths"
 import { useProcessScope } from "@/features/process/lib/processScope"
-import useAuth from "@/hooks/useAuth"
 
 export type AerialScopeFields = {
   date: string
@@ -121,16 +118,6 @@ export function buildAerialScope(
 /** Select value for "no population filter" (Radix Select can't use ""). */
 const ALL_POPULATIONS = "__all_populations__"
 
-function filterVisible(
-  all: ExperimentOutput[],
-  myIds: string[],
-  isSuperuser: boolean,
-): ExperimentOutput[] {
-  if (isSuperuser) return all
-  const mySet = new Set(myIds)
-  return all.filter((e) => e.id != null && mySet.has(String(e.id)))
-}
-
 /**
  * Process-scope selectors: experiment / season / site / population.
  *
@@ -151,7 +138,6 @@ export function ProcessScopeSelectors({
 }: {
   allowAllPopulations?: boolean
 } = {}) {
-  const { user, isUserLoading } = useAuth()
   const {
     experimentId,
     setExperimentId,
@@ -162,10 +148,8 @@ export function ProcessScopeSelectors({
     populationId,
     setPopulationId,
   } = useProcessScope()
-  const isSuperuser = Boolean(user?.is_superuser)
 
   const { data: all, isLoading: loadingAll } = useAllExperiments()
-  const { data: myIds, isLoading: loadingMyIds } = useMyExperimentIds()
   const { data: seasons = [], isLoading: loadingSeasons } =
     useExperimentSeasons(experimentId)
   const { data: sites = [], isLoading: loadingSites } =
@@ -173,13 +157,11 @@ export function ProcessScopeSelectors({
   const { data: populations = [], isLoading: loadingPopulations } =
     useExperimentPopulations(experimentId)
 
-  const stillLoadingExperiments =
-    loadingAll || isUserLoading || (!isSuperuser && loadingMyIds)
+  const stillLoadingExperiments = loadingAll
 
-  const visible = useMemo(
-    () => filterVisible(all ?? [], myIds ?? [], isSuperuser),
-    [all, myIds, isSuperuser],
-  )
+  // The API lists what this person may see (public experiments, and private
+  // ones they belong to): no second filter here.
+  const visible = useMemo(() => all ?? [], [all])
 
   // Auto-select the first visible experiment if none is set, mirroring the
   // deleted sidebar ExperimentSelector. Also re-fire if the stored

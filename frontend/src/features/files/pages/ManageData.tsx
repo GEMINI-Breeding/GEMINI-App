@@ -40,6 +40,7 @@ import {
 import { useMemo, useState } from "react"
 
 import {
+  type ApiError,
   type DatasetOutput,
   DatasetsService,
   type ExperimentOutput,
@@ -59,6 +60,7 @@ import {
   thumbnailSrc,
 } from "@/features/genotyping/components/AuthImage"
 import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
 import { EditUploadDialog } from "../components/EditUploadDialog"
 import { ImageLightbox } from "../components/ImageLightbox"
 import {
@@ -123,11 +125,8 @@ export function ManageData() {
       })
       showSuccessToast("Experiment deleted")
     },
-    onError: (err) => {
-      showErrorToastWithCopy(
-        err instanceof Error ? err.message : "Delete failed",
-      )
-    },
+    // The API's own words (e.g. who may delete it), not just "Forbidden".
+    onError: (err) => handleError.call(showErrorToastWithCopy, err as ApiError),
   })
 
   const handleDelete = async (exp: ExperimentOutput) => {
@@ -530,11 +529,8 @@ function DatasetRow({
       }
       showSuccessToast(isUpload ? "Upload deleted" : "Results deleted")
     },
-    onError: (err) => {
-      showErrorToastWithCopy(
-        err instanceof Error ? err.message : "Delete failed",
-      )
-    },
+    // The API's own words (e.g. who may delete it), not just "Forbidden".
+    onError: (err) => handleError.call(showErrorToastWithCopy, err as ApiError),
   })
 
   const title = w

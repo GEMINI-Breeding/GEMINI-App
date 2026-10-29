@@ -357,7 +357,14 @@ def join(login: str, folder: str, key: str = "") -> dict:
 
     out = run(args, None, timeout=180)
     _cache["t"] = 0.0
-    return {"result": out.strip().splitlines()[-1] if out.strip() else "joined"}
+    result = {"result": out.strip().splitlines()[-1] if out.strip() else "joined"}
+    # Connect now, so the app opens on the session's data (and its sign-in) rather than
+    # on an empty page until someone presses Reconnect. The core may be down: say so.
+    try:
+        result["connected"] = reconnect()
+    except Exception as e:                      # noqa: BLE001 — reported, the join stands
+        result["not_connected"] = str(e)[:300]
+    return result
 
 
 # ── start / stop ─────────────────────────────────────────────────────────────

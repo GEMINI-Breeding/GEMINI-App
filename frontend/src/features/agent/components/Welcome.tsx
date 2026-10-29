@@ -438,8 +438,14 @@ export function ClusterSetup({
 export function JoinSession({ onJoined }: { onJoined: () => void }) {
   const [login, setLogin] = useState("")
   const [folder, setFolder] = useState("")
+  const [key, setKey] = useState("")
   const join = useMutation({
-    mutationFn: () => agentApi.computeJoin(login.trim(), folder.trim()),
+    mutationFn: () =>
+      agentApi.computeJoin(
+        login.trim(),
+        folder.trim(),
+        key.trim() || undefined,
+      ),
     onSuccess: onJoined,
   })
   return (
@@ -452,12 +458,21 @@ export function JoinSession({ onJoined }: { onJoined: () => void }) {
         onChange={(e) => setLogin(e.target.value)}
         placeholder="Your cluster login, e.g. ana@hpc.university.edu"
         aria-label="Your cluster login"
+        data-testid="join-session-login"
       />
       <Input
         value={folder}
         onChange={(e) => setFolder(e.target.value)}
         placeholder="The shared GEMI folder on the cluster (ask whoever runs it)"
         aria-label="The shared GEMI folder"
+        data-testid="join-session-folder"
+      />
+      <Input
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        placeholder="Your SSH key file, e.g. ~/.ssh/id_ed25519 (empty: your usual key)"
+        aria-label="Your SSH key file"
+        data-testid="join-session-key"
       />
       <p className="text-muted-foreground text-xs">
         Needs an SSH key for your login (no password prompt) and membership of
