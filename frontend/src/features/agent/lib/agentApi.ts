@@ -516,6 +516,12 @@ export interface WorkItem {
 
 export const agentApi = {
   mode: () => call<AgentMode>("/mode"),
+  /** Which place the app works on: the agent talks to the same API. */
+  setPlace: (place: "computer" | "cluster") =>
+    call<{ place: string; api: string }>("/place", {
+      method: "PUT",
+      body: JSON.stringify({ place }),
+    }),
   /** A session for the stack's own account; only answered on this computer. */
   autoLogin: () => call<{ enabled: boolean; token?: string }>("/auto_login"),
   setRequireSignIn: (require_sign_in: boolean) =>

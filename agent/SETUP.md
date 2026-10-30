@@ -90,7 +90,9 @@ GEMI_PASSWORD=your-app-password
 ```
 
 `GEMI_API` is the REST API: `http://127.0.0.1:7777` for the local Docker
-stack; for a cluster session, the port printed by `gemi-hpc tunnel`.
+stack; for a cluster session, the port printed by `gemi-hpc tunnel` (the desktop
+app's own tunnel uses 7877, so the two never share a port). Without `GEMI_API`,
+the agent service follows the place the desktop app works on.
 The home page does not use this login — it acts as whoever is signed in.
 
 Check: `cd agent && python -m gemi_agent status`

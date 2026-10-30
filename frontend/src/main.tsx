@@ -10,7 +10,7 @@ import { Toaster } from "./components/ui/sonner"
 import { ProcessProvider } from "./contexts/ProcessContext"
 import { OnboardingGate } from "./features/agent/components/Welcome"
 import { installAuthInterceptors } from "./lib/auth"
-import { applyClusterUrls } from "./lib/stack"
+import { announcePlace, applyClusterUrls } from "./lib/stack"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
@@ -21,6 +21,8 @@ import { routeTree } from "./routeTree.gen"
 OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
 // Desktop app set to use a cluster: the API is the agent service's tunnel.
 applyClusterUrls()
+// …and tell the agent service, so it talks to the same API.
+announcePlace()
 
 // Wire the JWT bearer-token resolver and the 401 interceptor. After this call,
 // OpenAPI.TOKEN reads from localStorage on every request and a 401 response
@@ -47,7 +49,21 @@ window.addEventListener("keydown", (e) => {
 
 const queryClient = new QueryClient()
 
-const router = createRouter({ routeTree })
+// While a page waits to open (signing in, which on a cluster can take a few
+// seconds), say so rather than show an empty window.
+function Opening() {
+  return (
+    <div className="text-muted-foreground flex min-h-screen items-center justify-center text-sm">
+      Signing in…
+    </div>
+  )
+}
+
+const router = createRouter({
+  routeTree,
+  defaultPendingComponent: Opening,
+  defaultPendingMs: 300,
+})
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router

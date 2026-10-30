@@ -60,8 +60,32 @@ def _all_facts() -> dict:
         return {}
 
 
+def _resolve_design(value: Any) -> Any:
+    """A design named by a shared fact (a file name) as this computer's file, fetched
+    from the stack when this computer has no copy; anything else as it is."""
+    from pathlib import Path
+
+    from . import shared
+
+    if not isinstance(value, str) or not value or value == "stand-in":
+        return value
+    if Path(value).is_file():
+        return value
+    local = shared.fetch_design(Path(value).name, LAYOUTS)
+    return str(local) if local else value
+
+
 def facts_of(run_id: str) -> dict:
-    return {k: v for k, v in (_all_facts().get(run_id) or {}).items() if not k.startswith("_")}
+    """What has been said about a run: shared with everyone using the stack, merged over
+    this computer's own record (the shared one wins; the agent's private notes stay here)."""
+    from . import shared
+
+    mine = {k: v for k, v in (_all_facts().get(run_id) or {}).items() if not k.startswith("_")}
+    theirs = shared.read_facts(run_id) or {}
+    facts = {**mine, **theirs}
+    if facts.get("design_path"):
+        facts["design_path"] = _resolve_design(facts["design_path"])
+    return facts
 
 
 def _note(run_id: str, key: str, value: Any = None) -> Any:
@@ -113,7 +137,29 @@ def save_facts(run_id: str, patch: dict) -> dict:
     data[run_id] = row
     FACTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     FACTS_FILE.write_text(json.dumps(data, indent=1))
+    _share_facts(run_id, patch)
     return row
+
+
+def _share_facts(run_id: str, patch: dict) -> None:
+    """The run's facts for everyone using the stack: the design by file name (its file
+    shared too), so another computer finds it in its own copy."""
+    from pathlib import Path
+
+    from . import shared
+
+    current = shared.read_facts(run_id)
+    if current is None:
+        return                                  # the stack cannot be reached: this computer's record stands
+    out = {**current, **{k: v for k, v in patch.items() if not k.startswith("_")}}
+    design = out.get("design_path")
+    if isinstance(design, str) and design not in ("", "stand-in"):
+        p = Path(design)
+        if p.is_file():
+            out["design_path"] = shared.put_design(p) or p.name
+        else:
+            out["design_path"] = p.name
+    shared.write_facts(run_id, out)
 
 
 # ── a run ────────────────────────────────────────────────────────────────────

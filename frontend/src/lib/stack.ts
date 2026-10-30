@@ -71,10 +71,12 @@ export function isDesktopApp(): boolean {
  */
 export type StackMode = "local" | "cluster"
 const MODE_KEY = "gemini.stack.mode"
-/** The tunnel the agent service opens to a cluster's API. */
-export const CLUSTER_API_URL = "http://127.0.0.1:7777"
-/** TiTiler beside that API: the map tiles (orthomosaics, rover mosaics). */
-export const CLUSTER_TITILER_URL = "http://127.0.0.1:8091"
+/** The tunnel the agent service opens to a cluster's API. Not the Docker
+ *  stack's port (7777): both can be up at once, and are never mistaken for
+ *  each other. (agent/gemi_agent/client.py CLUSTER_API_PORT) */
+export const CLUSTER_API_URL = "http://127.0.0.1:7877"
+/** TiTiler beside that API: the map tiles (orthomosaics, rover mosaics); Docker's is 8091. */
+export const CLUSTER_TITILER_URL = "http://127.0.0.1:8191"
 
 export function stackMode(): StackMode {
   try {
@@ -90,6 +92,19 @@ export function setStackMode(mode: StackMode): void {
   } catch {
     // Storage unavailable: stays local.
   }
+  announcePlace(mode)
+}
+
+/** Tell the agent service which place the app works on, so it talks to the
+ *  same API (Docker's, or the cluster tunnel's). Best effort: at start and on
+ *  every switch. */
+export function announcePlace(mode: StackMode = stackMode()): void {
+  if (!isDesktopApp()) return
+  void import("@/features/agent/lib/agentApi")
+    .then(({ agentApi }) =>
+      agentApi.setPlace(mode === "cluster" ? "cluster" : "computer"),
+    )
+    .catch(() => undefined)
 }
 
 /** The desktop app, running its own Docker stack. */

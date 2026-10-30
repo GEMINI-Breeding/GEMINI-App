@@ -209,6 +209,8 @@ export function RunAgentCard({
     onSuccess: (r) => {
       queryClient.setQueryData(["agent", "facts", runId], r)
       queryClient.invalidateQueries({ queryKey: ["agent", "next_step", runId] })
+      // The boundary editor offers the design saved here (and the plot length).
+      queryClient.invalidateQueries({ queryKey: ["agent", "field_designs", runId] })
     },
   })
 

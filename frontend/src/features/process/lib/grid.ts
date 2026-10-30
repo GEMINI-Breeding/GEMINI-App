@@ -37,6 +37,11 @@ export type GridParams = {
   colOffset?: number
   /** Plot-number assignment order. Default "row-major". */
   fillPattern?: FillPattern
+  /** Plot size, metres (width across columns, length along rows). When set,
+   *  plots are exactly this size, the grid centred in the outer boundary;
+   *  unset or 0, plots stretch to fill it. */
+  plotWidthMeters?: number
+  plotLengthMeters?: number
 }
 
 type LngLat = [number, number]
@@ -102,8 +107,21 @@ export function generateGridFeatures(
   const { dLng: gapXDeg } = metersToDeg(gapX, cy)
   const { dLat: gapYDeg } = metersToDeg(gapY, cy)
 
-  const cellWDeg = (widthDeg - (cols - 1) * gapXDeg) / cols
-  const cellHDeg = (heightDeg - (rows - 1) * gapYDeg) / rows
+  // Fixed plot sizes, when given; otherwise each plot is the share of the
+  // outer boundary its row and column leave after the gaps.
+  const fixedW = (params.plotWidthMeters ?? 0) > 0
+  const fixedH = (params.plotLengthMeters ?? 0) > 0
+  const cellWDeg = fixedW
+    ? metersToDeg(params.plotWidthMeters as number, cy).dLng
+    : (widthDeg - (cols - 1) * gapXDeg) / cols
+  const cellHDeg = fixedH
+    ? metersToDeg(params.plotLengthMeters as number, cy).dLat
+    : (heightDeg - (rows - 1) * gapYDeg) / rows
+  // A grid of fixed-size plots is centred in the outer boundary.
+  const gridW = cols * cellWDeg + (cols - 1) * gapXDeg
+  const gridH = rows * cellHDeg + (rows - 1) * gapYDeg
+  const left = fixedW ? cx - gridW / 2 : minX
+  const top = fixedH ? cy + gridH / 2 : maxY
 
   const angleRad = (params.angleDeg * Math.PI) / 180
   const rowOffset = Math.trunc(params.rowOffset ?? 0)
@@ -113,9 +131,9 @@ export function generateGridFeatures(
 
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
-      const x0 = minX + c * (cellWDeg + gapXDeg)
+      const x0 = left + c * (cellWDeg + gapXDeg)
       const x1 = x0 + cellWDeg
-      const y1 = maxY - r * (cellHDeg + gapYDeg)
+      const y1 = top - r * (cellHDeg + gapYDeg)
       const y0 = y1 - cellHDeg
 
       const corners: LngLat[] = [

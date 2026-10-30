@@ -45,7 +45,8 @@ main() {
   # When sshd runs this as a forced command, the original command names the gate first.
   case "$cmd" in */gemi-gate\ *) cmd="${cmd#*/gemi-gate }" ;; esac
 
-  audit() { printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$cmd" >> "$LOG"; }
+  # (A member who cannot write the log is not refused for it: the command still runs.)
+  audit() { printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$cmd" >> "$LOG" 2>/dev/null || true; }
   refuse() { audit REFUSED; echo "gemi-gate: refused: ${cmd:-<empty>}${1:+ ($1)}" >&2; exit 77; }
 
   [ -n "$cmd" ] || refuse
@@ -424,7 +425,7 @@ main() {
           echo "me=$USER groups=$(id -Gn | tr ' ' ',') folder_group=$grp"
           local d="$GEMI_HPC_ROOT"
           while [ "$d" != "/" ] && [ -n "$d" ]; do stat -c '%A %U %G %n' "$d" 2>&1; d=$(dirname "$d"); done | tac
-          for f in "$RUN" "$SHARE_CONF" "$RUN/session.env" "$RUN/stack.env" "$RUN/share" "$LOGS" "$DATA" \
+          for f in "$RUN" "$SHARE_CONF" "$RUN/session.env" "$RUN/stack.env" "$RUN/share" "$LOGS" "$LOGS/gate.log" "$HPC/clusters/current" "$HPC/clusters/current/launch.conf" "$DATA" \
                    "$HPC" "$HPC/remote/gemi-gate" "$IMAGES" "$INCOMING"; do
             stat -c '%A %U %G %n' "$f" 2>&1
           done

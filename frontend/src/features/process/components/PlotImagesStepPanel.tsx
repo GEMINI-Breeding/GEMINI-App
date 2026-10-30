@@ -11,6 +11,8 @@ import { useState } from "react"
 
 import type { FileMetadata } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import type { PlotChoice } from "@/features/process/lib/plotSelection"
 import { PlotFramesPanel } from "./PlotFramesPanel"
 import { PlotImageGrid } from "./PlotImageGrid"
 
@@ -23,6 +25,7 @@ export function PlotImagesStepPanel({
   offerFrames = true,
   running,
   onRunFrames,
+  onRunOrtho,
 }: {
   plotImageFiles: FileMetadata[]
   prefix: string
@@ -35,14 +38,79 @@ export function PlotImagesStepPanel({
    * was uploaded, and then only the orthomosaic's plot images are offered. */
   offerFrames?: boolean
   running: boolean
-  onRunFrames: () => void
+  onRunFrames: (plots: PlotChoice) => void
+  /** Plot images from the orthomosaic, of the plots chosen. */
+  onRunOrtho?: (plots: PlotChoice) => void
 }) {
+  const [choice, setChoice] = useState<"all" | "missing" | "list">("all")
+  const [listText, setListText] = useState("")
+  const plotChoice: PlotChoice =
+    choice === "list" ? { mode: "list", text: listText } : { mode: choice }
+  const choiceReady = choice !== "list" || listText.trim().length > 0
+  const plotsPicker = (
+    <div
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs"
+      data-testid="plot-images-which"
+    >
+      <span className="font-medium">Plots:</span>
+      {(
+        [
+          ["all", "All"],
+          ["missing", "Those without images yet"],
+          ["list", "These:"],
+        ] as const
+      ).map(([key, label]) => (
+        <label key={key} className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="plot-images-which"
+            checked={choice === key}
+            onChange={() => setChoice(key)}
+            data-testid={`plot-images-which-${key}`}
+          />
+          {label}
+        </label>
+      ))}
+      <Input
+        className="h-7 w-48 text-xs"
+        placeholder="e.g. 12, 15-18, 106"
+        value={listText}
+        onFocus={() => setChoice("list")}
+        onChange={(e) => setListText(e.target.value)}
+        aria-label="Plots to make images of"
+        data-testid="plot-images-list"
+      />
+      <span className="text-muted-foreground">
+        Some plots only: added to the earlier images (e.g. a plot just added to
+        the boundaries).
+      </span>
+    </div>
+  )
   const [source, setSource] = useState<"ortho" | "frames">(
     hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho",
   )
   if (!offerFrames)
     return (
       <div className="space-y-3" data-testid="plot-images-step">
+        {onRunOrtho && plotImageFiles.length > 0 && (
+          <div className="space-y-2">
+            {plotsPicker}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={running || !choiceReady}
+              onClick={() => onRunOrtho(plotChoice)}
+              data-testid="plot-ortho-run"
+            >
+              {running && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
+              {choice === "all"
+                ? "Cut the plot images again"
+                : "Cut these plots' images"}
+            </Button>
+          </div>
+        )}
         <PlotImageGrid files={plotImageFiles} prefix={prefix} />
       </div>
     )
@@ -68,7 +136,30 @@ export function PlotImagesStepPanel({
         ))}
       </div>
       {source === "ortho" ? (
-        <PlotImageGrid files={plotImageFiles} prefix={prefix} />
+        <div className="space-y-3">
+          {onRunOrtho && (
+            <div className="space-y-2">
+              {plotsPicker}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={running || !choiceReady}
+                onClick={() => onRunOrtho(plotChoice)}
+                data-testid="plot-ortho-run"
+              >
+                {running && (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                )}
+                {choice === "all"
+                  ? plotImageFiles.length
+                    ? "Cut the plot images again"
+                    : "Cut the plot images"
+                  : "Cut these plots' images"}
+              </Button>
+            </div>
+          )}
+          <PlotImageGrid files={plotImageFiles} prefix={prefix} />
+        </div>
       ) : (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
@@ -83,17 +174,22 @@ export function PlotImagesStepPanel({
             capture time and cut the same way; a thermal camera also gives each
             plot's canopy temperature.
           </p>
+          {hasFrames && plotsPicker}
           <div className="flex items-center gap-3">
             <Button
               size="sm"
-              disabled={running || !hasCameraPositions}
-              onClick={onRunFrames}
+              disabled={running || !hasCameraPositions || !choiceReady}
+              onClick={() => onRunFrames(plotChoice)}
               data-testid="plot-frames-run"
             >
               {running && (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               )}
-              {hasFrames ? "Pick the frames again" : "Pick each plot's frames"}
+              {!hasFrames
+                ? "Pick each plot's frames"
+                : choice === "all"
+                  ? "Pick the frames again"
+                  : "Pick these plots' frames"}
             </Button>
             {!hasCameraPositions && (
               <span className="text-xs text-amber-600">

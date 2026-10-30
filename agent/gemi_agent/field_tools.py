@@ -1090,7 +1090,8 @@ def _cells_of(snapshot: dict, crops: Optional[list[str]] = None) -> list[dict]:
         p = f.get("properties") or {}
         if p.get("role") == "outer" or (f.get("geometry") or {}).get("type") != "Polygon":
             continue
-        if want and str(p.get("crop") or "").lower() not in want:
+        # A plot added by hand (no crop of its own) comes along whatever crops are asked for.
+        if want and str(p.get("crop") or "").lower() not in want and not (p.get("added") and not p.get("crop")):
             continue
         out.append(f)
     return out

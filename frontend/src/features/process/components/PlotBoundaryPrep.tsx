@@ -55,6 +55,7 @@ import { BoundaryImportPicker } from "@/features/process/components/BoundaryImpo
 import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
+import { FieldMapPanel } from "@/features/process/components/FieldMapPanel"
 import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
 import {
   StitchPlacementPanel,
@@ -81,12 +82,14 @@ import {
   applyLabelsToFeatures,
   describeFacts,
   designFromFeatures,
+  designPlotChecker,
   dimensionsFromDesign,
   type FdTransform,
   type FieldDesign,
   mergeLabelsIntoExisting,
   transformFromFacts,
 } from "@/features/process/lib/fieldDesign"
+import { plotsFromGeojson } from "@/features/process/lib/geojsonImport"
 import {
   type FillPattern,
   generateGridFeatures,
@@ -94,6 +97,7 @@ import {
 import {
   mirrorFeatures,
   rotateFeatures,
+  translateFeaturesMeters,
 } from "@/features/process/lib/groupTransform"
 import { folderOrthos, nearestRegions } from "@/features/process/lib/multiOrtho"
 import type { AerialScope } from "@/features/process/lib/paths"
@@ -177,6 +181,21 @@ export interface PlotBoundaryPrepProps {
 
 const PANEL_KEY = "gemi.boundaryPrep.panel"
 
+/** The name a plot added by hand gets: one after the highest plot number
+ *  (or "added-N" when plots are not numbered). It can be renamed. */
+export function nextPlotName(features: GeoJSON.Feature[]): string {
+  let max = 0
+  let plots = 0
+  for (const f of features) {
+    const p = (f.properties ?? {}) as Record<string, unknown>
+    if (p.role === "outer" || p.border === true) continue
+    plots += 1
+    const n = Number(p.plot)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max > 0 ? String(Math.trunc(max) + 1) : `added-${plots + 1}`
+}
+
 export function PlotBoundaryPrep({
   run,
   scope,
@@ -229,6 +248,28 @@ export function PlotBoundaryPrep({
   // Bumped when boundaries are loaded or imported: the map zooms to them.
   const [fitSignal, setFitSignal] = useState(0)
   const [fdDialogOpen, setFdDialogOpen] = useState(false)
+  // How the design dialog opens: on the field's known design, or on a field map sheet.
+  const [fdDialogStart, setFdDialogStart] = useState<
+    "upload" | "preset" | "fieldmap"
+  >("upload")
+  // Map view: plots shown and how strongly, border positions, box select.
+  const [showPlots, setShowPlots] = useState(true)
+  const [plotOpacity, setPlotOpacity] = useState(1)
+  const [showBorders, setShowBorders] = useState(true)
+  const [boxSelect, setBoxSelect] = useState(false)
+  // Move step for the selection, metres (buttons and arrow keys).
+  const [nudgeStep, setNudgeStep] = useState(0.1)
+  const nudgeStepRef = useRef(nudgeStep)
+  nudgeStepRef.current = nudgeStep
+  const [fieldMapOpen, setFieldMapOpen] = useState(false)
+  // "Add a plot": the next shape drawn becomes a plot (not a new outline).
+  const [addPlot, setAddPlotState] = useState(false)
+  const addPlotRef = useRef(false)
+  const addedRef = useRef(false)
+  const setAddPlot = (on: boolean) => {
+    addPlotRef.current = on
+    setAddPlotState(on)
+  }
   // The design this field already has (recorded with the agent for this run or
   // another date of the same field) and the orientation its facts give.
   const fieldInfo = useQuery({
@@ -313,26 +354,16 @@ export function PlotBoundaryPrep({
       )
       return
     }
-    // No active block — apply rows/cols to pendingDefaultParams so the
-    // value sticks until the user draws a boundary.
-    if (patch.rows !== undefined || patch.cols !== undefined) {
-      history.set(
-        {
-          ...s,
-          pendingDefaultParams: {
-            rows:
-              patch.rows ??
-              s.pendingDefaultParams?.rows ??
-              DEFAULT_BLOCK_PARAMS.rows,
-            cols:
-              patch.cols ??
-              s.pendingDefaultParams?.cols ??
-              DEFAULT_BLOCK_PARAMS.cols,
-          },
-        },
-        { tag: "params" },
-      )
-    }
+    // No active block yet: keep every setting (rows, cols, angle, gaps, plot
+    // size, borders) for the first block drawn. Only rows and cols were kept
+    // before, so an angle or gap typed before drawing the boundary was lost.
+    history.set(
+      {
+        ...s,
+        pendingDefaultParams: { ...(s.pendingDefaultParams ?? {}), ...patch },
+      },
+      { tag: "params" },
+    )
   }
   const setRows = (v: number) => updateActiveParams({ rows: v })
   const setCols = (v: number) => updateActiveParams({ cols: v })
@@ -367,6 +398,23 @@ export function PlotBoundaryPrep({
         if (props.role === "outer" || typeof props.blockId === "string")
           return f
         if (props.row !== undefined || props.col !== undefined) return f
+        // "Add a plot": the shape just drawn is a plot of the selected block,
+        // named after the highest plot number (renamed in the selection bar).
+        if (addPlotRef.current && base.activeBlockId) {
+          addPlotRef.current = false
+          addedRef.current = true
+          return {
+            ...f,
+            properties: {
+              ...(f.properties ?? {}),
+              blockId: base.activeBlockId,
+              block:
+                base.blocks[base.activeBlockId]?.label ?? base.activeBlockId,
+              plot: nextPlotName(base.features),
+              added: true,
+            },
+          }
+        }
         highestNum += 1
         const newId = `block-${highestNum}`
         const label = `Block ${highestNum}`
@@ -494,6 +542,20 @@ export function PlotBoundaryPrep({
         return
       }
       const mod = e.metaKey || e.ctrlKey
+      // Arrow keys move the selected plots by the move step (Shift: ten steps).
+      const arrows: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, 1],
+        ArrowDown: [0, -1],
+      }
+      if (!mod && arrows[e.key] && stateRef.current.selectedCellIds.length) {
+        e.preventDefault()
+        const step = nudgeStepRef.current * (e.shiftKey ? 10 : 1)
+        const [ex, ny] = arrows[e.key]
+        nudgeRef.current(ex * step, ny * step)
+        return
+      }
       if (!mod) return
       const k = e.key.toLowerCase()
       if (k === "z" && !e.shiftKey) {
@@ -791,7 +853,14 @@ export function PlotBoundaryPrep({
   // it renders/edits on the map) but isn't a plot — keep it out of the
   // count surfaced to the user and out of the save/clear gating.
   const plotFeatureCount = useMemo(
-    () => features.filter((f) => f.properties?.role !== "outer").length,
+    () =>
+      features.filter(
+        (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+      ).length,
+    [features],
+  )
+  const borderCount = useMemo(
+    () => features.filter((f) => f.properties?.border === true).length,
     [features],
   )
 
@@ -918,6 +987,32 @@ export function PlotBoundaryPrep({
     buildNextStateForFeatures,
   ])
 
+  // A plot was just added: leave "Add a plot" and select it, to rename it.
+  useEffect(() => {
+    if (!addedRef.current) return
+    addedRef.current = false
+    setAddPlotState(false)
+    const added = [...history.state.features]
+      .reverse()
+      .find(
+        (f) =>
+          f.properties?.added === true &&
+          typeof f.properties?.cellId === "string",
+      )
+    if (added) {
+      history.set(
+        {
+          ...history.state,
+          selectedCellIds: [added.properties?.cellId as string],
+        },
+        { tag: "select" },
+      )
+      showSuccessToast(
+        `Plot ${String(added.properties?.plot)} added. Rename it below, or keep the name.`,
+      )
+    }
+  }, [history.state, history.set, showSuccessToast])
+
   // Field-design mode: the grid the design needs, and the active block's
   // drawn grid when it differs (after a swap of axes, or one drawn in Manual).
   const fdSize = fieldDesign ? dimensionsFromDesign(fieldDesign) : null
@@ -932,7 +1027,8 @@ export function PlotBoundaryPrep({
     let maxC = 0
     for (const f of features) {
       const p = (f.properties ?? {}) as Record<string, unknown>
-      if (p.role === "outer" || p.blockId !== activeBlockId) continue
+      if (p.role === "outer" || p.blockId !== activeBlockId || p.border)
+        continue
       const gr = Number(p._grid_row ?? p.row)
       const gc = Number(p._grid_col ?? p.col)
       if (!gr || !gc) continue
@@ -948,16 +1044,126 @@ export function PlotBoundaryPrep({
     return { rows: r, cols: c }
   })()
 
+  // The arrow keys (a mount-time listener) call the latest version through this.
+  const nudgeRef = useRef<(eastM: number, northM: number) => void>(() => {})
+  nudgeRef.current = nudgeSelection
+  function nudgeSelection(eastM: number, northM: number) {
+    const s = stateRef.current
+    const sel = new Set(s.selectedCellIds)
+    if (!sel.size) return
+    history.set(
+      {
+        ...s,
+        features: translateFeaturesMeters(s.features, sel, eastM, northM),
+      },
+      { tag: "nudge", coalesce: true },
+    )
+  }
+
+  /** Every plot removed; the outer boundaries (blocks) stay, to generate again. */
+  function clearPlotsKeepOutlines() {
+    const s = stateRef.current
+    history.set(
+      {
+        ...s,
+        features: s.features.filter((f) => f.properties?.role === "outer"),
+        selectedCellIds: [],
+      },
+      { tag: "clear-plots" },
+    )
+  }
+
+  /** Plots from a GeoJSON file made elsewhere: a new block (its outline drawn
+   *  around them), each plot keeping its properties. */
+  const geojsonInputRef = useRef<HTMLInputElement | null>(null)
+  async function importGeojson(file: File) {
+    let plots: GeoJSON.Feature<GeoJSON.Polygon>[]
+    try {
+      plots = plotsFromGeojson(await file.text())
+    } catch (e) {
+      showErrorToast(e instanceof Error ? e.message : String(e))
+      return
+    }
+    const s = stateRef.current
+    const outer = bboxOuterFromFeatures(plots)
+    if (!outer) return
+    let n = 0
+    for (const id of Object.keys(s.blocks)) {
+      const m = id.match(/^block-(\d+)$/)
+      if (m) n = Math.max(n, Number(m[1]))
+    }
+    const blockId = `block-${n + 1}`
+    const label = `Block ${n + 1}`
+    const features = [
+      ...s.features,
+      { ...outer, properties: { role: "outer", blockId, label } },
+      ...plots.map((f) => ({
+        ...f,
+        properties: { ...f.properties, blockId, block: label },
+      })),
+    ]
+    const next = buildNextStateForFeatures(
+      {
+        ...s,
+        blocks: { ...s.blocks, [blockId]: { label, ...DEFAULT_BLOCK_PARAMS } },
+        activeBlockId: blockId,
+        selectedCellIds: [],
+      },
+      features,
+    )
+    history.set(next, { tag: "import-geojson" })
+    setFitSignal((k) => k + 1)
+    showSuccessToast(
+      `Imported ${plots.length} plots from ${file.name} as ${label}. Check the fit, then save to keep them.`,
+    )
+  }
+
+  /** The plots as a GeoJSON file (no outer boundaries, no border positions). */
+  function downloadGeojson() {
+    const plots = stateRef.current.features
+      .filter(
+        (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+      )
+      .map((f) => ({
+        type: "Feature" as const,
+        geometry: f.geometry,
+        properties: Object.fromEntries(
+          Object.entries(f.properties ?? {}).filter(
+            ([k]) => !k.startsWith("_") && k !== "cellId" && k !== "blockId",
+          ),
+        ),
+      }))
+    const blob = new Blob(
+      [JSON.stringify({ type: "FeatureCollection", features: plots }, null, 1)],
+      { type: "application/geo+json" },
+    )
+    const name = `${directory
+      .replace(/^Processed\//, "")
+      .replace(/\/+$/, "")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")}_plot_boundaries.geojson`
+    const a = document.createElement("a")
+    a.href = URL.createObjectURL(blob)
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  }
+
   function regenerateGrid() {
-    if (!activeBlockId) {
+    // Everything from the editor's latest state, not this render's values:
+    // a setting committed on the way to this button (blur) is already in it.
+    const st = stateRef.current
+    const blockId = st.activeBlockId
+    if (!blockId) {
       showErrorToast("Draw a boundary first, then generate the grid.")
       return
     }
-    const outer = features.find(
+    const outer = st.features.find(
       (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
         f.geometry?.type === "Polygon" &&
         f.properties?.role === "outer" &&
-        f.properties?.blockId === activeBlockId,
+        f.properties?.blockId === blockId,
     )
     if (!outer) {
       showErrorToast(
@@ -965,56 +1171,95 @@ export function PlotBoundaryPrep({
       )
       return
     }
-    // Field-design mode draws the grid the design needs; Manual mode its
-    // own rows and columns.
-    const size =
-      gridMode === "fd" && fieldDesign
-        ? dimensionsFromDesign(fieldDesign)
-        : { rows, cols }
+    const p: BlockParams = {
+      ...DEFAULT_BLOCK_PARAMS,
+      ...(st.pendingDefaultParams ?? {}),
+      ...(st.blocks[blockId] ?? {}),
+      label: st.blocks[blockId]?.label ?? "",
+    }
+    const design =
+      st.gridMode === "fd" && st.fieldDesign ? st.fieldDesign : null
+    // Field-design mode draws the grid the design needs, with border positions
+    // around it when asked; Manual mode its own rows and columns.
+    const span = design ? dimensionsFromDesign(design) : null
+    const br = design ? Math.max(0, Math.trunc(p.borderRows ?? 0)) : 0
+    const bc = design ? Math.max(0, Math.trunc(p.borderCols ?? 0)) : 0
+    const size = span
+      ? { rows: span.rows + 2 * br, cols: span.cols + 2 * bc }
+      : { rows: p.rows, cols: p.cols }
     const grid = generateGridFeatures(outer.geometry, {
       rows: size.rows,
       cols: size.cols,
-      angleDeg: angle,
-      gapXMeters: gapColMeters,
-      gapYMeters: gapMeters,
+      angleDeg: p.angle,
+      gapXMeters: p.gapColMeters ?? p.gapMeters,
+      gapYMeters: p.gapMeters,
+      plotWidthMeters: p.plotWidthM,
+      plotLengthMeters: p.plotLengthM,
       // Field-coordinate offsets + plot-number order. In field-design
       // mode the CSV is authoritative for plot/row/col, so don't apply
       // the manual offsets/fill-pattern (they'd double-shift the labels).
-      ...(gridMode === "fd" ? {} : { rowOffset, colOffset, fillPattern }),
+      ...(design
+        ? {}
+        : {
+            rowOffset: p.rowOffset,
+            colOffset: p.colOffset,
+            fillPattern: p.fillPattern,
+          }),
     })
-    // Stamp every cell with the parent blockId + the block label so the
-    // map can colour them together and so saved snapshots carry the
-    // grouping. Apply CSV-derived labels only when the user is in
-    // field-design mode.
-    const labeled =
-      gridMode === "fd" && fieldDesign
-        ? applyLabelsToFeatures(grid, fieldDesign)
-        : grid
-    const blockLabel = blocks[activeBlockId]?.label ?? activeBlockId
-    const tagged = labeled.map((f) => ({
+    let cells = grid
+    if (design && span) {
+      // Grid positions in the design's own frame (the border rows and columns
+      // fall outside it), labelled from the design. A position with no plot in
+      // the design (outside it, or a gap in it) is a border: drawn to help
+      // place the grid, never saved as a plot.
+      const shifted = grid.map((f) => {
+        const pr = (f.properties ?? {}) as Record<string, unknown>
+        const r = Number(pr.row) - br
+        const c = Number(pr.col) - bc
+        const inside = r >= 1 && r <= span.rows && c >= 1 && c <= span.cols
+        return {
+          ...f,
+          properties: {
+            ...pr,
+            row: r,
+            col: c,
+            ...(inside ? {} : { border: true }),
+          },
+        }
+      })
+      const inside = shifted.filter((f) => !f.properties.border)
+      const hasPlot = designPlotChecker(design)
+      const labeled = applyLabelsToFeatures(inside, design).map((f) =>
+        hasPlot(f)
+          ? f
+          : { ...f, properties: { ...(f.properties ?? {}), border: true } },
+      )
+      cells = [...labeled, ...shifted.filter((f) => f.properties.border)]
+    }
+    const blockLabel = st.blocks[blockId]?.label ?? blockId
+    const tagged = cells.map((f) => ({
       ...f,
       properties: {
         ...(f.properties ?? {}),
-        blockId: activeBlockId,
+        blockId,
         block: blockLabel,
       },
     }))
     // Replace only the *active* block's existing cells. Other blocks'
     // outers and cells are preserved so the user can iterate per-block.
-    const keep = features.filter((f) => {
+    const keep = st.features.filter((f) => {
       const props = (f.properties ?? {}) as Record<string, unknown>
       if (props.role === "outer") return true
-      return props.blockId !== activeBlockId
+      // A plot added by hand stays: generating the grid again would lose it.
+      if (props.added === true) return true
+      return props.blockId !== blockId
     })
     // Run through the reconciler so each fresh cell picks up a stable
     // `cellId` (deterministic `${blockId}:${row}:${col}` when row/col
     // exist, UUID otherwise). Selection / group ops in the UI reference
     // cells by cellId, so skipping the reconciler would leave the new
     // grid unselectable.
-    const reconciled = buildNextStateForFeatures(stateRef.current, [
-      ...keep,
-      ...tagged,
-    ])
+    const reconciled = buildNextStateForFeatures(st, [...keep, ...tagged])
     history.set(reconciled, { tag: "grid-regenerate" })
   }
 
@@ -1136,7 +1381,11 @@ export function PlotBoundaryPrep({
     // treat every feature in the saved FeatureCollection as a distinct
     // plot, so an enclosing rectangle would create a junk plot covering
     // the whole field.
-    const plotFeatures = features.filter((f) => f.properties?.role !== "outer")
+    // Border positions (around or between the design's plots) help placing
+    // the grid; they are not plots.
+    const plotFeatures = features.filter(
+      (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+    )
     if (plotFeatures.length === 0) {
       throw new Error("Draw at least one polygon first")
     }
@@ -1168,6 +1417,66 @@ export function PlotBoundaryPrep({
     setVersionName("")
     return v
   }
+
+  // Plot length the field facts give (one number), offered for the grid.
+  const factsPlotLength = (() => {
+    const v = (fieldInfo.data?.facts as Record<string, unknown> | undefined)
+      ?.plot_length_m
+    const n =
+      typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  })()
+  const plotSizeInputs = (
+    <div className="space-y-1.5" data-testid="boundary-plot-size">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="grid-plot-width" className="mb-1.5 text-xs">
+            Plot width (m)
+          </Label>
+          <NumberField
+            id="grid-plot-width"
+            data-testid="boundary-plot-width"
+            min={0}
+            step={0.1}
+            value={activeParams.plotWidthM ?? 0}
+            onCommit={(v) => updateActiveParams({ plotWidthM: v })}
+          />
+        </div>
+        <div>
+          <Label htmlFor="grid-plot-length" className="mb-1.5 text-xs">
+            Plot length (m)
+          </Label>
+          <NumberField
+            id="grid-plot-length"
+            data-testid="boundary-plot-length"
+            min={0}
+            step={0.1}
+            value={activeParams.plotLengthM ?? 0}
+            onCommit={(v) => updateActiveParams({ plotLengthM: v })}
+          />
+        </div>
+      </div>
+      <p className="text-muted-foreground text-[11px]">
+        Width across the columns, length along the rows. 0: plots fill the outer
+        boundary; with a size, plots are exactly that size, centred in it.
+        {factsPlotLength && !activeParams.plotLengthM ? (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="text-primary underline underline-offset-2"
+              data-testid="boundary-plot-length-from-facts"
+              onClick={() =>
+                updateActiveParams({ plotLengthM: factsPlotLength })
+              }
+            >
+              Use the field facts' length ({factsPlotLength} m)
+            </button>
+          </>
+        ) : null}
+      </p>
+    </div>
+  )
 
   return (
     <div className="space-y-4">
@@ -1255,51 +1564,195 @@ export function PlotBoundaryPrep({
             </Button>
           </CardHeader>
           <CardContent>
-            <BoundaryMap
-              features={features}
-              fitSignal={fitSignal}
-              onFeaturesChange={setFeatures}
-              orthoTileUrl={multi ? undefined : orthoTileUrl}
-              orthoLayers={orthoLayers}
-              orthoBounds={orthoBounds}
-              selectedBlockId={activeBlockId}
-              onSelectBlock={(id) =>
-                history.set(
-                  {
-                    ...stateRef.current,
-                    activeBlockId: id,
-                    selectedCellIds: [],
-                  },
-                  { tag: "select-block" },
-                )
-              }
-              selectedCellIds={history.state.selectedCellIds}
-              onCellSelect={(id, mode) =>
-                history.set(
-                  {
-                    ...stateRef.current,
-                    selectedCellIds: nextSelection(
-                      stateRef.current.selectedCellIds,
-                      id,
-                      mode,
-                    ),
-                  },
-                  { tag: "select", coalesce: true },
-                )
-              }
-              overlays={placement.overlays}
-              onOverlayClick={(bed) => placement.setSelectedBed(bed)}
-              onSelectionClear={() =>
-                history.set(
-                  { ...stateRef.current, selectedCellIds: [] },
-                  { tag: "select", coalesce: true },
-                )
-              }
-            />
+            <div
+              className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+              data-testid="boundary-map-toolbar"
+            >
+              <Button
+                size="sm"
+                variant={boxSelect ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-box-select"
+                title="Drag a box on the map to select the plots inside it (Shift: add to the selection); then move or rotate them"
+                onClick={() => setBoxSelect((v) => !v)}
+              >
+                {boxSelect
+                  ? "Selecting an area… (click to stop)"
+                  : "Select an area"}
+              </Button>
+              <Button
+                size="sm"
+                variant={addPlot ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-add-plot"
+                disabled={!activeBlockId}
+                title={
+                  activeBlockId
+                    ? "Draw one more plot (rectangle or polygon tool, top left of the map); it joins the selected block"
+                    : "Draw or select an outer boundary first: an added plot joins its block"
+                }
+                onClick={() => setAddPlot(!addPlot)}
+              >
+                {addPlot ? "Draw the plot… (click to cancel)" : "Add a plot"}
+              </Button>
+              <span className="flex items-center gap-1.5">
+                <Checkbox
+                  id="boundary-show-plots"
+                  checked={showPlots}
+                  onCheckedChange={(v) => setShowPlots(v === true)}
+                  data-testid="boundary-show-plots"
+                />
+                <label htmlFor="boundary-show-plots">Plots</label>
+              </span>
+              <label className="flex items-center gap-1.5">
+                Opacity
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={plotOpacity}
+                  disabled={!showPlots}
+                  onChange={(e) => setPlotOpacity(Number(e.target.value))}
+                  className="w-24"
+                  aria-label="Plot overlay opacity"
+                  data-testid="boundary-plot-opacity"
+                />
+              </label>
+              <Button
+                size="sm"
+                variant={fieldMapOpen ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-field-map"
+                title="The field design laid out by rows and columns, or a field map sheet, to look at while placing plots (e.g. how many border plots)"
+                onClick={() => setFieldMapOpen((v) => !v)}
+              >
+                Field map
+              </Button>
+              {features.some((f) => f.properties?.border === true) && (
+                <span className="flex items-center gap-1.5">
+                  <Checkbox
+                    id="boundary-show-borders"
+                    checked={showBorders}
+                    onCheckedChange={(v) => setShowBorders(v === true)}
+                    data-testid="boundary-show-borders"
+                  />
+                  <label htmlFor="boundary-show-borders">
+                    Border positions (not saved)
+                  </label>
+                </span>
+              )}
+            </div>
+            {/* The map's own height: its wrapper is h-full, which in this card
+                (as tall as the settings beside it) pushed everything after the
+                map out below the card. */}
+            <div className="h-[500px]">
+              <BoundaryMap
+                showPlots={showPlots}
+                plotOpacity={plotOpacity}
+                hideBorders={!showBorders}
+                boxSelect={boxSelect}
+                onBoxSelect={(ids, add) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      selectedCellIds: add
+                        ? [
+                            ...new Set([
+                              ...stateRef.current.selectedCellIds,
+                              ...ids,
+                            ]),
+                          ]
+                        : ids,
+                    },
+                    { tag: "select" },
+                  )
+                }
+                features={features}
+                fitSignal={fitSignal}
+                onFeaturesChange={setFeatures}
+                orthoTileUrl={multi ? undefined : orthoTileUrl}
+                orthoLayers={orthoLayers}
+                orthoBounds={orthoBounds}
+                selectedBlockId={activeBlockId}
+                onSelectBlock={(id) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      activeBlockId: id,
+                      selectedCellIds: [],
+                    },
+                    { tag: "select-block" },
+                  )
+                }
+                selectedCellIds={history.state.selectedCellIds}
+                onCellSelect={(id, mode) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      selectedCellIds: nextSelection(
+                        stateRef.current.selectedCellIds,
+                        id,
+                        mode,
+                      ),
+                    },
+                    { tag: "select", coalesce: true },
+                  )
+                }
+                overlays={placement.overlays}
+                onOverlayClick={(bed) => placement.setSelectedBed(bed)}
+                onSelectionClear={() =>
+                  history.set(
+                    { ...stateRef.current, selectedCellIds: [] },
+                    { tag: "select", coalesce: true },
+                  )
+                }
+              />
+            </div>
+            {fieldMapOpen && (
+              <div className="mt-3 rounded-md border p-3">
+                <FieldMapPanel fieldDesign={fieldDesign} />
+              </div>
+            )}
             {history.state.selectedCellIds.length > 0 ? (
               <div className="mt-3">
                 <SelectionActionBar
                   count={history.state.selectedCellIds.length}
+                  onNudge={nudgeSelection}
+                  plotName={
+                    history.state.selectedCellIds.length === 1
+                      ? (() => {
+                          const f = features.find(
+                            (x) =>
+                              x.properties?.cellId ===
+                              history.state.selectedCellIds[0],
+                          )
+                          return f
+                            ? String(f.properties?.plot ?? "")
+                            : undefined
+                        })()
+                      : undefined
+                  }
+                  onRenamePlot={(name) => {
+                    const s = stateRef.current
+                    const id = s.selectedCellIds[0]
+                    history.set(
+                      {
+                        ...s,
+                        features: s.features.map((f) =>
+                          f.properties?.cellId === id
+                            ? {
+                                ...f,
+                                properties: { ...f.properties, plot: name },
+                              }
+                            : f,
+                        ),
+                      },
+                      { tag: "rename" },
+                    )
+                  }}
+                  nudgeStep={nudgeStep}
+                  onNudgeStepChange={setNudgeStep}
                   hasActiveBlock={activeBlockId != null}
                   onRotate={(deg) => {
                     const sel = new Set(stateRef.current.selectedCellIds)
@@ -1410,6 +1863,9 @@ export function PlotBoundaryPrep({
               )}
               <p className="text-muted-foreground">
                 {plotFeatureCount} plot{plotFeatureCount === 1 ? "" : "s"}{" "}
+                {borderCount
+                  ? `(and ${borderCount} border positions, not saved) `
+                  : ""}
                 across {Object.keys(blocks).length} block
                 {Object.keys(blocks).length === 1 ? "" : "s"}
               </p>
@@ -1629,6 +2085,7 @@ export function PlotBoundaryPrep({
                     origin). Irregular numbering that fits neither pattern → use
                     a field-design CSV.
                   </p>
+                  {plotSizeInputs}
                 </TabsContent>
 
                 <TabsContent value="fd" className="space-y-3 pt-3">
@@ -1719,10 +2176,34 @@ export function PlotBoundaryPrep({
                           size="sm"
                           variant="outline"
                           data-testid="field-design-replace"
-                          onClick={() => setFdDialogOpen(true)}
+                          onClick={() => {
+                            setFdDialogStart("upload")
+                            setFdDialogOpen(true)
+                          }}
                         >
                           Replace field design
                         </Button>
+                        {fieldPreset &&
+                        fieldPreset.name !== fieldDesign.source ? (
+                          // The field facts name another design (saved there since).
+                          <p
+                            className="mt-1.5 text-sky-700 dark:text-sky-400"
+                            data-testid="field-design-facts-differ"
+                          >
+                            The field facts give{" "}
+                            <strong>{fieldPreset.name}</strong>.{" "}
+                            <button
+                              type="button"
+                              className="underline underline-offset-2"
+                              onClick={() => {
+                                setFdDialogStart("preset")
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              Use it instead
+                            </button>
+                          </p>
+                        ) : null}
                       </>
                     ) : (
                       <>
@@ -1745,16 +2226,47 @@ export function PlotBoundaryPrep({
                             metadata. Rows/cols come from the design.
                           </p>
                         )}
-                        <Button
-                          size="sm"
-                          variant={fieldPreset ? "default" : "outline"}
-                          data-testid="field-design-upload"
-                          onClick={() => setFdDialogOpen(true)}
-                        >
-                          {fieldPreset
-                            ? "Use this field's design"
-                            : "Upload field design"}
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={fieldPreset ? "default" : "outline"}
+                            data-testid="field-design-upload"
+                            onClick={() => {
+                              setFdDialogStart(
+                                fieldPreset ? "preset" : "upload",
+                              )
+                              setFdDialogOpen(true)
+                            }}
+                          >
+                            {fieldPreset
+                              ? `Use ${fieldPreset.name}`
+                              : "Upload field design"}
+                          </Button>
+                          {fieldPreset && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setFdDialogStart("upload")
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              Another file
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid="field-design-from-map"
+                            title="A sheet with the plot numbers laid out as the plots lie in the field: click two opposite corners of this field"
+                            onClick={() => {
+                              setFdDialogStart("fieldmap")
+                              setFdDialogOpen(true)
+                            }}
+                          >
+                            From a field map sheet
+                          </Button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -1802,6 +2314,57 @@ export function PlotBoundaryPrep({
                       />
                     </div>
                   </div>
+                  {plotSizeInputs}
+                  <div className="space-y-1.5" data-testid="boundary-borders">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label
+                          htmlFor="grid-border-rows"
+                          className="mb-1.5 text-xs"
+                        >
+                          Border rows (each end)
+                        </Label>
+                        <NumberField
+                          id="grid-border-rows"
+                          data-testid="boundary-border-rows"
+                          min={0}
+                          step={1}
+                          value={activeParams.borderRows ?? 0}
+                          onCommit={(v) =>
+                            updateActiveParams({
+                              borderRows: Math.max(0, Math.trunc(v)),
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-border-cols"
+                          className="mb-1.5 text-xs"
+                        >
+                          Border columns (each side)
+                        </Label>
+                        <NumberField
+                          id="grid-border-cols"
+                          data-testid="boundary-border-cols"
+                          min={0}
+                          step={1}
+                          value={activeParams.borderCols ?? 0}
+                          onCommit={(v) =>
+                            updateActiveParams({
+                              borderCols: Math.max(0, Math.trunc(v)),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <p className="text-muted-foreground text-[11px]">
+                      Positions around the design, and gaps in it, are drawn as
+                      dashed border plots to help place the grid (the field map
+                      shows how many); they are not saved. Hide them with
+                      "Border positions" above the map.
+                    </p>
+                  </div>
                 </TabsContent>
               </Tabs>
 
@@ -1838,6 +2401,55 @@ export function PlotBoundaryPrep({
                   }
                 >
                   Generate plot grid
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="boundary-clear-plots"
+                  title="Remove the plots; the outer boundaries stay, to generate the grid again"
+                  onClick={clearPlotsKeepOutlines}
+                  disabled={
+                    !features.some((f) => f.properties?.role !== "outer")
+                  }
+                >
+                  Clear plots (keep outlines)
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="boundary-import-geojson"
+                  title="Plot boundaries from a GeoJSON file made elsewhere (QGIS, another tool): added as a new block"
+                  onClick={() => geojsonInputRef.current?.click()}
+                >
+                  Import GeoJSON…
+                </Button>
+                <input
+                  ref={geojsonInputRef}
+                  type="file"
+                  accept=".geojson,.json,application/geo+json,application/json"
+                  className="hidden"
+                  data-testid="boundary-import-geojson-file"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ""
+                    if (f) void importGeojson(f)
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="boundary-download-geojson"
+                  title="The plots as a GeoJSON file (no outer boundaries or border positions)"
+                  onClick={downloadGeojson}
+                  disabled={
+                    !features.some(
+                      (f) =>
+                        f.properties?.role !== "outer" &&
+                        f.properties?.border !== true,
+                    )
+                  }
+                >
+                  Download GeoJSON
                 </Button>
                 <Button
                   size="sm"
@@ -1945,6 +2557,7 @@ export function PlotBoundaryPrep({
         onClose={() => setFdDialogOpen(false)}
         onSaved={handleFieldDesignSaved}
         preset={fieldPreset}
+        startWith={fdDialogStart}
         keep={
           scope
             ? {

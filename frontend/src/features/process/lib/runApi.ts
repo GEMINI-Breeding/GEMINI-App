@@ -147,6 +147,8 @@ export interface StitchingParams {
 }
 
 export interface SplitOrthomosaicParams {
+  /** Some plots only: add to the earlier plot images rather than replace them. */
+  merge?: boolean
   /**
    * Plot polygons in WGS84. The worker treats EVERY feature as a plot, so
    * the enclosing `role: "outer"` rectangle must already be stripped —
@@ -519,6 +521,9 @@ export async function executeStep(
         ...(input.splitOrthomosaic.orthomosaicPath
           ? { orthomosaic_path: input.splitOrthomosaic.orthomosaicPath }
           : {}),
+        // Some plots only: the worker adds them to the earlier plot images
+        // (manifest, tables, canopy temperature) instead of replacing them.
+        ...(input.splitOrthomosaic.merge ? { merge: true } : {}),
         ...(input.splitOrthomosaic.source === "frames"
           ? {
               source: "frames",

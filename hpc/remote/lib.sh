@@ -50,7 +50,7 @@ share_perms() {
     chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
     chmod 600 "$RUN/secrets.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
     chmod 2770 "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING"
-    touch "$LOGS/gate.log"; chmod 660 "$LOGS/gate.log"
+    touch "$LOGS/gate.log"; chgrp "$grp" "$LOGS/gate.log" 2>/dev/null; chmod 660 "$LOGS/gate.log"
     chmod -R g+rwX "$DATA/models" 2>/dev/null
     chmod -R g+rX "$IMAGES" "$HPC" "$SRC" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
     chmod o-rwx "$GEMI_HPC_ROOT"

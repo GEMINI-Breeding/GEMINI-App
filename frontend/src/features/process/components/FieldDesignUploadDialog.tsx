@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -38,6 +38,8 @@ interface Props {
   keep?: { year?: string; location?: string; experiment?: string }
   /** The design this field already has (held by the agent), with the grid
    *  orientation its recorded layout gives: one click instead of an upload. */
+  /** Open straight on the field's known design (preset) or on a field map sheet. */
+  startWith?: "upload" | "preset" | "fieldmap"
   preset?: {
     path: string
     name: string
@@ -63,6 +65,7 @@ export function FieldDesignUploadDialog({
   onSaved,
   keep,
   preset,
+  startWith = "upload",
 }: Props) {
   const [step, setStep] = useState<"upload" | "map" | "fieldmap">("upload")
   const [headers, setHeaders] = useState<string[]>([])
@@ -110,6 +113,20 @@ export function FieldDesignUploadDialog({
   }
 
   const [layoutNote, setLayoutNote] = useState<FieldLayoutSummary | null>(null)
+
+  // Opened on the known design, or on a field map: go there at once.
+  const startedRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per opening, not again when the preset object changes
+  useEffect(() => {
+    if (!open) {
+      startedRef.current = false
+      return
+    }
+    if (startedRef.current) return
+    startedRef.current = true
+    if (startWith === "fieldmap") setStep("fieldmap")
+    else if (startWith === "preset" && preset) void applyPreset()
+  }, [open, startWith])
 
   function handleClose() {
     reset()

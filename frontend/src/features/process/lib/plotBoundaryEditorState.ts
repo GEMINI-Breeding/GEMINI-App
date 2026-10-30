@@ -17,6 +17,14 @@ export type BlockParams = {
   colOffset: number
   /** Plot-number assignment order across the grid. */
   fillPattern: FillPattern
+  /** Plot size, metres: width across the columns (beds), length along the rows.
+   *  Unset or 0: plots stretch to fill the outer boundary. */
+  plotWidthM?: number
+  plotLengthM?: number
+  /** Field-design grids: positions around the design (rows above and below,
+   *  columns each side) drawn as border plots, to help place the grid. */
+  borderRows?: number
+  borderCols?: number
 }
 
 export const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
@@ -33,7 +41,9 @@ export type PlotBoundaryEditorState = {
   features: GeoJSON.Feature[]
   blocks: Record<string, BlockParams>
   activeBlockId: string | null
-  pendingDefaultParams: { rows: number; cols: number } | null
+  /** Settings typed before any outer boundary (block) exists: applied to the
+   *  first block drawn. */
+  pendingDefaultParams: Partial<Omit<BlockParams, "label">> | null
   gridMode: "manual" | "fd"
   fieldDesign: FieldDesign | null
   selectedCellIds: string[]

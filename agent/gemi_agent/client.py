@@ -2,7 +2,8 @@
 
 Connection comes from the environment, or from ``agent/.env``:
 
-    GEMI_API       base URL of the REST API (default http://127.0.0.1:7777)
+    GEMI_API       base URL of the REST API (default: the app's place: Docker on :7777,
+                   or the tunnel to a cluster session on :7877)
     GEMI_EMAIL     login
     GEMI_PASSWORD
     GEMI_BUCKET    storage bucket (default "gemini")
@@ -67,6 +68,39 @@ SKILLS_DIR = (_FROZEN / "skills") if _FROZEN else (_SOURCE_DIR / "skills")
 AGENT_DIR.mkdir(parents=True, exist_ok=True)
 RETRY_DELAYS = (1, 3, 10, 30)
 
+# Where the REST API is, by the place the app works on. The Docker stack on this computer and
+# the tunnel to a cluster session use different ports, so both can be up at once.
+DOCKER_API_PORT = 7777
+CLUSTER_API_PORT = 7877           # the tunnel to a cluster session's API (hpc_tools._connect)
+CLUSTER_TILES_PORT = 8191         # … and to its TiTiler (Docker's is 8091)
+PLACE_FILE = AGENT_DIR / "work" / "place.json"
+
+
+def place() -> str:
+    """The place the app works on, as the app last said: "computer" or "cluster"."""
+    try:
+        p = json.loads(PLACE_FILE.read_text()).get("place")
+    except (OSError, ValueError):
+        p = None
+    return p if p in ("computer", "cluster") else "computer"
+
+
+def set_place(p: str) -> str:
+    if p not in ("computer", "cluster"):
+        raise ValueError("place: computer or cluster")
+    PLACE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PLACE_FILE.write_text(json.dumps({"place": p}))
+    return p
+
+
+def default_api() -> str:
+    """GEMI_API when set (gemi-hpc app, a terminal); else the API of the app's place."""
+    explicit = os.environ.get("GEMI_API")
+    if explicit:
+        return explicit.rstrip("/")
+    port = CLUSTER_API_PORT if place() == "cluster" else DOCKER_API_PORT
+    return f"http://127.0.0.1:{port}"
+
 
 def _load_env_file() -> None:
     env = AGENT_DIR / ".env"
@@ -98,7 +132,7 @@ class Client:
         """`token`: act as an already logged-in user (the agent service passes
         the browser's token); otherwise log in with GEMI_EMAIL/GEMI_PASSWORD."""
         _load_env_file()
-        self.base = os.environ.get("GEMI_API", "http://127.0.0.1:7777").rstrip("/")
+        self.base = default_api()
         self.bucket = os.environ.get("GEMI_BUCKET", "gemini")
         self._token: Optional[str] = token or os.environ.get("GEMI_TOKEN") or None
 

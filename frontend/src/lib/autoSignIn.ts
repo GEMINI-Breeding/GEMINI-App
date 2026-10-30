@@ -78,6 +78,11 @@ export function noAccountsInUse(): boolean {
 }
 
 let inFlight: Promise<boolean> | null = null
+// When the agent service last said there is no automatic session here (a
+// member of someone's shared session signs in with their own account). The
+// sign-in page asks again right after the app's start did: not for a while.
+let declinedAt = 0
+const DECLINED_FOR_MS = 60_000
 
 /**
  * Sign in without a login screen if that is allowed and possible.
@@ -90,16 +95,25 @@ export function autoSignIn(
   if (signInRequired()) return Promise.resolve(false)
   if (!options.afterSignOut && read(() => sessionStorage, SIGNED_OUT_KEY))
     return Promise.resolve(false)
+  if (Date.now() - declinedAt < DECLINED_FOR_MS) return Promise.resolve(false)
   inFlight ??= (async () => {
     try {
       if (isManagedStack()) {
         const { email, password } = await stackCredentials()
         await login(email, password)
       } else {
-        const r = await agentApi.autoLogin()
+        const r = await agentApi.autoLogin().catch((e: unknown) => {
+          // "No account to sign in with" is an answer, not an outage: remember it.
+          if (e instanceof Error && /no account/i.test(e.message))
+            declinedAt = Date.now()
+          throw e
+        })
         // Not enabled: a login screen was asked for. Not remembered here, so
         // switching it back off takes effect in every browser.
-        if (!r.enabled || !r.token) return false
+        if (!r.enabled || !r.token) {
+          declinedAt = Date.now()
+          return false
+        }
         setToken(r.token)
       }
       clearSignedOut()

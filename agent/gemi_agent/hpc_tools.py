@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .client import AGENT_DIR, RESOURCES
+from .client import AGENT_DIR, CLUSTER_API_PORT, CLUSTER_TILES_PORT, RESOURCES
 from .tools import _bool, _int, _str, _tool
 
 # Source checkout: the repository. Packaged app: scripts and backend source ship
@@ -30,8 +30,10 @@ REPO = AGENT_DIR.parent if RESOURCES is None else RESOURCES
 HPC = REPO / "hpc"
 CLUSTERS = (HPC / "clusters") if RESOURCES is None else (AGENT_DIR / "clusters")
 STATE = AGENT_DIR / "work" / "hpc.json"          # tunnels opened by this computer
-API_PORT, LLM_PORT = 7777, 8000                  # where the app and the agent expect them
-TILES_PORT = 8091                                # the session's TiTiler (map tiles), where the desktop app looks
+# The tunnels to a cluster session: not the Docker stack's ports (7777, 8091), so a stack on this
+# computer can stay up beside a cluster session (and is never mistaken for it).
+API_PORT, LLM_PORT = CLUSTER_API_PORT, 8000      # where the app and the agent expect them
+TILES_PORT = CLUSTER_TILES_PORT                  # the session's TiTiler (map tiles), where the desktop app looks
 _strs = {"type": "array", "items": _str}
 
 
@@ -269,7 +271,27 @@ def _find_key(target: str, key: Optional[str], port: Optional[int]) -> Optional[
                        "Set up key-based SSH login first: ssh-keygen, then ssh-copy-id.")
 
 
+def _crlf_scripts() -> list[str]:
+    """Cluster scripts with Windows line ends (a checkout on Windows without .gitattributes):
+    bash cannot run them, and a sync would copy them to the cluster."""
+    found = []
+    for f in [HPC / "gemi-hpc", *sorted((HPC / "remote").glob("*"))]:
+        try:
+            if f.is_file() and b"\r\n" in f.read_bytes():
+                found.append(str(f.relative_to(HPC.parent)))
+        except OSError:
+            continue
+    return found
+
+
 def _gemi_hpc(args: list[str], cluster: Optional[str] = None, timeout: int = 600, env: Optional[dict] = None) -> str:
+    bad = _crlf_scripts()
+    if bad:
+        raise RuntimeError(
+            f"the cluster scripts have Windows line ends ({', '.join(bad[:3])}{', …' if len(bad) > 3 else ''}), "
+            "which bash cannot run. In the GEMI folder (with .gitattributes pulled), check them out again "
+            "with Unix line ends, in Git Bash: git ls-files -z hpc | xargs -0 rm -f && git checkout -- hpc "
+            "(this leaves your own hpc/clusters settings alone). In the installed app: reinstall it.")
     e = dict(os.environ, **(env or {}))
     if cluster:
         e["GEMI_CLUSTER"] = cluster
@@ -285,6 +307,16 @@ def _gemi_hpc(args: list[str], cluster: Optional[str] = None, timeout: int = 600
     if r.returncode:
         raise RuntimeError(f"gemi-hpc {' '.join(args)} failed: {out[-800:]}")
     return out
+
+
+def joined_session(cluster: str) -> bool:
+    """This computer joined another person's shared session on the cluster (gemi-hpc join
+    writes a launch.conf that says so) rather than running its own."""
+    try:
+        head = (CLUSTERS / cluster / "launch.conf").read_text(errors="replace")[:200]
+    except OSError:
+        return False
+    return head.lstrip().startswith("# Joined")
 
 
 def active_cluster() -> Optional[str]:
@@ -752,7 +784,8 @@ def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
         if st.get(k):
             _kill(int(st[k]))
     if _port_open(API_PORT):
-        raise RuntimeError(f"localhost:{API_PORT} is already in use (a local Docker stack?). Stop it, or use that stack.")
+        raise RuntimeError(f"localhost:{API_PORT} (the tunnel to the cluster's API) is in use by another "
+                           "program on this computer: close it and connect again.")
     st = {"cluster": cluster, "api_pid": _tunnel(conf, API_PORT, session["CORE_IP"], session["API_PORT"])}
     result: dict[str, Any] = {"app_api": f"http://127.0.0.1:{API_PORT}", "core_node": session.get("CORE_NODE")}
     if session.get("TITILER_PORT") and not _port_open(TILES_PORT):
@@ -761,6 +794,9 @@ def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
         result["map_tiles"] = f"http://127.0.0.1:{TILES_PORT}"
     elif not session.get("TITILER_PORT"):
         result["map_tiles"] = "none: this session has no tile server (it is started from the next session on)"
+    else:
+        result["map_tiles"] = (f"localhost:{TILES_PORT} is in use by another program: maps show no orthomosaic "
+                               "until it is closed")
     llm = _kv(_gemi_hpc(["llm", "env"], cluster))
     if "LLM_IP" in llm:
         port = LLM_PORT if not _port_open(LLM_PORT) else LLM_PORT + 1

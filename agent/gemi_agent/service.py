@@ -14,6 +14,8 @@ token (checked against the REST API):
     GET  /agent/onboarding             (no auth; this computer only) what this computer can run, and which
                                        set-up questions (processing, model) are already answered
     GET  /agent/onboarding/disk?path=  (no auth; this computer only) free space for the data folder and Docker
+    GET  /agent/place                  (no auth; this computer only) the app's place and the API it means
+    PUT  /agent/place                  {place: computer|cluster}  the desktop app says where it works
     GET  /agent/auto_login             (no auth; this computer only) a session for the stack's owner
                                        account, so the app opens without a login screen
     PUT  /agent/auto_login             {require_sign_in: bool}  (administrators)
@@ -59,6 +61,7 @@ token (checked against the REST API):
 from __future__ import annotations
 
 import json
+import os
 import mimetypes
 import re
 import subprocess
@@ -138,10 +141,13 @@ def _owner_token() -> str:
             clean = {k.strip(): v.strip().strip("'\"") for k, v in kv.items()}
             token = attempt(clean.get("GEMINI_FIRST_SUPERUSER_EMAIL"), clean.get("GEMINI_FIRST_SUPERUSER_PASSWORD"))
     if token is None:
-        from .hpc_tools import _gemi_hpc, _kv, active_cluster
+        from .hpc_tools import _gemi_hpc, _kv, active_cluster, joined_session
 
         cluster = active_cluster()
-        if cluster:
+        # A computer that joined someone's shared session never gets that session's own login
+        # (the cluster refuses it to members): asking only kept the app blank for an SSH round
+        # trip before the sign-in page. Members sign in with their own account.
+        if cluster and not joined_session(cluster):
             # Reading the login is an ssh round trip (seconds over a remote link);
             # keep it for this process and read it again only when it stops working
             # (a new session has a new password).
@@ -184,6 +190,9 @@ def _keep_design(src: Path) -> Optional[str]:
             dest = folder / f"{src.stem} ({n}){src.suffix}"
         if not dest.exists():
             dest.write_bytes(data)
+        from . import shared
+
+        shared.put_design(dest)                     # for everyone using the stack, too
         return dest.name
     except OSError:
         return None
@@ -333,6 +342,26 @@ class Handler(BaseHTTPRequestHandler):
                 from . import installers
 
                 return self._send(200, installers.disk_space((query.get("path") or [""])[0]))
+            if route == ["place"]:
+                # The place the app works on (this computer or a cluster session): which API the
+                # agent talks to. The desktop app says it at start and on every switch. This
+                # computer only, like the automatic sign-in below.
+                host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+                if self.client_address[0] not in ("127.0.0.1", "::1") or host not in ("127.0.0.1", "localhost", "::1"):
+                    raise HttpError(403, "the place is set by the app on this computer")
+                from .client import default_api, place, set_place
+
+                if method == "PUT":
+                    try:
+                        set_place(str(self._body().get("place") or ""))
+                    except ValueError as e:
+                        raise HttpError(400, str(e)) from None
+                    from . import compute
+
+                    if compute._watch_client is not None:
+                        compute._watch_client.base = default_api()
+                    compute._cache["t"] = 0.0
+                return self._send(200, {"place": place(), "api": default_api()})
             if route == ["auto_login"] and method == "GET":
                 # Hands out the owner's session, so: this computer only (also by Host
                 # header, against DNS rebinding), and never when sign-in is required.
@@ -485,7 +514,7 @@ class Handler(BaseHTTPRequestHandler):
             if route == ["compute", "ssh_unlock"] and method == "POST":
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
                     raise HttpError(403, "a key is unlocked on the computer running the app")
-                from .hpc_tools import unlock_key
+                from .hpc_tools import API_PORT, _port_open, active_cluster, unlock_key
 
                 b = self._body()
                 try:
@@ -494,6 +523,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise HttpError(400, str(e)) from None
                 compute._cache["t"] = 0.0
                 compute._locked_seen["t"] = 0.0
+                # The key was what kept the session's connection closed: open it now, rather
+                # than leave "not connected" up until someone presses Reconnect.
+                if active_cluster() and not _port_open(API_PORT):
+                    try:
+                        out["connected"] = compute.reconnect()
+                    except Exception as e:          # the core may be stopped: the panel says so
+                        out["not_connected"] = str(e)[:300]
                 return out
             if route[:2] == ["compute", "cluster"] and method == "POST":
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
@@ -615,6 +651,8 @@ class Handler(BaseHTTPRequestHandler):
 
             from .field_layout import read_for_field, summarize, write_csv
 
+            if not user.get("setup"):
+                use_client(Client(token=token))     # the kept file is shared through the stack
             body = self._body()
             name = Path(str(body.get("name") or body.get("path") or "design.csv")).name
             if Path(name).suffix.lower() not in (".csv", ".tsv", ".txt", ".xlsx", ".xlsm"):
@@ -681,7 +719,18 @@ class Handler(BaseHTTPRequestHandler):
                 folder.mkdir(parents=True, exist_ok=True)
                 dest = folder / name
                 dest.write_bytes(base64.b64decode(str(body.get("content_base64") or "")))
+                from . import shared
+
+                use_client(Client(token=token))
+                shared.put_design(dest)             # for everyone using the stack, too
                 return {"path": str(dest), "name": name}
+            # The designs shared through the stack: a copy here of each this computer lacks.
+            from . import shared
+
+            use_client(Client(token=token))
+            for name in shared.list_designs():
+                if Path(name).suffix.lower() in (".csv", ".xlsx", ".xlsm"):
+                    shared.fetch_design(name, folder)
             files = sorted(
                 ({"name": f.name, "path": str(f), "modified": round(f.stat().st_mtime)}
                  for f in (folder.glob("*") if folder.exists() else [])
@@ -689,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
                 key=lambda r: -r["modified"])
             suggested = None
             run_id = (query.get("run") or [""])[0]
-            keep = ("design_path", "first_tier_at", "first_bed_at", "beds")
+            keep = ("design_path", "first_tier_at", "first_bed_at", "beds", "plot_length_m")
             facts: dict = {}
             if run_id:
                 try:
@@ -738,6 +787,8 @@ class Handler(BaseHTTPRequestHandler):
             return {"files": files, "suggested": suggested, "facts": facts}
         if len(route) == 2 and route[0] == "facts" and not user.get("setup"):
             from . import guide
+
+            use_client(Client(token=token))         # facts are shared through the stack
 
             if method == "GET":
                 return {"facts": guide.facts_of(route[1]), "keys": guide.FACT_KEYS}
@@ -880,6 +931,23 @@ def _read_queue() -> None:
             pass
 
 
+class _Server(ThreadingHTTPServer):
+    """The service's HTTP server, with its port to itself. Python's default reuses the
+    address; on Windows that lets a second service bind the same port while the first
+    still listens, so an updated service started "fine" and the old one went on
+    answering. Windows: exclusive use; elsewhere reuse only frees a port in TIME_WAIT
+    and two listeners are refused anyway."""
+
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        import socket
+
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def serve(argv: list[str]) -> None:
     port, host = 7790, "127.0.0.1"
     for i, a in enumerate(argv):
@@ -904,4 +972,8 @@ def serve(argv: list[str]) -> None:
     threading.Thread(target=compute.watch, daemon=True).start()
     cfg = load_config()
     print(f"gemi-agent service on http://{host}:{port}/agent  (model {cfg['model']} at {cfg['base_url']})", flush=True)
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    try:
+        server = _Server((host, port), Handler)
+    except OSError as e:
+        raise SystemExit(f"port {port} is in use (another GEMI agent service still running?): {e}") from None
+    server.serve_forever()

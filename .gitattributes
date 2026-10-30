@@ -1,0 +1,6 @@
+# Shell scripts keep Unix line ends on every checkout, Windows included (Git for
+# Windows converts to CRLF by default). bash cannot run a script with CRLF line
+# ends, and `gemi-hpc sync` copies hpc/ to the cluster as checked out.
+hpc/** text eol=lf
+*.sh text eol=lf
+*.sbatch text eol=lf

@@ -51,7 +51,8 @@ when the work is done: `bash hpc/gemi-hpc stop odm`, or `stop_process`.
 
 ```bash
 bash hpc/gemi-hpc app             # tunnel + the app on free local ports; prints URL and login
-bash hpc/gemi-hpc tunnel 7777     # or only the API, e.g. for terminal agents (GEMI_API=http://127.0.0.1:7777)
+bash hpc/gemi-hpc tunnel 7877     # or only the API, e.g. for terminal agents (GEMI_API=http://127.0.0.1:7877);
+                                  # not 7777, which is the Docker stack's on this computer
 bash hpc/gemi-hpc logs worker-stitch   # tail a log: core, rest-api, worker-<name>, llm, pull-llm
 ```
 

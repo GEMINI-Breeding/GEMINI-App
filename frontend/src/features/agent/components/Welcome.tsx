@@ -932,6 +932,7 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   // skips it, even if a question gets answered meanwhile (a model coming up
   // must not make the page vanish under them).
   const started = useRef(false)
+  const appShown = useRef(false)
   const [finished, setFinished] = useState(false)
   const [processingDone, setProcessingDone] = useState(false)
   const [styleDone, setStyleDone] = useState(false)
@@ -985,7 +986,14 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   const needed =
     forced || !processingAnswered || !styleAnswered || !modelAnswered
   if (get(sessionStorage, SKIP_KEY) === "1") return <>{children}</>
-  if (!needed && !started.current) return <>{children}</>
+  // Once the app is showing, a question becoming open later (a reconnect
+  // refreshing what is known: no model yet) does not take the app away; the
+  // model is set from the agent page's gear. "Run it again" still shows it.
+  if (appShown.current && !forced) return <>{children}</>
+  if (!needed && !started.current) {
+    appShown.current = true
+    return <>{children}</>
+  }
   started.current = true
 
   const askedProcessing = forced || !processingAnswered || processingDone
@@ -1000,6 +1008,7 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
       : total
 
   const leave = () => {
+    appShown.current = true
     put(sessionStorage, FORCE_KEY, null)
     queryClient.invalidateQueries({ queryKey: ["agent"] })
     setFinished(true)

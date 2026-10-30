@@ -149,7 +149,7 @@ export function describeFacts(facts: {
  * Pull (row, col) from a CSV row using the mapping. Returns null if either
  * is missing or non-numeric — caller should treat as "no design row here".
  */
-function rowColOf(
+export function rowColOf(
   row: FieldDesignRow,
   mapping: Partial<Record<FdTargetKey, string>>,
 ): { r: number; c: number } | null {
@@ -239,6 +239,24 @@ function indexByRowCol(fd: FieldDesign): Map<string, FieldDesignRow> {
  * (geometric row/col/plot) is preserved under namespaced keys so callers
  * can still recover position even when CSV defines its own `plot`.
  */
+/**
+ * A check: does the design have a plot at a grid cell's position? A cell
+ * without one is a border position (around or between the design's plots).
+ */
+export function designPlotChecker(
+  fd: FieldDesign,
+): (f: GeoJSON.Feature) => boolean {
+  const index = indexByRowCol(fd)
+  return (f) => {
+    const p = (f.properties ?? {}) as Record<string, unknown>
+    const gr = Number(p._grid_row ?? p.row)
+    const gc = Number(p._grid_col ?? p.col)
+    if (!Number.isFinite(gr) || !Number.isFinite(gc)) return true
+    const at = transformLookup({ r: gr, c: gc }, fd)
+    return index.has(`${at.r},${at.c}`)
+  }
+}
+
 export function applyLabelsToFeatures(
   features: GeoJSON.Feature[],
   fd: FieldDesign,

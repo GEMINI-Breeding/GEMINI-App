@@ -51,6 +51,27 @@ export function translateFeatures(
   })
 }
 
+const EARTH_RADIUS_M = 6_378_137
+
+/**
+ * Move selected polygons by metres: east (+) / west (-) and north (+) /
+ * south (-), at the selection's latitude.
+ */
+export function translateFeaturesMeters(
+  features: GeoJSON.Feature[],
+  selected: ReadonlySet<string>,
+  eastM: number,
+  northM: number,
+): GeoJSON.Feature[] {
+  const origin = selectionCentroid(features, selected)
+  if (!origin) return features
+  const dLat = (northM / EARTH_RADIUS_M) * (180 / Math.PI)
+  const dLng =
+    (eastM / (EARTH_RADIUS_M * Math.cos((origin[1] * Math.PI) / 180))) *
+    (180 / Math.PI)
+  return translateFeatures(features, selected, dLng, dLat)
+}
+
 /**
  * Centroid of every vertex on the outer ring of every selected polygon.
  * Returns null when nothing is selected or no selected feature is a
@@ -104,16 +125,20 @@ export function rotateFeatures(
   const cosA = Math.cos(rad)
   const sinA = Math.sin(rad)
   const [ox, oy] = origin
+  // A degree of longitude is shorter than a degree of latitude away from the
+  // equator: rotate in metres-like units (longitude scaled by cos(latitude)),
+  // or rectangles shear into parallelograms.
+  const k = Math.cos((oy * Math.PI) / 180) || 1
   return features.map((f) => {
     const id = selectedCellIdOf(f)
     if (!id || !selected.has(id) || !isPolygonFeature(f)) return f
     const rotated: LngLat[][] = (f.geometry.coordinates as LngLat[][]).map(
       (ring) =>
         ring.map(([x, y]) => {
-          const dx = x - ox
+          const dx = (x - ox) * k
           const dy = y - oy
           return [
-            ox + dx * cosA - dy * sinA,
+            ox + (dx * cosA - dy * sinA) / k,
             oy + dx * sinA + dy * cosA,
           ] as LngLat
         }),

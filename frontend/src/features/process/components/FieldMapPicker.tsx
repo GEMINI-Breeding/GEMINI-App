@@ -24,11 +24,11 @@ import {
 type Grid = string[][]
 type Cell = { r: number; c: number }
 
-const BORDER = /^(b|border|buffer|f|fill|filler|bf|s ?b|gap)$/i
+export const BORDER = /^(b|border|buffer|f|fill|filler|bf|s ?b|gap)$/i
 const MAX_ROWS = 150
 const MAX_COLS = 90
 
-async function readSheets(file: File): Promise<Record<string, Grid>> {
+export async function readSheets(file: File): Promise<Record<string, Grid>> {
   const XLSX = await import("xlsx")
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" })
   const out: Record<string, Grid> = {}

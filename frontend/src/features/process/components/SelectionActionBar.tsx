@@ -1,11 +1,20 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { NumberField } from "@/components/ui/number-field"
 
 export type SelectionActionBarProps = {
   count: number
   onRotate: (degrees: number) => void
+  /** Move the selection by metres: east (+) / west (-), north (+) / south (-). */
+  onNudge?: (eastM: number, northM: number) => void
+  /** The nudge step, metres (shared with the arrow keys). */
+  nudgeStep?: number
+  onNudgeStepChange?: (m: number) => void
+  /** One plot selected: its name, to keep or change. */
+  plotName?: string
+  onRenamePlot?: (name: string) => void
   /** Renumber from the opposite side: rows = top↔bottom, cols = left↔right. */
   onFlip: (axis: "rows" | "cols") => void
   onDelete: () => void
@@ -21,12 +30,17 @@ export type SelectionActionBarProps = {
  * Exposes the bulk operations the user asked for: select-all helpers,
  * rotation (steppers + exact-degree input), and delete.
  *
- * Group-translate happens directly on the map via Geoman drag and is
- * wired into BoundaryMap — no button here for it.
+ * Moving: drag a selected cell on the map, or nudge by a step in metres
+ * (the buttons here, or the arrow keys).
  */
 export function SelectionActionBar({
   count,
   onRotate,
+  onNudge,
+  nudgeStep = 0.1,
+  onNudgeStepChange,
+  plotName,
+  onRenamePlot,
   onFlip,
   onDelete,
   onClear,
@@ -35,6 +49,7 @@ export function SelectionActionBar({
   hasActiveBlock,
 }: SelectionActionBarProps) {
   const [rotateInput, setRotateInput] = useState(0)
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
@@ -78,6 +93,98 @@ export function SelectionActionBar({
           </Button>
         </div>
       </div>
+
+      {plotName !== undefined && onRenamePlot && (
+        <form
+          className="mt-3 flex flex-wrap items-center gap-2"
+          data-testid="plot-rename"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const v = (nameDraft ?? plotName).trim()
+            if (v) onRenamePlot(v)
+            setNameDraft(null)
+          }}
+        >
+          <label htmlFor="plot-rename-input" className="text-xs">
+            Plot name:
+          </label>
+          <Input
+            id="plot-rename-input"
+            className="h-8 w-40"
+            value={nameDraft ?? plotName}
+            onChange={(e) => setNameDraft(e.target.value)}
+            data-testid="plot-rename-input"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            variant="outline"
+            disabled={
+              nameDraft === null || !nameDraft.trim() || nameDraft === plotName
+            }
+          >
+            Rename
+          </Button>
+        </form>
+      )}
+
+      {onNudge && (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-2"
+          data-testid="nudge-controls"
+        >
+          <span className="text-xs">Move:</span>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Move west"
+            data-testid="nudge-west"
+            onClick={() => onNudge(-nudgeStep, 0)}
+          >
+            ←
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Move north"
+            data-testid="nudge-north"
+            onClick={() => onNudge(0, nudgeStep)}
+          >
+            ↑
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Move south"
+            data-testid="nudge-south"
+            onClick={() => onNudge(0, -nudgeStep)}
+          >
+            ↓
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Move east"
+            data-testid="nudge-east"
+            onClick={() => onNudge(nudgeStep, 0)}
+          >
+            →
+          </Button>
+          <span className="text-xs">by</span>
+          <NumberField
+            value={nudgeStep}
+            onCommit={(v) => onNudgeStepChange?.(v > 0 ? v : 0.1)}
+            min={0}
+            step={0.05}
+            data-testid="nudge-step"
+            className="h-8 w-20"
+            aria-label="Move step in metres"
+          />
+          <span className="text-muted-foreground text-xs">
+            m · arrow keys too (Shift: ×10)
+          </span>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="text-xs">Rotate:</span>

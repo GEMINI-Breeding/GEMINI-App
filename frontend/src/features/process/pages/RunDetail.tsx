@@ -50,6 +50,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -62,6 +70,7 @@ import {
 import { useProcess } from "@/contexts/ProcessContext"
 import { RunAgentCard } from "@/features/agent/components/RunAgentCard"
 import { agentApi } from "@/features/agent/lib/agentApi"
+import { readJson } from "@/features/files/lib/download"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import {
@@ -128,6 +137,12 @@ import {
   rawScopePrefix,
   uploadedOrthosPrefix,
 } from "@/features/process/lib/paths"
+import type { PlotFramesManifest } from "@/features/process/lib/plotFrames"
+import {
+  choosePlots,
+  type PlotChoice,
+  plotsWithOrthoImages,
+} from "@/features/process/lib/plotSelection"
 import {
   executeStep,
   markStepSkipped,
@@ -438,8 +453,11 @@ function splitParams(
   treatmentOrthos: string[],
   /** The run's label, when it is one of several of the day. */
   batchLabel?: string,
+  /** Some plots only: added to the earlier plot images, not replacing them. */
+  merge = false,
 ): SplitOrthomosaicParams {
-  if (source !== "frames") return { boundaries, orthomosaicPath }
+  if (source !== "frames")
+    return { boundaries, orthomosaicPath, ...(merge ? { merge } : {}) }
   const orthomosaicPaths = [
     ...new Set([
       ...(orthomosaicPath ? [orthomosaicPath] : []),
@@ -453,6 +471,7 @@ function splitParams(
     source,
     orthomosaicPaths,
     ...(runKey ? { runKey, runLabel: batchLabel ?? "" } : {}),
+    ...(merge ? { merge } : {}),
   }
 }
 
@@ -461,6 +480,8 @@ interface RunStepOptions {
   settings?: Record<string, unknown>
   /** Plot images: cut from the orthomosaic, or each plot's best raw frames. */
   plotSource?: "ortho" | "frames"
+  /** Plot images of some plots only (added to the earlier ones). */
+  plotChoice?: PlotChoice
 }
 
 interface StepRowProps {
@@ -1073,6 +1094,8 @@ export function RunDetail() {
   // not state: it's read once inside the same handler that sets it, and
   // going through state would need an extra render before executeStep.
   const splitBoundariesRef = useRef<GeoJSON.FeatureCollection | null>(null)
+  // The plot images run does some plots only: its results join the earlier ones.
+  const splitSomeRef = useRef(false)
   const boundaryVersionRef = useRef<number | null>(null)
   const [dataSyncOpen, setDataSyncOpen] = useState(false)
   const dataSyncChoiceRef = useRef<DataSyncChoice | null>(null)
@@ -1084,6 +1107,8 @@ export function RunDetail() {
   const [orthoParams, setOrthoParams] = useState<OrthomosaicParams>({
     reconstruction_quality: "Standard",
   })
+  // Re-running a finished orthomosaic: the quality is checked again first.
+  const [orthoRerunOpen, setOrthoRerunOpen] = useState(false)
   const orthoSeededRef = useRef(false)
   // What the run's last orthomosaic actually ran with (the agent or another
   // page may have used other settings than the pipeline's default).
@@ -1841,7 +1866,40 @@ export function RunDetail() {
             )
             return
           }
-          splitBoundariesRef.current = boundaries
+          let chosen = boundaries
+          splitSomeRef.current = false
+          if (stepKey === "split_orthomosaic" && opts.plotChoice) {
+            // Which plots already have images (for "without images yet").
+            let have = new Set<string>()
+            if (opts.plotChoice.mode === "missing") {
+              if (opts.plotSource === "frames") {
+                const m = await readJson<PlotFramesManifest>(
+                  `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}manifest.json`,
+                ).catch(() => null)
+                have = new Set(
+                  (m?.plots ?? [])
+                    .filter((p) => (p.frames ?? []).length > 0)
+                    .map((p) => String(p.plot)),
+                )
+              } else {
+                have = plotsWithOrthoImages(
+                  plotImageFiles.map((f) => f.object_name ?? ""),
+                )
+              }
+            }
+            const pick = choosePlots(boundaries, opts.plotChoice, have)
+            if (pick.count === 0) {
+              showErrorToast(
+                opts.plotChoice.mode === "missing"
+                  ? "Every plot already has images."
+                  : "None of those plots is in the boundaries.",
+              )
+              return
+            }
+            chosen = pick.boundaries
+            splitSomeRef.current = pick.some
+          }
+          splitBoundariesRef.current = chosen
           boundaryVersionRef.current = activeVersion
         } catch (err) {
           showErrorToast(
@@ -2030,6 +2088,7 @@ export function RunDetail() {
                         .filter((x): x is string => Boolean(x))
                     : [],
                   run.uploadScope?.batchLabel,
+                  splitSomeRef.current,
                 )
               : undefined,
         })
@@ -2096,6 +2155,7 @@ export function RunDetail() {
       rawImagesQuery.refetch,
       pipeline?.type,
       importedDemPath,
+      plotImageFiles,
     ],
   )
 
@@ -2578,7 +2638,11 @@ export function RunDetail() {
                     }
                     errorMessage={run?.steps[step.key]?.error}
                     warning={capabilityWarningForStep(step.key, capabilities)}
-                    onRunStep={() => handleRunStep(step.key)}
+                    onRunStep={() =>
+                      step.key === "orthomosaic" && status === "completed"
+                        ? setOrthoRerunOpen(true)
+                        : handleRunStep(step.key)
+                    }
                     onOpenTool={() => handleOpenTool(step.key)}
                     onStopStep={() => handleStopStep(step.key)}
                     onSkipStep={
@@ -2645,9 +2709,16 @@ export function RunDetail() {
                             starting === "split_orthomosaic" ||
                             status === "running"
                           }
-                          onRunFrames={() =>
+                          onRunFrames={(plotChoice) =>
                             void handleRunStep("split_orthomosaic", {
                               plotSource: "frames",
+                              plotChoice,
+                            })
+                          }
+                          onRunOrtho={(plotChoice) =>
+                            void handleRunStep("split_orthomosaic", {
+                              plotSource: "ortho",
+                              plotChoice,
                             })
                           }
                         />
@@ -2694,6 +2765,64 @@ export function RunDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={orthoRerunOpen} onOpenChange={setOrthoRerunOpen}>
+        <DialogContent className="max-w-lg" data-testid="ortho-rerun-dialog">
+          <DialogHeader>
+            <DialogTitle>Re-run the orthomosaic</DialogTitle>
+            <DialogDescription>
+              Choose the quality for this run. The current orthomosaic stays as
+              an earlier version.
+            </DialogDescription>
+          </DialogHeader>
+          <OrthomosaicOptions
+            params={orthoParams}
+            onChange={setOrthoParams}
+            onOpenImport={() => {
+              setOrthoRerunOpen(false)
+              setImportDialogOpen(true)
+            }}
+            hasUploadedOrthos={false}
+          />
+          <DialogFooter className="flex-wrap gap-2 sm:justify-between">
+            <Button
+              variant="link"
+              className="px-0"
+              data-testid="ortho-rerun-full-settings"
+              onClick={() => {
+                setOrthoRerunOpen(false)
+                navigate({
+                  to: "/process/$workspaceId/pipeline",
+                  params: { workspaceId },
+                  search: {
+                    pipelineId: pipeline?.id,
+                    type: pipeline?.type ?? "aerial",
+                  },
+                })
+              }}
+            >
+              Full pipeline settings…
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setOrthoRerunOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                data-testid="ortho-rerun-go"
+                onClick={() => {
+                  setOrthoRerunOpen(false)
+                  void handleRunStep("orthomosaic")
+                }}
+              >
+                Re-run ({orthoParams.reconstruction_quality ?? "Standard"})
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <DataSyncDialog
         open={dataSyncOpen}
