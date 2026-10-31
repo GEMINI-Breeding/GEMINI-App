@@ -68,6 +68,7 @@ import {
   WorkerStartButton,
 } from "@/features/agent/components/WorkerStartPrompt"
 import { agentApi } from "@/features/agent/lib/agentApi"
+import { useAgentHidden } from "@/features/agent/lib/agentChoice"
 import { readJson } from "@/features/files/lib/download"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
 import { AssociationPanel } from "@/features/process/components/AssociationPanel"
@@ -304,7 +305,7 @@ const AERIAL_STEPS: StepDef[] = [
     key: "split_orthomosaic",
     label: "Split Into Plot Images",
     description:
-      "Cut the orthomosaic into one PNG per plot using the active boundaries. Plot images feed the plot viewer, per-plot inference and crop downloads. Not needed for Initial Trait Extraction: go straight to it with the arrow on the right, and make plot images later if you run inference.",
+      "One image per plot, for the plot viewer and inference (not needed for trait extraction).",
     kind: "compute",
   },
   {
@@ -1097,6 +1098,8 @@ export function RunDetail() {
   const pipeline = usePipeline(run?.pipelineId)
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const { addProcess, updateProcess, processes, queuedJobIds } = useProcess()
+  // Chose to work without the agent (welcome screen): no agent box here.
+  const agentHidden = useAgentHidden()
   const queryClient = useQueryClient()
   // Preflight: warn before submitting a step the backend can't service
   // (no AgRowStitch in the stitch worker, no Docker for ODM). Both probes
@@ -2599,7 +2602,9 @@ export function RunDetail() {
                     : `${imageFiles.length.toLocaleString()} image${imageFiles.length === 1 ? "" : "s"} found`
                 }
               />
-              {run && <RunAgentCard runId={run.id} kind={pipeline.type} />}
+              {run && !agentHidden && (
+                <RunAgentCard runId={run.id} kind={pipeline.type} />
+              )}
             </div>
           )}
 

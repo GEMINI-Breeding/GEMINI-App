@@ -74,20 +74,35 @@ export function PlotImagesStepPanel({
   const plotChoice: PlotChoice =
     choice === "list" ? { mode: "list", text: listText } : { mode: choice }
   const choiceReady = choice !== "list" || listText.trim().length > 0
+  const [source, setSource] = useState<"ortho" | "frames">(
+    last.source ??
+      (hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho"),
+  )
+  const src: "ortho" | "frames" = offerFrames ? source : "ortho"
+
+  // Which plots, in one row: the explanations are in the hovers.
   const plotsPicker = (
-    <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs"
+    <span
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs"
       data-testid="plot-images-which"
     >
-      <span className="font-medium">Plots:</span>
+      <span className="font-medium">Plots</span>
       {(
         [
-          ["all", "All"],
-          ["missing", "Those without images yet"],
-          ["list", "These:"],
+          ["all", "All", "Every plot of the active boundaries"],
+          [
+            "missing",
+            "Without images",
+            "Only the plots that have no images yet; added to the earlier ones",
+          ],
+          [
+            "list",
+            "These:",
+            "Some plots only (e.g. one just added to the boundaries); added to the earlier images",
+          ],
         ] as const
-      ).map(([key, label]) => (
-        <label key={key} className="flex items-center gap-1">
+      ).map(([key, label, hint]) => (
+        <label key={key} className="flex items-center gap-1" title={hint}>
           <input
             type="radio"
             name="plot-images-which"
@@ -99,146 +114,105 @@ export function PlotImagesStepPanel({
         </label>
       ))}
       <Input
-        className="h-7 w-48 text-xs"
-        placeholder="e.g. 12, 15-18, 106"
+        className="h-7 w-36 text-xs"
+        placeholder="12, 15-18, 106"
         value={listText}
         onFocus={() => setChoice("list")}
         onChange={(e) => setListText(e.target.value)}
         aria-label="Plots to make images of"
+        title="Plot numbers or ranges; added to the earlier images"
         data-testid="plot-images-list"
       />
-      <span className="text-muted-foreground">
-        Some plots only: added to the earlier images (e.g. a plot just added to
-        the boundaries).
-      </span>
-    </div>
+    </span>
   )
-  const [source, setSource] = useState<"ortho" | "frames">(
-    last.source ??
-      (hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho"),
-  )
-  if (!offerFrames)
-    return (
-      <div className="space-y-3" data-testid="plot-images-step">
-        {onRunOrtho && (
-          <div className="space-y-2">
-            {plotsPicker}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={running || !choiceReady}
-              onClick={() => onRunOrtho(plotChoice)}
-              data-testid="plot-ortho-run"
-            >
-              {running && (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              )}
-              {choice === "all"
-                ? plotImageFiles.length
-                  ? "Cut the plot images again"
-                  : "Cut the plot images"
-                : "Cut these plots' images"}
-            </Button>
+
+  const framesHint =
+    "For each plot, the flight frames that show it best (whole plot in frame, then the most top-down), placed with the camera positions of the orthomosaic the boundaries were drawn on. For flights whose orthomosaic smears in wind: a Quick orthomosaic is enough. You get crops, the best frame straightened top-down, and the full frames, named by plot and accession; the flight's other cameras (thermal) are matched by capture time and cut the same way."
+
+  const runButton =
+    src === "ortho" ? (
+      onRunOrtho && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          disabled={running || !choiceReady}
+          onClick={() => onRunOrtho(plotChoice)}
+          data-testid="plot-ortho-run"
+        >
+          {running && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          {choice === "all"
+            ? plotImageFiles.length
+              ? "Cut the plot images again"
+              : "Cut the plot images"
+            : "Cut these plots' images"}
+        </Button>
+      )
+    ) : (
+      <Button
+        size="sm"
+        className="h-7"
+        disabled={running || !hasCameraPositions || !choiceReady}
+        title={framesHint}
+        onClick={() => onRunFrames(plotChoice)}
+        data-testid="plot-frames-run"
+      >
+        {running && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+        {!hasFrames
+          ? "Pick each plot's frames"
+          : choice === "all"
+            ? "Pick the frames again"
+            : "Pick these plots' frames"}
+      </Button>
+    )
+
+  return (
+    <div className="space-y-2" data-testid="plot-images-step">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {offerFrames && (
+          <div className="inline-flex rounded-md border bg-muted p-0.5 text-xs">
+            {(
+              [
+                [
+                  "ortho",
+                  "Orthomosaic",
+                  MapIcon,
+                  "Cut the orthomosaic by the plot boundaries",
+                ],
+                ["frames", "Raw frames", Images, framesHint],
+              ] as const
+            ).map(([key, label, Icon, hint]) => (
+              <button
+                key={key}
+                type="button"
+                title={hint}
+                onClick={() => setSource(key)}
+                data-testid={`plot-source-${key}`}
+                className={`flex items-center gap-1.5 rounded px-2.5 py-0.5 ${source === key ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
           </div>
         )}
+        {(src === "frames" || onRunOrtho) && plotsPicker}
+        {runButton}
+      </div>
+      {src === "frames" && !hasCameraPositions && (
+        <p className="text-xs text-amber-600">
+          This orthomosaic's ODM run did not keep its camera positions. Build it
+          again (the Quick preset is enough) and place the boundaries on it.
+        </p>
+      )}
+      {src === "ortho" ? (
         <PlotImageGrid
           files={plotImageFiles}
           prefix={prefix}
           emptyText="No plot images yet: “Cut the plot images” above makes them."
         />
-      </div>
-    )
-  return (
-    <div className="space-y-3" data-testid="plot-images-step">
-      <div className="inline-flex rounded-md border bg-muted p-0.5 text-sm">
-        {(
-          [
-            ["ortho", "From the orthomosaic", MapIcon],
-            ["frames", "From the raw frames", Images],
-          ] as const
-        ).map(([key, label, Icon]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setSource(key)}
-            data-testid={`plot-source-${key}`}
-            className={`flex items-center gap-1.5 rounded px-3 py-1 ${source === key ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-      {source === "ortho" ? (
-        <div className="space-y-3">
-          {onRunOrtho && (
-            <div className="space-y-2">
-              {plotsPicker}
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={running || !choiceReady}
-                onClick={() => onRunOrtho(plotChoice)}
-                data-testid="plot-ortho-run"
-              >
-                {running && (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                )}
-                {choice === "all"
-                  ? plotImageFiles.length
-                    ? "Cut the plot images again"
-                    : "Cut the plot images"
-                  : "Cut these plots' images"}
-              </Button>
-            </div>
-          )}
-          <PlotImageGrid
-            files={plotImageFiles}
-            prefix={prefix}
-            emptyText="No plot images yet: “Cut the plot images” above makes them."
-          />
-        </div>
       ) : (
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            For each plot, the frames of the flight that show it best (the whole
-            plot in frame, then the most top-down view), placed with the camera
-            positions of the orthomosaic the boundaries were drawn on. Use it
-            when wind smears the orthomosaic: a Quick orthomosaic is enough to
-            place the boundaries. You get a crop of each frame, the best frame
-            straightened to a top-down view, and the full frames, all named by
-            plot and accession. The flight's other cameras (thermal), uploaded
-            for this date as their own sensor, are matched to these frames by
-            capture time and cut the same way; a thermal camera also gives each
-            plot's canopy temperature.
-          </p>
-          {plotsPicker}
-          <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              disabled={running || !hasCameraPositions || !choiceReady}
-              onClick={() => onRunFrames(plotChoice)}
-              data-testid="plot-frames-run"
-            >
-              {running && (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              )}
-              {!hasFrames
-                ? "Pick each plot's frames"
-                : choice === "all"
-                  ? "Pick the frames again"
-                  : "Pick these plots' frames"}
-            </Button>
-            {!hasCameraPositions && (
-              <span className="text-xs text-amber-600">
-                This orthomosaic's ODM run did not keep its camera positions
-                (built before this option). Build it again — the Quick preset is
-                enough — and place the boundaries on it.
-              </span>
-            )}
-          </div>
-          {hasFrames && <PlotFramesPanel prefix={framesPrefix} />}
-        </div>
+        hasFrames && <PlotFramesPanel prefix={framesPrefix} />
       )}
     </div>
   )

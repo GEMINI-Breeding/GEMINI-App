@@ -225,17 +225,43 @@ export function StepNavigator({
           </Button>
         )}
       </div>
-      {/* Where each step stands, at a glance. */}
-      <div className="flex gap-1" aria-hidden>
-        {steps.map((s) => (
-          <div
-            key={s.key}
-            title={`${s.label}: ${STATUS_LABEL[statusOf(s.key)]}`}
-            className={`h-1.5 flex-1 rounded-full ${BAR[statusOf(s.key)]} ${
-              s.key === cur.key ? "ring-foreground/60 ring-2 ring-offset-1" : ""
-            }`}
-          />
-        ))}
+      {/* Where each step stands, at a glance; click a segment to go to that
+          step (a locked one says what it waits for). */}
+      <div className="flex gap-1" data-testid="step-bar">
+        {steps.map((s) => {
+          const st = statusOf(s.key)
+          const locked = st === "locked"
+          const waits = locked ? waitingOn(steps, s.key, statusOf) : []
+          const here = s.key === cur.key
+          return (
+            <button
+              key={s.key}
+              type="button"
+              disabled={locked}
+              aria-current={here ? "step" : undefined}
+              aria-label={`${s.label}: ${STATUS_LABEL[st]}${locked ? " (locked)" : ""}`}
+              title={
+                locked
+                  ? `${s.label} is locked${waits.length ? `: it needs ${waits.join(", ")} first` : ""}`
+                  : `${s.label}: ${STATUS_LABEL[st]}${here ? " (shown)" : " · click to open"}`
+              }
+              data-testid={`step-bar-${s.key}`}
+              onClick={() => onShow(s.key)}
+              // A taller hit area than the thin bar it draws.
+              className="group flex-1 py-1.5 disabled:cursor-not-allowed enabled:cursor-pointer"
+            >
+              <span
+                className={`block h-1.5 rounded-full transition-[height] ${BAR[st]} ${
+                  here
+                    ? "ring-foreground/60 ring-2 ring-offset-1"
+                    : locked
+                      ? ""
+                      : "group-hover:h-2.5"
+                }`}
+              />
+            </button>
+          )
+        })}
       </div>
       <div className="flex items-stretch gap-3">
         <Arrow

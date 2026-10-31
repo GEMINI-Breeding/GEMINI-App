@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 
 import type { NavStatus, NavStep } from "@/features/process/lib/stepNav"
 import { StepNavigator } from "./StepNavigator"
@@ -21,14 +21,18 @@ const STEPS: NavStep[] = [
   },
 ]
 
-function nav(shown: string, status: Record<string, NavStatus>) {
+function nav(
+  shown: string,
+  status: Record<string, NavStatus>,
+  onShow: (k: string) => void = () => {},
+) {
   return render(
     <StepNavigator
       steps={STEPS}
       statusOf={(k) => status[k] ?? "locked"}
       shownKey={shown}
       nextKey="split_orthomosaic"
-      onShow={() => {}}
+      onShow={onShow}
     >
       <div />
     </StepNavigator>,
@@ -53,5 +57,25 @@ describe("StepNavigator next arrow", () => {
     })
     // Inference needs the plot images, which are not made yet.
     expect(screen.getByTestId("step-next")).toBeDisabled()
+  })
+})
+
+describe("StepNavigator step bar", () => {
+  it("opens an unlocked step from its segment, not a locked one", () => {
+    const onShow = vi.fn()
+    nav(
+      "plot_boundary_prep",
+      {
+        plot_boundary_prep: "completed",
+        split_orthomosaic: "ready",
+        trait_extraction: "ready",
+      },
+      onShow,
+    )
+    fireEvent.click(screen.getByTestId("step-bar-trait_extraction"))
+    expect(onShow).toHaveBeenCalledWith("trait_extraction")
+    const locked = screen.getByTestId("step-bar-inference")
+    expect(locked).toBeDisabled()
+    expect(locked.getAttribute("title")).toMatch(/needs Plot images/)
   })
 })
