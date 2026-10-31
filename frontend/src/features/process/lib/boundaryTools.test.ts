@@ -5,7 +5,12 @@
 import { describe, expect, it } from "vitest"
 
 import { designGrid } from "../components/FieldMapPanel"
-import { nextPlotName } from "../components/PlotBoundaryPrep"
+import {
+  nextPlotName,
+  normBearing,
+  plotsAngleOf,
+  screenToGround,
+} from "../components/PlotBoundaryPrep"
 import { designPlotChecker, type FieldDesign } from "./fieldDesign"
 import { generateGridFeatures } from "./grid"
 import { rotateFeatures, translateFeaturesMeters } from "./groupTransform"
@@ -170,5 +175,30 @@ describe("a plot added by hand", () => {
       ]),
     ).toBe("106")
     expect(nextPlotName([f({ plot: "A" }), f({ plot: "B" })])).toBe("added-3")
+  })
+})
+
+describe("turning the view", () => {
+  it("keeps bearings in (-180, 180]", () => {
+    expect(normBearing(190)).toBe(-170)
+    expect(normBearing(-180)).toBe(180)
+    expect(normBearing(15)).toBe(15)
+  })
+
+  it("moves selected plots the way the arrow points on screen", () => {
+    expect(screenToGround(1, 0, 0)).toEqual([1, 0]) // north up: right is east
+    expect(screenToGround(0, 1, 90)).toEqual([-1, 0]) // north to the right: up is west
+    expect(screenToGround(1, 0, 90)).toEqual([0, 1]) // …and right is north
+  })
+
+  it("finds how far the plots are turned, to line the view up with them", () => {
+    const cells = generateGridFeatures(outer, { rows: 2, cols: 1, angleDeg: 0 }) // 40 m × 15 m: long side east
+    expect(plotsAngleOf(cells, null)).toBeCloseTo(0, 0)
+    const turned = generateGridFeatures(outer, {
+      rows: 1,
+      cols: 1,
+      angleDeg: 30,
+    })
+    expect(plotsAngleOf(turned, null)).toBeCloseTo(30, 0)
   })
 })

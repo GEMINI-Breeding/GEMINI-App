@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createContext,
   useCallback,
@@ -10,9 +10,12 @@ import {
 } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
+import { WorkerStartDialog } from "@/features/agent/components/WorkerStartPrompt"
+import { jobTitle } from "@/features/process/lib/jobTitle"
 import { useProcessScope } from "@/features/process/lib/processScope"
 import {
   findRunByJobId,
+  getState as getRunStore,
   useRunStoreReady,
 } from "@/features/process/lib/runStore"
 import useAuth from "@/hooks/useAuth"
@@ -58,22 +61,66 @@ const WORKER_FOR: Record<string, string> = {
   EXTRACT_BINARY: "rover extraction",
 }
 
+/** A job's title (step · date · pipeline) and the step it is, from its run. */
+function describeJob(
+  jobId: string,
+  fallback: string,
+): { title: string; stepKey?: string } {
+  const run = findRunByJobId(jobId)
+  if (!run) return { title: fallback }
+  const pipeline = getRunStore?.()?.pipelines?.find(
+    (p) => p.id === run.pipelineId,
+  )?.name
+  const stepKey = Object.entries(run.steps ?? {}).find(([, s]) =>
+    s?.jobIds?.includes(jobId),
+  )?.[0]
+  return { title: jobTitle(run, jobId, pipeline, fallback), stepKey }
+}
+
 export function ProcessProvider({ children }: { children: React.ReactNode }) {
   const [processes, setProcesses] = useState<Process[]>([])
   const [history, setHistory] = useState<Process[]>([])
   const [hasBeenActive, setHasBeenActive] = useState(false)
   // Map of runId → unsubscribe fn for active SSE subscriptions
   const activeSubs = useRef<Map<string, () => void>>(new Map())
+  // Jobs submitted from this tab (not found running elsewhere): when one is
+  // queued with its worker stopped, the person is asked to start it.
+  const queryClient = useQueryClient()
+  const [submittedHere, setSubmittedHere] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
 
   const addProcess = useCallback(
     (process: Omit<Process, "id" | "createdAt">) => {
       const id = crypto.randomUUID()
-      const newProcess: Process = { ...process, id, createdAt: new Date() }
+      const jobId = process.runId
+      const named = jobId ? describeJob(jobId, process.title) : null
+      const newProcess: Process = {
+        ...process,
+        ...(named ?? {}),
+        // A job can be called off from the panel (while queued, or for some
+        // steps while running; the panel decides which it offers).
+        cancel:
+          process.cancel ??
+          (jobId && process.type === "processing"
+            ? () =>
+                JobsService.apiJobsJobIdCancelCancelJob({ jobId }).catch(
+                  () => {},
+                )
+            : undefined),
+        id,
+        createdAt: new Date(),
+      }
+      if (jobId) {
+        setSubmittedHere((prev) => new Set(prev).add(jobId))
+        // See it queued now rather than at the next poll.
+        void queryClient.invalidateQueries({ queryKey: ["process-rehydrate"] })
+      }
       setProcesses((prev) => [...prev, newProcess])
       setHasBeenActive(true)
       return id
     },
-    [],
+    [queryClient],
   )
 
   const updateProcess = useCallback((id: string, updates: Partial<Process>) => {
@@ -184,6 +231,18 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
     [liveBackendJobs],
   )
 
+  const queuedHere = useMemo(
+    () =>
+      new Map(
+        (liveBackendJobs ?? [])
+          .filter(
+            (j) => j.status === "PENDING" && submittedHere.has(String(j.id)),
+          )
+          .map((j) => [String(j.id), String(j.job_type)]),
+      ),
+    [liveBackendJobs, submittedHere],
+  )
+
   // Jobs found running elsewhere leave once the backend no longer lists them as
   // live: a finish the job's event stream missed (a restart, a closed socket)
   // kept them "queued" in the panel for good.
@@ -238,7 +297,7 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
           id: crypto.randomUUID(),
           type: "processing",
           status: queued ? "pending" : "running",
-          title: `${j.job_type} job ${runId.slice(0, 8)}${queued ? " (queued)" : ""}`,
+          ...describeJob(runId, `${j.job_type} job ${runId.slice(0, 8)}`),
           items: [],
           createdAt: new Date(),
           runId,
@@ -370,6 +429,7 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+      <WorkerStartDialog queued={queuedHere} />
     </ProcessContext.Provider>
   )
 }

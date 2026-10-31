@@ -18,7 +18,7 @@
  */
 
 import { useQueries, useQuery } from "@tanstack/react-query"
-import { PanelRightClose, PanelRightOpen } from "lucide-react"
+import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { type FileMetadata, FilesService } from "@/client"
@@ -56,6 +56,7 @@ import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
 import { FieldMapPanel } from "@/features/process/components/FieldMapPanel"
+import { QuickSave } from "@/features/process/components/QuickSave"
 import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
 import {
   StitchPlacementPanel,
@@ -177,9 +178,69 @@ export interface PlotBoundaryPrepProps {
   scope: AerialScope
   onSaved?: () => void
   onCancel?: () => void
+  /** The page's title, shown on the map card (the page has no header above it). */
+  title?: string
+  /** Back to the run; an arrow beside the title. */
+  onBack?: () => void
 }
 
 const PANEL_KEY = "gemi.boundaryPrep.panel"
+
+/** A move on screen (right, up) as a move on the ground (east, north), for a
+ *  view turned `bearing` degrees clockwise. */
+export function screenToGround(
+  right: number,
+  up: number,
+  bearing: number,
+): [number, number] {
+  const t = (bearing * Math.PI) / 180
+  const r = (v: number) => Math.round(v * 1e9) / 1e9
+  return [
+    r(right * Math.cos(t) - up * Math.sin(t)),
+    r(right * Math.sin(t) + up * Math.cos(t)),
+  ]
+}
+
+/** A bearing in (-180, 180]. */
+export function normBearing(deg: number): number {
+  const d = ((((deg + 180) % 360) + 360) % 360) - 180
+  return d === -180 ? 180 : Math.round(d * 10) / 10
+}
+
+/**
+ * How far the plots' long side is turned from east, degrees counter-clockwise
+ * (from the first plot of the active block, in metres): the view turned by it
+ * puts the plots' rows across the screen. Null without plots.
+ */
+export function plotsAngleOf(
+  features: GeoJSON.Feature[],
+  blockId: string | null,
+): number | null {
+  const plot = features.find(
+    (f) =>
+      f.geometry?.type === "Polygon" &&
+      f.properties?.role !== "outer" &&
+      f.properties?.border !== true &&
+      (!blockId || f.properties?.blockId === blockId),
+  )
+  if (!plot) return null
+  const ring = (plot.geometry as GeoJSON.Polygon).coordinates[0]
+  if (ring.length < 4) return null
+  const k = Math.cos((ring[0][1] * Math.PI) / 180)
+  // The longer of the first two sides.
+  const side = (a: number[], b: number[]) => ({
+    dx: (b[0] - a[0]) * k,
+    dy: b[1] - a[1],
+  })
+  const s1 = side(ring[0], ring[1])
+  const s2 = side(ring[1], ring[2])
+  const s = Math.hypot(s1.dx, s1.dy) >= Math.hypot(s2.dx, s2.dy) ? s1 : s2
+  let a = (Math.atan2(s.dy, s.dx) * 180) / Math.PI
+  // A side's direction either way round: the smaller turn.
+  if (a > 90) a -= 180
+  if (a <= -90) a += 180
+  return Math.round(a * 10) / 10
+}
 
 /** The name a plot added by hand gets: one after the highest plot number
  *  (or "added-N" when plots are not numbered). It can be renamed. */
@@ -201,6 +262,8 @@ export function PlotBoundaryPrep({
   scope,
   onSaved,
   onCancel,
+  title = "Map",
+  onBack,
 }: PlotBoundaryPrepProps) {
   const directory = useMemo(() => processedPrefix(scope), [scope])
   // The grid side panel can be hidden so the map gets the full width;
@@ -262,6 +325,14 @@ export function PlotBoundaryPrep({
   const nudgeStepRef = useRef(nudgeStep)
   nudgeStepRef.current = nudgeStep
   const [fieldMapOpen, setFieldMapOpen] = useState(false)
+  // The map view's rotation (degrees clockwise; 0 = north up).
+  const [bearing, setBearing] = useState(0)
+  const bearingRef = useRef(bearing)
+  bearingRef.current = bearing
+  const plotsAngle = useMemo(
+    () => plotsAngleOf(history.state.features, history.state.activeBlockId),
+    [history.state.features, history.state.activeBlockId],
+  )
   // "Add a plot": the next shape drawn becomes a plot (not a new outline).
   const [addPlot, setAddPlotState] = useState(false)
   const addPlotRef = useRef(false)
@@ -530,6 +601,21 @@ export function PlotBoundaryPrep({
   // is what keeps native text-undo working inside form inputs: when the
   // user is typing in a textbox, this handler bails and the browser (or
   // Tauri WebView) handles undo as a text-edit operation.
+  // Every plot (not the outer boundaries) selected: the "All" button and Cmd/Ctrl-A.
+  const selectAllRef = useRef<() => boolean>(() => false)
+  selectAllRef.current = () => {
+    const s = stateRef.current
+    const ids = s.features
+      .filter(
+        (f) => (f.properties as Record<string, unknown>)?.role !== "outer",
+      )
+      .map((f) => (f.properties as Record<string, unknown>)?.cellId)
+      .filter((id): id is string => typeof id === "string")
+    if (!ids.length) return false
+    history.set({ ...s, selectedCellIds: ids }, { tag: "select" })
+    return true
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement | null
@@ -537,7 +623,12 @@ export function PlotBoundaryPrep({
         t &&
         (t.tagName === "INPUT" ||
           t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
+          t.tagName === "SELECT" ||
+          t.isContentEditable ||
+          // Lists, menus, sliders and dialogs use the arrow keys themselves.
+          t.closest?.(
+            '[role="listbox"],[role="menu"],[role="slider"],[role="combobox"],[role="dialog"]',
+          ))
       ) {
         return
       }
@@ -551,6 +642,8 @@ export function PlotBoundaryPrep({
       }
       if (!mod && arrows[e.key] && stateRef.current.selectedCellIds.length) {
         e.preventDefault()
+        // Not also a pan of the map (its keyboard handler would take them).
+        e.stopPropagation()
         const step = nudgeStepRef.current * (e.shiftKey ? 10 : 1)
         const [ex, ny] = arrows[e.key]
         nudgeRef.current(ex * step, ny * step)
@@ -558,6 +651,11 @@ export function PlotBoundaryPrep({
       }
       if (!mod) return
       const k = e.key.toLowerCase()
+      // Select all plots; with no plots yet, the browser's own select-all.
+      if (k === "a" && !e.shiftKey && !e.altKey) {
+        if (selectAllRef.current()) e.preventDefault()
+        return
+      }
       if (k === "z" && !e.shiftKey) {
         e.preventDefault()
         history.undo()
@@ -566,8 +664,10 @@ export function PlotBoundaryPrep({
         history.redo()
       }
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    // Capture: before the map, which takes the arrow keys once it has focus
+    // (a click on it) and stops them there.
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
   }, [history.undo, history.redo])
 
   // Tauri Edit menu (when present): listen for editor:undo / editor:redo
@@ -868,9 +968,21 @@ export function PlotBoundaryPrep({
     loadSource?.directory ?? null,
     loadSource?.version ?? null,
   )
+  // What was last put in the editor: a version is loaded when it is opened
+  // (or imported), not again when its query refetches (window focus, an
+  // invalidation), which replaced the person's unsaved edits with the
+  // saved plots ("the plots jump back after a drag").
+  const appliedRef = useRef<{ src: unknown; imp: unknown } | null>(null)
   useEffect(() => {
     const snapshot = importedSnapshot ?? loaded.data?.state_snapshot
     if (!snapshot) return
+    if (
+      appliedRef.current &&
+      appliedRef.current.src === loadSource &&
+      appliedRef.current.imp === importedSnapshot
+    )
+      return
+    appliedRef.current = { src: loadSource, imp: importedSnapshot }
     const fc = snapshot.boundaries
     const grid = snapshot.grid
     const fd = snapshot.field_design
@@ -980,6 +1092,7 @@ export function PlotBoundaryPrep({
     setFitSignal((n) => n + 1) // the map zooms to what was loaded
   }, [
     loaded.data,
+    loadSource,
     importedSnapshot,
     history.replace,
     history.clearHistory,
@@ -1047,10 +1160,13 @@ export function PlotBoundaryPrep({
   // The arrow keys (a mount-time listener) call the latest version through this.
   const nudgeRef = useRef<(eastM: number, northM: number) => void>(() => {})
   nudgeRef.current = nudgeSelection
-  function nudgeSelection(eastM: number, northM: number) {
+  /** Move the selection by metres as the arrows point on screen (right, up),
+   *  whatever the view's rotation. */
+  function nudgeSelection(rightM: number, upM: number) {
     const s = stateRef.current
     const sel = new Set(s.selectedCellIds)
     if (!sel.size) return
+    const [eastM, northM] = screenToGround(rightM, upM, bearingRef.current)
     history.set(
       {
         ...s,
@@ -1347,9 +1463,11 @@ export function PlotBoundaryPrep({
     }
   }
 
-  async function handleSaveAndComplete() {
+  async function handleSaveAndComplete(
+    opts: { name?: string; version?: number } = {},
+  ): Promise<boolean> {
     try {
-      const v = await saveCurrent()
+      const v = await saveCurrent(opts)
       // Activate immediately so trait_extraction picks it up.
       await activate.mutateAsync({ directory, version: v.version })
       // Flip the wizard step to completed and stash the version on the
@@ -1369,14 +1487,16 @@ export function PlotBoundaryPrep({
       setDraftBanner({ visible: false })
       showSuccessToast(`Saved + activated v${v.version}`)
       onSaved?.()
+      return true
     } catch (err) {
       showErrorToast(
         err instanceof Error ? err.message : "Failed to save and activate",
       )
+      return false
     }
   }
 
-  async function saveCurrent() {
+  async function saveCurrent(opts: { name?: string; version?: number } = {}) {
     // Strip the role="outer" feature: SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS
     // treat every feature in the saved FeatureCollection as a distinct
     // plot, so an enclosing rectangle would create a junk plot covering
@@ -1412,11 +1532,19 @@ export function PlotBoundaryPrep({
     const v = await save.mutateAsync({
       directory,
       stateSnapshot: snapshot,
-      name: versionName.trim() || undefined,
+      name: opts.name ?? (versionName.trim() || undefined),
+      ...(opts.version !== undefined ? { version: opts.version } : {}),
     })
     setVersionName("")
     return v
   }
+
+  // The quick save's name: the version being edited, else the plot count.
+  const quickSaveDefault =
+    (loadSource?.directory === directory &&
+      versionsForOpen.data?.find((v) => v.version === loadSource.version)
+        ?.name) ||
+    `${plotFeatureCount} plots`
 
   // Plot length the field facts give (one number), offered for the grid.
   const factsPlotLength = (() => {
@@ -1526,19 +1654,35 @@ export function PlotBoundaryPrep({
           </CardContent>
         </Card>
       ) : null}
+      {/* The map (its grid settings under it) and, beside it, versions and
+          saving: hidable for a full-width map. */}
       <div
-        className={`grid grid-cols-1 gap-4 ${panelOpen ? "lg:grid-cols-[2fr_1fr]" : ""}`}
+        className={`grid grid-cols-1 items-start gap-4 ${panelOpen ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}
       >
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-            <div>
-              <CardTitle className="text-base">Map</CardTitle>
-              <CardDescription>
-                Use the toolbar to draw or edit polygons.
-                {panelOpen
-                  ? " The grid panel on the right lays out plots."
-                  : " The grid panel is hidden; show it to lay out plots."}
-              </CardDescription>
+            <div className="flex min-w-0 items-start gap-2">
+              {onBack && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="-ml-2 size-8 shrink-0"
+                  aria-label="Back to run"
+                  data-testid="boundary-back"
+                  onClick={onBack}
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+              )}
+              <div className="min-w-0">
+                <CardTitle className="text-base" data-testid="boundary-title">
+                  {title}
+                </CardTitle>
+                <CardDescription>
+                  Draw or import the plots on the orthomosaic, adjust them, then
+                  save a version. Help (?) at the top right shows how.
+                </CardDescription>
+              </div>
             </div>
             <Button
               size="sm"
@@ -1548,17 +1692,18 @@ export function PlotBoundaryPrep({
               data-testid="boundary-panel-toggle"
               title={
                 panelOpen
-                  ? "Hide the grid panel so the map uses the full width"
-                  : "Show the grid panel"
+                  ? "Hide versions and saving so the map uses the full width"
+                  : "Show versions and saving beside the map"
               }
             >
               {panelOpen ? (
                 <>
-                  <PanelRightClose className="mr-1.5 h-4 w-4" /> Full-width map
+                  <PanelRightClose className="mr-1.5 h-4 w-4" /> Hide version
+                  menu
                 </>
               ) : (
                 <>
-                  <PanelRightOpen className="mr-1.5 h-4 w-4" /> Grid panel
+                  <PanelRightOpen className="mr-1.5 h-4 w-4" /> Version menu
                 </>
               )}
             </Button>
@@ -1576,9 +1721,8 @@ export function PlotBoundaryPrep({
                 title="Drag a box on the map to select the plots inside it (Shift: add to the selection); then move or rotate them"
                 onClick={() => setBoxSelect((v) => !v)}
               >
-                {boxSelect
-                  ? "Selecting an area… (click to stop)"
-                  : "Select an area"}
+                {/* About the same width either way: the toolbar does not re-wrap. */}
+                {boxSelect ? "Stop selecting" : "Select an area"}
               </Button>
               <Button
                 size="sm"
@@ -1619,6 +1763,66 @@ export function PlotBoundaryPrep({
                   data-testid="boundary-plot-opacity"
                 />
               </label>
+              <span
+                className="flex items-center gap-1"
+                data-testid="boundary-view-rotation"
+                title="Turn the view (also Shift + drag on the map). The compass on the map shows north; click it to go back to north up."
+              >
+                View
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  aria-label="Turn the view 15° left"
+                  onClick={() => setBearing((b) => normBearing(b - 15))}
+                >
+                  ⟲
+                </Button>
+                <NumberField
+                  className="h-7 w-16 text-xs"
+                  allowNegative
+                  step={1}
+                  value={Math.round(bearing)}
+                  onCommit={(v) => setBearing(normBearing(v))}
+                  aria-label="View rotation in degrees"
+                  data-testid="boundary-bearing"
+                />
+                °
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  aria-label="Turn the view 15° right"
+                  onClick={() => setBearing((b) => normBearing(b + 15))}
+                >
+                  ⟳
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  data-testid="boundary-bearing-align"
+                  disabled={plotsAngle === null}
+                  title="Turn the view so the plots' rows run across the screen"
+                  onClick={() =>
+                    plotsAngle !== null && setBearing(normBearing(plotsAngle))
+                  }
+                >
+                  Align with plots
+                </Button>
+                {/* Always there (greyed out when north is up), so turning the
+                    view does not change the toolbar's width and wrap it. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  data-testid="boundary-bearing-north"
+                  disabled={bearing === 0}
+                  onClick={() => setBearing(0)}
+                >
+                  North up
+                </Button>
+              </span>
               <Button
                 size="sm"
                 variant={fieldMapOpen ? "default" : "outline"}
@@ -1646,13 +1850,23 @@ export function PlotBoundaryPrep({
             {/* The map's own height: its wrapper is h-full, which in this card
                 (as tall as the settings beside it) pushed everything after the
                 map out below the card. */}
-            <div className="h-[500px]">
+            <div className="relative h-[min(70vh,680px)]">
+              <QuickSave
+                defaultName={quickSaveDefault}
+                versions={versionsForOpen.data ?? []}
+                busy={save.isPending || activate.isPending}
+                disabled={plotFeatureCount === 0}
+                onSave={(opts) => handleSaveAndComplete(opts)}
+              />
               <BoundaryMap
+                className="isolate h-full w-full rounded-md border"
+                bearing={bearing}
+                onBearingChange={setBearing}
                 showPlots={showPlots}
                 plotOpacity={plotOpacity}
                 hideBorders={!showBorders}
                 boxSelect={boxSelect}
-                onBoxSelect={(ids, add) =>
+                onBoxSelect={(ids, add) => {
                   history.set(
                     {
                       ...stateRef.current,
@@ -1667,7 +1881,11 @@ export function PlotBoundaryPrep({
                     },
                     { tag: "select" },
                   )
-                }
+                  // Plots selected: the next drag moves them (as the bar
+                  // under the map says), not another box. Shift keeps
+                  // selecting, to add more areas.
+                  if (ids.length && !add) setBoxSelect(false)
+                }}
                 features={features}
                 fitSignal={fitSignal}
                 onFeaturesChange={setFeatures}
@@ -1718,6 +1936,8 @@ export function PlotBoundaryPrep({
               <div className="mt-3">
                 <SelectionActionBar
                   count={history.state.selectedCellIds.length}
+                  selectingArea={boxSelect}
+                  onStopSelectingArea={() => setBoxSelect(false)}
                   onNudge={nudgeSelection}
                   plotName={
                     history.state.selectedCellIds.length === 1
@@ -1826,26 +2046,7 @@ export function PlotBoundaryPrep({
                       { tag: "select" },
                     )
                   }}
-                  onSelectAll={() => {
-                    const s = stateRef.current
-                    const ids = s.features
-                      .filter(
-                        (f) =>
-                          (f.properties as Record<string, unknown>)?.role !==
-                          "outer",
-                      )
-                      .map(
-                        (f) =>
-                          (f.properties as Record<string, unknown>)?.cellId as
-                            | string
-                            | undefined,
-                      )
-                      .filter((id): id is string => typeof id === "string")
-                    history.set(
-                      { ...s, selectedCellIds: ids },
-                      { tag: "select" },
-                    )
-                  }}
+                  onSelectAll={() => selectAllRef.current()}
                 />
               </div>
             ) : null}
@@ -1875,600 +2076,621 @@ export function PlotBoundaryPrep({
                 </p>
               )}
             </div>
+            {/* The grid settings: part of the map, under it, at its width. */}
+            <section
+              className="mt-4 border-t pt-4"
+              data-testid="boundary-grid-settings"
+            >
+              <CardHeader className="px-0">
+                <CardTitle className="text-base">
+                  Grid
+                  {activeBlockId && blocks[activeBlockId] ? (
+                    <span
+                      className="ml-2 text-sm font-normal text-muted-foreground"
+                      data-testid="active-block-label"
+                    >
+                      — {blocks[activeBlockId].label} active
+                    </span>
+                  ) : null}
+                </CardTitle>
+                <CardDescription>
+                  {Object.keys(blocks).length > 1
+                    ? "Click a boundary on the map to switch which block the grid panel targets."
+                    : "Generate plot rectangles inscribed in the outer polygon."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Object.keys(blocks).length > 1 ? (
+                  <div
+                    className="flex flex-wrap gap-1.5"
+                    data-testid="block-switcher"
+                  >
+                    {Object.entries(blocks).map(([id, p]) => (
+                      <Button
+                        key={id}
+                        size="sm"
+                        variant={id === activeBlockId ? "default" : "outline"}
+                        onClick={() =>
+                          history.set(
+                            {
+                              ...stateRef.current,
+                              activeBlockId: id,
+                              selectedCellIds: [],
+                            },
+                            { tag: "select-block" },
+                          )
+                        }
+                        data-testid={`block-switch-${id}`}
+                      >
+                        {p.label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+                <Tabs
+                  value={gridMode}
+                  onValueChange={(v) =>
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        gridMode: v as "manual" | "fd",
+                      },
+                      { tag: "grid-mode" },
+                    )
+                  }
+                >
+                  <TabsList className="w-full">
+                    <TabsTrigger value="manual" data-testid="grid-mode-manual">
+                      Manual
+                    </TabsTrigger>
+                    <TabsTrigger value="fd" data-testid="grid-mode-fd">
+                      Field design CSV
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent
+                    value="manual"
+                    className="grid gap-3 pt-3 lg:grid-cols-2 lg:gap-x-6 [&>*]:min-w-0"
+                  >
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
+                          Rows
+                        </Label>
+                        <NumberField
+                          id="grid-rows"
+                          data-testid="boundary-rows"
+                          integer
+                          min={1}
+                          step={1}
+                          value={rows}
+                          onCommit={setRows}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
+                          Cols
+                        </Label>
+                        <NumberField
+                          id="grid-cols"
+                          data-testid="boundary-cols"
+                          integer
+                          min={1}
+                          step={1}
+                          value={cols}
+                          onCommit={setCols}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
+                          Angle (°)
+                        </Label>
+                        <NumberField
+                          id="grid-angle"
+                          data-testid="boundary-angle"
+                          allowNegative
+                          step={1}
+                          value={angle}
+                          onCommit={setAngle}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
+                          Gap between rows (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap"
+                          data-testid="boundary-gap"
+                          min={0}
+                          step={0.1}
+                          value={gapMeters}
+                          onCommit={setGapMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-gap-cols"
+                          className="mb-1.5 text-xs"
+                        >
+                          Gap between columns (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-cols"
+                          data-testid="boundary-gap-cols"
+                          min={0}
+                          step={0.1}
+                          value={gapColMeters}
+                          onCommit={setGapColMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-row-offset"
+                          className="mb-1.5 text-xs"
+                        >
+                          Row offset
+                        </Label>
+                        <NumberField
+                          id="grid-row-offset"
+                          data-testid="boundary-row-offset"
+                          integer
+                          min={0}
+                          step={1}
+                          value={rowOffset}
+                          onCommit={setRowOffset}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-col-offset"
+                          className="mb-1.5 text-xs"
+                        >
+                          Col offset
+                        </Label>
+                        <NumberField
+                          id="grid-col-offset"
+                          data-testid="boundary-col-offset"
+                          integer
+                          min={0}
+                          step={1}
+                          value={colOffset}
+                          onCommit={setColOffset}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label
+                          htmlFor="grid-fill-pattern"
+                          className="mb-1.5 text-xs"
+                        >
+                          Plot numbering
+                        </Label>
+                        <Select
+                          value={fillPattern}
+                          onValueChange={(v) =>
+                            setFillPattern(v as FillPattern)
+                          }
+                        >
+                          <SelectTrigger
+                            id="grid-fill-pattern"
+                            data-testid="boundary-fill-pattern"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="row-major">
+                              Row by row (1,2,3 / 4,5,6)
+                            </SelectItem>
+                            <SelectItem value="snake">
+                              Snake (1,2,3 / 6,5,4)
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Offsets place this block within the full field (0 = field
+                      origin). Irregular numbering that fits neither pattern →
+                      use a field-design CSV.
+                    </p>
+                    {plotSizeInputs}
+                  </TabsContent>
+
+                  <TabsContent
+                    value="fd"
+                    className="grid gap-3 pt-3 lg:grid-cols-2 lg:gap-x-6 [&>*]:min-w-0"
+                  >
+                    <div
+                      className="rounded border bg-muted/30 p-2 text-xs"
+                      data-testid="field-design-banner"
+                    >
+                      {fieldDesign ? (
+                        <>
+                          <p className="mb-1.5">
+                            Field design
+                            {fieldDesign.source ? (
+                              <>
+                                {" "}
+                                <strong data-testid="field-design-source">
+                                  {fieldDesign.source}
+                                </strong>
+                              </>
+                            ) : null}
+                            : <strong>{fieldDesign.rows.length}</strong> plots
+                            on a {fdSize?.rows} × {fdSize?.cols} grid (rows ×
+                            columns, from the design)
+                          </p>
+                          {fdMismatch && (
+                            <p
+                              className="mb-1.5 text-amber-600"
+                              data-testid="field-design-mismatch"
+                            >
+                              The drawn grid is {fdMismatch.rows} ×{" "}
+                              {fdMismatch.cols}: Generate plot grid again to
+                              match the design.
+                            </p>
+                          )}
+                          <div className="mb-2 flex items-center gap-3">
+                            <Label
+                              htmlFor="fd-flip-rows"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-flip-rows"
+                                data-testid="fd-flip-rows"
+                                checked={fieldDesign.transform.flipRows}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    flipRows: v === true,
+                                  })
+                                }
+                              />
+                              Flip rows
+                            </Label>
+                            <Label
+                              htmlFor="fd-flip-cols"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-flip-cols"
+                                data-testid="fd-flip-cols"
+                                checked={fieldDesign.transform.flipCols}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    flipCols: v === true,
+                                  })
+                                }
+                              />
+                              Flip cols
+                            </Label>
+                            <Label
+                              htmlFor="fd-swap-axes"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-swap-axes"
+                                data-testid="fd-swap-axes"
+                                checked={fieldDesign.transform.swapAxes}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    swapAxes: v === true,
+                                  })
+                                }
+                              />
+                              Swap axes
+                            </Label>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid="field-design-replace"
+                            onClick={() => {
+                              setFdDialogStart("upload")
+                              setFdDialogOpen(true)
+                            }}
+                          >
+                            Replace field design
+                          </Button>
+                          {fieldPreset &&
+                          fieldPreset.name !== fieldDesign.source ? (
+                            // The field facts name another design (saved there since).
+                            <p
+                              className="mt-1.5 text-sky-700 dark:text-sky-400"
+                              data-testid="field-design-facts-differ"
+                            >
+                              The field facts give{" "}
+                              <strong>{fieldPreset.name}</strong>.{" "}
+                              <button
+                                type="button"
+                                className="underline underline-offset-2"
+                                onClick={() => {
+                                  setFdDialogStart("preset")
+                                  setFdDialogOpen(true)
+                                }}
+                              >
+                                Use it instead
+                              </button>
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          {fieldPreset ? (
+                            <p
+                              className="mb-1.5"
+                              data-testid="field-design-known"
+                            >
+                              This field's design is{" "}
+                              <strong>{fieldPreset.name}</strong>
+                              {fieldPreset.described
+                                ? ` (${fieldPreset.described})`
+                                : ""}
+                              . Use it, then draw the outer boundary around the
+                              design's plots and generate the grid.
+                            </p>
+                          ) : (
+                            <p className="text-muted-foreground mb-1.5">
+                              Upload a CSV mapping (row, col) coordinates to
+                              plot metadata. Rows/cols come from the design.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant={fieldPreset ? "default" : "outline"}
+                              data-testid="field-design-upload"
+                              onClick={() => {
+                                setFdDialogStart(
+                                  fieldPreset ? "preset" : "upload",
+                                )
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              {fieldPreset
+                                ? `Use ${fieldPreset.name}`
+                                : "Upload field design"}
+                            </Button>
+                            {fieldPreset && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setFdDialogStart("upload")
+                                  setFdDialogOpen(true)
+                                }}
+                              >
+                                Another file
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-testid="field-design-from-map"
+                              title="A sheet with the plot numbers laid out as the plots lie in the field: click two opposite corners of this field"
+                              onClick={() => {
+                                setFdDialogStart("fieldmap")
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              From a field map sheet
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label
+                          htmlFor="grid-angle-fd"
+                          className="mb-1.5 text-xs"
+                        >
+                          Angle (°)
+                        </Label>
+                        <NumberField
+                          id="grid-angle-fd"
+                          data-testid="boundary-angle-fd"
+                          allowNegative
+                          step={1}
+                          value={angle}
+                          onCommit={setAngle}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
+                          Gap between rows (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-fd"
+                          data-testid="boundary-gap-fd"
+                          min={0}
+                          step={0.1}
+                          value={gapMeters}
+                          onCommit={setGapMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-gap-cols-fd"
+                          className="mb-1.5 text-xs"
+                        >
+                          Gap between columns (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-cols-fd"
+                          data-testid="boundary-gap-fd-cols"
+                          min={0}
+                          step={0.1}
+                          value={gapColMeters}
+                          onCommit={setGapColMeters}
+                        />
+                      </div>
+                    </div>
+                    {plotSizeInputs}
+                    <div className="space-y-1.5" data-testid="boundary-borders">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label
+                            htmlFor="grid-border-rows"
+                            className="mb-1.5 text-xs"
+                          >
+                            Border rows (each end)
+                          </Label>
+                          <NumberField
+                            id="grid-border-rows"
+                            data-testid="boundary-border-rows"
+                            min={0}
+                            step={1}
+                            value={activeParams.borderRows ?? 0}
+                            onCommit={(v) =>
+                              updateActiveParams({
+                                borderRows: Math.max(0, Math.trunc(v)),
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label
+                            htmlFor="grid-border-cols"
+                            className="mb-1.5 text-xs"
+                          >
+                            Border columns (each side)
+                          </Label>
+                          <NumberField
+                            id="grid-border-cols"
+                            data-testid="boundary-border-cols"
+                            min={0}
+                            step={1}
+                            value={activeParams.borderCols ?? 0}
+                            onCommit={(v) =>
+                              updateActiveParams({
+                                borderCols: Math.max(0, Math.trunc(v)),
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <p className="text-muted-foreground text-[11px]">
+                        Positions around the design, and gaps in it, are drawn
+                        as dashed border plots to help place the grid (the field
+                        map shows how many); they are not saved. Hide them with
+                        "Border positions" above the map.
+                      </p>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+
+                {features.length === 0 ? (
+                  <p className="text-amber-700 dark:text-amber-400 text-xs">
+                    Draw an outer boundary on the map
+                    {orthoBounds ? " (or use the ortho's extent)" : ""}, then
+                    click <strong>Generate plot grid</strong>.
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {orthoBounds && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="boundary-auto-from-ortho"
+                      title="Outer boundary = the orthomosaic's extent, inset 2.5% to trim its ragged edge"
+                      onClick={() =>
+                        setFeatures([
+                          ...stateRef.current.features,
+                          outerFromOrthoBounds(orthoBounds),
+                        ])
+                      }
+                    >
+                      Boundary from ortho extent
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={regenerateGrid}
+                    disabled={
+                      !activeBlockId || (gridMode === "fd" && !fieldDesign)
+                    }
+                  >
+                    Generate plot grid
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-clear-plots"
+                    title="Remove the plots; the outer boundaries stay, to generate the grid again"
+                    onClick={clearPlotsKeepOutlines}
+                    disabled={
+                      !features.some((f) => f.properties?.role !== "outer")
+                    }
+                  >
+                    Clear plots (keep outlines)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-import-geojson"
+                    title="Plot boundaries from a GeoJSON file made elsewhere (QGIS, another tool): added as a new block"
+                    onClick={() => geojsonInputRef.current?.click()}
+                  >
+                    Import GeoJSON…
+                  </Button>
+                  <input
+                    ref={geojsonInputRef}
+                    type="file"
+                    accept=".geojson,.json,application/geo+json,application/json"
+                    className="hidden"
+                    data-testid="boundary-import-geojson-file"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ""
+                      if (f) void importGeojson(f)
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-download-geojson"
+                    title="The plots as a GeoJSON file (no outer boundaries or border positions)"
+                    onClick={downloadGeojson}
+                    disabled={
+                      !features.some(
+                        (f) =>
+                          f.properties?.role !== "outer" &&
+                          f.properties?.border !== true,
+                      )
+                    }
+                  >
+                    Download GeoJSON
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-clear-all"
+                    onClick={() => setClearConfirmOpen(true)}
+                    disabled={features.length === 0}
+                  >
+                    Clear all polygons
+                  </Button>
+                </div>
+              </CardContent>
+            </section>
           </CardContent>
         </Card>
 
         {/* Kept mounted when hidden so the panel's settings survive. */}
         <div className={panelOpen ? "space-y-4" : "hidden"}>
           <StitchPlacementPanel state={placement} />
-          <Card>
+          <Card data-testid="boundary-versions-save">
             <CardHeader>
-              <CardTitle className="text-base">
-                Grid
-                {activeBlockId && blocks[activeBlockId] ? (
-                  <span
-                    className="ml-2 text-sm font-normal text-muted-foreground"
-                    data-testid="active-block-label"
-                  >
-                    — {blocks[activeBlockId].label} active
-                  </span>
-                ) : null}
-              </CardTitle>
+              <CardTitle className="text-base">Versions &amp; saving</CardTitle>
               <CardDescription>
-                {Object.keys(blocks).length > 1
-                  ? "Click a boundary on the map to switch which block the grid panel targets."
-                  : "Generate plot rectangles inscribed in the outer polygon."}
+                Save this layout, or load or import another. Hide this to give
+                the map the full width.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.keys(blocks).length > 1 ? (
-                <div
-                  className="flex flex-wrap gap-1.5"
-                  data-testid="block-switcher"
-                >
-                  {Object.entries(blocks).map(([id, p]) => (
-                    <Button
-                      key={id}
-                      size="sm"
-                      variant={id === activeBlockId ? "default" : "outline"}
-                      onClick={() =>
-                        history.set(
-                          {
-                            ...stateRef.current,
-                            activeBlockId: id,
-                            selectedCellIds: [],
-                          },
-                          { tag: "select-block" },
-                        )
-                      }
-                      data-testid={`block-switch-${id}`}
-                    >
-                      {p.label}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              <Tabs
-                value={gridMode}
-                onValueChange={(v) =>
-                  history.set(
-                    {
-                      ...stateRef.current,
-                      gridMode: v as "manual" | "fd",
-                    },
-                    { tag: "grid-mode" },
-                  )
-                }
-              >
-                <TabsList className="w-full">
-                  <TabsTrigger value="manual" data-testid="grid-mode-manual">
-                    Manual
-                  </TabsTrigger>
-                  <TabsTrigger value="fd" data-testid="grid-mode-fd">
-                    Field design CSV
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="manual" className="space-y-3 pt-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
-                        Rows
-                      </Label>
-                      <NumberField
-                        id="grid-rows"
-                        data-testid="boundary-rows"
-                        integer
-                        min={1}
-                        step={1}
-                        value={rows}
-                        onCommit={setRows}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
-                        Cols
-                      </Label>
-                      <NumberField
-                        id="grid-cols"
-                        data-testid="boundary-cols"
-                        integer
-                        min={1}
-                        step={1}
-                        value={cols}
-                        onCommit={setCols}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
-                        Angle (°)
-                      </Label>
-                      <NumberField
-                        id="grid-angle"
-                        data-testid="boundary-angle"
-                        allowNegative
-                        step={1}
-                        value={angle}
-                        onCommit={setAngle}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
-                        Gap between rows (m)
-                      </Label>
-                      <NumberField
-                        id="grid-gap"
-                        data-testid="boundary-gap"
-                        min={0}
-                        step={0.1}
-                        value={gapMeters}
-                        onCommit={setGapMeters}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="grid-gap-cols" className="mb-1.5 text-xs">
-                        Gap between columns (m)
-                      </Label>
-                      <NumberField
-                        id="grid-gap-cols"
-                        data-testid="boundary-gap-cols"
-                        min={0}
-                        step={0.1}
-                        value={gapColMeters}
-                        onCommit={setGapColMeters}
-                      />
-                    </div>
-                    <div>
-                      <Label
-                        htmlFor="grid-row-offset"
-                        className="mb-1.5 text-xs"
-                      >
-                        Row offset
-                      </Label>
-                      <NumberField
-                        id="grid-row-offset"
-                        data-testid="boundary-row-offset"
-                        integer
-                        min={0}
-                        step={1}
-                        value={rowOffset}
-                        onCommit={setRowOffset}
-                      />
-                    </div>
-                    <div>
-                      <Label
-                        htmlFor="grid-col-offset"
-                        className="mb-1.5 text-xs"
-                      >
-                        Col offset
-                      </Label>
-                      <NumberField
-                        id="grid-col-offset"
-                        data-testid="boundary-col-offset"
-                        integer
-                        min={0}
-                        step={1}
-                        value={colOffset}
-                        onCommit={setColOffset}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <Label
-                        htmlFor="grid-fill-pattern"
-                        className="mb-1.5 text-xs"
-                      >
-                        Plot numbering
-                      </Label>
-                      <Select
-                        value={fillPattern}
-                        onValueChange={(v) => setFillPattern(v as FillPattern)}
-                      >
-                        <SelectTrigger
-                          id="grid-fill-pattern"
-                          data-testid="boundary-fill-pattern"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="row-major">
-                            Row by row (1,2,3 / 4,5,6)
-                          </SelectItem>
-                          <SelectItem value="snake">
-                            Snake (1,2,3 / 6,5,4)
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Offsets place this block within the full field (0 = field
-                    origin). Irregular numbering that fits neither pattern → use
-                    a field-design CSV.
-                  </p>
-                  {plotSizeInputs}
-                </TabsContent>
-
-                <TabsContent value="fd" className="space-y-3 pt-3">
-                  <div
-                    className="rounded border bg-muted/30 p-2 text-xs"
-                    data-testid="field-design-banner"
-                  >
-                    {fieldDesign ? (
-                      <>
-                        <p className="mb-1.5">
-                          Field design
-                          {fieldDesign.source ? (
-                            <>
-                              {" "}
-                              <strong data-testid="field-design-source">
-                                {fieldDesign.source}
-                              </strong>
-                            </>
-                          ) : null}
-                          : <strong>{fieldDesign.rows.length}</strong> plots on
-                          a {fdSize?.rows} × {fdSize?.cols} grid (rows ×
-                          columns, from the design)
-                        </p>
-                        {fdMismatch && (
-                          <p
-                            className="mb-1.5 text-amber-600"
-                            data-testid="field-design-mismatch"
-                          >
-                            The drawn grid is {fdMismatch.rows} ×{" "}
-                            {fdMismatch.cols}: Generate plot grid again to match
-                            the design.
-                          </p>
-                        )}
-                        <div className="mb-2 flex items-center gap-3">
-                          <Label
-                            htmlFor="fd-flip-rows"
-                            className="flex items-center gap-1.5 font-normal"
-                          >
-                            <Checkbox
-                              id="fd-flip-rows"
-                              data-testid="fd-flip-rows"
-                              checked={fieldDesign.transform.flipRows}
-                              onCheckedChange={(v) =>
-                                setFdTransform({
-                                  ...fieldDesign.transform,
-                                  flipRows: v === true,
-                                })
-                              }
-                            />
-                            Flip rows
-                          </Label>
-                          <Label
-                            htmlFor="fd-flip-cols"
-                            className="flex items-center gap-1.5 font-normal"
-                          >
-                            <Checkbox
-                              id="fd-flip-cols"
-                              data-testid="fd-flip-cols"
-                              checked={fieldDesign.transform.flipCols}
-                              onCheckedChange={(v) =>
-                                setFdTransform({
-                                  ...fieldDesign.transform,
-                                  flipCols: v === true,
-                                })
-                              }
-                            />
-                            Flip cols
-                          </Label>
-                          <Label
-                            htmlFor="fd-swap-axes"
-                            className="flex items-center gap-1.5 font-normal"
-                          >
-                            <Checkbox
-                              id="fd-swap-axes"
-                              data-testid="fd-swap-axes"
-                              checked={fieldDesign.transform.swapAxes}
-                              onCheckedChange={(v) =>
-                                setFdTransform({
-                                  ...fieldDesign.transform,
-                                  swapAxes: v === true,
-                                })
-                              }
-                            />
-                            Swap axes
-                          </Label>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          data-testid="field-design-replace"
-                          onClick={() => {
-                            setFdDialogStart("upload")
-                            setFdDialogOpen(true)
-                          }}
-                        >
-                          Replace field design
-                        </Button>
-                        {fieldPreset &&
-                        fieldPreset.name !== fieldDesign.source ? (
-                          // The field facts name another design (saved there since).
-                          <p
-                            className="mt-1.5 text-sky-700 dark:text-sky-400"
-                            data-testid="field-design-facts-differ"
-                          >
-                            The field facts give{" "}
-                            <strong>{fieldPreset.name}</strong>.{" "}
-                            <button
-                              type="button"
-                              className="underline underline-offset-2"
-                              onClick={() => {
-                                setFdDialogStart("preset")
-                                setFdDialogOpen(true)
-                              }}
-                            >
-                              Use it instead
-                            </button>
-                          </p>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        {fieldPreset ? (
-                          <p
-                            className="mb-1.5"
-                            data-testid="field-design-known"
-                          >
-                            This field's design is{" "}
-                            <strong>{fieldPreset.name}</strong>
-                            {fieldPreset.described
-                              ? ` (${fieldPreset.described})`
-                              : ""}
-                            . Use it, then draw the outer boundary around the
-                            design's plots and generate the grid.
-                          </p>
-                        ) : (
-                          <p className="text-muted-foreground mb-1.5">
-                            Upload a CSV mapping (row, col) coordinates to plot
-                            metadata. Rows/cols come from the design.
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant={fieldPreset ? "default" : "outline"}
-                            data-testid="field-design-upload"
-                            onClick={() => {
-                              setFdDialogStart(
-                                fieldPreset ? "preset" : "upload",
-                              )
-                              setFdDialogOpen(true)
-                            }}
-                          >
-                            {fieldPreset
-                              ? `Use ${fieldPreset.name}`
-                              : "Upload field design"}
-                          </Button>
-                          {fieldPreset && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setFdDialogStart("upload")
-                                setFdDialogOpen(true)
-                              }}
-                            >
-                              Another file
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            data-testid="field-design-from-map"
-                            title="A sheet with the plot numbers laid out as the plots lie in the field: click two opposite corners of this field"
-                            onClick={() => {
-                              setFdDialogStart("fieldmap")
-                              setFdDialogOpen(true)
-                            }}
-                          >
-                            From a field map sheet
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor="grid-angle-fd" className="mb-1.5 text-xs">
-                        Angle (°)
-                      </Label>
-                      <NumberField
-                        id="grid-angle-fd"
-                        data-testid="boundary-angle-fd"
-                        allowNegative
-                        step={1}
-                        value={angle}
-                        onCommit={setAngle}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
-                        Gap between rows (m)
-                      </Label>
-                      <NumberField
-                        id="grid-gap-fd"
-                        data-testid="boundary-gap-fd"
-                        min={0}
-                        step={0.1}
-                        value={gapMeters}
-                        onCommit={setGapMeters}
-                      />
-                    </div>
-                    <div>
-                      <Label
-                        htmlFor="grid-gap-cols-fd"
-                        className="mb-1.5 text-xs"
-                      >
-                        Gap between columns (m)
-                      </Label>
-                      <NumberField
-                        id="grid-gap-cols-fd"
-                        data-testid="boundary-gap-fd-cols"
-                        min={0}
-                        step={0.1}
-                        value={gapColMeters}
-                        onCommit={setGapColMeters}
-                      />
-                    </div>
-                  </div>
-                  {plotSizeInputs}
-                  <div className="space-y-1.5" data-testid="boundary-borders">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label
-                          htmlFor="grid-border-rows"
-                          className="mb-1.5 text-xs"
-                        >
-                          Border rows (each end)
-                        </Label>
-                        <NumberField
-                          id="grid-border-rows"
-                          data-testid="boundary-border-rows"
-                          min={0}
-                          step={1}
-                          value={activeParams.borderRows ?? 0}
-                          onCommit={(v) =>
-                            updateActiveParams({
-                              borderRows: Math.max(0, Math.trunc(v)),
-                            })
-                          }
-                        />
-                      </div>
-                      <div>
-                        <Label
-                          htmlFor="grid-border-cols"
-                          className="mb-1.5 text-xs"
-                        >
-                          Border columns (each side)
-                        </Label>
-                        <NumberField
-                          id="grid-border-cols"
-                          data-testid="boundary-border-cols"
-                          min={0}
-                          step={1}
-                          value={activeParams.borderCols ?? 0}
-                          onCommit={(v) =>
-                            updateActiveParams({
-                              borderCols: Math.max(0, Math.trunc(v)),
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                    <p className="text-muted-foreground text-[11px]">
-                      Positions around the design, and gaps in it, are drawn as
-                      dashed border plots to help place the grid (the field map
-                      shows how many); they are not saved. Hide them with
-                      "Border positions" above the map.
-                    </p>
-                  </div>
-                </TabsContent>
-              </Tabs>
-
-              {features.length === 0 ? (
-                <p className="text-amber-700 dark:text-amber-400 text-xs">
-                  Draw an outer boundary on the map
-                  {orthoBounds ? " (or use the ortho's extent)" : ""}, then
-                  click <strong>Generate plot grid</strong>.
-                </p>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                {orthoBounds && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="boundary-auto-from-ortho"
-                    title="Outer boundary = the orthomosaic's extent, inset 2.5% to trim its ragged edge"
-                    onClick={() =>
-                      setFeatures([
-                        ...stateRef.current.features,
-                        outerFromOrthoBounds(orthoBounds),
-                      ])
-                    }
-                  >
-                    Boundary from ortho extent
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={regenerateGrid}
-                  disabled={
-                    !activeBlockId || (gridMode === "fd" && !fieldDesign)
-                  }
-                >
-                  Generate plot grid
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  data-testid="boundary-clear-plots"
-                  title="Remove the plots; the outer boundaries stay, to generate the grid again"
-                  onClick={clearPlotsKeepOutlines}
-                  disabled={
-                    !features.some((f) => f.properties?.role !== "outer")
-                  }
-                >
-                  Clear plots (keep outlines)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  data-testid="boundary-import-geojson"
-                  title="Plot boundaries from a GeoJSON file made elsewhere (QGIS, another tool): added as a new block"
-                  onClick={() => geojsonInputRef.current?.click()}
-                >
-                  Import GeoJSON…
-                </Button>
-                <input
-                  ref={geojsonInputRef}
-                  type="file"
-                  accept=".geojson,.json,application/geo+json,application/json"
-                  className="hidden"
-                  data-testid="boundary-import-geojson-file"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    e.target.value = ""
-                    if (f) void importGeojson(f)
-                  }}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  data-testid="boundary-download-geojson"
-                  title="The plots as a GeoJSON file (no outer boundaries or border positions)"
-                  onClick={downloadGeojson}
-                  disabled={
-                    !features.some(
-                      (f) =>
-                        f.properties?.role !== "outer" &&
-                        f.properties?.border !== true,
-                    )
-                  }
-                >
-                  Download GeoJSON
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  data-testid="boundary-clear-all"
-                  onClick={() => setClearConfirmOpen(true)}
-                  disabled={features.length === 0}
-                >
-                  Clear all polygons
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Save</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div>
                 <Label htmlFor="version-name" className="mb-1.5 text-xs">
                   Version name (optional)
@@ -2484,7 +2706,7 @@ export function PlotBoundaryPrep({
               <div className="flex flex-col gap-2">
                 <Button
                   data-testid="boundary-save-and-complete"
-                  onClick={handleSaveAndComplete}
+                  onClick={() => void handleSaveAndComplete()}
                   disabled={
                     plotFeatureCount === 0 ||
                     save.isPending ||
@@ -2508,49 +2730,57 @@ export function PlotBoundaryPrep({
                   </Button>
                 )}
               </div>
+              <div className="min-w-0 overflow-x-auto border-t pt-3">
+                <Tabs defaultValue="versions">
+                  <TabsList>
+                    <TabsTrigger value="versions">Versions</TabsTrigger>
+                    <TabsTrigger
+                      value="import"
+                      data-testid="boundary-import-tab"
+                    >
+                      Import from…
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="versions" className="pt-3">
+                    <VersionPicker
+                      directory={directory}
+                      activeVersion={
+                        loadSource?.directory === directory
+                          ? loadSource.version
+                          : null
+                      }
+                      onLoad={(v) => {
+                        setImportedSnapshot(null)
+                        setLoadSource({ directory, version: v })
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="import" className="pt-3">
+                    <BoundaryImportPicker
+                      directory={directory}
+                      onImportSnapshot={(snap, note) => {
+                        setImportedSnapshot(
+                          snap as unknown as PlotGeometryStateSnapshot,
+                        )
+                        showSuccessToast(
+                          `${note} Check the fit, then save to keep them here.`,
+                        )
+                      }}
+                      onImport={(dir, version, plotCount) => {
+                        setImportedSnapshot(null)
+                        setLoadSource({ directory: dir, version })
+                        showSuccessToast(
+                          `Imported ${plotCount} plots. Check the fit, then save to keep them here.`,
+                        )
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
-
-      <Tabs defaultValue="versions">
-        <TabsList>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
-          <TabsTrigger value="import" data-testid="boundary-import-tab">
-            Import from…
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="versions" className="pt-3">
-          <VersionPicker
-            directory={directory}
-            activeVersion={
-              loadSource?.directory === directory ? loadSource.version : null
-            }
-            onLoad={(v) => {
-              setImportedSnapshot(null)
-              setLoadSource({ directory, version: v })
-            }}
-          />
-        </TabsContent>
-        <TabsContent value="import" className="pt-3">
-          <BoundaryImportPicker
-            directory={directory}
-            onImportSnapshot={(snap, note) => {
-              setImportedSnapshot(snap as unknown as PlotGeometryStateSnapshot)
-              showSuccessToast(
-                `${note} Check the fit, then save to keep them here.`,
-              )
-            }}
-            onImport={(dir, version, plotCount) => {
-              setImportedSnapshot(null)
-              setLoadSource({ directory: dir, version })
-              showSuccessToast(
-                `Imported ${plotCount} plots. Check the fit, then save to keep them here.`,
-              )
-            }}
-          />
-        </TabsContent>
-      </Tabs>
 
       <FieldDesignUploadDialog
         open={fdDialogOpen}

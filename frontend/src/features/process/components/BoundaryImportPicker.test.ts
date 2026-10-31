@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { rankCandidates } from "./BoundaryImportPicker"
+import { rankCandidates, sameTrial } from "./BoundaryImportPicker"
 
 const dir = (season: string, site: string, pop: string, date: string) =>
   `Processed/${season}/GEMINI/${site}/${pop}/${date}/Drone/RGB/`
@@ -20,5 +20,30 @@ describe("rankCandidates", () => {
       dir("2023", "Kearney", "Mixed", "2023-07-13"),
       dir("2026", "Davis", "Sorghum", "2026-08-21"),
     ])
+  })
+})
+
+describe("sameTrial", () => {
+  const here =
+    "Processed/2023/Interspecific Kearney/Kearney/Interspecific/2023-08-03/Drone/RGB/"
+  it("matches the experiment, site and population, whatever the date, season or sensor", () => {
+    expect(
+      sameTrial(
+        "Processed/2022/Interspecific Kearney/Kearney/Interspecific/2022-07-05/Drone/RGB-SonyA7R/",
+        here,
+      ),
+    ).toBe(true)
+    expect(
+      sameTrial(
+        "Processed/2023/Interspecific Kearney/Kearney/Common bean/2023-08-03/Drone/RGB/",
+        here,
+      ),
+    ).toBe(false)
+    expect(
+      sameTrial(
+        "Processed/2023/GEMINI-26/Kearney/Interspecific/2023-08-03/Drone/RGB/",
+        here,
+      ),
+    ).toBe(false)
   })
 })

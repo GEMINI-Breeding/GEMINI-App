@@ -193,6 +193,14 @@ def work_in_flight() -> list[dict]:
     waiting for a cluster job slot, and on this computer. One row each:
     {kind, title, state: waiting | queued | running, detail}."""
     rows: list[dict] = []
+    # A copy that waited for a job slot is known to the app by its waiting id ("w…").
+    via: dict[str, str] = {}
+    try:
+        from . import cloud
+
+        via = {str(w["job_id"]): w["id"] for w in cloud._waiting(None) if w.get("job_id")}
+    except Exception:
+        pass
     for jid, r in sorted(_seen.items()):
         name = r["name"][len("gemi-"):] if r["name"].startswith("gemi-") else r["name"]
         if name not in _KIND:
@@ -203,7 +211,8 @@ def work_in_flight() -> list[dict]:
             "waiting for the account's CPU allowance" if str(r.get("reason") or "").startswith("QOSGrp")
             else "waiting for room on the cluster")
         rows.append({"kind": name, "id": jid, "title": f"{_KIND[name]} (cluster job {jid})", "state": state,
-                     "detail": why or (f"on {r['node']}" if r.get("node") else "")})
+                     "detail": why or (f"on {r['node']}" if r.get("node") else ""),
+                     **({"fetch_id": via[str(jid)]} if str(jid) in via else {})})
     try:
         from . import cloud
 

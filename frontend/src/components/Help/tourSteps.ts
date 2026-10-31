@@ -8,6 +8,8 @@ export interface TourStep {
   route?: string
   /** Search params for that route (e.g. an Analyze tab). */
   search?: Record<string, string>
+  /** A run step to bring onto the run page's card first (its key). */
+  focus?: string
 }
 
 export interface TourSection {
@@ -99,7 +101,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         id: "process-workspace-pipelines",
         title: "Create a New Pipeline",
         description:
-          "Select a pipeline that suits your data extraction needs — Aerial for drone imagery (orthomosaic → traits) or Ground for Amiga rover data (stitching → traits). Click either card to configure and create it.",
+          "Select a pipeline that suits your data extraction needs — Aerial for drone imagery (orthomosaic → traits) or Ground for Amiga rover data (stitching → traits). Click either one to configure and create it (once a workspace has pipelines, this sits at the bottom of the page as “Add another pipeline”).",
         selector: '[data-onboarding="process-pipeline-cards"]',
       },
       {
@@ -147,7 +149,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         id: "run-steps",
         title: "The Processing Steps",
         description:
-          "Steps run top to bottom; the next one to do is highlighted. Each step shows its status, its progress log and, if it failed, what went wrong. A run that starts from an uploaded orthomosaic skips the drone-image steps.",
+          "One step at a time: the card shows the step to do next. Pick any step from the list at the top (each shows its status), or use the arrows beside the card. A step unlocks once what it needs is done (Initial Trait Extraction needs only the orthomosaic and plot boundaries, not the plot images); hover a locked arrow to see what is left. A run that starts from an uploaded orthomosaic skips the drone-image steps.",
         selector: '[data-onboarding="run-steps"]',
       },
       {
@@ -156,6 +158,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "Optional first steps for raw drone images: leave out blurry or off-field images, and mark ground control points for more accurate positions.",
         selector: '[data-testid="step-row-image_review"]',
+        focus: "image_review",
       },
       {
         id: "run-orthomosaic",
@@ -163,6 +166,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "Stitches the images into one map of the field, with a DEM for plant height. Pick a quality: a quick one is enough to place plot boundaries and cut plot images from the raw frames.",
         selector: '[data-testid="step-row-orthomosaic"]',
+        focus: "orthomosaic",
       },
       {
         id: "run-boundaries",
@@ -170,6 +174,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "Draw or generate the plot grid over the orthomosaic and attach the field design. Boundaries saved on another date can be imported and shifted to fit this one.",
         selector: '[data-testid="step-row-plot_boundary_prep"]',
+        focus: "plot_boundary_prep",
       },
       {
         id: "run-plot-images",
@@ -177,6 +182,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "One image per plot, cut from the orthomosaic or, for sharper views, from the raw frames. Raw frames also give the other cameras' views of each plot (thermal) and their canopy temperature.",
         selector: '[data-testid="step-row-split_orthomosaic"]',
+        focus: "split_orthomosaic",
       },
       {
         id: "run-traits",
@@ -184,6 +190,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "Measures each plot: canopy cover, vegetation indices, plant height from the DEM, and temperature from thermal. The results are stored per plot and appear in Analyze.",
         selector: '[data-testid="step-row-trait_extraction"]',
+        focus: "trait_extraction",
       },
       {
         id: "run-inference",
@@ -191,6 +198,7 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         description:
           "Runs a trained model on the plot images, for example to count or detect plant organs, and stores its results as traits too.",
         selector: '[data-testid="step-row-inference"]',
+        focus: "inference",
       },
     ],
   },
@@ -398,116 +406,74 @@ TOUR_SECTIONS["/process/plot-boundary-prep"] = {
   label: "Plot Boundary Prep",
   steps: [
     {
-      id: "pbp-field-design",
-      title: "Field Design",
+      id: "pbp-overview",
+      title: "Plot Boundary Prep",
       description:
-        "Upload your field design CSV here. It maps row/column coordinates to plot IDs and accession labels — required before you can generate the plot grid. Once loaded, it shows a row × column count.",
-      selector: '[data-onboarding="pbp-field-design"]',
-    },
-    {
-      id: "pbp-instructions",
-      title: "Instructions",
-      description:
-        "Expand this panel for a step-by-step guide and a keyboard shortcut reference. Covers drawing the boundary, generating the grid, adjusting positions, and saving.",
-      selector: '[data-onboarding="pbp-instructions"]',
+        "Put one outline on the orthomosaic for every plot, then save them as a version. Plot images and traits are cut from the active version. The arrow beside the title goes back to the run.",
+      selector: '[data-testid="boundary-title"]',
     },
     {
       id: "pbp-map",
-      title: "Map — Draw the Field Boundary",
+      title: "The map",
       description:
-        "Use the polygon tool (⬠) in the top-left toolbar to draw the outer boundary of your field. Click to add vertices, double-click to finish. The plot grid is generated inside this boundary.",
-      selector: '[data-onboarding="pbp-map"]',
+        "Draw the outer field boundary with the rectangle or polygon tool (top left of the map); the grid settings fill it with plots. Click a plot to select it: Shift-click adds, Cmd/Ctrl-click toggles, Cmd/Ctrl-A selects every plot. Shift + drag turns the view; the compass goes back to north up.",
+      selector: ".gemi-map",
     },
     {
-      id: "pbp-grid-inputs",
-      title: "Plot Dimensions",
+      id: "pbp-move",
+      title: "Moving plots",
       description:
-        "Set the width, length, row count, column count, and spacing for each plot. These values define the shape and layout of the auto-generated grid.",
-      selector: '[data-onboarding="pbp-grid-inputs"]',
+        "Drag any selected plot to move the whole selection, or use the arrow keys to move it by the step in the selection bar (Shift: ten steps). The bar under the map also rotates, flips, renames and deletes the selection. Cmd/Ctrl-Z undoes, Cmd/Ctrl-Shift-Z redoes.",
+      selector: '[data-testid="selection-action-bar"]',
     },
     {
-      id: "pbp-angle",
-      title: "Grid Angle",
+      id: "pbp-toolbar",
+      title: "Map tools",
       description:
-        "Rotate the entire plot grid to match the orientation of your field rows. Use the slider for coarse adjustment or type an exact value in degrees.",
-      selector: '[data-onboarding="pbp-angle"]',
+        "Select an area: drag a box to select the plots inside it (Shift adds); it switches off once plots are selected, so the next drag moves them. Add a plot draws one more plot in the selected block. Plots and Opacity show or fade the overlay.",
+      selector: '[data-testid="boundary-map-toolbar"]',
     },
     {
-      id: "pbp-generate-grid",
-      title: "Generate Grid",
+      id: "pbp-view",
+      title: "Turning the view",
       description:
-        "Fills the field boundary with a plot grid using the current dimension settings. Click Regenerate Grid any time you change the settings to update the preview.",
-      selector: '[data-onboarding="pbp-generate-grid"]',
+        "Turn the map 15° at a time, type an angle, or Align with plots so the plot rows run across the screen. North up turns it back. Only the view turns: the plots stay where they are on the field.",
+      selector: '[data-testid="boundary-view-rotation"]',
     },
     {
-      id: "pbp-mode-buttons",
-      title: "Select / Move Mode",
+      id: "pbp-quick-save",
+      title: "Quick save",
       description:
-        "Select mode lets you click or drag-select individual plots. Move mode lets you drag selected plots to fine-tune their positions. Switch between them with the S and M keys.",
-      selector: '[data-onboarding="pbp-mode-buttons"]',
+        "Saves and activates the plots without opening the version menu. If a version already has that name, it asks for another name or whether to overwrite it. The eye icon tucks it into the corner.",
+      selector: '[data-testid="quick-save"]',
     },
     {
-      id: "pbp-select-tools",
-      title: "Select All / Clear / Delete",
+      id: "pbp-grid",
+      title: "Grid settings",
       description:
-        "In Select mode: All selects every plot, Clear deselects, and Delete removes the highlighted plots permanently. Use this to remove edge plots that fall outside the field.",
-      selector: '[data-onboarding="pbp-select-tools"]',
+        "Under the map: the rows, columns, plot size, gaps and angle the grid is laid out with, or a field design (CSV) that names every plot with its row, column and genotype.",
+      selector: '[data-testid="boundary-grid-settings"]',
     },
     {
-      id: "pbp-undo",
-      title: "Undo",
+      id: "pbp-version-menu",
+      title: "Version menu",
       description:
-        "Undo the last boundary or plot edit. Also available with Ctrl+Z.",
-      selector: '[data-onboarding="pbp-undo"]',
+        "Hide version menu gives the map the full width; Version menu brings it back.",
+      selector: '[data-testid="boundary-panel-toggle"]',
     },
     {
-      id: "pbp-redo",
-      title: "Redo",
+      id: "pbp-versions",
+      title: "Versions & saving",
       description:
-        "Redo a previously undone action. Also available with Ctrl+Y.",
-      selector: '[data-onboarding="pbp-redo"]',
+        "Save & complete step saves a version, makes it the active one and finishes the step; Save without activating keeps the current one active. The Versions list loads, compares and activates earlier versions.",
+      selector: '[data-testid="boundary-versions-save"]',
     },
     {
-      id: "pbp-toggle-grid",
-      title: "Show / Hide Grid",
+      id: "pbp-import",
+      title: "Import from another date",
       description:
-        "Toggle the plot grid overlay on or off. Hiding the grid makes it easier to redraw or edit the field boundary without the plots getting in the way.",
-      selector: '[data-onboarding="pbp-toggle-grid"]',
-    },
-    {
-      id: "pbp-version-selectors",
-      title: "Background Image & Boundary Version",
-      description:
-        "Switch between orthomosaic or stitching versions used as the map background, and load a previously saved boundary version to compare or continue editing.",
-      selector: '[data-onboarding="pbp-version-selectors"]',
-    },
-    {
-      id: "pbp-save",
-      title: "Save",
-      description:
-        "Saves the current plot boundaries, overwriting the active version. The boundary file is used by all downstream steps — trait extraction, inference, and association.",
-      selector: '[data-onboarding="pbp-save"]',
-    },
-    {
-      id: "pbp-save-as",
-      title: "Save As",
-      description:
-        "Saves the current boundaries as a new named version, keeping the previous version intact. Useful for testing different grid layouts before committing.",
-      selector: '[data-onboarding="pbp-save-as"]',
-    },
-    {
-      id: "pbp-cancel",
-      title: "Cancel",
-      description:
-        "Exit the boundary editor without saving. If you have unsaved changes, you'll be prompted to confirm.",
-      selector: '[data-onboarding="pbp-cancel"]',
-    },
-    {
-      id: "pbp-clear-all",
-      title: "Clear All Plots",
-      description:
-        "Removes every plot from the grid so you can start fresh — found under the Danger zone toggle at the bottom of the Plot Settings panel. Only appears when plots exist.",
-      selector: '[data-onboarding="pbp-clear-all"]',
+        "Boundaries saved for another date of the same experiment, site and population, nearest date first. Show other experiments, sites and populations lists the rest. Imported plots are unsaved until you save; aligning moves them onto this date's orthomosaic.",
+      selector: '[data-testid="boundary-import-tab"]',
     },
   ],
 }

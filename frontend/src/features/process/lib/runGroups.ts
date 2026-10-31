@@ -36,6 +36,12 @@ export interface RunGroup {
   date: string
   /** "Davis · Sorghum · Drone". */
   title: string
+  /** "Davis · Sorghum": the field, without the platform (the row's icon says it). */
+  field: string
+  /** The crop / population, for filtering. */
+  crop: string
+  /** The site (location), shown once above the list when every run shares it. */
+  site: string
   sensors: string[]
   treatments: string[]
   lines: RunLine[]
@@ -75,6 +81,12 @@ export function groupRuns(
         key,
         date,
         title: where.join(" · ") || run.name || `Run ${run.id.slice(0, 8)}`,
+        field:
+          [s?.location, s?.population].filter(Boolean).join(" · ") ||
+          run.name ||
+          `Run ${run.id.slice(0, 8)}`,
+        crop: s?.population ?? "",
+        site: s?.location ?? "",
         sensors: [],
         treatments: [],
         lines: [],

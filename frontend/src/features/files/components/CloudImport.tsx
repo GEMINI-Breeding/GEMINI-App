@@ -32,13 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { KeyUnlock, lockedKeyOf } from "@/features/agent/components/KeyUnlock"
 import {
   agentApi,
-  type CloudFetch,
   type CloudItem,
   type CloudProvider,
 } from "@/features/agent/lib/agentApi"
 import { friendlyError } from "@/features/agent/lib/friendlyError"
+import { copyTracker, useTrackedCopies } from "@/features/files/lib/copyTracker"
 import {
   dateFromFolder,
   dateOf,
@@ -46,18 +47,11 @@ import {
   groupByDate,
 } from "@/features/files/lib/fileDates"
 import { CLUSTER_DATA_TYPES, uploadSettings } from "./ClusterFolderUpload"
+import { CopyRow } from "./CopyProgress"
 import { DateCheckDialog, type DateCheckGroup } from "./DateCheckDialog"
 import type { EntityChoice } from "./EntitySelectField"
 
-const FINISHED = new Set(["done", "failed", "COMPLETED", "FAILED", "ENDED"])
-
-export function isFinished(f: Pick<CloudFetch, "state">): boolean {
-  return FINISHED.has(f.state)
-}
-
-export function isFailure(f: Pick<CloudFetch, "state">): boolean {
-  return f.state === "failed" || f.state === "FAILED" || f.state === "ENDED"
-}
+export { isFailure, isFinished } from "@/features/files/lib/copyTracker"
 
 /** "1.2 GiB" from bytes. */
 export function humanSize(n: number | null | undefined): string {
@@ -106,7 +100,8 @@ export function CloudImport({
   const [keep, setKeep] = useState(false)
   const [adding, setAdding] = useState(false)
   // The copies started (one per date when dates come from the files).
-  const [fetchIds, setFetchIds] = useState<{ id: string; date: string }[]>([])
+  // Followed in the process panel too, on every page (see copyTracker).
+  const copies = useTrackedCopies()
   const [datePrompt, setDatePrompt] = useState<{
     groups: DateCheckGroup[]
     resolve: (dates: string[] | null) => void
@@ -135,7 +130,9 @@ export function CloudImport({
   })
 
   const start = useMutation({
-    mutationFn: async (): Promise<{ id: string; date: string }[]> => {
+    mutationFn: async (): Promise<
+      { id: string; date: string; source: string }[]
+    > => {
       const base = uploadSettings(dataType, formValues, scope)
       if (nameEnds.trim()) base.name_ends = nameEnds.trim()
       const target = picked ?? path
@@ -146,7 +143,7 @@ export function CloudImport({
           settings: base,
           keep,
         })
-        return [{ id: f.id, date: base.date }]
+        return [{ id: f.id, date: base.date, source: `${remote}:${target}` }]
       }
       // Dates from the files: list them (and dated folders one level down),
       // one copy per date, after the person has checked the dates.
@@ -223,7 +220,7 @@ export function CloudImport({
         }),
       )
       if (!dates) return []
-      const out: { id: string; date: string }[] = []
+      const out: { id: string; date: string; source: string }[] = []
       const failed: string[] = []
       for (const [i, g] of groups.entries()) {
         const settings: Record<string, string> = { ...base, date: dates[i] }
@@ -251,7 +248,7 @@ export function CloudImport({
             settings,
             keep,
           })
-          out.push({ id: f.id, date: dates[i] })
+          out.push({ id: f.id, date: dates[i], source: `${remote}:${from}` })
         } catch (e) {
           failed.push(`${dates[i]}: ${friendlyError(e)}`)
         }
@@ -262,7 +259,7 @@ export function CloudImport({
         )
       return out
     },
-    onSuccess: (list) => setFetchIds(list),
+    onSuccess: (list) => copyTracker.add(list),
   })
 
   const kind = CLUSTER_DATA_TYPES[dataType ?? ""]
@@ -281,6 +278,29 @@ export function CloudImport({
         <Loader2 className="h-4 w-4 animate-spin" />
         Looking up your storage connections…
       </p>
+    )
+
+  // The cluster's key has a passphrase not entered on this computer yet: every
+  // copy and listing would fail with "Permission denied" until it is.
+  const lockedKey = overview.data?.key_locked
+    ? (overview.data.ssh_key ?? null)
+    : lockedKeyOf(overview.error ?? listing.error ?? start.error)
+  if (lockedKey)
+    return (
+      <div className="space-y-2" data-testid="cloud-import">
+        <p className="text-sm" data-testid="cloud-key-locked">
+          Your SSH key for {cluster ?? "the cluster"} has a passphrase. Enter it
+          once to reach your storage connections from there.
+        </p>
+        <KeyUnlock
+          keyPath={lockedKey}
+          onUnlocked={() => {
+            start.reset()
+            queryClient.invalidateQueries({ queryKey: ["agent", "cloud"] })
+            queryClient.invalidateQueries({ queryKey: ["agent", "compute"] })
+          }}
+        />
+      </div>
     )
 
   return (
@@ -480,9 +500,17 @@ export function CloudImport({
         </div>
       )}
 
-      {fetchIds.map((f) => (
-        <FetchProgress key={f.id} id={f.id} date={f.date} />
-      ))}
+      {copies.length > 0 && (
+        <div className="divide-y rounded border" data-testid="cloud-progress">
+          <p className="text-muted-foreground px-3 py-1.5 text-xs">
+            Your copies (also in the processes panel at the bottom right, on
+            every page). Click one for its progress.
+          </p>
+          {copies.map((c) => (
+            <CopyRow key={c.id} copy={c} />
+          ))}
+        </div>
+      )}
       <DateCheckDialog
         groups={datePrompt?.groups ?? null}
         onConfirm={(dates) => {
@@ -494,44 +522,6 @@ export function CloudImport({
           setDatePrompt(null)
         }}
       />
-    </div>
-  )
-}
-
-/** One copy's progress (one per date when dates come from the files). */
-function FetchProgress({ id, date }: { id: string; date: string }) {
-  const progress = useQuery({
-    queryKey: ["agent", "cloud", "fetch", id],
-    queryFn: () => agentApi.cloudFetchState(id),
-    refetchInterval: (q) =>
-      q.state.data && isFinished(q.state.data) ? false : 5000,
-  })
-  const finished = progress.data && isFinished(progress.data)
-  useEffect(() => {
-    if (!progress.data || !isFinished(progress.data)) return
-    if (isFailure(progress.data))
-      toast.error(
-        `The copy of ${date} did not finish; see the details under it.`,
-      )
-    else
-      toast.success(
-        `${date}: copied and uploaded. The run shows on the Process tab.`,
-      )
-  }, [progress.data, date])
-  if (!progress.data) return null
-  return (
-    <div
-      className="space-y-1 rounded bg-muted p-2 text-xs"
-      data-testid="cloud-progress"
-    >
-      <p className="flex items-center gap-2 font-medium">
-        {!finished && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-        {date}: {stateLabel(progress.data)}
-      </p>
-      {progress.data.line && <p>{progress.data.line}</p>}
-      {progress.data.error && (
-        <p className="text-destructive">{progress.data.error}</p>
-      )}
     </div>
   )
 }
@@ -598,31 +588,6 @@ async function filesToCopy(
     )
   }
   return out
-}
-
-function stateLabel(f: CloudFetch): string {
-  switch (f.state) {
-    case "copying":
-      return "Copying from the storage…"
-    case "uploading":
-      return "Uploading into the app…"
-    case "done":
-    case "COMPLETED":
-      return "Done: the run shows on the Process tab"
-    case "failed":
-    case "FAILED":
-    case "ENDED":
-      return "The copy did not finish"
-    case "WAITING":
-      return "Waiting for a free cluster job slot (starts by itself)…"
-    case "PENDING":
-    case "QUEUED":
-      return "Waiting for the cluster to start the copy job…"
-    case "RUNNING":
-      return "Copying and uploading on the cluster…"
-    default:
-      return f.state
-  }
 }
 
 function ConnectForm({

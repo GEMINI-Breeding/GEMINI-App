@@ -16,6 +16,25 @@ import type { PlotChoice } from "@/features/process/lib/plotSelection"
 import { PlotFramesPanel } from "./PlotFramesPanel"
 import { PlotImageGrid } from "./PlotImageGrid"
 
+/** The source and plots a plot images run was queued with (or the defaults). */
+export function queuedChoice(queued: Record<string, unknown> | undefined): {
+  source?: "ortho" | "frames"
+  plots: PlotChoice
+} {
+  const source =
+    queued?.source === "frames" || queued?.source === "ortho"
+      ? queued.source
+      : undefined
+  const p = queued?.plots as { mode?: unknown; text?: unknown } | undefined
+  const plots: PlotChoice =
+    p?.mode === "list" && typeof p.text === "string"
+      ? { mode: "list", text: p.text }
+      : p?.mode === "missing"
+        ? { mode: "missing" }
+        : { mode: "all" }
+  return { source, plots }
+}
+
 export function PlotImagesStepPanel({
   plotImageFiles,
   prefix,
@@ -26,6 +45,7 @@ export function PlotImagesStepPanel({
   running,
   onRunFrames,
   onRunOrtho,
+  queued,
 }: {
   plotImageFiles: FileMetadata[]
   prefix: string
@@ -41,9 +61,16 @@ export function PlotImagesStepPanel({
   onRunFrames: (plots: PlotChoice) => void
   /** Plot images from the orthomosaic, of the plots chosen. */
   onRunOrtho?: (plots: PlotChoice) => void
+  /** What the step was last queued with ({source, plots}): the card opens on it. */
+  queued?: Record<string, unknown>
 }) {
-  const [choice, setChoice] = useState<"all" | "missing" | "list">("all")
-  const [listText, setListText] = useState("")
+  const last = queuedChoice(queued)
+  const [choice, setChoice] = useState<"all" | "missing" | "list">(
+    last.plots.mode,
+  )
+  const [listText, setListText] = useState(
+    last.plots.mode === "list" ? last.plots.text : "",
+  )
   const plotChoice: PlotChoice =
     choice === "list" ? { mode: "list", text: listText } : { mode: choice }
   const choiceReady = choice !== "list" || listText.trim().length > 0
@@ -87,12 +114,13 @@ export function PlotImagesStepPanel({
     </div>
   )
   const [source, setSource] = useState<"ortho" | "frames">(
-    hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho",
+    last.source ??
+      (hasFrames && plotImageFiles.length === 0 ? "frames" : "ortho"),
   )
   if (!offerFrames)
     return (
       <div className="space-y-3" data-testid="plot-images-step">
-        {onRunOrtho && plotImageFiles.length > 0 && (
+        {onRunOrtho && (
           <div className="space-y-2">
             {plotsPicker}
             <Button
@@ -106,12 +134,18 @@ export function PlotImagesStepPanel({
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               )}
               {choice === "all"
-                ? "Cut the plot images again"
+                ? plotImageFiles.length
+                  ? "Cut the plot images again"
+                  : "Cut the plot images"
                 : "Cut these plots' images"}
             </Button>
           </div>
         )}
-        <PlotImageGrid files={plotImageFiles} prefix={prefix} />
+        <PlotImageGrid
+          files={plotImageFiles}
+          prefix={prefix}
+          emptyText="No plot images yet: “Cut the plot images” above makes them."
+        />
       </div>
     )
   return (
@@ -158,7 +192,11 @@ export function PlotImagesStepPanel({
               </Button>
             </div>
           )}
-          <PlotImageGrid files={plotImageFiles} prefix={prefix} />
+          <PlotImageGrid
+            files={plotImageFiles}
+            prefix={prefix}
+            emptyText="No plot images yet: “Cut the plot images” above makes them."
+          />
         </div>
       ) : (
         <div className="space-y-3">
@@ -174,7 +212,7 @@ export function PlotImagesStepPanel({
             capture time and cut the same way; a thermal camera also gives each
             plot's canopy temperature.
           </p>
-          {hasFrames && plotsPicker}
+          {plotsPicker}
           <div className="flex items-center gap-3">
             <Button
               size="sm"

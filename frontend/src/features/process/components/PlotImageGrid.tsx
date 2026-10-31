@@ -26,11 +26,14 @@ export function PlotImageGrid({
   files,
   prefix,
   download = true,
+  emptyText = "No plot images yet.",
 }: {
   files: FileMetadata[]
   prefix: string
   /** Its own "Download all" button; off where the page has its own downloads. */
   download?: boolean
+  /** What to say before there are any (how to make them, on that page). */
+  emptyText?: string
 }) {
   const pngFiles = useMemo(
     () => files.filter((f) => /\.(png|jpe?g)$/i.test(f.object_name ?? "")),
@@ -58,11 +61,7 @@ export function PlotImageGrid({
 
   const pages = Math.ceil(pngFiles.length / PER_PAGE)
   if (pngFiles.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        No plot images yet. Run the split job, then check back here.
-      </p>
-    )
+    return <p className="text-muted-foreground text-sm">{emptyText}</p>
   }
 
   return (

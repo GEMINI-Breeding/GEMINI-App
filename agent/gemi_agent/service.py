@@ -595,6 +595,22 @@ class Handler(BaseHTTPRequestHandler):
 
             cluster = active_cluster()
             where = "cluster" if cluster else "local"
+            # A cluster key with a passphrase, not unlocked yet: every ssh would fail with
+            # "Permission denied". Say so (the page offers the unlock) instead of trying.
+            if cluster:
+                from . import compute
+                from .hpc_tools import _conf
+
+                try:
+                    key = _conf(cluster).get("HPC_KEY")
+                except ValueError:
+                    key = None
+                if compute._key_locked(key):
+                    if route == ["cloud"] and method == "GET":
+                        return {"where": where, "rclone": False, "remotes": [], "cluster": cluster,
+                                "providers": cloud.PROVIDERS, "key_locked": True, "ssh_key": key}
+                    raise HttpError(400, f"The key {key} has a passphrase: unlock it (on the online "
+                                         "storage page or in Settings → Compute), then try again.")
             try:
                 if route == ["cloud"] and method == "GET":
                     return {**cloud.remotes(where, cluster), "cluster": cluster, "providers": cloud.PROVIDERS}

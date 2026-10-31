@@ -55,6 +55,20 @@ const SECTIONS: Record<string, Section> = {
       "Reference datasets can be associated with a workspace from the workspace detail page",
     ],
   },
+  plot_boundary_prep: {
+    title: "Plot Boundary Prep",
+    docPath: "/app_guide/aerial_pipeline/",
+    bullets: [
+      "Draw the outer field boundary with the rectangle or polygon tool (top left of the map); the grid settings under the map fill it with plots",
+      "Or import boundaries saved for another date of this field (Version menu → Import from…)",
+      "Click a plot to select it: Shift-click adds, Cmd/Ctrl-click toggles, Cmd/Ctrl-A selects every plot",
+      "Select an area: drag a box around plots to select them; it switches off afterwards so the next drag moves them",
+      "Drag a selected plot to move the whole selection, or use the arrow keys (Shift: ten steps)",
+      "Cmd/Ctrl-Z undoes, Cmd/Ctrl-Shift-Z redoes",
+      "Shift + drag (or the View buttons) turns the map; only the view turns, not the plots",
+      "Save with the quick save on the map, or Save & complete step in the Version menu; the active version is what plot images and traits use",
+    ],
+  },
   "/analyze": {
     title: "Analyze",
     docPath: "/app_guide/analyze/",
@@ -69,7 +83,10 @@ const SECTIONS: Record<string, Section> = {
   },
 }
 
-function getSectionForPath(pathname: string): Section {
+function getSectionForPath(pathname: string, step?: string): Section {
+  // A step's own tool page has its own help.
+  if (pathname.endsWith("/tool") && step && SECTIONS[step])
+    return SECTIONS[step]
   if (pathname.startsWith("/files")) return SECTIONS["/files"]
   if (pathname.startsWith("/process")) return SECTIONS["/process"]
   if (pathname.startsWith("/analyze")) return SECTIONS["/analyze"]
@@ -84,7 +101,10 @@ interface HelpSidebarProps {
 
 export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
   const location = useLocation()
-  const section = getSectionForPath(location.pathname)
+  const section = getSectionForPath(
+    location.pathname,
+    (location.search as { step?: string })?.step,
+  )
   const tourLabel = getTourSection(
     location.pathname,
     (location.search as any)?.step,
@@ -154,17 +174,19 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
               All Sections
             </p>
             <div className="space-y-1">
-              {Object.entries(SECTIONS).map(([, sec]) => (
-                <button
-                  key={sec.docPath}
-                  type="button"
-                  onClick={() => openUrl(`${DOCS_BASE}${sec.docPath}`)}
-                  className="flex items-center justify-between w-full px-2 py-1.5 rounded text-xs text-left hover:bg-muted transition-colors"
-                >
-                  <span>{sec.title}</span>
-                  <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                </button>
-              ))}
+              {Object.entries(SECTIONS)
+                .filter(([key]) => key.startsWith("/")) // not a tool page's own
+                .map(([, sec]) => (
+                  <button
+                    key={sec.docPath}
+                    type="button"
+                    onClick={() => openUrl(`${DOCS_BASE}${sec.docPath}`)}
+                    className="flex items-center justify-between w-full px-2 py-1.5 rounded text-xs text-left hover:bg-muted transition-colors"
+                  >
+                    <span>{sec.title}</span>
+                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                ))}
             </div>
           </div>
         </div>

@@ -38,6 +38,7 @@ vi.mock("@/client", () => ({
 const findRunByJobIdMock = vi.fn()
 vi.mock("@/features/process/lib/runStore", () => ({
   findRunByJobId: (jobId: string) => findRunByJobIdMock(jobId),
+  getState: () => ({ workspaces: [], pipelines: [], runs: [] }),
   useRunStoreReady: () => true,
 }))
 

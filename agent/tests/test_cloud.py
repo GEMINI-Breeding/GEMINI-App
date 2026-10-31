@@ -129,3 +129,25 @@ class FakeClient:
 have = U.already_uploaded(FakeClient(), "Raw/2023/E/K/P/2023-07-20/Drone/RGB/")
 assert have == {("2023-07-20-RGB.tif", 10), ("2023-07-20-DEM.tif", 5)}, have
 print("dedupe ok")
+
+
+def test_filter_rules_skip_names_in_the_app_then_keep_the_includes():
+    from gemi_agent import cloud
+
+    rules = cloud.filter_rules(["*.tif"], {"2023-07-27-RGB.tif", "odd [1].tif"}).splitlines()
+    assert rules == ["- 2023-07-27-RGB.tif", "- odd \\[1\\].tif", "+ *.tif", "- **"]
+    # No include patterns: everything else is copied.
+    assert cloud.filter_rules([], {"a.JPG"}).splitlines() == ["- a.JPG"]
+
+
+def test_in_app_names_looks_in_the_upload_scope(monkeypatch):
+    from gemi_agent import cloud, uploads
+
+    seen = {}
+    monkeypatch.setattr(uploads, "already_uploaded",
+                        lambda client, prefix: seen.setdefault("p", prefix) and {("a.tif", 5), ("b.tif", 7)})
+    names = cloud.in_app_names(None, {"experiment": "Interspecific Kearney", "site": "Kearney",
+                                      "population": "Interspecific", "date": "2023-08-03",
+                                      "platform": "Drone", "sensor": "RGB"})
+    assert names == {"a.tif", "b.tif"}
+    assert seen["p"] == "Raw/2023/Interspecific Kearney/Kearney/Interspecific/2023-08-03/Drone/RGB/"

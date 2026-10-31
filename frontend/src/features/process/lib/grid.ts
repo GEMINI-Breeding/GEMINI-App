@@ -74,10 +74,14 @@ function metersToDeg(
 function rotate(point: LngLat, origin: LngLat, angleRad: number): LngLat {
   const [px, py] = point
   const [ox, oy] = origin
-  const dx = px - ox
+  // In metres-like units: a degree of longitude is shorter than one of
+  // latitude away from the equator, so rotating raw degrees sheared the plots
+  // (a grid at 30° came out as parallelograms, their sides at about 36°).
+  const k = Math.cos((oy * Math.PI) / 180) || 1
+  const dx = (px - ox) * k
   const dy = py - oy
   return [
-    ox + dx * Math.cos(angleRad) - dy * Math.sin(angleRad),
+    ox + (dx * Math.cos(angleRad) - dy * Math.sin(angleRad)) / k,
     oy + dx * Math.sin(angleRad) + dy * Math.cos(angleRad),
   ]
 }

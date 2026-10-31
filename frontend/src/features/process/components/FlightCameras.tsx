@@ -90,72 +90,65 @@ export function FlightCameras({
   if (companions.length === 0) return null
   return (
     <div
-      className="space-y-2 rounded-md border p-3"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs"
       data-testid="flight-cameras"
     >
-      <p className="flex items-center gap-1.5 text-sm font-medium">
-        <Camera className="h-4 w-4" /> Cameras in this flight
-      </p>
-      <p className="text-xs text-muted-foreground">
-        Processed as one run. Their frames go into the plot images from the raw
-        frames (matched to these frames by capture time, cut per plot; a thermal
-        camera also gives canopy temperature). An orthomosaic of each is
-        optional.
-      </p>
-      <div className="space-y-1">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="w-28 font-medium">
-            {run.uploadScope?.sensor ?? "RGB"}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            this run — orthomosaic, boundaries and plot images below
-          </span>
-        </div>
-        {companions.map((c) => {
-          const ortho = c.steps?.orthomosaic?.status
-          const files = uploadedFiles(c)
-          const label = c.uploadScope?.batchLabel
-          return (
-            <div
-              key={c.id}
-              className="flex flex-wrap items-center gap-2 text-sm"
-              data-testid="flight-camera"
-            >
-              <span className="w-28 font-medium">{c.uploadScope?.sensor}</span>
-              <span className="text-xs text-muted-foreground">
+      <span
+        className="flex items-center gap-1.5 font-medium"
+        title="Processed as one run. Their frames go into the plot images from the raw frames (matched to these frames by capture time, cut per plot; a thermal camera also gives canopy temperature). An orthomosaic of each is optional."
+      >
+        <Camera className="h-3.5 w-3.5" /> Cameras
+      </span>
+      <span>
+        <span className="font-medium">{run.uploadScope?.sensor ?? "RGB"}</span>{" "}
+        <span className="text-muted-foreground">this run</span>
+      </span>
+      {companions.map((c) => {
+        const ortho = c.steps?.orthomosaic?.status
+        const files = uploadedFiles(c)
+        const label = c.uploadScope?.batchLabel
+        return (
+          <span
+            key={c.id}
+            className="flex flex-wrap items-center gap-2"
+            data-testid="flight-camera"
+          >
+            <span>
+              <span className="font-medium">{c.uploadScope?.sensor}</span>{" "}
+              <span className="text-muted-foreground">
                 {files != null ? `${files} frames` : "uploaded"}
-                {label ? ` · ${label}` : ""} · used in plot images (raw frames)
+                {label ? ` · ${label}` : ""} · in plot images
                 {ortho && ORTHO_STATUS[ortho]
                   ? ` · ${ORTHO_STATUS[ortho]}`
                   : ""}
               </span>
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              disabled={building === c.id || ortho === "running"}
+              onClick={() => onBuildOrtho(c)}
+            >
+              {(building === c.id || ortho === "running") && (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              )}
+              {ortho === "completed" ? "Rebuild" : "Build"}{" "}
+              {c.uploadScope?.sensor} orthomosaic
+            </Button>
+            {ortho === "completed" && (
               <Button
                 size="sm"
-                variant="outline"
-                className="ml-auto h-7"
-                disabled={building === c.id || ortho === "running"}
-                onClick={() => onBuildOrtho(c)}
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                onClick={() => open(c)}
               >
-                {(building === c.id || ortho === "running") && (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                )}
-                {ortho === "completed" ? "Rebuild" : "Build"}{" "}
-                {c.uploadScope?.sensor} orthomosaic
+                View
               </Button>
-              {ortho === "completed" && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7"
-                  onClick={() => open(c)}
-                >
-                  View
-                </Button>
-              )}
-            </div>
-          )
-        })}
-      </div>
+            )}
+          </span>
+        )
+      })}
     </div>
   )
 }

@@ -24,15 +24,28 @@ mkdir -p "$dest"
 filters=()
 IFS=',' read -r -a pats <<< "$patterns"
 for p in "${pats[@]}"; do [ -n "$p" ] && filters+=(--include "$p"); done
+# Files the app already has for this date, platform and sensor are not copied again.
+if [ "${#settings[@]}" -gt 0 ]; then
+  rules="$RUN/fetch-$SLURM_JOB_ID.filter"
+  if bash "$HPC/remote/skip-filter.sh" "$rules" "$patterns" "${settings[@]}"; then
+    filters=(--filter-from "$rules")
+  else
+    log "could not check what the app already has: copying everything (the upload still skips it)"
+  fi
+fi
 log "copy $src -> $dest${patterns:+ (only $patterns)}"
 # One-line stats every 10 s: "Transferred: 1.2 GiB / 6.3 GiB, 19%, 50 MiB/s, ETA 1m" (the app shows it).
 "$RCLONE" --config "$RCLONE_CONF" copy "$src" "$dest" --ignore-case "${filters[@]}" \
   --transfers 8 --checkers 16 --stats 10s --stats-one-line --stats-log-level NOTICE \
-  || { log "copy FAILED"; exit 1; }
+  || { log "copy FAILED"; rm -f "${rules:-}"; exit 1; }
+rm -f "${rules:-}"
 n=$(find "$dest" -type f | wc -l)
 log "copied: $n files, $(du -sh --apparent-size "$dest" 2>/dev/null | cut -f1)"
 
 [ "${#settings[@]}" -gt 0 ] || { log "done (no upload asked for): $dest"; exit 0; }
+if [ "$n" -eq 0 ] && [ "${#filters[@]}" -gt 0 ] && [ "${filters[0]}" = --filter-from ]; then
+  rm -rf "$dest"; log "nothing new: the app already has every file of this copy"; log "done"; exit 0
+fi
 args="$RUN/ingest-$(date +%s%N).args"
 printf '%s\n' "${settings[@]}" > "$args"; chmod 600 "$args"
 log "uploading into the session"

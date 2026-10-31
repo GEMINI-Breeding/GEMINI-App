@@ -12,9 +12,17 @@ import L, { type FeatureGroup } from "leaflet"
 import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 import { tilesDownMessage, watchTileLayer } from "@/lib/tileHealth"
+// View rotation (bearing) and its compass. Pinned to 0.2.8 (2023): newer
+// releases appeared in a burst after years without one.
+import "leaflet-rotate"
 import "@geoman-io/leaflet-geoman-free"
 import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css"
+import "./boundaryMap.css"
 import { cellTooltipHtml } from "@/features/process/lib/cellTooltip"
+
+// leaflet-rotate gives every Leaflet map in the app a compass by default;
+// only this editor asks for one (rotateControl in its options).
+L.Map.mergeOptions({ rotateControl: false })
 
 const DEFAULT_CENTER: L.LatLngTuple = [38.5, -121.7]
 const DEFAULT_ZOOM = 6
@@ -82,6 +90,9 @@ export type BoundaryMapProps = {
   /** Drag a box on the map to select the plots inside it (shift: add to the selection). */
   boxSelect?: boolean
   onBoxSelect?: (cellIds: string[], add: boolean) => void
+  /** View rotation, degrees clockwise (north up = 0); the compass resets it. */
+  bearing?: number
+  onBearingChange?: (deg: number) => void
 }
 
 export interface OrthoLayer {
@@ -137,6 +148,8 @@ export function BoundaryMap({
   hideBorders = false,
   boxSelect = false,
   onBoxSelect,
+  bearing,
+  onBearingChange,
 }: BoundaryMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -154,6 +167,12 @@ export function BoundaryMap({
   const onSelectionClearRef = useRef(onSelectionClear)
   const onBoxSelectRef = useRef(onBoxSelect)
   onBoxSelectRef.current = onBoxSelect
+  const boxSelectRef = useRef(boxSelect)
+  boxSelectRef.current = boxSelect
+  const bearingRef = useRef(bearing)
+  bearingRef.current = bearing
+  const onBearingChangeRef = useRef(onBearingChange)
+  onBearingChangeRef.current = onBearingChange
   const featuresRef = useRef(features)
   featuresRef.current = features
   const hiddenRef = useRef({ showPlots, hideBorders })
@@ -200,13 +219,30 @@ export function BoundaryMap({
     const map = L.map(mapEl.current, {
       center: center ?? DEFAULT_CENTER,
       zoom: zoom ?? DEFAULT_ZOOM,
+      // The view can be turned (Shift + drag, two fingers, or the bearing
+      // controls of the editor); the compass shows north and resets it.
+      rotate: true,
+      bearing: bearingRef.current ?? 0,
+      touchRotate: true,
+      shiftKeyRotate: true,
+      rotateControl: { closeOnZeroBearing: false, position: "topright" },
+    } as L.MapOptions)
+    map.on("rotate", () => {
+      const b =
+        (map as L.Map & { getBearing?: () => number }).getBearing?.() ?? 0
+      onBearingChangeRef.current?.(Math.round(b * 10) / 10)
     })
 
     // Custom pane for the ortho overlay. Default tilePane has z-index 200;
     // putting the ortho at 250 keeps it above any basemap regardless of
     // insertion order, so toggling Esri ↔ OSM via the layers control
     // doesn't push the ortho underneath the new basemap.
-    map.createPane("orthoPane")
+    // Inside the rotate plugin's pane, so the ortho turns with the view and
+    // its tiles land where they belong (a pane outside it is misplaced).
+    map.createPane(
+      "orthoPane",
+      (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+    )
     const orthoPaneEl = map.getPane("orthoPane")
     if (orthoPaneEl) orthoPaneEl.style.zIndex = "250"
 
@@ -366,6 +402,7 @@ export function BoundaryMap({
     }
 
     editable.on("pm:dragstart", (e) => {
+      lastDragEndRef.current = Date.now()
       const layer = (e as { layer: L.Layer }).layer as L.Path
       layer.setStyle?.({ color: "#facc15", weight: 3, fillOpacity: 0.5 })
       const draggedId = getCellId(layer as L.Layer)
@@ -390,6 +427,12 @@ export function BoundaryMap({
     })
 
     editable.on("pm:drag", (e) => {
+      // Geoman reports the end of a drag 10 ms after the mouseup, and the
+      // browser's click on the plot comes in between: a click that close to
+      // drag movement is part of the drag, not a selection. (Taken as one, it
+      // selected the plot under the cursor and redrew every plot where it was
+      // before the drag: "they jump back and one plot is selected".)
+      lastDragEndRef.current = Date.now()
       if (!dragGroup) return
       const layer = (e as { layer: L.Layer }).layer as L.Polygon
       const c = layer.getBounds().getCenter()
@@ -505,7 +548,12 @@ export function BoundaryMap({
     const made: { layer: L.TileLayer; pane: HTMLElement }[] = []
     orthoLayers.forEach((o, i) => {
       const name = `orthoPane${i}`
-      const pane = map.getPane(name) ?? map.createPane(name)
+      const pane =
+        map.getPane(name) ??
+        map.createPane(
+          name,
+          (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+        )
       pane.style.zIndex = String(250 + i)
       const layer = L.tileLayer(o.url, {
         opacity: orthoOpacity ?? 0.9,
@@ -703,6 +751,13 @@ export function BoundaryMap({
           })
         }
         layer.addLayer(l)
+        // Selected plots can be dragged at once (the whole selection moves
+        // with the one held, see pm:dragstart), without first choosing the
+        // drag tool; elsewhere a drag still pans the map.
+        if (isCellSelected && !hidden && !boxSelectRef.current)
+          (
+            l as L.Layer & { pm?: { enableLayerDrag?: () => void } }
+          ).pm?.enableLayerDrag?.()
       })
     }
     // Refit only on empty <-> non-empty transitions so undo back to an
@@ -735,42 +790,61 @@ export function BoundaryMap({
     showPlots,
     plotOpacity,
     hideBorders,
+    boxSelect,
   ])
 
-  // Box select: drag a rectangle on the map; the plots whose centre is inside
-  // it are selected (shift: added to the selection). The map does not pan
-  // meanwhile.
+  // The bearing set from outside (the editor's view controls).
+  useEffect(() => {
+    const map = mapRef.current as
+      | (L.Map & {
+          getBearing?: () => number
+          setBearing?: (deg: number) => void
+        })
+      | null
+    if (!map?.setBearing || bearing === undefined) return
+    if (Math.abs((map.getBearing?.() ?? 0) - bearing) > 0.05)
+      map.setBearing(bearing)
+  }, [bearing])
+
+  // Box select: drag a box on the screen; the plots whose centre falls inside
+  // it are selected (shift: added to the selection). In screen space, so a
+  // rotated view selects what the box covers. The map does not pan meanwhile.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !boxSelect) return
     map.dragging.disable()
     const container = map.getContainer()
     container.style.cursor = "crosshair"
-    let start: L.LatLng | null = null
-    let rect: L.Rectangle | null = null
+    let start: L.Point | null = null
     let add = false
+    const box = document.createElement("div")
+    box.style.cssText =
+      "position:absolute;z-index:1000;pointer-events:none;border:1px dashed #facc15;background:rgba(250,204,21,0.1);display:none"
+    container.appendChild(box)
+    const draw = (a: L.Point, b: L.Point) => {
+      box.style.display = "block"
+      box.style.left = `${Math.min(a.x, b.x)}px`
+      box.style.top = `${Math.min(a.y, b.y)}px`
+      box.style.width = `${Math.abs(a.x - b.x)}px`
+      box.style.height = `${Math.abs(a.y - b.y)}px`
+    }
     const down = (e: L.LeafletMouseEvent) => {
       const t = e.originalEvent?.target as Element | null
       if (t?.closest?.(".leaflet-control")) return
-      start = e.latlng
+      start = map.mouseEventToContainerPoint(e.originalEvent)
       add = Boolean(e.originalEvent?.shiftKey)
-      rect = L.rectangle(L.latLngBounds(start, start), {
-        color: "#facc15",
-        weight: 1,
-        dashArray: "4 4",
-        fillOpacity: 0.1,
-        interactive: false,
-      }).addTo(map)
+      draw(start, start)
     }
     const move = (e: L.LeafletMouseEvent) => {
-      if (start && rect) rect.setBounds(L.latLngBounds(start, e.latlng))
+      if (start) draw(start, map.mouseEventToContainerPoint(e.originalEvent))
     }
     const up = (e: L.LeafletMouseEvent) => {
-      if (!start || !rect) return
-      const box = L.latLngBounds(start, e.latlng)
-      map.removeLayer(rect)
-      rect = null
+      if (!start) return
+      const end = map.mouseEventToContainerPoint(e.originalEvent)
+      const [x0, x1] = [Math.min(start.x, end.x), Math.max(start.x, end.x)]
+      const [y0, y1] = [Math.min(start.y, end.y), Math.max(start.y, end.y)]
       start = null
+      box.style.display = "none"
       lastDragEndRef.current = Date.now() // not a background click: keep the selection
       const { showPlots: shown, hideBorders: noBorders } = hiddenRef.current
       const ids: string[] = []
@@ -787,7 +861,9 @@ export function BoundaryMap({
           x += ring[i][0]
           y += ring[i][1]
         }
-        if (box.contains([y / n, x / n])) ids.push(p.cellId as string)
+        const pt = map.latLngToContainerPoint([y / n, x / n])
+        if (pt.x >= x0 && pt.x <= x1 && pt.y >= y0 && pt.y <= y1)
+          ids.push(p.cellId as string)
       }
       onBoxSelectRef.current?.(ids, add)
     }
@@ -798,7 +874,7 @@ export function BoundaryMap({
       map.off("mousedown", down)
       map.off("mousemove", move)
       map.off("mouseup", up)
-      if (rect) map.removeLayer(rect)
+      box.remove()
       map.dragging.enable()
       container.style.cursor = ""
     }
@@ -813,7 +889,7 @@ export function BoundaryMap({
         // panes participate in the root stacking context and render *above*
         // body-portaled dialogs/overlays (z-50), which makes the
         // FieldDesignUploadDialog appear cut off or hidden behind tiles.
-        className={className ?? "h-[500px] w-full rounded-md border isolate"}
+        className={`gemi-map ${className ?? "h-[500px] w-full rounded-md border isolate"}`}
       />
       {tilesDown && (
         <div

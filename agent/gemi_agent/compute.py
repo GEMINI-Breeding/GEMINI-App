@@ -311,7 +311,10 @@ def watch(period_s: int = 45) -> None:
         time.sleep(period_s)
         try:
             p = prefs()
-            if not active_cluster() or not _port_open(API_PORT) or _watch_client is None:
+            # The API as the app reaches it: under `gemi-hpc app` that is the app's own
+            # tunnel (GEMI_API), not API_PORT, which was never open there, so no worker
+            # was ever started for a waiting job ("a worker is being started" forever).
+            if not active_cluster() or _watch_client is None or not _api_answers():
                 continue
             use_client(_watch_client)
             ov = overview()

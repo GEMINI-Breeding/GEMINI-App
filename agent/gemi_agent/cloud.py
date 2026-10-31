@@ -326,6 +326,42 @@ def includes(data_type: str = "", name_ends: str = "", name_has: str = "") -> li
     return pats
 
 
+def in_app_names(client, settings: dict) -> set[str]:
+    """Names of the files the app already holds for the upload's date, platform and sensor
+    (any earlier upload of that scope). Empty when it cannot be listed: then all is copied,
+    and the upload still skips what it finds by name and size."""
+    from .uploads import already_uploaded
+
+    s = settings
+    prefix = (f"Raw/{s['date'][:4]}/{s['experiment']}/{s['site']}/{s['population']}/"
+              f"{s['date']}/{s['platform']}/{s['sensor']}/")
+    return {n for n, _ in already_uploaded(client, prefix)}
+
+
+def _glob_literal(name: str) -> str:
+    """A file name as an rclone pattern that matches only that name."""
+    return re.sub(r"([*?\[\]{}\\])", r"\\\1", name)
+
+
+def filter_rules(pats: list[str], skip: set[str]) -> str:
+    """rclone --filter-from rules: leave out the names in ``skip`` (at any depth), then keep
+    what the include patterns keep (everything when there are none)."""
+    lines = [f"- {_glob_literal(n)}" for n in sorted(skip) if n.strip() == n and n]
+    lines += [f"+ {p}" for p in pats]
+    if pats:
+        lines.append("- **")
+    return "\n".join(lines) + "\n"
+
+
+def write_skip_filter(out: str, pats: list[str], settings: dict, client=None) -> int:
+    """Write the rules that skip files already in the app; the number of names skipped."""
+    from .client import Client
+
+    skip = in_app_names(client or Client(), settings)
+    Path(out).write_text(filter_rules(pats, skip))
+    return len(skip)
+
+
 def fetch(name: str, path: str, *, where: str = "local", cluster: Optional[str] = None,
           settings: Optional[dict] = None, keep: bool = False, token: Optional[str] = None,
           api: Optional[str] = None) -> dict:
@@ -414,8 +450,20 @@ def run_fetch(fid: str) -> int:
     state = _read(fid)
     dest = Path(state["dest"])
     dest.mkdir(parents=True, exist_ok=True)
+    filters = [a for p in state["include"] for a in ("--include", p)]
+    skipped = 0
+    if state["settings"]:
+        # Files the app already has for this date, platform and sensor are not copied at all.
+        rules = FETCHES / f"{fid}.filter"
+        try:
+            skipped = write_skip_filter(str(rules), state["include"], state["settings"], Client())
+            filters = ["--filter-from", str(rules)]
+        except Exception as e:      # copy all; the upload still skips what is in the app
+            state["note"] = f"could not check what is already in the app ({e}); copying everything"
+        state["skipped_in_app"] = skipped
+        _save(state)
     cmd = [str(rclone_path()), "--config", str(CONF), "copy", state["source"], str(dest), "--ignore-case",
-           *[a for p in state["include"] for a in ("--include", p)],
+           *filters,
            "--transfers", "4", "--stats", "3s", "--stats-one-line", "--stats-log-level", "NOTICE"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     last_err = ""
@@ -440,6 +488,12 @@ def run_fetch(fid: str) -> int:
     kind = uploads.DATA_TYPES[s["data_type"]]
     ends = [e.lower() for e in s.get("name_ends", "").split(",") if e]
     files = [p for p in files if p.suffix.lower() in kind["ext"] and (not ends or p.name.lower().endswith(tuple(ends)))]
+    if not files and skipped:
+        shutil.rmtree(dest, ignore_errors=True)
+        state.update(state="done", line=f"nothing new: the app already has these files ({skipped} for "
+                                        f"{s['date']} {s['platform']}/{s['sensor']})")
+        _save(state)
+        return 0
     if not files:
         state.update(state="failed", error=f"no {kind['label']} files in the copy (kept at {dest})")
         _save(state)

@@ -43,13 +43,7 @@ import {
 import { PanelBoundary } from "@/components/Common/PanelBoundary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -69,6 +63,10 @@ import {
 } from "@/components/ui/select"
 import { useProcess } from "@/contexts/ProcessContext"
 import { RunAgentCard } from "@/features/agent/components/RunAgentCard"
+import {
+  stoppedWorkerFor,
+  WorkerStartButton,
+} from "@/features/agent/components/WorkerStartPrompt"
 import { agentApi } from "@/features/agent/lib/agentApi"
 import { readJson } from "@/features/files/lib/download"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
@@ -82,6 +80,7 @@ import { FlightCameras } from "@/features/process/components/FlightCameras"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImagesStepPanel } from "@/features/process/components/PlotImagesStepPanel"
+import { StepNavigator } from "@/features/process/components/StepNavigator"
 import { StitchResultsPanel } from "@/features/process/components/StitchResultsPanel"
 import { ThermalGpsBlockedDialog } from "@/features/process/components/ThermalGpsBlockedDialog"
 import {
@@ -305,7 +304,7 @@ const AERIAL_STEPS: StepDef[] = [
     key: "split_orthomosaic",
     label: "Split Into Plot Images",
     description:
-      "Cut the orthomosaic into one PNG per plot using the active boundaries. Plot images feed the plot viewer, per-plot inference and crop downloads.",
+      "Cut the orthomosaic into one PNG per plot using the active boundaries. Plot images feed the plot viewer, per-plot inference and crop downloads. Not needed for Initial Trait Extraction: go straight to it with the arrow on the right, and make plot images later if you run inference.",
     kind: "compute",
   },
   {
@@ -431,6 +430,9 @@ function ProgressLog({ events }: { events: RunProgressEvent[] }) {
 
 // ── StepRow ─────────────────────────────────────────────────────────────────
 
+/** Steps whose card has its own start buttons (no step-wide "Run Step"). */
+const OWN_RUN_BUTTONS = new Set(["split_orthomosaic"])
+
 /** The job each step submits (to find the worker that runs it). */
 const STEP_JOB_TYPE: Record<string, string> = {
   orthomosaic: "RUN_ODM",
@@ -502,6 +504,8 @@ interface StepRowProps {
   isStarting?: boolean
   /** Set when the step's job is queued, not running: where it stands. */
   queuedNote?: string | null
+  /** Under the queued note: start the worker it waits for. */
+  queuedAction?: React.ReactNode
   warning?: string
   extraContent?: React.ReactNode
   /** Step-specific summary chip rendered alongside the kind/status badges. */
@@ -519,6 +523,7 @@ function StepRow(props: StepRowProps) {
     isExecuting,
     isStarting = false,
     queuedNote = null,
+    queuedAction = null,
     errorMessage,
     onRunStep,
     onOpenTool,
@@ -665,34 +670,38 @@ function StepRow(props: StepRowProps) {
                     Skip
                   </Button>
                 )}
-              <Button
-                variant={status === "completed" ? "outline" : "default"}
-                size="sm"
-                disabled={
-                  status === "locked" ||
-                  status === "unavailable" ||
-                  isActive ||
-                  isStarting ||
-                  (isExecuting && !isActive)
-                }
-                title={
-                  status === "unavailable"
-                    ? "This backend cannot perform this step yet."
-                    : warning
-                }
-                onClick={() => {
-                  if (isInteractive) onOpenTool()
-                  else if (canRun) onRunStep()
-                }}
-              >
-                {(isActive || isStarting) && (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                )}
-                {warning && !isActive && (
-                  <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
-                )}
-                {actionLabel}
-              </Button>
+              {/* Plot images start from their card (each source has its own
+                  button with its plots choice), not from a step-wide one. */}
+              {!OWN_RUN_BUTTONS.has(step.key) && (
+                <Button
+                  variant={status === "completed" ? "outline" : "default"}
+                  size="sm"
+                  disabled={
+                    status === "locked" ||
+                    status === "unavailable" ||
+                    isActive ||
+                    isStarting ||
+                    (isExecuting && !isActive)
+                  }
+                  title={
+                    status === "unavailable"
+                      ? "This backend cannot perform this step yet."
+                      : warning
+                  }
+                  onClick={() => {
+                    if (isInteractive) onOpenTool()
+                    else if (canRun) onRunStep()
+                  }}
+                >
+                  {(isActive || isStarting) && (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  )}
+                  {warning && !isActive && (
+                    <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  {actionLabel}
+                </Button>
+              )}
               {status === "completed" && (
                 <Button
                   variant="ghost"
@@ -740,6 +749,7 @@ function StepRow(props: StepRowProps) {
               data-testid={`step-queued-${step.key}`}
             >
               {queuedNote}
+              {queuedAction}
             </p>
           )}
 
@@ -843,28 +853,29 @@ function RunScopeSummary({
     ["Year", scope.year],
   ]
   return (
-    <Card data-testid="run-data">
-      <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-1 py-3 text-xs">
-        {fields.map(([label, value]) => (
-          <span key={label}>
-            <span className="text-muted-foreground">{label} </span>
-            <span
-              className="font-medium"
-              data-testid={`scope-${label.toLowerCase()}`}
-            >
-              {value || "—"}
-            </span>
+    <div
+      data-testid="run-data"
+      className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs"
+    >
+      {fields.map(([label, value]) => (
+        <span key={label}>
+          <span className="text-muted-foreground">{label} </span>
+          <span
+            className="font-medium"
+            data-testid={`scope-${label.toLowerCase()}`}
+          >
+            {value || "—"}
           </span>
-        ))}
-        <span
-          className="text-muted-foreground ml-auto flex items-center gap-1.5"
-          title={`Raw images under ${rawScopePrefix(scope)}. To process a different flight, create a new run from the workspace page.`}
-        >
-          <ImageIcon className="h-3.5 w-3.5" />
-          {images}
         </span>
-      </CardContent>
-    </Card>
+      ))}
+      <span
+        className="text-muted-foreground ml-auto flex items-center gap-1.5"
+        title={`Raw images under ${rawScopePrefix(scope)}. To process a different flight, create a new run from the workspace page.`}
+      >
+        <ImageIcon className="h-3.5 w-3.5" />
+        {images}
+      </span>
+    </div>
   )
 }
 
@@ -1729,6 +1740,24 @@ export function RunDetail() {
     /Orthomosaic-DEM\/.*\.tiff?$/i.test(f.object_name ?? ""),
   )
   const nextKey = getNextStep(steps, stepsState)
+  // The step on the card: the one picked, else the one to do next.
+  const [viewKey, setViewKey] = useState<string | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new run starts at its next step
+  useEffect(() => setViewKey(null), [runId])
+  const shownKey =
+    (viewKey && steps.some((s) => s.key === viewKey) ? viewKey : null) ??
+    nextKey ??
+    steps.at(-1)?.key ??
+    ""
+  // The tour shows each step's card in turn.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const key = (e as CustomEvent<string>).detail
+      if (steps.some((s) => s.key === key)) setViewKey(key)
+    }
+    window.addEventListener("gemini:tour-focus", onFocus)
+    return () => window.removeEventListener("gemini:tour-focus", onFocus)
+  }, [steps])
   // Where a queued job stands: which worker would take it and whether this
   // app can reach the cluster at all. A job that will not start for a while
   // must not look like one that is running.
@@ -1761,7 +1790,16 @@ export function RunDetail() {
       return `Queued: a ${part.label} worker is waiting for the cluster to start it${part.reason ? ` (Slurm: ${part.reason})` : ""}.`
     return c.auto_start
       ? `Queued: no ${part.label} worker is running; one is being started on the cluster.`
-      : `Queued: no ${part.label} worker is running. Start one in Settings → Compute.`
+      : `Queued: no ${part.label} worker is running, so it won't start until one is.`
+  }
+  const queuedAction = (stepKey: string) => {
+    const last = run?.steps[stepKey]?.jobIds?.at(-1)
+    const type = STEP_JOB_TYPE[stepKey]
+    if (!last || !type || !queuedJobIds.has(last)) return null
+    const part = stoppedWorkerFor(computeQuery.data, type)
+    return part ? (
+      <WorkerStartButton part={part} compute={computeQuery.data} />
+    ) : null
   }
 
   const isAnyExecuting = Object.values(stepsState).some(
@@ -1899,6 +1937,14 @@ export function RunDetail() {
             chosen = pick.boundaries
             splitSomeRef.current = pick.some
           }
+          if (stepKey === "split_orthomosaic")
+            // What is queued, shown again on the card after leaving the page.
+            setStepState(run.id, "split_orthomosaic", {
+              settings: {
+                source: opts.plotSource ?? "ortho",
+                plots: opts.plotChoice ?? { mode: "all" },
+              },
+            })
           splitBoundariesRef.current = chosen
           boundaryVersionRef.current = activeVersion
         } catch (err) {
@@ -2487,8 +2533,8 @@ export function RunDetail() {
 
   return (
     <div className="bg-background">
-      <div className="mx-auto max-w-5xl p-8">
-        <div className="mb-6 flex items-center gap-4">
+      <div className="mx-auto max-w-5xl px-8 pt-4 pb-8">
+        <div className="mb-3 flex items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
@@ -2500,11 +2546,11 @@ export function RunDetail() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="flex items-center gap-2 text-2xl font-semibold">
+            <h1 className="flex items-center gap-2 text-xl font-semibold">
               {run.name ?? `Run ${run.id.slice(0, 8)}`}
               <AgentRunMark run={run} className="h-5 w-5" />
             </h1>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-xs">
               {run.uploadScope?.location
                 ? `${run.uploadScope.location} · ${run.uploadScope.population ?? ""} · `
                 : ""}
@@ -2543,7 +2589,7 @@ export function RunDetail() {
             line says what the run is on and how many images it found. */}
         {(pipeline?.type === "aerial" || pipeline?.type === "ground") &&
           scope && (
-            <div className="mb-6 space-y-4" data-onboarding="run-scope">
+            <div className="mb-3 space-y-2" data-onboarding="run-scope">
               <RunScopeSummary
                 scope={scope}
                 treatments={run.uploadScope?.treatments}
@@ -2557,15 +2603,10 @@ export function RunDetail() {
             </div>
           )}
 
-        <Card data-onboarding="run-steps">
-          <CardHeader>
-            <CardTitle className="text-base">Processing Steps</CardTitle>
-            <CardDescription>
-              {pipeline?.type === "aerial"
-                ? "Drone imagery → orthomosaic → plot boundaries → traits."
-                : "Ground rover data → stitching → plot boundaries → inference."}
-            </CardDescription>
-            {fromUploadedOrtho && (
+        <Card data-onboarding="run-steps" className="gap-3 py-4">
+          <h2 className="sr-only">Processing steps</h2>
+          {fromUploadedOrtho && (
+            <CardHeader className="px-4">
               <div
                 className="border-primary/40 bg-primary/5 mt-2 rounded-md border px-3 py-2 text-sm"
                 data-testid="run-from-uploaded-ortho"
@@ -2586,11 +2627,11 @@ export function RunDetail() {
                   </>
                 ) : null}
               </div>
-            )}
-          </CardHeader>
-          <CardContent>
+            </CardHeader>
+          )}
+          <CardContent className="px-4">
             {pipeline?.type !== "ground" && (
-              <div className="mb-4" data-onboarding="run-cameras">
+              <div className="mb-3" data-onboarding="run-cameras">
                 <FlightCameras
                   run={run}
                   building={buildingCompanion}
@@ -2598,10 +2639,15 @@ export function RunDetail() {
                 />
               </div>
             )}
-            <div className="space-y-0">
-              {steps.map((step, idx) => {
+            <StepNavigator
+              steps={steps}
+              statusOf={(k) => getStepStatus(k, stepsState, steps)}
+              shownKey={shownKey}
+              nextKey={nextKey}
+              onShow={setViewKey}
+            >
+              {steps.map((step) => {
                 const status = getStepStatus(step.key, stepsState, steps)
-                const isLast = idx === steps.length - 1
                 const headerBadge = (() => {
                   if (step.key !== "image_review") return null
                   const outs = run?.steps.image_review?.outputs as
@@ -2623,145 +2669,152 @@ export function RunDetail() {
                   )
                 })()
                 return (
-                  <StepRow
-                    key={step.key}
-                    step={step}
-                    status={status}
-                    isNext={step.key === nextKey}
-                    isLast={isLast}
-                    events={events}
-                    lastProgress={lastProgress}
-                    isExecuting={isAnyExecuting}
-                    isStarting={starting === step.key}
-                    queuedNote={
-                      status === "running" ? queuedNote(step.key) : null
-                    }
-                    errorMessage={run?.steps[step.key]?.error}
-                    warning={capabilityWarningForStep(step.key, capabilities)}
-                    onRunStep={() =>
-                      step.key === "orthomosaic" && status === "completed"
-                        ? setOrthoRerunOpen(true)
-                        : handleRunStep(step.key)
-                    }
-                    onOpenTool={() => handleOpenTool(step.key)}
-                    onStopStep={() => handleStopStep(step.key)}
-                    onSkipStep={
-                      step.kind === "optional"
-                        ? () => handleSkipStep(step.key)
-                        : undefined
-                    }
-                    headerBadge={headerBadge}
-                    extraContent={boundPanel(
-                      `the ${step.label} results`,
-                      `${run?.id}:${step.key}`,
-                      step.key === "orthomosaic" ? (
-                        status === "completed" ? (
-                          <OrthoVersionsPanel
-                            run={run}
-                            scope={scope}
-                            files={orthoFiles}
-                            onOpenImport={() => setImportDialogOpen(true)}
-                          />
-                        ) : (
-                          <div className="space-y-3">
-                            <DatasetMultiSelect
-                              available={availableShortIds}
-                              labels={batchLabels}
-                              selected={run.uploadScope?.datasetShortIds ?? []}
-                              onChange={(next) =>
-                                run.uploadScope &&
-                                updateRun(run.id, {
-                                  uploadScope: {
-                                    ...run.uploadScope,
-                                    datasetShortIds: next,
-                                  },
-                                })
-                              }
-                            />
-                            <OrthomosaicOptions
-                              params={orthoParams}
-                              onChange={setOrthoParams}
+                  <div key={step.key} hidden={step.key !== shownKey}>
+                    <StepRow
+                      step={step}
+                      status={status}
+                      isNext={step.key === nextKey}
+                      isLast
+                      events={events}
+                      lastProgress={lastProgress}
+                      isExecuting={isAnyExecuting}
+                      isStarting={starting === step.key}
+                      queuedNote={
+                        status === "running" ? queuedNote(step.key) : null
+                      }
+                      queuedAction={
+                        status === "running" ? queuedAction(step.key) : null
+                      }
+                      errorMessage={run?.steps[step.key]?.error}
+                      warning={capabilityWarningForStep(step.key, capabilities)}
+                      onRunStep={() =>
+                        step.key === "orthomosaic" && status === "completed"
+                          ? setOrthoRerunOpen(true)
+                          : handleRunStep(step.key)
+                      }
+                      onOpenTool={() => handleOpenTool(step.key)}
+                      onStopStep={() => handleStopStep(step.key)}
+                      onSkipStep={
+                        step.kind === "optional"
+                          ? () => handleSkipStep(step.key)
+                          : undefined
+                      }
+                      headerBadge={headerBadge}
+                      extraContent={boundPanel(
+                        `the ${step.label} results`,
+                        `${run?.id}:${step.key}`,
+                        step.key === "orthomosaic" ? (
+                          status === "completed" ? (
+                            <OrthoVersionsPanel
+                              run={run}
+                              scope={scope}
+                              files={orthoFiles}
                               onOpenImport={() => setImportDialogOpen(true)}
-                              hasUploadedOrthos={(
-                                uploadedOrthosQuery.data ?? []
-                              ).some((f) =>
-                                /\.tiff?$/i.test(f.object_name ?? ""),
-                              )}
                             />
-                          </div>
-                        )
-                      ) : step.key === "split_orthomosaic" ? (
-                        <PlotImagesStepPanel
-                          plotImageFiles={plotImageFiles}
-                          prefix={scope ? processedPrefix(scope) : ""}
-                          framesPrefix={
-                            scope
-                              ? plotFramesPrefix(
-                                  scope,
-                                  run.uploadScope?.batchLabel,
-                                )
-                              : ""
-                          }
-                          hasFrames={hasPlotFrames}
-                          hasCameraPositions={orthoHasCameras}
-                          offerFrames={rawFramesPossible}
-                          running={
-                            starting === "split_orthomosaic" ||
-                            status === "running"
-                          }
-                          onRunFrames={(plotChoice) =>
-                            void handleRunStep("split_orthomosaic", {
-                              plotSource: "frames",
-                              plotChoice,
-                            })
-                          }
-                          onRunOrtho={(plotChoice) =>
-                            void handleRunStep("split_orthomosaic", {
-                              plotSource: "ortho",
-                              plotChoice,
-                            })
-                          }
-                        />
-                      ) : step.key === "trait_extraction" ? (
-                        <TraitRecordsPanel run={run} />
-                      ) : step.key === "data_sync" ? (
-                        <DataSyncPanel
-                          jobId={run.steps.data_sync?.jobIds?.at(-1)}
-                          status={status}
-                        />
-                      ) : step.key === "associate_boundaries" ? (
-                        <AssociationPanel
-                          files={processedFilesQuery.data ?? []}
-                          scope={scope}
-                        />
-                      ) : step.key === "stitching" ? (
-                        <StitchResultsPanel
-                          files={processedFilesQuery.data ?? []}
-                          scope={scope}
-                          restitching={
-                            starting === "stitching" ||
-                            getStepStatus("stitching", stepsState, steps) ===
-                              "running"
-                          }
-                          onRestitch={(plotIds, settings) =>
-                            void handleRunStep("stitching", {
-                              plotIds,
-                              settings,
-                            })
-                          }
-                        />
-                      ) : step.wiredIn && !isLive(step.wiredIn) ? (
-                        <p className="text-muted-foreground rounded border bg-muted/30 p-2 text-xs">
-                          This step's panels and dialogs are restored in{" "}
-                          <strong>{step.wiredIn}</strong>. The step row is shown
-                          here so the wizard order is visible.
-                        </p>
-                      ) : null,
-                    )}
-                  />
+                          ) : (
+                            <div className="space-y-3">
+                              <DatasetMultiSelect
+                                available={availableShortIds}
+                                labels={batchLabels}
+                                selected={
+                                  run.uploadScope?.datasetShortIds ?? []
+                                }
+                                onChange={(next) =>
+                                  run.uploadScope &&
+                                  updateRun(run.id, {
+                                    uploadScope: {
+                                      ...run.uploadScope,
+                                      datasetShortIds: next,
+                                    },
+                                  })
+                                }
+                              />
+                              <OrthomosaicOptions
+                                params={orthoParams}
+                                onChange={setOrthoParams}
+                                onOpenImport={() => setImportDialogOpen(true)}
+                                hasUploadedOrthos={(
+                                  uploadedOrthosQuery.data ?? []
+                                ).some((f) =>
+                                  /\.tiff?$/i.test(f.object_name ?? ""),
+                                )}
+                              />
+                            </div>
+                          )
+                        ) : step.key === "split_orthomosaic" ? (
+                          <PlotImagesStepPanel
+                            plotImageFiles={plotImageFiles}
+                            prefix={scope ? processedPrefix(scope) : ""}
+                            framesPrefix={
+                              scope
+                                ? plotFramesPrefix(
+                                    scope,
+                                    run.uploadScope?.batchLabel,
+                                  )
+                                : ""
+                            }
+                            hasFrames={hasPlotFrames}
+                            queued={run.steps.split_orthomosaic?.settings}
+                            hasCameraPositions={orthoHasCameras}
+                            offerFrames={rawFramesPossible}
+                            running={
+                              starting === "split_orthomosaic" ||
+                              status === "running"
+                            }
+                            onRunFrames={(plotChoice) =>
+                              void handleRunStep("split_orthomosaic", {
+                                plotSource: "frames",
+                                plotChoice,
+                              })
+                            }
+                            onRunOrtho={(plotChoice) =>
+                              void handleRunStep("split_orthomosaic", {
+                                plotSource: "ortho",
+                                plotChoice,
+                              })
+                            }
+                          />
+                        ) : step.key === "trait_extraction" ? (
+                          <TraitRecordsPanel run={run} />
+                        ) : step.key === "data_sync" ? (
+                          <DataSyncPanel
+                            jobId={run.steps.data_sync?.jobIds?.at(-1)}
+                            status={status}
+                          />
+                        ) : step.key === "associate_boundaries" ? (
+                          <AssociationPanel
+                            files={processedFilesQuery.data ?? []}
+                            scope={scope}
+                          />
+                        ) : step.key === "stitching" ? (
+                          <StitchResultsPanel
+                            files={processedFilesQuery.data ?? []}
+                            scope={scope}
+                            restitching={
+                              starting === "stitching" ||
+                              getStepStatus("stitching", stepsState, steps) ===
+                                "running"
+                            }
+                            onRestitch={(plotIds, settings) =>
+                              void handleRunStep("stitching", {
+                                plotIds,
+                                settings,
+                              })
+                            }
+                          />
+                        ) : step.wiredIn && !isLive(step.wiredIn) ? (
+                          <p className="text-muted-foreground rounded border bg-muted/30 p-2 text-xs">
+                            This step's panels and dialogs are restored in{" "}
+                            <strong>{step.wiredIn}</strong>. The step row is
+                            shown here so the wizard order is visible.
+                          </p>
+                        ) : null,
+                      )}
+                    />
+                  </div>
                 )
               })}
-            </div>
+            </StepNavigator>
           </CardContent>
         </Card>
       </div>

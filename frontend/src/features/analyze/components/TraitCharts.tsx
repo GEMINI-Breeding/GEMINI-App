@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -31,10 +31,12 @@ import {
   fetchHeritability,
   fetchSpatial,
 } from "../lib/multivariate"
+import { recordDate } from "../lib/seasonTraits"
 import { fetchTraitRecords } from "../lib/traitRecords"
 import { AnovaTable } from "./AnovaTable"
 import { GgeBiplot } from "./GgeBiplot"
 import { HeritabilityPanel } from "./HeritabilityPanel"
+import { SeasonDateTrend, SeasonTable } from "./SeasonViews"
 import { SpatialHeatmap } from "./SpatialHeatmap"
 
 const COLORS = [
@@ -67,10 +69,21 @@ interface TraitChartsProps {
   traitId: string
   traitName: string
   traitUnits?: string
+  /** Opened from a link (a run's trait results): the chart to show first. */
+  initialChart?: ChartType
+  /** …and the scope to filter to (each a single value). */
+  initialFilters?: {
+    experiment?: string
+    season?: string
+    site?: string
+    population?: string
+  }
 }
 
-type ChartType =
+export type ChartType =
   | "histogram"
+  | "date-trend"
+  | "season-table"
   | "forest"
   | "season-trend"
   | "site-trend"
@@ -112,6 +125,15 @@ function pickGenotype(record: TraitRecordOutput): string | null {
     }
   }
   return null
+}
+
+/** The crop / population a record is for: the record's own column (trait
+ *  extraction sets it), else what an import put in record_info. */
+function recordPopulation(r: TraitRecordOutput): string {
+  const own = (r as { population_name?: unknown }).population_name
+  if (typeof own === "string" && own.trim()) return own.trim()
+  const info = r.record_info as Record<string, unknown> | undefined
+  return info?.population ? String(info.population).trim() : ""
 }
 
 function extractGenotypes(records: TraitRecordOutput[]): string[] {
@@ -257,17 +279,26 @@ export function TraitCharts({
   traitId,
   traitName,
   traitUnits,
+  initialChart,
+  initialFilters,
 }: TraitChartsProps) {
-  const [chartType, setChartType] = useState<ChartType>("histogram")
-  const [groupBy, setGroupBy] = useState<GroupBy>("none")
-  const [filterExperiment, setFilterExperiment] = useState<Set<string>>(
-    new Set(),
+  const [chartType, setChartType] = useState<ChartType>(
+    initialChart ?? "histogram",
   )
-  const [filterSeason, setFilterSeason] = useState<Set<string>>(new Set())
-  const [filterSite, setFilterSite] = useState<Set<string>>(new Set())
+  const [groupBy, setGroupBy] = useState<GroupBy>("none")
+  const one = (v?: string) => new Set(v ? [v] : [])
+  const [filterExperiment, setFilterExperiment] = useState<Set<string>>(() =>
+    one(initialFilters?.experiment),
+  )
+  const [filterSeason, setFilterSeason] = useState<Set<string>>(() =>
+    one(initialFilters?.season),
+  )
+  const [filterSite, setFilterSite] = useState<Set<string>>(() =>
+    one(initialFilters?.site),
+  )
   const [filterDataset, setFilterDataset] = useState<Set<string>>(new Set())
-  const [filterPopulation, setFilterPopulation] = useState<Set<string>>(
-    new Set(),
+  const [filterPopulation, setFilterPopulation] = useState<Set<string>>(() =>
+    one(initialFilters?.population),
   )
 
   const { data: allRecords, isLoading } = useQuery({
@@ -295,12 +326,21 @@ export function TraitCharts({
   const populations = useMemo(() => {
     const set = new Set<string>()
     for (const r of allRecords ?? []) {
-      const info = r.record_info as Record<string, unknown> | undefined
-      const pop = info?.population
-      if (pop != null && String(pop).trim() !== "") set.add(String(pop).trim())
+      const pop = recordPopulation(r)
+      if (pop) set.add(pop)
     }
     return [...set].sort()
   }, [allRecords])
+  // A crop from a link that no record has (a field of several crops stores
+  // each plot under its own, not the upload's): filtering by it would leave
+  // nothing, so it is dropped.
+  useEffect(() => {
+    if (!allRecords || filterPopulation.size === 0) return
+    const known = new Set(populations)
+    const kept = [...filterPopulation].filter((p) => known.has(p))
+    if (kept.length !== filterPopulation.size)
+      setFilterPopulation(new Set(kept))
+  }, [allRecords, populations, filterPopulation])
   const hasGenotypes = useMemo(
     () => extractGenotypes(allRecords ?? []).length > 0,
     [allRecords],
@@ -327,9 +367,7 @@ export function TraitCharts({
       )
         return false
       if (filterPopulation.size > 0) {
-        const info = r.record_info as Record<string, unknown> | undefined
-        const pop = info?.population ? String(info.population).trim() : ""
-        if (!filterPopulation.has(pop)) return false
+        if (!filterPopulation.has(recordPopulation(r))) return false
       }
       return true
     })
@@ -387,6 +425,8 @@ export function TraitCharts({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="histogram">Histogram</SelectItem>
+              <SelectItem value="date-trend">Through the season</SelectItem>
+              <SelectItem value="season-table">Season table</SelectItem>
               <SelectItem value="forest" disabled={!hasGenotypes}>
                 Genotype range
               </SelectItem>
@@ -406,6 +446,8 @@ export function TraitCharts({
 
         {chartType !== "season-trend" &&
           chartType !== "site-trend" &&
+          chartType !== "date-trend" &&
+          chartType !== "season-table" &&
           chartType !== "spatial" &&
           chartType !== "anova" &&
           chartType !== "heritability" &&
@@ -502,6 +544,16 @@ export function TraitCharts({
         {filtered.length} of {allRecords.length} records
       </div>
 
+      {chartType === "date-trend" && (
+        <SeasonDateTrend records={filtered} valueLabel={valueLabel} />
+      )}
+      {chartType === "season-table" && (
+        <SeasonTable
+          records={filtered}
+          valueLabel={valueLabel}
+          fileName={`${traitName}-${[...filterExperiment, ...filterSeason, ...filterSite].join("-") || "all"}.csv`}
+        />
+      )}
       {chartType === "histogram" && (
         <Histogram
           records={filtered}
@@ -528,6 +580,8 @@ export function TraitCharts({
           experimentNames={[...filterExperiment]}
           seasonNames={[...filterSeason]}
           siteNames={[...filterSite]}
+          populations={[...filterPopulation]}
+          dates={[...new Set(filtered.map(recordDate).filter(Boolean))].sort()}
         />
       )}
       {chartType === "anova" && (
@@ -703,12 +757,22 @@ function ChartError({ error }: { error: unknown }) {
   )
 }
 
+const ALL_DATES = "mean"
+
+/** The field layout of one flight date (the latest by default), or the mean
+ *  of every date; which one is shown, and changed, above the map. */
 function SpatialChart({
   traitName,
   experimentNames,
   seasonNames,
   siteNames,
-}: StatsChartProps) {
+  populations,
+  dates,
+}: StatsChartProps & { populations: string[]; dates: string[] }) {
+  const latest = dates.at(-1) ?? ALL_DATES
+  const [picked, setPicked] = useState<string | null>(null)
+  const date =
+    picked && (picked === ALL_DATES || dates.includes(picked)) ? picked : latest
   const { data, isLoading, error } = useQuery({
     queryKey: [
       "spatial",
@@ -716,6 +780,8 @@ function SpatialChart({
       experimentNames.join(","),
       seasonNames.join(","),
       siteNames.join(","),
+      populations.join(","),
+      date,
     ],
     queryFn: () =>
       fetchSpatial({
@@ -723,15 +789,68 @@ function SpatialChart({
         experiment_names: experimentNames.length ? experimentNames : undefined,
         season_names: seasonNames.length ? seasonNames : undefined,
         site_names: siteNames.length ? siteNames : undefined,
-        aggregation: "mean",
+        ...(populations.length ? { populations } : {}),
+        ...(date === ALL_DATES
+          ? { aggregation: "mean" as const }
+          : { aggregation: "date" as const, aggregation_date: date }),
       }),
     enabled: Boolean(traitName),
   })
 
-  if (isLoading) return <ChartLoader label="Loading field layout…" />
-  if (error) return <ChartError error={error} />
-  if (!data) return null
-  return <SpatialHeatmap response={data} />
+  const i = dates.indexOf(date)
+  return (
+    <div className="space-y-2" data-testid="spatial-chart">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground text-xs">Flight date</span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 px-2"
+          aria-label="Earlier flight"
+          disabled={i <= 0}
+          onClick={() => setPicked(dates[i - 1])}
+        >
+          ‹
+        </Button>
+        <Select value={date} onValueChange={setPicked}>
+          <SelectTrigger className="h-8 w-48" data-testid="spatial-date">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {dates.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d}
+                {d === latest ? " (latest)" : ""}
+              </SelectItem>
+            ))}
+            <SelectItem value={ALL_DATES}>Mean of all dates</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 px-2"
+          aria-label="Later flight"
+          disabled={i < 0 || i >= dates.length - 1}
+          onClick={() => setPicked(dates[i + 1])}
+        >
+          ›
+        </Button>
+        <span className="text-muted-foreground text-xs">
+          {date === ALL_DATES
+            ? `Each plot's mean over ${dates.length} flight date${dates.length === 1 ? "" : "s"}`
+            : `Readings of the ${date} flight`}
+        </span>
+      </div>
+      {isLoading ? (
+        <ChartLoader label="Loading field layout…" />
+      ) : error ? (
+        <ChartError error={error} />
+      ) : data ? (
+        <SpatialHeatmap response={data} />
+      ) : null}
+    </div>
+  )
 }
 
 function Histogram({

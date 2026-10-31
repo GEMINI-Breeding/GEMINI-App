@@ -210,7 +210,9 @@ export function RunAgentCard({
       queryClient.setQueryData(["agent", "facts", runId], r)
       queryClient.invalidateQueries({ queryKey: ["agent", "next_step", runId] })
       // The boundary editor offers the design saved here (and the plot length).
-      queryClient.invalidateQueries({ queryKey: ["agent", "field_designs", runId] })
+      queryClient.invalidateQueries({
+        queryKey: ["agent", "field_designs", runId],
+      })
     },
   })
 
@@ -219,11 +221,7 @@ export function RunAgentCard({
   const row = next.data?.runs?.[0]
   if (!row) return null
   const needs = row.ask_person_first ?? []
-  const open =
-    toggled ??
-    (row.state !== "all steps done" &&
-      (needs.length > 0 ||
-        Object.values(facts.data?.facts ?? {}).every((v) => v == null)))
+  const open = toggled ?? false
   const finished = row.state === "all steps done"
   const set = (key: string, value: string) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -234,9 +232,9 @@ export function RunAgentCard({
     )
 
   return (
-    <Card data-testid="run-agent-card">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-3">
+    <Card data-testid="run-agent-card" className="gap-0 py-0">
+      <CardContent className="space-y-3 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {agentOn ? (
             <Bot className="text-muted-foreground h-4 w-4 shrink-0" />
           ) : (
@@ -254,7 +252,7 @@ export function RunAgentCard({
                     : row.state === "failed"
                       ? " · failed"
                       : needs.length > 0
-                        ? " · needs something from you first"
+                        ? " · needs from you"
                         : agentOn
                           ? " · the agent can do this"
                           : " · ready"}
@@ -267,19 +265,23 @@ export function RunAgentCard({
               </p>
             )}
             {needs.length > 0 && (
-              <ul className="text-muted-foreground mt-1 list-disc pl-5 text-xs">
-                {needs.map((n) => (
-                  <li key={n}>{n}</li>
-                ))}
-              </ul>
+              <span className="text-muted-foreground text-xs">
+                : {needs.join("; ")}
+              </span>
             )}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={() => setOpen(!open)}
+          >
             {open ? "Hide field facts" : "Field facts"}
           </Button>
           {!finished && agentOn && (
             <Button
               size="sm"
+              className="h-7"
               data-testid="run-continue-with-agent"
               onClick={() => {
                 queueAgentRequest(

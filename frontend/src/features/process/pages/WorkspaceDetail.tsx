@@ -260,6 +260,105 @@ function PipelineCard({
   )
 }
 
+/** The two big choices, for a workspace that has no pipeline yet. */
+function NewPipelineCards({ workspaceId }: { workspaceId: string }) {
+  const navigate = useNavigate()
+  return (
+    <div className="mb-8">
+      <h2 className="mb-1 text-lg font-medium">Create a new pipeline</h2>
+      <p className="text-muted-foreground mb-4 text-sm">
+        Choose the type of sensing data you want to process
+      </p>
+      <div
+        className="grid grid-cols-1 gap-4 md:grid-cols-2"
+        data-onboarding="process-pipeline-cards"
+      >
+        <Card
+          role="button"
+          tabIndex={0}
+          aria-label="Create Aerial Pipeline"
+          className="hover:border-primary cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={() =>
+            navigate({
+              to: "/process/$workspaceId/pipeline",
+              params: { workspaceId },
+              search: { type: "aerial" },
+            })
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              navigate({
+                to: "/process/$workspaceId/pipeline",
+                params: { workspaceId },
+                search: { type: "aerial" },
+              })
+            }
+          }}
+        >
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                <Plane className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <CardTitle>Aerial Pipeline</CardTitle>
+                <CardDescription>Process drone imagery</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">
+              GCP selection → Orthomosaic → Plot boundaries → Train → Traits
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          aria-label="Create Ground Pipeline"
+          className="hover:border-primary cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={() =>
+            navigate({
+              to: "/process/$workspaceId/pipeline",
+              params: { workspaceId },
+              search: { type: "ground" },
+            })
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              navigate({
+                to: "/process/$workspaceId/pipeline",
+                params: { workspaceId },
+                search: { type: "ground" },
+              })
+            }
+          }}
+        >
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+                <Navigation className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <CardTitle>Ground Pipeline</CardTitle>
+                <CardDescription>Process Amiga rover data</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm">
+              Plot marking → AgRowStitch → Plot boundaries → Train → Traits
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
 export function WorkspaceDetail() {
   const { workspaceId } = useParams({ from: "/_layout/process/$workspaceId/" })
   const navigate = useNavigate()
@@ -309,119 +408,79 @@ export function WorkspaceDetail() {
           </div>
         </div>
 
-        {/* Create new pipeline */}
-        <div className="mb-8">
-          <h2 className="mb-1 text-lg font-medium">Create a new pipeline</h2>
-          <p className="text-muted-foreground mb-4 text-sm">
-            Choose the type of sensing data you want to process
-          </p>
-          <div
-            className="grid grid-cols-1 gap-4 md:grid-cols-2"
-            data-onboarding="process-pipeline-cards"
-          >
-            <Card
-              role="button"
-              tabIndex={0}
-              aria-label="Create Aerial Pipeline"
-              className="hover:border-primary cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              onClick={() =>
-                navigate({
-                  to: "/process/$workspaceId/pipeline",
-                  params: { workspaceId },
-                  search: { type: "aerial" },
-                })
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault()
-                  navigate({
-                    to: "/process/$workspaceId/pipeline",
-                    params: { workspaceId },
-                    search: { type: "aerial" },
-                  })
-                }
-              }}
-            >
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                    <Plane className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <CardTitle>Aerial Pipeline</CardTitle>
-                    <CardDescription>Process drone imagery</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
+        {pipelines.length === 0 ? (
+          <>
+            <NewPipelineCards workspaceId={workspaceId} />
+            <div className="mb-10">
+              <h2 className="mb-4 text-lg font-medium">Pipelines</h2>
+              {pipelines.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
-                  GCP selection → Orthomosaic → Plot boundaries → Train → Traits
+                  No pipelines yet. Create one above to get started.
                 </p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              aria-label="Create Ground Pipeline"
-              className="hover:border-primary cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              onClick={() =>
-                navigate({
-                  to: "/process/$workspaceId/pipeline",
-                  params: { workspaceId },
-                  search: { type: "ground" },
-                })
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault()
-                  navigate({
-                    to: "/process/$workspaceId/pipeline",
-                    params: { workspaceId },
-                    search: { type: "ground" },
-                  })
-                }
-              }}
-            >
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-                    <Navigation className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div>
-                    <CardTitle>Ground Pipeline</CardTitle>
-                    <CardDescription>Process Amiga rover data</CardDescription>
-                  </div>
+              ) : (
+                <div className="space-y-3">
+                  {pipelines.map((pipeline) => (
+                    <PipelineCard
+                      key={pipeline.id}
+                      pipeline={pipeline}
+                      workspaceId={workspaceId}
+                    />
+                  ))}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground text-sm">
-                  Plot marking → AgRowStitch → Plot boundaries → Train → Traits
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Existing pipelines */}
-        <div className="mb-10">
-          <h2 className="mb-4 text-lg font-medium">Pipelines</h2>
-          {pipelines.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              No pipelines yet. Create one above to get started.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {pipelines.map((pipeline) => (
-                <PipelineCard
-                  key={pipeline.id}
-                  pipeline={pipeline}
-                  workspaceId={workspaceId}
-                />
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mb-6">
+              <h2 className="mb-4 text-lg font-medium">Pipelines</h2>
+              <div className="space-y-3">
+                {pipelines.map((pipeline) => (
+                  <PipelineCard
+                    key={pipeline.id}
+                    pipeline={pipeline}
+                    workspaceId={workspaceId}
+                  />
+                ))}
+              </div>
+            </div>
+            {/* Pipelines exist: making another is rare, so it waits at the bottom, small. */}
+            <div
+              className="text-muted-foreground flex flex-wrap items-center gap-2 border-t pt-4 text-sm"
+              data-onboarding="process-pipeline-cards"
+            >
+              <span>Add another pipeline:</span>
+              {(
+                [
+                  ["aerial", "Aerial (drone imagery)", Plane, "text-blue-600"],
+                  [
+                    "ground",
+                    "Ground (Amiga rover)",
+                    Navigation,
+                    "text-green-600",
+                  ],
+                ] as const
+              ).map(([type, label, Icon, color]) => (
+                <Button
+                  key={type}
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Create ${type === "aerial" ? "Aerial" : "Ground"} Pipeline`}
+                  onClick={() =>
+                    navigate({
+                      to: "/process/$workspaceId/pipeline",
+                      params: { workspaceId },
+                      search: { type },
+                    })
+                  }
+                >
+                  <Icon className={`mr-1.5 h-4 w-4 ${color}`} />
+                  {label}
+                </Button>
               ))}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   )

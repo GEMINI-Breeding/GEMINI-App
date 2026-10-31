@@ -69,6 +69,9 @@ export interface RunStepState {
   /** Jobs started together (one per treatment's orthomosaic, say): the step
    *  is done when all of them are. */
   batch?: string[]
+  /** The choices the step was last queued with (the plot images' source and
+   *  plots), so its card shows them again when the person comes back. */
+  settings?: Record<string, unknown>
 }
 
 export interface Workspace {

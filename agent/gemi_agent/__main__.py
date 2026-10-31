@@ -69,6 +69,13 @@ def main(argv: list[str]) -> int:
 
         uploads.run(argv[1])
         return 0
+    if argv[0] == "cloud_filter":   # a cluster copy job: rules that skip files already in the app
+        from . import cloud, uploads
+
+        out, pats = argv[1], [p for p in uploads.decode_setting(argv[2]).split(",") if p] if len(argv) > 2 else []
+        opts = {k: uploads.decode_setting(v) for k, v in (a.split("=", 1) for a in argv[3:] if "=" in a)}
+        print(f"already in the app (not copied): {cloud.write_skip_filter(out, pats, opts)} files", flush=True)
+        return 0
     if argv[0] == "_fetch":         # a copy from online storage, then its upload (cloud.fetch, local stack)
         from . import cloud
 

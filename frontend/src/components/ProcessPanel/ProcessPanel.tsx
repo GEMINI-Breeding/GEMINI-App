@@ -6,10 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { useProcess } from "@/contexts/ProcessContext"
 import { agentApi } from "@/features/agent/lib/agentApi"
+import { CopyRow, CopyWatcher } from "@/features/files/components/CopyProgress"
+import { isFinished, useTrackedCopies } from "@/features/files/lib/copyTracker"
 import {
   mapUploadProgress,
   mapWorkerProgress,
 } from "@/features/files/lib/uploadProgressSplit"
+import { CANCEL_WHILE_RUNNING } from "@/features/process/lib/jobTitle"
 import { useWhere } from "@/lib/where"
 import type { Process } from "@/types/process"
 
@@ -98,10 +101,13 @@ function processStatusLabel(process: Process): string {
 
 function ProcessItem({
   process,
+  queued = false,
   onDismiss,
   onCancel,
 }: {
   process: Process
+  /** Waiting for a worker: any job can be called off then. */
+  queued?: boolean
   onDismiss: () => void
   onCancel: () => void
 }) {
@@ -133,16 +139,24 @@ function ProcessItem({
           </button>
         )}
         <span className={`shrink-0 text-xs ${statusColor}`}>{statusLabel}</span>
-        {process.cancel && !isDone && (
-          <button
-            type="button"
-            className="shrink-0 text-muted-foreground hover:text-destructive"
-            title="Cancel"
-            onClick={onCancel}
-          >
-            <Ban className="h-3.5 w-3.5" />
-          </button>
-        )}
+        {process.cancel &&
+          !isDone &&
+          // A job on the cluster: while queued, or while running for the
+          // steps whose worker stops on a cancel. Uploads always.
+          (process.type !== "processing" ||
+            queued ||
+            process.status === "pending" ||
+            CANCEL_WHILE_RUNNING.has(process.stepKey ?? "")) && (
+            <button
+              type="button"
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+              title={queued ? "Cancel (not started yet)" : "Cancel"}
+              aria-label={`Cancel ${process.title}`}
+              onClick={onCancel}
+            >
+              <Ban className="h-3.5 w-3.5" />
+            </button>
+          )}
         <button
           type="button"
           className={`shrink-0 text-muted-foreground hover:text-foreground ${isDone ? "" : "invisible pointer-events-none"}`}
@@ -187,6 +201,7 @@ export function ProcessPanel() {
     removeProcess,
     clearCompleted,
     updateProcess,
+    queuedJobIds,
   } = useProcess()
   // Jobs started here open the panel; jobs found running elsewhere (the
   // agent's, another tab's) only show the pill, so the panel does not cover
@@ -206,13 +221,24 @@ export function ProcessPanel() {
     refetchInterval: 20_000,
     retry: false,
   })
-  const transfers = work.data ?? []
+  // Copies started in this browser: their own rows (progress, details on a
+  // click), kept after they end until dismissed.
+  const copies = useTrackedCopies()
+  const copyIds = new Set(copies.map((c) => c.id))
+  const transfers = (work.data ?? []).filter(
+    (t) => !copyIds.has(t.id) && !(t.fetch_id && copyIds.has(t.fetch_id)),
+  )
+  const copiesActive = copies.filter(
+    (c) => !c.final || !isFinished(c.final),
+  ).length
   const queuedCount =
     processes.filter((p) => p.status === "pending").length +
     transfers.filter((t) => t.state !== "running").length
   const runningCount =
     processes.filter((p) => p.status === "running" || p.status === "pending")
-      .length + transfers.length
+      .length +
+    transfers.length +
+    copiesActive
 
   // A job that finished successfully leaves the panel after a while: the
   // open panel (or its pill) sits over the bottom-right of every page — it
@@ -231,8 +257,12 @@ export function ProcessPanel() {
     return () => clearTimeout(t)
   }, [doneIds])
 
-  if ((!hasBeenActive || processes.length === 0) && transfers.length === 0)
-    return null
+  if (
+    (!hasBeenActive || processes.length === 0) &&
+    transfers.length === 0 &&
+    copies.length === 0
+  )
+    return <CopyWatcher />
 
   if (!isOpen) {
     return (
@@ -249,8 +279,9 @@ export function ProcessPanel() {
           <ChevronUp className="mr-1.5 h-4 w-4" />
           {runningCount > 0
             ? activeLabel(runningCount, queuedCount)
-            : `${processes.length} processes`}
+            : `${processes.length + copies.length} processes`}
         </Button>
+        <CopyWatcher />
       </div>
     )
   }
@@ -317,6 +348,7 @@ export function ProcessPanel() {
                   <ProcessItem
                     key={p.id}
                     process={p}
+                    queued={Boolean(p.runId && queuedJobIds.has(p.runId))}
                     onDismiss={() => removeProcess(p.id)}
                     onCancel={() => {
                       p.cancel?.()
@@ -327,41 +359,66 @@ export function ProcessPanel() {
               </div>
             ),
           )}
+          {copies.length > 0 && (
+            <div className="border-t" data-testid="process-copies">
+              <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
+                Copies from online storage
+              </p>
+              {copies.map((c) => (
+                <CopyRow key={c.id} copy={c} />
+              ))}
+            </div>
+          )}
           {transfers.length > 0 && (
             <div className="border-t" data-testid="process-transfers">
               <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
                 Uploads and copies
               </p>
-              {transfers.map((t) => (
-                <div key={t.id} className="px-3 py-1.5 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${t.state === "running" ? "bg-green-500" : "bg-amber-500 animate-pulse"}`}
-                    />
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {t.title}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {/* Uploads send files from this computer; copies and
+              {transfers.map((t) =>
+                t.kind === "fetch" ? (
+                  // A copy started elsewhere (another browser, the agent): its
+                  // progress and log on a click too.
+                  <CopyRow
+                    key={t.id}
+                    title={t.title}
+                    copy={{ id: t.fetch_id ?? t.id, date: "", started: 0 }}
+                    known={{
+                      state: t.state === "running" ? "RUNNING" : "QUEUED",
+                      line: t.detail,
+                    }}
+                  />
+                ) : (
+                  <div key={t.id} className="px-3 py-1.5 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${t.state === "running" ? "bg-green-500" : "bg-amber-500 animate-pulse"}`}
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium">
+                        {t.title}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {/* Uploads send files from this computer; copies and
                           folder uploads are jobs on the cluster. */}
-                      {t.kind === "upload"
-                        ? "from this computer"
-                        : "on the cluster"}
-                      {" · "}
-                      {t.state}
-                    </span>
+                        {t.kind === "upload"
+                          ? "from this computer"
+                          : "on the cluster"}
+                        {" · "}
+                        {t.state}
+                      </span>
+                    </div>
+                    {t.detail && (
+                      <p className="ml-4 truncate text-muted-foreground">
+                        {t.detail}
+                      </p>
+                    )}
                   </div>
-                  {t.detail && (
-                    <p className="ml-4 truncate text-muted-foreground">
-                      {t.detail}
-                    </p>
-                  )}
-                </div>
-              ))}
+                ),
+              )}
             </div>
           )}
         </CardContent>
       </Card>
+      <CopyWatcher />
     </div>
   )
 }

@@ -117,6 +117,10 @@ export function useLoadPlotGeometryVersion(
     // this gate the load endpoint 404s on every render where no version
     // is selected — noisy and breaks the strict-E2E console-error guard.
     enabled: isLoggedIn() && Boolean(directory) && version != null,
+    // A saved version is put in the editor once, when opened; refetching it
+    // on window focus only risked overwriting unsaved edits.
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -129,16 +133,22 @@ export function useSavePlotGeometryVersion() {
       directory: string
       stateSnapshot: PlotGeometryStateSnapshot
       name?: string
+      /** Replace this version (keeps its number) rather than add a new one. */
+      version?: number
     }
   >({
-    mutationFn: async ({ directory, stateSnapshot, name }) => {
+    mutationFn: async ({ directory, stateSnapshot, name, version }) => {
       const res =
         await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
           requestBody: {
             directory,
             state_snapshot: stateSnapshot as unknown as Record<string, unknown>,
             name: name ?? undefined,
-          },
+            // The API takes it; the generated client predates the field.
+            ...(version !== undefined ? { version } : {}),
+          } as Parameters<
+            typeof PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion
+          >[0]["requestBody"],
         })
       return res as unknown as PlotGeometryVersion
     },

@@ -69,6 +69,12 @@ export function OnboardingTour({
         await new Promise((r) => setTimeout(r, 120))
       }
 
+      if (data.focus) {
+        window.dispatchEvent(
+          new CustomEvent("gemini:tour-focus", { detail: data.focus }),
+        )
+        await new Promise((r) => setTimeout(r, 60))
+      }
       if (!data.selector || cancelled) {
         setRect(null)
         return

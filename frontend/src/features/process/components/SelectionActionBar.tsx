@@ -7,7 +7,7 @@ import { NumberField } from "@/components/ui/number-field"
 export type SelectionActionBarProps = {
   count: number
   onRotate: (degrees: number) => void
-  /** Move the selection by metres: east (+) / west (-), north (+) / south (-). */
+  /** Move the selection by metres as the arrows point on screen: right (+) / left (-), up (+) / down (-). */
   onNudge?: (eastM: number, northM: number) => void
   /** The nudge step, metres (shared with the arrow keys). */
   nudgeStep?: number
@@ -23,6 +23,9 @@ export type SelectionActionBarProps = {
   onSelectAll: () => void
   /** Whether an active block is set — used to gate "select all in block". */
   hasActiveBlock: boolean
+  /** "Select an area" is on: a drag on the map draws a box, it does not move. */
+  selectingArea?: boolean
+  onStopSelectingArea?: () => void
 }
 
 /**
@@ -47,6 +50,8 @@ export function SelectionActionBar({
   onSelectAllInBlock,
   onSelectAll,
   hasActiveBlock,
+  selectingArea = false,
+  onStopSelectingArea,
 }: SelectionActionBarProps) {
   const [rotateInput, setRotateInput] = useState(0)
   const [nameDraft, setNameDraft] = useState<string | null>(null)
@@ -61,10 +66,25 @@ export function SelectionActionBar({
         <span className="font-medium" data-testid="selection-count">
           {count} cell{count === 1 ? "" : "s"} selected
         </span>
-        <span className="text-muted-foreground text-xs">
-          Drag any selected cell to move the group · Shift-click to extend ·
-          Cmd/Ctrl-click to toggle
-        </span>
+        {selectingArea ? (
+          <span className="text-xs" data-testid="selection-area-hint">
+            Dragging draws another box while “Select an area” is on (Shift adds
+            to the selection).{" "}
+            <button
+              type="button"
+              className="text-primary underline underline-offset-2"
+              data-testid="selection-area-stop"
+              onClick={onStopSelectingArea}
+            >
+              Stop selecting to move them
+            </button>
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-xs">
+            Drag any selected cell to move the group · Shift-click to extend ·
+            Cmd/Ctrl-click to toggle · Cmd/Ctrl-A selects every plot
+          </span>
+        )}
         <div className="ml-auto flex flex-wrap gap-2">
           <Button
             size="sm"
@@ -137,7 +157,7 @@ export function SelectionActionBar({
           <Button
             size="sm"
             variant="outline"
-            aria-label="Move west"
+            aria-label="Move left"
             data-testid="nudge-west"
             onClick={() => onNudge(-nudgeStep, 0)}
           >
@@ -146,7 +166,7 @@ export function SelectionActionBar({
           <Button
             size="sm"
             variant="outline"
-            aria-label="Move north"
+            aria-label="Move up"
             data-testid="nudge-north"
             onClick={() => onNudge(0, nudgeStep)}
           >
@@ -155,7 +175,7 @@ export function SelectionActionBar({
           <Button
             size="sm"
             variant="outline"
-            aria-label="Move south"
+            aria-label="Move down"
             data-testid="nudge-south"
             onClick={() => onNudge(0, -nudgeStep)}
           >
@@ -164,7 +184,7 @@ export function SelectionActionBar({
           <Button
             size="sm"
             variant="outline"
-            aria-label="Move east"
+            aria-label="Move right"
             data-testid="nudge-east"
             onClick={() => onNudge(nudgeStep, 0)}
           >

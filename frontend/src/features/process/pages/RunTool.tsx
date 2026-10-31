@@ -49,6 +49,10 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
 
 const STEP_PHASE: Record<string, string> = {}
 
+/** Tools that carry the page title themselves (on their first card), so the
+ *  page starts with the tool rather than a header above it. */
+const TITLED_BY_TOOL = new Set(["plot_boundary_prep"])
+
 function ToolPlaceholder({ step, runId }: { step: string; runId: string }) {
   const phase = STEP_PHASE[step] ?? "a later phase"
   return (
@@ -105,25 +109,32 @@ export function RunTool() {
 
   return (
     <div className="bg-background">
-      <div className="mx-auto max-w-[1600px] px-6 py-6">
-        <div className="mb-6 flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Back to run"
-            onClick={goBack}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-xl font-semibold">{label}</h1>
+      <div className="mx-auto max-w-[1600px] px-6 py-4">
+        {TITLED_BY_TOOL.has(step) && run && scope ? (
+          <h1 className="sr-only">{label}</h1>
+        ) : (
+          // One slim line: the tool, not its header, gets the screen.
+          <div className="mb-3 flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Back to run"
+              onClick={goBack}
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+            <h1 className="text-base font-semibold">{label}</h1>
             {description && (
-              <p className="text-muted-foreground text-sm mt-0.5">
-                {description}
+              <p
+                className="text-muted-foreground hidden min-w-0 truncate text-xs md:block"
+                title={description}
+              >
+                · {description}
               </p>
             )}
           </div>
-        </div>
+        )}
 
         <PanelBoundary
           what={`the ${label} panel`}
@@ -154,6 +165,8 @@ export function RunTool() {
               scope={scope}
               onSaved={goBack}
               onCancel={goBack}
+              title={label}
+              onBack={goBack}
             />
           ) : step === "gcp_selection" && workspace ? (
             <GcpPicker

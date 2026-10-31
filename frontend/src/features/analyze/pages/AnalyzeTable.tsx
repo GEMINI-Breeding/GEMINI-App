@@ -303,7 +303,9 @@ export function AnalyzeTable() {
           </p>
 
           <div className="max-h-[60vh] overflow-auto rounded border text-xs">
-            <table className="w-full">
+            {/* One line per cell: many trait columns scroll sideways rather
+                than squeezing names and values onto several lines. */}
+            <table className="w-full min-w-max whitespace-nowrap">
               <thead className="bg-muted sticky top-0">
                 <tr>
                   {header("Plot", "plot", "analyze-table-sort-plot")}

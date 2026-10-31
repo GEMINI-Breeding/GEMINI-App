@@ -41,6 +41,8 @@ export interface Process {
   cancel?: () => void
   /** Pipeline run ID — if set, ProcessContext opens its own SSE to track progress */
   runId?: string
+  /** The run step the job is (trait_extraction, …), when known. */
+  stepKey?: string
   /**
    * Further jobs this process waits for after `runId`, in order (an upload
    * of several .bin logs runs one extraction job per log). The process is

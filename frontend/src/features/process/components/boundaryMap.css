@@ -1,0 +1,137 @@
+/*
+ * The boundary map in the app's colors (light and dark): Leaflet's and
+ * Geoman's controls, the layers menu, tooltips, and a larger compass.
+ */
+.gemi-map {
+  font-family: inherit;
+  background: var(--muted);
+}
+
+/* Control bars: zoom, Geoman's drawing tools, the compass. */
+.gemi-map .leaflet-bar,
+.gemi-map .leaflet-control-layers,
+.gemi-map .leaflet-pm-toolbar {
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15) !important;
+  background: var(--background);
+  background-clip: padding-box;
+}
+.gemi-map .leaflet-bar a,
+.gemi-map
+  .leaflet-pm-toolbar
+  .button-container
+  a.leaflet-buttons-control-button {
+  background-color: var(--background);
+  color: var(--foreground);
+  border-bottom: 1px solid var(--border);
+}
+.gemi-map .leaflet-bar a:last-child,
+.gemi-map
+  .leaflet-pm-toolbar
+  .button-container:last-child
+  a.leaflet-buttons-control-button {
+  border-bottom: none;
+}
+.gemi-map .leaflet-bar a:hover,
+.gemi-map .leaflet-pm-toolbar a.leaflet-buttons-control-button:hover {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+.gemi-map .leaflet-bar a.leaflet-disabled {
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+}
+/* The tool in use. */
+.gemi-map .leaflet-pm-toolbar
+  .button-container.active
+  a.leaflet-buttons-control-button {
+  background-color: color-mix(in oklch, var(--primary) 22%, var(--background));
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+/* Geoman's sub-actions (Finish, Cancel…). */
+.gemi-map .leaflet-pm-actions-container .leaflet-pm-action {
+  background-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: color-mix(in oklch, var(--primary) 70%, black) !important;
+}
+.gemi-map .leaflet-pm-actions-container .leaflet-pm-action:hover {
+  background-color: color-mix(in oklch, var(--primary) 85%, black) !important;
+}
+/* Geoman's icons are dark glyphs: lighten them on a dark background. */
+.dark .gemi-map .leaflet-pm-toolbar .control-icon {
+  filter: invert(0.9);
+}
+
+/* The basemap menu. */
+.gemi-map .leaflet-control-layers {
+  color: var(--foreground);
+}
+.gemi-map .leaflet-control-layers-expanded {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.dark .gemi-map .leaflet-control-layers-toggle {
+  filter: invert(0.9);
+}
+.gemi-map .leaflet-control-layers-separator {
+  border-top-color: var(--border);
+}
+
+.gemi-map .leaflet-control-attribution {
+  background: color-mix(
+    in oklch,
+    var(--background) 75%,
+    transparent
+  ) !important;
+  color: var(--muted-foreground);
+  border-top-left-radius: var(--radius-sm);
+  font-size: 10px;
+}
+.gemi-map .leaflet-control-attribution a {
+  color: var(--primary);
+}
+
+/* Tooltips (plot names on hover). */
+.gemi-map .leaflet-tooltip {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+}
+.gemi-map .leaflet-tooltip-top::before {
+  border-top-color: var(--border);
+}
+.gemi-map .leaflet-tooltip-bottom::before {
+  border-bottom-color: var(--border);
+}
+.gemi-map .leaflet-tooltip-left::before {
+  border-left-color: var(--border);
+}
+.gemi-map .leaflet-tooltip-right::before {
+  border-right-color: var(--border);
+}
+
+/*
+ * The compass: larger, a red north with an "N", turning with the map.
+ * Drag it to rotate; click it to turn north up again.
+ */
+.gemi-map .leaflet-control-rotate {
+  border-radius: 9999px !important;
+}
+.gemi-map .leaflet-control-rotate a.leaflet-control-rotate-toggle {
+  width: 52px !important;
+  height: 52px !important;
+  line-height: 52px;
+  border-radius: 9999px !important;
+  border: none !important;
+  background-color: var(--background) !important;
+}
+.gemi-map .leaflet-control-rotate a.leaflet-control-rotate-toggle:hover {
+  background-color: var(--accent) !important;
+}
+.gemi-map .leaflet-control-rotate-arrow {
+  background-size: 46px 46px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 46 46'%3E%3Ccircle cx='23' cy='23' r='21' fill='none' stroke='%23888' stroke-opacity='.45' stroke-width='1.5'/%3E%3Cpath d='M23 9l5.5 14h-11z' fill='%23dc2626'/%3E%3Cpath d='M23 37l5.5-14h-11z' fill='%23a3a3a3'/%3E%3Ctext x='23' y='8.2' text-anchor='middle' font-family='system-ui,sans-serif' font-size='8' font-weight='700' fill='%23dc2626'%3EN%3C/text%3E%3C/svg%3E") !important;
+}

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { type TraitOutput, TraitsService } from "@/client"
 import {
@@ -17,6 +17,10 @@ import { AnalyzeMap } from "./AnalyzeMap"
 import { AnalyzeTable } from "./AnalyzeTable"
 import { MultivariateAnalyze } from "./MultivariateAnalyze"
 
+function traitNameOf(traits: TraitOutput[], id: string) {
+  return traits.find((t) => idAsString(t.id) === id)?.trait_name
+}
+
 export function AnalyzeDashboard() {
   const navigate = useNavigate()
   const search = useSearch({ from: "/_layout/analyze/" })
@@ -30,6 +34,14 @@ export function AnalyzeDashboard() {
       TraitsService.apiTraitsAllGetAllTraits({ limit: 500, offset: 0 }),
   })
   const traits: TraitOutput[] = (traitsQuery.data as TraitOutput[] | null) ?? []
+
+  // Opened from a link (a run's trait results): pick that trait by name.
+  useEffect(() => {
+    if (!search.trait || traitId) return
+    const t = traits.find((x) => x.trait_name === search.trait)
+    if (t) setTraitId(idAsString(t.id))
+  }, [search.trait, traits, traitId])
+  const linked = traitNameOf(traits, traitId) === search.trait ? search : null
 
   const selectedTrait = useMemo(
     () => traits.find((t) => idAsString(t.id) === traitId),
@@ -124,9 +136,21 @@ export function AnalyzeDashboard() {
 
           {traitId && selectedTrait && (
             <TraitCharts
+              key={traitId}
               traitId={traitId}
               traitName={selectedTrait.trait_name}
               traitUnits={selectedTrait.trait_units ?? undefined}
+              initialChart={linked?.chart}
+              initialFilters={
+                linked
+                  ? {
+                      experiment: linked.experiment,
+                      season: linked.season,
+                      site: linked.site,
+                      population: linked.population,
+                    }
+                  : undefined
+              }
             />
           )}
         </TabsContent>

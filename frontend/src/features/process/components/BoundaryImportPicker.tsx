@@ -48,6 +48,31 @@ function sameField(a: string, b: string): boolean {
   )
 }
 
+/** The same experiment, site and population (any season, date or sensor). */
+export function sameTrial(a: string, b: string): boolean {
+  const x = describeDirectory(a)
+  const y = describeDirectory(b)
+  return (
+    x.experiment === y.experiment &&
+    x.site === y.site &&
+    x.population === y.population
+  )
+}
+
+/** Where another field differs from this one, in a few words ("Sorghum"). */
+export function otherParts(
+  d: ReturnType<typeof describeDirectory>,
+  here: ReturnType<typeof describeDirectory>,
+): string {
+  return [
+    d.experiment !== here.experiment && d.experiment,
+    d.site !== here.site && d.site,
+    d.population !== here.population && d.population,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 /**
  * How close a saved layout's directory is to the one being edited, highest
  * first: the same field (site and population) matters most, then the same
@@ -101,6 +126,8 @@ export function BoundaryImportPicker({
 }) {
   const { data = [], isLoading, isError } = useAllPlotGeometryVersions()
   const [filter, setFilter] = useState("")
+  // Other experiments, sites and populations only when asked for.
+  const [showAll, setShowAll] = useState(false)
   const [picked, setPicked] = useState<{
     directory: string
     version: number
@@ -109,15 +136,26 @@ export function BoundaryImportPicker({
   const [align, setAlign] = useState(true)
   const [crops, setCrops] = useState<string[] | null>(null)
 
-  const rows = useMemo(() => {
+  const { rows, others } = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    return rankCandidates(
-      data
-        .filter((v) => v.directory !== directory && v.plot_count > 0)
-        .filter((v) => !q || v.directory.toLowerCase().includes(q)),
+    const all = rankCandidates(
+      data.filter((v) => v.directory !== directory && v.plot_count > 0),
       directory,
-    ).map((v) => ({ ...v, same: sameField(v.directory, directory) }))
-  }, [data, directory, filter])
+    ).map((v) => ({
+      ...v,
+      same: sameField(v.directory, directory),
+      trial: sameTrial(v.directory, directory),
+    }))
+    const others = all.filter((v) => !v.trial).length
+    return {
+      others,
+      rows: all.filter(
+        (v) =>
+          (showAll || v.trial) && (!q || v.directory.toLowerCase().includes(q)),
+      ),
+    }
+  }, [data, directory, filter, showAll])
+  const here = describeDirectory(directory)
 
   // The crops in the picked version (from each plot's design properties).
   const loaded = useLoadPlotGeometryVersion(
@@ -215,19 +253,19 @@ export function BoundaryImportPicker({
   return (
     <div className="space-y-2" data-testid="boundary-import-picker">
       <p className="text-muted-foreground text-xs">
-        Load boundaries saved for another date, sensor or experiment into the
-        editor. The closest matches to this flight (same field, season and
-        nearest date) are listed first. Check they line up with this
-        orthomosaic, adjust if needed, then save — nothing is written until you
-        do.
+        Boundaries saved for other dates of {here.experiment} · {here.site} ·{" "}
+        {here.population}, nearest date first. They load as unsaved work: check
+        the fit, then save.
       </p>
-      <Input
-        placeholder="Filter by experiment, site, date…"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="max-w-sm"
-        data-testid="boundary-import-filter"
-      />
+      {showAll && (
+        <Input
+          placeholder="Filter by experiment, site, date…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="h-8 text-xs"
+          data-testid="boundary-import-filter"
+        />
+      )}
       {rows.length === 0 ? (
         <p
           className="text-muted-foreground text-sm"
@@ -235,91 +273,75 @@ export function BoundaryImportPicker({
         >
           {filter
             ? "No saved boundaries match."
-            : "No boundaries saved anywhere else yet."}
+            : showAll
+              ? "No boundaries saved anywhere else yet."
+              : "None saved for another date of this field yet."}
         </p>
       ) : (
-        <div className="max-h-72 overflow-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs">
-              <tr>
-                <th className="px-3 py-2 text-left">Experiment</th>
-                <th className="px-3 py-2 text-left">Site · population</th>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Sensor</th>
-                <th className="px-3 py-2 text-left">Version</th>
-                <th className="px-3 py-2 text-right">Plots</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((v) => {
-                const d = describeDirectory(v.directory)
-                return (
-                  <tr
-                    key={`${v.directory}|${v.version}`}
-                    className="border-t"
-                    data-testid="boundary-import-row"
-                  >
-                    <td className="px-3 py-2">
-                      {d.experiment}
-                      <span className="text-muted-foreground text-xs">
-                        {" "}
-                        ({d.season})
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      {d.site} · {d.population}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {d.date}
-                      {v.same && (
-                        <span
-                          className="text-muted-foreground ml-1 font-sans"
-                          title="Same field and season: these boundaries can be moved onto this date"
-                        >
-                          · same field
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
+        <ul className="max-h-80 divide-y overflow-y-auto rounded-md border">
+          {rows.map((v) => {
+            const d = describeDirectory(v.directory)
+            const isPicked =
+              picked?.directory === v.directory && picked.version === v.version
+            return (
+              <li
+                key={`${v.directory}|${v.version}`}
+                className={`flex items-center gap-2 px-2.5 py-1.5 ${isPicked ? "bg-muted/60" : ""}`}
+                data-testid="boundary-import-row"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">
+                    <span className="font-mono text-xs">{d.date}</span>{" "}
+                    <span className="text-muted-foreground text-xs">
                       {d.platform}/{d.sensor}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      v{v.version}
-                      {v.name ? ` · ${v.name}` : ""}
-                      {v.is_active ? " · active" : ""}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {v.plot_count}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Button
-                        size="sm"
-                        variant={
-                          picked?.directory === v.directory &&
-                          picked.version === v.version
-                            ? "default"
-                            : "outline"
-                        }
-                        onClick={() => {
-                          setPicked({
-                            directory: v.directory,
-                            version: v.version,
-                            plotCount: v.plot_count,
-                          })
-                          setCrops(null)
-                          setAlign(v.same)
-                        }}
-                      >
-                        Import…
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {d.season !== here.season ? ` · ${d.season}` : ""}
+                    </span>
+                  </p>
+                  <p
+                    className="text-muted-foreground truncate text-xs"
+                    title={`${v.directory}${v.name ? ` · ${v.name}` : ""}`}
+                  >
+                    {!v.trial && `${otherParts(d, here)} · `}v{v.version} ·{" "}
+                    {v.plot_count} plots{v.is_active ? " · active" : ""}
+                    {v.name ? ` · ${v.name}` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0 px-2 text-xs"
+                  variant={isPicked ? "default" : "outline"}
+                  onClick={() => {
+                    setPicked({
+                      directory: v.directory,
+                      version: v.version,
+                      plotCount: v.plot_count,
+                    })
+                    setCrops(null)
+                    setAlign(v.same)
+                  }}
+                >
+                  Import…
+                </Button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {others > 0 && (
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto px-0 text-xs"
+          data-testid="boundary-import-show-all"
+          onClick={() => {
+            setShowAll((x) => !x)
+            setFilter("")
+          }}
+        >
+          {showAll
+            ? "Only this field"
+            : `Show other experiments, sites and populations (${others})`}
+        </Button>
       )}
       {picked && (
         <div

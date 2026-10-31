@@ -485,6 +485,9 @@ export interface CloudOverview {
   rclone: boolean
   remotes: CloudRemote[]
   providers: CloudProvider[]
+  /** The cluster's key has a passphrase not entered yet: nothing there answers. */
+  key_locked?: boolean
+  ssh_key?: string
 }
 export interface CloudItem {
   name: string
@@ -512,6 +515,8 @@ export interface WorkItem {
   title: string
   state: "waiting" | "queued" | "running"
   detail?: string
+  /** A cluster copy that first waited for a job slot: the id the app started it as. */
+  fetch_id?: string
 }
 
 export const agentApi = {
