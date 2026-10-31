@@ -56,4 +56,15 @@ describe("season views", () => {
     expect(t.rows[2].values["2023-07-27"]).toBeUndefined()
     expect(seasonCsv(t).split("\n")[1]).toBe("1,IT84S-2246,0.2,0.8")
   })
+
+  it("leaves outliers out of the spread when asked (Tukey's fences)", () => {
+    const day = [0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.95].map((v, i) =>
+      rec(i + 1, "2023-07-27", v),
+    )
+    const [kept] = byDate(day)
+    expect(kept).toMatchObject({ n: 7, outliers: 0, max: 0.95 })
+    const [clean] = byDate(day, { excludeOutliers: true })
+    expect(clean).toMatchObject({ n: 6, outliers: 1, max: 0.35 })
+    expect(clean.mean).toBeCloseTo(0.325)
+  })
 })

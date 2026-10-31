@@ -18,6 +18,7 @@ import {
 
 import type { TraitRecordOutput } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { chartActiveDot, chartTooltip } from "@/lib/chartTheme"
 import { usePlotPolygons } from "../hooks/usePlotPolygons"
@@ -37,7 +38,13 @@ export function SeasonDateTrend({
   records: TraitRecordOutput[]
   valueLabel: string
 }) {
-  const points = useMemo(() => byDate(records), [records])
+  // Outliers are left out unless asked for (a bad plot stretches the bands).
+  const [keepOutliers, setKeepOutliers] = useState(false)
+  const points = useMemo(
+    () => byDate(records, { excludeOutliers: !keepOutliers }),
+    [records, keepOutliers],
+  )
+  const leftOut = points.reduce((n, p) => n + p.outliers, 0)
   if (points.length === 0)
     return (
       <p className="text-muted-foreground py-4 text-sm">
@@ -81,7 +88,11 @@ export function SeasonDateTrend({
           <Legend verticalAlign="top" height={28} />
           <Area
             dataKey="range"
-            name="All plots (min – max)"
+            name={
+              keepOutliers
+                ? "All plots (min – max)"
+                : "Plots, outliers left out (min – max)"
+            }
             stroke="none"
             fill="var(--primary)"
             fillOpacity={0.12}
@@ -106,10 +117,39 @@ export function SeasonDateTrend({
           />
         </ComposedChart>
       </ResponsiveContainer>
-      <p className="text-muted-foreground text-xs">
-        {points.length} flight date{points.length === 1 ? "" : "s"};{" "}
-        {points.map((p) => `${p.date}: ${p.n} plots`).join(" · ")}
-      </p>
+      <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <label
+          htmlFor="season-keep-outliers"
+          className="flex items-center gap-1.5"
+          title="Outliers: readings more than 1.5 × the interquartile range beyond the quartiles of their date (as a box plot marks them)"
+        >
+          <Checkbox
+            id="season-keep-outliers"
+            checked={keepOutliers}
+            onCheckedChange={(v) => setKeepOutliers(v === true)}
+            data-testid="season-keep-outliers"
+          />
+          Include outliers
+        </label>
+        <span data-testid="season-outliers">
+          {keepOutliers
+            ? "All readings shown"
+            : leftOut
+              ? `${leftOut} outlier reading${leftOut === 1 ? "" : "s"} left out`
+              : "No outliers"}
+        </span>
+        <span
+          className="cursor-help underline decoration-dotted underline-offset-2"
+          title={points
+            .map(
+              (p) =>
+                `${p.date}: ${p.n} plots${p.outliers ? ` (${p.outliers} left out)` : ""}`,
+            )
+            .join("\n")}
+        >
+          {points.length} flight date{points.length === 1 ? "" : "s"}
+        </span>
+      </div>
     </div>
   )
 }

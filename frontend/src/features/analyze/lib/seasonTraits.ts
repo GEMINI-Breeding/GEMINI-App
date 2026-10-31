@@ -44,6 +44,8 @@ export interface DatePoint {
   /** [min, max] and [q1, q3], for recharts' range areas. */
   range: [number, number]
   iqr: [number, number]
+  /** Readings left out as outliers (0 when they are kept). */
+  outliers: number
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -55,7 +57,17 @@ function quantile(sorted: number[], q: number): number {
 }
 
 /** The plots' spread per flight date, earliest first. */
-export function byDate(records: TraitRecordOutput[]): DatePoint[] {
+/**
+ * The plots' spread per flight date, earliest first. With `excludeOutliers`
+ * (the chart's default), readings beyond 1.5 × the interquartile range from
+ * the quartiles (Tukey's fences, as a box plot draws them) are left out of
+ * the mean and the bands: one bad plot (a shadow, a weed patch, a mis-cut
+ * boundary) no longer stretches the whole season's range.
+ */
+export function byDate(
+  records: TraitRecordOutput[],
+  { excludeOutliers = false }: { excludeOutliers?: boolean } = {},
+): DatePoint[] {
   const values = new Map<string, number[]>()
   for (const r of records) {
     const d = recordDate(r)
@@ -67,12 +79,20 @@ export function byDate(records: TraitRecordOutput[]): DatePoint[] {
   return [...values.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, vs]) => {
-      const s = [...vs].sort((a, b) => a - b)
+      const all = [...vs].sort((a, b) => a - b)
+      let s = all
+      if (excludeOutliers && all.length >= 4) {
+        const a = quantile(all, 0.25)
+        const b = quantile(all, 0.75)
+        const k = 1.5 * (b - a)
+        s = all.filter((v) => v >= a - k && v <= b + k)
+      }
       const mean = s.reduce((a, b) => a + b, 0) / s.length
       const q1 = quantile(s, 0.25)
       const q3 = quantile(s, 0.75)
       return {
         date,
+        outliers: all.length - s.length,
         n: s.length,
         mean,
         min: s[0],
