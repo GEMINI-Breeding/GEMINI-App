@@ -8,7 +8,6 @@ import {
 import { CircleHelp } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-
 import { Footer } from "@/components/Common/Footer"
 import { HelpSidebar, OnboardingTour } from "@/components/Help"
 import {
@@ -26,6 +25,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { BatchRunner } from "@/features/process/components/BatchRunner"
 import { hydrateRunStore } from "@/features/process/lib/runStore"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
@@ -193,6 +193,7 @@ function Layout() {
         {!isFullHeight && <Footer />}
       </SidebarInset>
       <ProcessPanel />
+      <BatchRunner />
       <ConnectionNotice />
       <WorkersNotice />
 

@@ -16,6 +16,8 @@ export interface MultivariateRequest {
   aggregation: Aggregation
   aggregation_date?: string // ISO date when aggregation === "date"
   collapse_replicates?: boolean
+  /** A row per plot per collection date (rows carry collection_date). */
+  per_date?: boolean
 }
 
 export interface MatrixRow {
@@ -28,6 +30,8 @@ export interface MatrixRow {
   site_name?: string | null
   accession_name?: string | null
   population?: string | null
+  /** The flight date, when the table shows each date separately. */
+  collection_date?: string | null
   values: Record<string, number | null>
 }
 

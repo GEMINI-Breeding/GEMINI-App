@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 
+import { traitLabel } from "@/lib/traitName"
 import type { AnovaPanel, AnovaResponse } from "../lib/multivariate"
 import {
   buildAnovaVerdict,
@@ -44,7 +45,7 @@ export function AnovaTable({ response }: Props) {
       </p>
       {[...byTrait.entries()].map(([trait, panels]) => (
         <div key={trait} className="flex flex-col gap-3">
-          <h3 className="text-base font-semibold">{trait}</h3>
+          <h3 className="text-base font-semibold">{traitLabel(trait)}</h3>
           {panels.map((panel, i) => (
             <Panel key={`${trait}-${i}`} panel={panel} />
           ))}

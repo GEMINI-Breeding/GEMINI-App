@@ -311,12 +311,23 @@ def _gemi_hpc(args: list[str], cluster: Optional[str] = None, timeout: int = 600
 
 def joined_session(cluster: str) -> bool:
     """This computer joined another person's shared session on the cluster (gemi-hpc join
-    writes a launch.conf that says so) rather than running its own."""
+    writes a launch.conf that says so) rather than running its own. Joining your own
+    session from a second computer (the same cluster login) is running your own: the
+    owner's login is yours to read."""
     try:
-        head = (CLUSTERS / cluster / "launch.conf").read_text(errors="replace")[:200]
+        text = (CLUSTERS / cluster / "launch.conf").read_text(errors="replace")
     except OSError:
         return False
-    return head.lstrip().startswith("# Joined")
+    head = text.lstrip()
+    if not head.startswith("# Joined"):
+        return False
+    m = re.search(r"from the settings on (\S+)", head.splitlines()[0])
+    host = re.search(r'^HPC_HOST=["\']?([^"\'\s#]+)', text, re.M)
+    if m and host:
+        def user(login: str) -> str:
+            return login.split("@", 1)[0].lower()
+        return user(m.group(1)) != user(host.group(1))
+    return True
 
 
 def active_cluster() -> Optional[str]:

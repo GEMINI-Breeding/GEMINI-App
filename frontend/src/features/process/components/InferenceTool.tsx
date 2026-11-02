@@ -20,13 +20,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Loader2, Play, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-
 import {
   type FileMetadata,
   FilesService,
   type JobOutput,
   JobsService,
-  PlotGeometryService,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -55,6 +53,7 @@ import {
   PredictionOverlay,
   useAuthedBlobUrl,
 } from "@/features/process/components/predictionView"
+import { loadActiveBoundaries } from "@/features/process/lib/activeBoundaries"
 import {
   type InferenceModel,
   modelDisplayName,
@@ -214,31 +213,6 @@ function BatchInferenceSummary({
   )
 }
 
-/**
- * Plot polygons of the active plot-geometry version at `directory`, or
- * undefined when there is none. Absence isn't an error: inference still
- * runs, it just can't attribute counts to plots.
- */
-async function loadActiveBoundaries(
-  directory: string,
-): Promise<GeoJSON.FeatureCollection | undefined> {
-  const versions =
-    ((await PlotGeometryService.apiPlotGeometryVersionsListListVersions({
-      requestBody: { directory },
-    })) ?? []) as Array<{ version: number; is_active?: boolean }>
-  const active =
-    versions.find((v) => v.is_active)?.version ?? versions[0]?.version
-  if (active == null) return undefined
-  const loaded =
-    (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
-      requestBody: { directory, version: active },
-    })) as unknown as {
-      state_snapshot?: { boundaries?: GeoJSON.FeatureCollection }
-    }
-  const fc = loaded?.state_snapshot?.boundaries
-  return fc?.features?.length ? fc : undefined
-}
-
 interface InferenceToolProps {
   pipeline: Pipeline
   run: Run
@@ -314,7 +288,26 @@ export function InferenceTool({
       },
     ]
   }, [scope, datasetShortIds, run.uploadScope?.batchLabel])
-  const [sourceIdx, setSourceIdx] = useState(0)
+  // The pipeline's preferred order of image sources (set in "Run across
+  // dates"): start on the first, and move on while a source has no images,
+  // until the person picks one.
+  const preferred = useMemo(() => {
+    const index: Record<string, number> = {
+      ortho: 0,
+      crops: 2,
+      straightened: 3,
+    }
+    const saved = (pipeline.params.inference_sources as
+      | string[]
+      | undefined) ?? ["ortho", "straightened", "crops"]
+    return saved.map((s) => index[s]).filter((i) => i != null)
+  }, [pipeline.params.inference_sources])
+  const [sourceIdx, setSourceIdxRaw] = useState(() => preferred[0] ?? 0)
+  const [sourcePicked, setSourcePicked] = useState(false)
+  const setSourceIdx = (i: number) => {
+    setSourcePicked(true)
+    setSourceIdxRaw(i)
+  }
   const activePrefix = sources[sourceIdx].prefix
   // "single" infers the previewed image; "all" hands the whole prefix to
   // one job that loops server-side and keys results by plot number.
@@ -337,6 +330,12 @@ export function InferenceTool({
       ),
     [imagesQuery.data],
   )
+  useEffect(() => {
+    if (sourcePicked || !imagesQuery.isSuccess || images.length) return
+    const at = preferred.indexOf(sourceIdx)
+    const next = at >= 0 ? preferred[at + 1] : undefined
+    if (next != null) setSourceIdxRaw(next)
+  }, [sourcePicked, imagesQuery.isSuccess, images.length, preferred, sourceIdx])
   const [imageIdx, setImageIdx] = useState(0)
   const activeImage = images[imageIdx] ?? null
   const activeImageName = activeImage?.object_name?.split("/").pop() ?? ""
@@ -370,12 +369,13 @@ export function InferenceTool({
       const stem =
         mode === "all" ? "all-plots" : activeImageName.replace(/\.[^.]+$/, "")
       const outputPath = `${plotImagesPrefix(scope)}inference/${stem}-${activeModelIdx}-${Date.now()}.json`
-      // Batch over plot images: send the active boundary version so the
-      // worker can write per-plot counts to trait_records. Those are the
-      // polygons the split used, so plot numbers line up with the PNGs.
-      // Raw drone frames have no plot identity, so nothing is ingested.
+      // Batch over per-plot images (cut from the orthomosaic, or from the
+      // raw frames): send the active boundary version so the worker can
+      // write per-plot counts to trait_records. Both are named by the plot
+      // numbers of those boundaries. Raw drone frames have no plot
+      // identity, so nothing is ingested for them.
       let boundaries: GeoJSON.FeatureCollection | undefined
-      if (mode === "all" && sourceIdx === 0) {
+      if (mode === "all" && sources[sourceIdx].plots) {
         boundaries = await loadActiveBoundaries(processedPrefix(scope))
       }
       const result = await executeStep({
@@ -526,6 +526,7 @@ export function InferenceTool({
   if (models.length === 0) {
     return (
       <div className="space-y-4">
+        {results}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">No models yet</CardTitle>
@@ -553,21 +554,23 @@ export function InferenceTool({
             </span>
           </CardContent>
         </Card>
-        {results}
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
+      {/* What has been run comes first; running another model below. */}
+      {results}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <CardTitle className="text-base">Inference setup</CardTitle>
+              <CardTitle className="text-base">Run a model</CardTitle>
               <CardDescription>
-                Pick a model + a sample image to test detection. Predictions are
-                written to MinIO and rendered below.
+                Try a model on one plot image, or run it on all of them. To run
+                it on every date at once, use "Run across dates" on the
+                pipeline's run list.
               </CardDescription>
             </div>
             <Button
@@ -808,8 +811,6 @@ export function InferenceTool({
             experiment={run.uploadScope?.experiment}
           />
         )}
-
-      {results}
 
       {predictions && (
         <Card>

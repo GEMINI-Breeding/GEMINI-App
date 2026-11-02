@@ -13,7 +13,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-
 import type { TraitRecordOutput } from "@/client"
 import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
 import { Button } from "@/components/ui/button"
@@ -25,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { chartTooltip } from "@/lib/chartTheme"
+import { traitLabel } from "@/lib/traitName"
 import {
   fetchAnova,
   fetchGGE,
@@ -283,7 +283,7 @@ export function TraitCharts({
   initialFilters,
 }: TraitChartsProps) {
   const [chartType, setChartType] = useState<ChartType>(
-    initialChart ?? "histogram",
+    initialChart ?? "date-trend",
   )
   const [groupBy, setGroupBy] = useState<GroupBy>("none")
   const one = (v?: string) => new Set(v ? [v] : [])
@@ -380,7 +380,9 @@ export function TraitCharts({
     filterPopulation,
   ])
 
-  const valueLabel = traitUnits ? `${traitName} (${traitUnits})` : traitName
+  const valueLabel = traitUnits
+    ? `${traitLabel(traitName)} (${traitUnits})`
+    : traitLabel(traitName)
 
   if (isLoading) {
     return (
@@ -424,9 +426,9 @@ export function TraitCharts({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="histogram">Histogram</SelectItem>
               <SelectItem value="date-trend">Through the season</SelectItem>
               <SelectItem value="season-table">Season table</SelectItem>
+              <SelectItem value="histogram">Histogram</SelectItem>
               <SelectItem value="forest" disabled={!hasGenotypes}>
                 Genotype range
               </SelectItem>

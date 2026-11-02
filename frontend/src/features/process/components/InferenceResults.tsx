@@ -56,10 +56,17 @@ function counted(j: JobOutput): string {
   }
   const rows = summaryRows(r).filter((x) => x.count != null)
   if (!rows.length) return "no plots counted"
+  const p = (j.parameters ?? {}) as {
+    recount?: boolean
+    confidence_threshold?: number
+  }
+  const again = p.recount
+    ? `recounted at ≥ ${(p.confidence_threshold ?? 0).toFixed(2)} · `
+    : ""
   const task = (j.parameters as { task_type?: string } | null)?.task_type
   if (task === "classification") return `${rows.length} plots labelled`
   const mean = rows.reduce((a, x) => a + (x.count ?? 0), 0) / rows.length
-  return `${rows.length} plots, mean ${mean.toFixed(1)} per plot`
+  return `${again}${rows.length} plots, mean ${mean.toFixed(1)} per plot`
 }
 
 const STATUS: Record<string, string> = {

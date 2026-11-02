@@ -14,9 +14,9 @@
  * date) and could mis-match the season the boundary was actually saved
  * under.
  */
+
 import { useQueries, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
-
 import { PlotGeometryService, type TraitOutput, TraitsService } from "@/client"
 import { Label } from "@/components/ui/label"
 import {
@@ -36,8 +36,10 @@ import {
 } from "@/features/process/components/AerialScopePicker"
 import { TraitMap } from "@/features/process/components/TraitMap"
 import { buildTitilerTileUrl } from "@/features/process/lib/activeOrtho"
+import { currentOrthoJobIds } from "@/features/process/lib/multiOrtho"
 import { processedPopulationPrefix } from "@/features/process/lib/paths"
 import { useAllRuns } from "@/features/process/lib/runStore"
+import { traitLabel } from "@/lib/traitName"
 import { PlotImageDialog } from "../components/PlotImageDialog"
 import {
   usePopulationListing,
@@ -229,15 +231,7 @@ export function AnalyzeMap() {
   // each flight's latest.
   const allRuns = useAllRuns()
   const latestJobs = useMemo(
-    () =>
-      new Set(
-        allRuns
-          .flatMap((r) => [
-            r.steps.orthomosaic?.jobIds?.at(-1),
-            ...(r.uploadScope?.treatments ?? []).map((t) => t.orthoJobId),
-          ])
-          .filter((j): j is string => Boolean(j)),
-      ),
+    () => new Set(allRuns.flatMap((r) => currentOrthoJobIds(r))),
     [allRuns],
   )
   const dayOrthos = useMemo(
@@ -446,7 +440,7 @@ export function AnalyzeMap() {
               <SelectItem value="__none__">Outline only</SelectItem>
               {traits.map((t) => (
                 <SelectItem key={idAsString(t.id)} value={idAsString(t.id)}>
-                  {t.trait_name}
+                  {traitLabel(t.trait_name)}
                   {t.trait_units ? ` (${t.trait_units})` : ""}
                 </SelectItem>
               ))}
@@ -543,7 +537,8 @@ export function AnalyzeMap() {
           className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
           data-testid="analyze-map-no-trait-overlap"
         >
-          {selectedTrait?.trait_name} has {overlap.recordCount} record
+          {traitLabel(selectedTrait?.trait_name)} has {overlap.recordCount}{" "}
+          record
           {overlap.recordCount === 1 ? "" : "s"} in this scope, but none match
           the plot numbering of these boundaries
           {overlap.recordRange

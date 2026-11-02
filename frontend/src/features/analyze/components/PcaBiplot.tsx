@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 
+import { traitLabel } from "@/lib/traitName"
 import type { PCAResponse } from "../lib/multivariate"
 import { linearScale } from "../lib/svg"
 
@@ -229,7 +230,7 @@ function PcaBiplotBody({ response }: Props) {
                 textAnchor={x1 >= x0 ? "start" : "end"}
                 className="fill-foreground text-[11px] font-medium"
               >
-                {l.trait_name}
+                {traitLabel(l.trait_name)}
               </text>
             </g>
           )

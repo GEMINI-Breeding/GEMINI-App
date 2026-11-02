@@ -8,7 +8,13 @@
  */
 import type { MatrixRow } from "./multivariate"
 
-export type SortKey = "plot" | "row" | "col" | "accession" | { trait: string }
+export type SortKey =
+  | "date"
+  | "plot"
+  | "row"
+  | "col"
+  | "accession"
+  | { trait: string }
 
 export type SortDir = "asc" | "desc"
 
@@ -18,6 +24,7 @@ function identity(r: MatrixRow) {
     row: r.plot_row_number ?? null,
     col: r.plot_column_number ?? null,
     accession: r.accession_name ?? "",
+    date: r.collection_date ?? "",
   }
 }
 
@@ -25,6 +32,7 @@ function identity(r: MatrixRow) {
  * Filter rows by a small query language, all terms ANDed:
  *   `plot:5`  `row:2`  `col:3`  exact number match
  *   `acc:CB27`                  accession contains (case-insensitive)
+ *   `date:2022-07`              flight date starts with
  *   anything else               free text over plot / row / col / accession
  *
  * Empty query returns every row. Unknown `key:` prefixes are treated as free
@@ -37,13 +45,14 @@ export function filterRows(rows: MatrixRow[], query: string): MatrixRow[] {
   return rows.filter((r) => {
     const id = identity(r)
     return terms.every((t) => {
-      const m = t.match(/^(plot|row|col|acc):(.*)$/i)
+      const m = t.match(/^(plot|row|col|acc|date):(.*)$/i)
       if (m) {
         const key = m[1].toLowerCase()
         const val = m[2]
         if (key === "acc") {
           return id.accession.toLowerCase().includes(val.toLowerCase())
         }
+        if (key === "date") return id.date.startsWith(val)
         const n = Number(val)
         if (!Number.isFinite(n)) return false
         const actual =
@@ -51,7 +60,7 @@ export function filterRows(rows: MatrixRow[], query: string): MatrixRow[] {
         return actual === n
       }
       const needle = t.toLowerCase()
-      return [id.plot, id.row, id.col, id.accession].some((v) =>
+      return [id.plot, id.row, id.col, id.accession, id.date].some((v) =>
         String(v ?? "")
           .toLowerCase()
           .includes(needle),
@@ -63,7 +72,9 @@ export function filterRows(rows: MatrixRow[], query: string): MatrixRow[] {
 function sortValue(r: MatrixRow, key: SortKey): number | string | null {
   if (typeof key === "object") return r.values[key.trait] ?? null
   const id = identity(r)
-  return key === "accession" ? id.accession || null : id[key]
+  if (key === "accession") return id.accession || null
+  if (key === "date") return id.date || null
+  return id[key]
 }
 
 /**
@@ -100,7 +111,9 @@ function cell(v: unknown): string {
 
 /** CSV of exactly the rows given (i.e. what the user is looking at). */
 export function tableCsv(rows: MatrixRow[], traitNames: string[]): string {
+  const dated = rows.some((r) => r.collection_date)
   const header = [
+    ...(dated ? ["collection_date"] : []),
     "plot_number",
     "plot_row_number",
     "plot_column_number",
@@ -115,6 +128,7 @@ export function tableCsv(rows: MatrixRow[], traitNames: string[]): string {
   for (const r of rows) {
     lines.push(
       [
+        ...(dated ? [r.collection_date] : []),
         r.plot_number,
         r.plot_row_number,
         r.plot_column_number,
@@ -130,4 +144,21 @@ export function tableCsv(rows: MatrixRow[], traitNames: string[]): string {
     )
   }
   return `${lines.join("\n")}\n`
+}
+
+/**
+ * Each date's matrix (one plot row per date) as one table: a row per plot
+ * per flight date, earliest first, with the traits of every date. Nothing
+ * is averaged across dates.
+ */
+export function rowsByDate(
+  perDate: { date: string; rows: MatrixRow[]; trait_names: string[] }[],
+): { rows: MatrixRow[]; trait_names: string[] } {
+  const traits = new Set<string>()
+  const rows: MatrixRow[] = []
+  for (const d of [...perDate].sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const t of d.trait_names) traits.add(t)
+    for (const r of d.rows) rows.push({ ...r, collection_date: d.date })
+  }
+  return { rows, trait_names: [...traits] }
 }

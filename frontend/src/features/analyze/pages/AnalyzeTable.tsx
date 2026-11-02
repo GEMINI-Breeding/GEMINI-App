@@ -12,24 +12,42 @@
  * trait_records long -> wide per plot. Reference data (hand measurements)
  * for the same experiment + site is joined on as extra, orange columns.
  */
+
 import { useQuery } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Download } from "lucide-react"
 import { useMemo, useState } from "react"
-
 import { ExperimentsService, type TraitOutput } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   ProcessScopeSelectors,
   useAerialScopeContext,
 } from "@/features/process/components/AerialScopePicker"
 import { processedPopulationPrefix } from "@/features/process/lib/paths"
+import { traitLabel } from "@/lib/traitName"
 import { PlotImageDialog } from "../components/PlotImageDialog"
-import { usePlotImages } from "../hooks/usePlotImages"
+import { usePlotImageListing } from "../hooks/usePlotImageListing"
 import { useScopeReference } from "../hooks/useScopeReference"
-import { fetchMatrix, type MatrixRow } from "../lib/multivariate"
+import {
+  matrixKey,
+  useScopeDates,
+  useTraitsByDate,
+} from "../hooks/useTraitsByDate"
+import {
+  fetchMatrix,
+  type MatrixRow,
+  type MultivariateRequest,
+} from "../lib/multivariate"
+import { imageFor, indexSeasonImages, kindLabel } from "../lib/plotSeason"
 import { attachReference, isRefColumn } from "../lib/referenceJoin"
 import {
   filterRows,
@@ -43,6 +61,12 @@ function sameKey(a: SortKey, b: SortKey): boolean {
   if (typeof a === "object" && typeof b === "object") return a.trait === b.trait
   return a === b
 }
+
+/** How the table treats several flight dates: each date on its own rows
+ *  (the default: nothing is averaged unasked), one date, or combined. */
+const EACH = "each"
+const MEAN = "mean"
+const LATEST = "latest"
 
 /** Reference (hand-measured) columns are orange, as they were on main. */
 const REF_TEXT = "text-orange-600 dark:text-orange-400"
@@ -80,30 +104,56 @@ export function AnalyzeTable() {
   const scopeReady = Boolean(
     ctx.experimentName && ctx.seasonName && ctx.siteName,
   )
-  const matrixQuery = useQuery({
-    queryKey: [
-      "analyze",
-      "table",
-      "matrix",
-      ctx.experimentName,
-      ctx.seasonName,
-      ctx.siteName,
-      ctx.populationName,
-      selectedTraits.join("\u0000"),
-    ],
-    queryFn: () =>
-      fetchMatrix({
+  const scopeNames = {
+    experiment: ctx.experimentName,
+    season: ctx.seasonName,
+    site: ctx.siteName,
+    population: ctx.populationName,
+  }
+  const { dates, isLoading: datesLoading } = useScopeDates(scopeNames)
+  const [dateMode, setDateMode] = useState<string>(EACH)
+  // A single date no longer in the scope (another site picked) falls back.
+  const mode =
+    dateMode === EACH || dateMode === MEAN || dateMode === LATEST
+      ? dateMode
+      : dates.includes(dateMode)
+        ? dateMode
+        : EACH
+
+  const want = scopeReady && selectedTraits.length > 0
+  // Each date: one matrix per date, merged into a row per plot per date.
+  const eachDate = mode === EACH && dates.length > 0
+  const byDate = useTraitsByDate({
+    scope: scopeNames,
+    traits: selectedTraits,
+    dates,
+    enabled: want && eachDate,
+  })
+  const combined = useQuery({
+    queryKey: [...matrixKey(scopeNames, selectedTraits), mode],
+    queryFn: () => {
+      const base = {
         trait_names: selectedTraits,
         experiment_names: [ctx.experimentName as string],
         season_names: [ctx.seasonName as string],
         site_names: [ctx.siteName as string],
         ...(ctx.populationName ? { populations: [ctx.populationName] } : {}),
-        aggregation: "mean",
-      }),
-    enabled: scopeReady && selectedTraits.length > 0,
+      }
+      const req: MultivariateRequest =
+        mode === MEAN || mode === LATEST || mode === EACH
+          ? { ...base, aggregation: mode === LATEST ? "latest" : "mean" }
+          : { ...base, aggregation: "date", aggregation_date: mode }
+      return fetchMatrix(req)
+    },
+    // "Each date" without dated records shows the plots once rather than
+    // nothing.
+    enabled: want && !eachDate && !datesLoading,
   })
+  const matrixQuery = eachDate ? byDate : combined
+  const dated = eachDate
 
   const [query, setQuery] = useState("")
+  // By plot: each plot's dates sit together, earliest first.
   const [sortKey, setSortKey] = useState<SortKey>("plot")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
   const refQuery = useScopeReference({
@@ -137,17 +187,28 @@ export function AnalyzeTable() {
     }
   }
 
+  const [openRow, setOpenRow] = useState<MatrixRow | null>(null)
+  // The opened plot's image: its crop's folder (the population picked, else
+  // the row's own), on the row's date.
+  const imagePop = ctx.populationName || openRow?.population || ""
   const imagesPrefix =
-    ctx.seasonName && ctx.experimentName && ctx.siteName && ctx.populationName
+    ctx.seasonName && ctx.experimentName && ctx.siteName && imagePop
       ? processedPopulationPrefix({
           year: ctx.seasonName,
           experiment: ctx.experimentName,
           location: ctx.siteName,
-          population: ctx.populationName,
+          population: imagePop,
         })
       : null
-  const plotImages = usePlotImages(imagesPrefix)
-  const [openRow, setOpenRow] = useState<MatrixRow | null>(null)
+  const plotImages = usePlotImageListing(openRow ? imagesPrefix : null)
+  const openImage = useMemo(() => {
+    if (!openRow || openRow.plot_number == null || !plotImages.data) return null
+    return imageFor(
+      indexSeasonImages(plotImages.data, imagePop),
+      String(openRow.plot_number),
+      openRow.collection_date,
+    )
+  }, [openRow, plotImages.data, imagePop])
 
   const download = () => {
     const url = URL.createObjectURL(
@@ -230,7 +291,7 @@ export function AnalyzeTable() {
                     }}
                     data-testid={`analyze-table-trait-${t}`}
                   />
-                  {t}
+                  {traitLabel(t)}
                 </label>
               ))}
             </div>
@@ -252,6 +313,34 @@ export function AnalyzeTable() {
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs" htmlFor="analyze-table-dates">
+                Dates
+              </Label>
+              <Select value={mode} onValueChange={setDateMode}>
+                <SelectTrigger
+                  id="analyze-table-dates"
+                  className="w-56"
+                  data-testid="analyze-table-dates"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={EACH}>
+                    Each date{dates.length ? ` (${dates.length})` : ""}
+                  </SelectItem>
+                  {dates.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      Only {d}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={LATEST}>
+                    Latest reading per plot
+                  </SelectItem>
+                  <SelectItem value={MEAN}>Mean across dates</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="min-w-72 flex-1 space-y-1">
               <Label className="text-xs" htmlFor="analyze-table-query">
                 Filter plots
@@ -261,7 +350,7 @@ export function AnalyzeTable() {
                 data-testid="analyze-table-query"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="plot:12  row:3  col:5  acc:CB27  — or any text"
+                placeholder="plot:12  acc:CB27  date:2022-07  — or any text"
               />
             </div>
             <Button
@@ -297,9 +386,16 @@ export function AnalyzeTable() {
           >
             {matrixQuery.isLoading
               ? "Loading…"
-              : `${shown.length} of ${allRows.length} plots`}
-            {!ctx.populationName &&
-              " · pick a population to open plot images from the table"}
+              : dated
+                ? `${shown.length} of ${allRows.length} readings · a row per plot per date`
+                : `${shown.length} of ${allRows.length} plots${
+                    mode === MEAN
+                      ? " · each value is the plot's mean across dates"
+                      : mode === LATEST
+                        ? " · each value is the plot's latest reading"
+                        : ""
+                  }`}
+            {" · click a row for its plot image"}
           </p>
 
           <div className="max-h-[60vh] overflow-auto rounded border text-xs">
@@ -308,6 +404,7 @@ export function AnalyzeTable() {
             <table className="w-full min-w-max whitespace-nowrap">
               <thead className="bg-muted sticky top-0">
                 <tr>
+                  {dated && header("Date", "date", "analyze-table-sort-date")}
                   {header("Plot", "plot", "analyze-table-sort-plot")}
                   {header("Row", "row", "analyze-table-sort-row")}
                   {header("Col", "col", "analyze-table-sort-col")}
@@ -317,18 +414,27 @@ export function AnalyzeTable() {
                     "analyze-table-sort-accession",
                   )}
                   {columns.map((t) =>
-                    header(t, { trait: t }, `analyze-table-sort-trait-${t}`),
+                    header(
+                      traitLabel(t),
+                      { trait: t },
+                      `analyze-table-sort-trait-${t}`,
+                    ),
                   )}
                 </tr>
               </thead>
               <tbody>
                 {shown.map((r, i) => (
                   <tr
-                    key={`${r.plot_id ?? ""}-${r.plot_number}-${r.plot_row_number}-${r.plot_column_number}-${i}`}
+                    key={`${r.collection_date ?? ""}-${r.plot_id ?? ""}-${r.plot_number}-${r.plot_row_number}-${r.plot_column_number}-${i}`}
                     className="hover:bg-muted/50 cursor-pointer border-t"
                     onClick={() => setOpenRow(r)}
                     data-testid="analyze-table-row"
                   >
+                    {dated && (
+                      <td className="px-2 py-1 font-mono">
+                        {r.collection_date}
+                      </td>
+                    )}
                     <td className="px-2 py-1">{r.plot_number ?? "—"}</td>
                     <td className="px-2 py-1">{r.plot_row_number ?? "—"}</td>
                     <td className="px-2 py-1">{r.plot_column_number ?? "—"}</td>
@@ -358,6 +464,16 @@ export function AnalyzeTable() {
         properties={
           openRow
             ? {
+                ...(openRow.collection_date
+                  ? { date: openRow.collection_date }
+                  : {}),
+                ...(openImage &&
+                (openImage.date !== openRow.collection_date ||
+                  openImage.kind !== "ortho")
+                  ? {
+                      image: `${kindLabel(openImage.kind)}, ${openImage.date}`,
+                    }
+                  : {}),
                 plot: openRow.plot_number,
                 row: openRow.plot_row_number,
                 col: openRow.plot_column_number,
@@ -366,11 +482,7 @@ export function AnalyzeTable() {
               }
             : undefined
         }
-        objectPath={
-          openRow?.plot_number != null
-            ? (plotImages.data?.get(openRow.plot_number) ?? null)
-            : null
-        }
+        objectPath={openImage?.path ?? null}
         loading={plotImages.isLoading && Boolean(imagesPrefix)}
       />
     </div>

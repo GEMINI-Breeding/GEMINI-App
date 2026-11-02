@@ -11,10 +11,10 @@
  * thermal camera also gives each plot's canopy temperature (the trait
  * Temp_veg_avg_C, in Analyze).
  */
+
 import { useQuery } from "@tanstack/react-query"
 import { Download } from "lucide-react"
 import { useMemo, useState } from "react"
-
 import type { FileMetadata } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -268,7 +268,7 @@ function CompanionSummary({
         `, lined up at ${a.k.toFixed(2)} RGB pixels per ${name.toLowerCase()} pixel (${a.pairs_used} of ${a.pairs_tried} test pairs agree${sec.frames_aligned_on_their_own ? `; ${sec.frames_aligned_on_their_own} frames fine-tuned on their own` : ""})`}
       ; {sec.plots_seen} plots.
       {sec.canopy_temperature_plots != null &&
-        ` Canopy temperature for ${sec.canopy_temperature_plots} plots, saved as the trait Temp_veg_avg_C (Analyze).`}
+        ` Canopy temperature for ${sec.canopy_temperature_plots} plots, saved as the trait Canopy temperature (Analyze).`}
       {sec.values === "image (no temperatures)" &&
         " These frames hold no temperatures (8-bit images), so no canopy temperature: upload the radiometric or converted frames (°C) for that."}
       {sec.trait_error && (

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 
+import { traitLabel } from "@/lib/traitName"
 import type { GGEResponse } from "../lib/multivariate"
 import { linearScale } from "../lib/svg"
 
@@ -76,8 +77,8 @@ function GgeBiplotBody({ response }: Props) {
     <section className="flex flex-col gap-3" data-testid="mv-gge">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
-          {response.trait_name} · {response.n_accessions} accessions ×{" "}
-          {response.n_envs} envs · PC1 {pc1Pct}% · PC2 {pc2Pct}%
+          {traitLabel(response.trait_name)} · {response.n_accessions} accessions
+          × {response.n_envs} envs · PC1 {pc1Pct}% · PC2 {pc2Pct}%
         </span>
         <label className="flex items-center gap-2 text-xs">
           <input

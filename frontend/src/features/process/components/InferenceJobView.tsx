@@ -35,6 +35,11 @@ import {
   PredictionOverlay,
   useAuthedBlobUrl,
 } from "@/features/process/components/predictionView"
+import { SaveThreshold } from "@/features/process/components/SaveThreshold"
+import {
+  recountable,
+  thresholdOf,
+} from "@/features/process/lib/recountThreshold"
 
 interface PlotResult {
   plot: string
@@ -158,8 +163,10 @@ export function InferenceJobView({
     ? params.task_type === "classification"
     : rows.some((r) => r.predictions.some((p) => !hasBox(p)))
 
+  // Starts where the job counted (the worker's default when it named none),
+  // so what shows matches the counts in Analyze.
   const [threshold, setThreshold] = useState(
-    classification ? 0 : (params.confidence_threshold ?? 0.25),
+    classification ? 0 : thresholdOf(job),
   )
   const [sortByCount, setSortByCount] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -363,6 +370,9 @@ export function InferenceJobView({
           </Button>
         </div>
       </div>
+      {!classification && recountable(job) && (
+        <SaveThreshold job={job} threshold={threshold} />
+      )}
 
       {predsQuery.isLoading ? (
         <div className="text-muted-foreground flex items-center gap-2 p-6 text-sm">

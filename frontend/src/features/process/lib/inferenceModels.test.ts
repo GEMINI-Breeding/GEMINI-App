@@ -165,3 +165,34 @@ describe("models from jobs, any provider", () => {
     })
   })
 })
+
+describe("weightsFileProblem", () => {
+  const zipBytes = (complete: boolean) => {
+    const head = [0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4]
+    const end = complete
+      ? [0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]
+      : []
+    return new Uint8Array([...head, ...new Array(100).fill(7), ...end])
+  }
+  it("accepts a whole checkpoint and an onnx file", async () => {
+    const { weightsFileProblem } = await import("./inferenceModels")
+    expect(
+      await weightsFileProblem(new File([zipBytes(true)], "best.pt")),
+    ).toBeNull()
+    expect(
+      await weightsFileProblem(new File([new Uint8Array([8, 1])], "m.onnx")),
+    ).toBeNull()
+  })
+  it("refuses an empty, cut-short or non-checkpoint file", async () => {
+    const { weightsFileProblem } = await import("./inferenceModels")
+    expect(await weightsFileProblem(new File([], "best.pt"))).toMatch(/empty/)
+    expect(
+      await weightsFileProblem(new File([zipBytes(false)], "best.pt")),
+    ).toMatch(/incomplete/)
+    expect(
+      await weightsFileProblem(
+        new File([new Uint8Array([1, 2, 3, 4, 5])], "best.pt"),
+      ),
+    ).toMatch(/isn't a PyTorch/)
+  })
+})

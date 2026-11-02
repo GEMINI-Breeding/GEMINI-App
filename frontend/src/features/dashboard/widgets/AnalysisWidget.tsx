@@ -5,6 +5,7 @@
  *
  * Every view leads with a sentence saying what it shows, then the detail.
  */
+
 import { useQuery } from "@tanstack/react-query"
 import { EyeOff, Loader2 } from "lucide-react"
 import { useEffect } from "react"
@@ -17,7 +18,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-
 import type { TraitRecord } from "@/features/analyze/api"
 import { CorrelationHeatmap } from "@/features/analyze/components/CorrelationHeatmap"
 import { HeritabilityPanel } from "@/features/analyze/components/HeritabilityPanel"
@@ -31,6 +31,7 @@ import {
   type MultivariateRequest,
 } from "@/features/analyze/lib/multivariate"
 import { CHART_PRIMARY, chartActiveDot, chartTooltip } from "@/lib/chartTheme"
+import { traitLabel } from "@/lib/traitName"
 import { useTraitRecords } from "../hooks/useTraitData"
 import type { AnalysisConfig } from "../types"
 
@@ -330,7 +331,7 @@ function Trend({
           <div key={t} className="group rounded-md border p-2">
             <div className="mb-1 flex items-center gap-1">
               <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                {t}
+                {traitLabel(t)}
               </span>
               {onHideTrait && (
                 <button

@@ -7,8 +7,8 @@
  * directly — fetch into a blob and render an object URL, revoking it on
  * unmount. Same approach as PlotImageGrid.
  */
-import { useEffect, useState } from "react"
 
+import { useEffect, useState } from "react"
 import { objectImageUrl } from "@/components/Common/PlotImage"
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getToken } from "@/lib/auth"
+import { traitLabel } from "@/lib/traitName"
 
 export interface PlotImageDialogProps {
   open: boolean
@@ -54,7 +55,12 @@ export function PlotImageDialog({
     let objectUrl: string | null = null
     setFailed(false)
     const token = getToken()
-    fetch(objectImageUrl(objectPath), {
+    // Callers pass object names from a listing ("Processed/…"); the download
+    // route wants the bucket first.
+    const full = /^(Processed|Raw|Models)\//.test(objectPath)
+      ? `gemini/${objectPath}`
+      : objectPath
+    fetch(objectImageUrl(full), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((r) => {
@@ -127,7 +133,9 @@ export function PlotImageDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
             {shown.map(([k, v]) => (
               <div key={k} className="min-w-0">
-                <dt className="text-muted-foreground truncate">{k}</dt>
+                <dt className="text-muted-foreground truncate" title={k}>
+                  {traitLabel(k)}
+                </dt>
                 <dd className="truncate font-medium">
                   {typeof v === "number"
                     ? v.toFixed(3).replace(/\.?0+$/, "")

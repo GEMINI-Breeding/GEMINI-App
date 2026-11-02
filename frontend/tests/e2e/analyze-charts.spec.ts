@@ -87,20 +87,25 @@ test.describe("Analyze charts — driven by imported records", () => {
     })
 
     // ---- Analyze ----
-    await page.goto("/analyze")
+    await page.goto("/analyze?view=single")
     await expect(page.getByRole("heading", { name: /^analyze$/i })).toBeVisible(
       { timeout: 15_000 },
     )
 
-    await page.getByTestId("analyze-trait-select").click()
+    // Traits are listed for the scope picked; include the rest and search.
+    await page.getByText(/Also traits not measured here/).click()
+    await page.getByTestId("analyze-trait-search").fill(traitName)
     await page
-      .getByRole("option", { name: new RegExp(traitName) })
+      .getByTestId("analyze-trait-list")
+      .getByRole("button", { name: new RegExp(traitName) })
       .first()
       .click()
 
-    // Histogram is the default chart type.
+    // Through the season is the default; start from the histogram.
     const charts = page.getByTestId("trait-charts")
     await expect(charts).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId("trait-charts-chart-type").click()
+    await page.getByRole("option", { name: "Histogram" }).click()
     await expect(charts.locator("svg.recharts-surface").first()).toBeVisible({
       timeout: 30_000,
     })

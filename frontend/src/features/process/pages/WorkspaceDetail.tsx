@@ -14,6 +14,7 @@ import {
   MoreVertical,
   Navigation,
   Plane,
+  Play,
   Plus,
   Trash2,
 } from "lucide-react"
@@ -40,6 +41,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { BatchRunDialog } from "@/features/process/components/BatchRunDialog"
 import { NewRunDialog } from "@/features/process/components/NewRunDialog"
 import { RunGroupList } from "@/features/process/components/RunGroupList"
 import {
@@ -65,6 +67,7 @@ function PipelineCard({
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false)
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<Run | null>(null)
   const [newRunOpen, setNewRunOpen] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
 
   const isAerial = pipeline.type === "aerial"
   const Icon = isAerial ? Plane : Navigation
@@ -105,6 +108,18 @@ function PipelineCard({
               >
                 Settings
               </Button>
+              {pipeline.type === "aerial" && runs.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBatchOpen(true)}
+                  title="Start steps on every date at once: plot images, trait extraction, inference"
+                  data-testid="batch-run-open"
+                >
+                  <Play className="mr-1 h-4 w-4" />
+                  Run across dates
+                </Button>
+              )}
               <Button
                 size="sm"
                 data-onboarding="process-new-run"
@@ -188,6 +203,14 @@ function PipelineCard({
           </CardContent>
         )}
       </Card>
+
+      <BatchRunDialog
+        pipeline={pipeline}
+        runs={runs}
+        workspaceId={workspaceId}
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+      />
 
       <NewRunDialog
         pipeline={pipeline}

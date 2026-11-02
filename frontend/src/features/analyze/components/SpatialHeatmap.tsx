@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 
+import { traitLabel } from "@/lib/traitName"
 import type { SpatialResponse, SpatialSite } from "../lib/multivariate"
 import { sequentialColor, textOn } from "../lib/svg"
 
@@ -28,7 +29,7 @@ export function SpatialHeatmap({ response }: Props) {
     <section className="flex flex-col gap-6" data-testid="mv-spatial">
       <header className="flex items-end gap-3">
         <h3 className="text-base font-semibold">
-          Field layout · {response.trait_name}
+          Field layout · {traitLabel(response.trait_name)}
         </h3>
         <span className="text-xs text-muted-foreground">
           {response.sites.length} site{response.sites.length === 1 ? "" : "s"} ·{" "}

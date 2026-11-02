@@ -24,12 +24,39 @@ import {
   tintVegetation,
   vegetationFraction,
 } from "@/features/process/lib/exgPreview"
+import { type Bounds, pickCovering } from "@/features/process/lib/multiOrtho"
 import { titilerBase } from "@/lib/stack"
 
 export interface PreviewPlot {
   label: string
   /** WGS84 [west, south, east, north]. */
   bbox: [number, number, number, number]
+}
+
+/** An orthomosaic the plots can be cropped from. A date flown in parts
+ *  (one flight per treatment) has one per part, each covering its block. */
+export interface PreviewSource {
+  /** The treatment it was flown for, when there are several. */
+  label: string | null
+  /** s3:// URL TiTiler reads. */
+  s3Url: string
+}
+
+/** Each source's extent, from TiTiler (extraction gives each plot to the
+ *  nearest orthomosaic that covers it). */
+async function sourceBounds(sources: PreviewSource[]): Promise<Bounds[]> {
+  return Promise.all(
+    sources.map(async (src) => {
+      const res = await fetch(
+        `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(src.s3Url)}&tilesize=256`,
+      )
+      if (!res.ok)
+        throw new Error(
+          `Couldn't read the orthomosaic's extent (${res.status})`,
+        )
+      return ((await res.json()) as { bounds: Bounds }).bounds
+    }),
+  )
 }
 
 /** Bounding box of a (Multi)Polygon feature, WGS84. */
@@ -69,29 +96,51 @@ async function loadCrop(s3Url: string, bbox: PreviewPlot["bbox"]) {
 }
 
 export function TraitPreview({
-  s3Url,
+  sources,
   plots,
   threshold,
 }: {
-  /** s3:// URL of the ortho TiTiler reads. */
-  s3Url: string
+  sources: PreviewSource[]
   plots: PreviewPlot[]
   threshold: number
 }) {
   const [plotIdx, setPlotIdx] = useState(0)
   const plot = plots[Math.min(plotIdx, plots.length - 1)]
+  const centres = useQuery({
+    queryKey: ["trait-preview-centres", sources.map((x) => x.s3Url).join(",")],
+    queryFn: () => sourceBounds(sources),
+    enabled: sources.length > 1,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+  // The plot's orthomosaic: the only one, or the one extraction gives it.
+  const source = (() => {
+    if (sources.length <= 1) return sources[0]
+    if (!centres.data || !plot) return undefined
+    return sources[pickCovering(plot.bbox, centres.data)]
+  })()
+  const s3Url = source?.s3Url ?? ""
   const crop = useQuery({
     queryKey: ["trait-preview", s3Url, plot?.bbox.join(",")],
     queryFn: () => loadCrop(s3Url, plot.bbox),
-    enabled: Boolean(plot),
+    enabled: Boolean(plot && source),
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
   const result = useMemo(() => {
     const img = crop.data
     if (!img) return null
+    // Nothing but transparent pixels: the orthomosaic doesn't cover the plot.
+    let covered = false
+    for (let i = 3; i < img.data.length; i += 4)
+      if (img.data[i] > 0) {
+        covered = true
+        break
+      }
+    if (!covered) return { outside: true as const }
     const mask = exgMask(img.data, img.width, img.height, threshold)
     return {
+      outside: false as const,
       vf: vegetationFraction(mask),
       pixels: tintVegetation(img.data, mask),
       width: img.width,
@@ -102,7 +151,7 @@ export function TraitPreview({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const c = canvasRef.current
-    if (!c || !result) return
+    if (!c || !result || result.outside) return
     c.width = result.width
     c.height = result.height
     c.getContext("2d")?.putImageData(
@@ -145,14 +194,32 @@ export function TraitPreview({
           </Select>
         </div>
         <p className="text-xs" data-testid="trait-preview-vf">
-          {result
+          {result && !result.outside
             ? `Vegetation fraction ${result.vf.toFixed(4)}`
-            : crop.isError
+            : crop.isError || result?.outside
               ? ""
               : "…"}
         </p>
       </div>
-      {crop.isLoading && (
+      {source?.label && sources.length > 1 && (
+        <p className="text-muted-foreground text-[11px]">
+          From the {source.label} orthomosaic (the one this plot is extracted
+          from).
+        </p>
+      )}
+      {result?.outside && (
+        <p className="text-amber-700 text-xs dark:text-amber-400">
+          {sources.length > 1
+            ? "None of this date's orthomosaics covers this plot: extraction will find nothing here."
+            : "The chosen orthomosaic doesn't cover this plot: extraction will find nothing here."}
+        </p>
+      )}
+      {centres.isError && (
+        <p className="text-destructive text-xs">
+          {(centres.error as Error).message}
+        </p>
+      )}
+      {(crop.isLoading || centres.isLoading) && (
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <Loader2 className="h-3 w-3 animate-spin" /> Loading plot…
         </div>
@@ -164,7 +231,7 @@ export function TraitPreview({
       )}
       <canvas
         ref={canvasRef}
-        className={`max-h-56 w-full rounded object-contain ${result ? "" : "hidden"}`}
+        className={`max-h-56 w-full rounded object-contain ${result && !result.outside ? "" : "hidden"}`}
         data-testid="trait-preview-canvas"
       />
       <p className="text-muted-foreground text-[11px]">

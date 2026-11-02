@@ -127,9 +127,7 @@ test.describe("Reference data", () => {
     // says so instead of closing on a toast.
     const result = page.getByTestId("ref-upload-result")
     await expect(result).toBeVisible({ timeout: 30_000 })
-    await expect(result.getByTestId("ref-upload-match")).toContainText(
-      "2 of 3",
-    )
+    await expect(result.getByTestId("ref-upload-match")).toContainText("2 of 3")
     await expect(result.getByTestId("ref-upload-match")).toContainText("99")
     await result.getByTestId("ref-upload-done").click()
     await expect(refDialog).toBeHidden({ timeout: 10_000 })

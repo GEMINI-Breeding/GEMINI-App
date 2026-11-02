@@ -143,14 +143,17 @@ test.describe("Analyze — GGE biplot chart", () => {
     }
 
     // ---- Analyze (single-trait) → pick trait → GGE biplot chart ----
-    await page.goto("/analyze")
+    await page.goto("/analyze?view=single")
     await expect(page.getByRole("heading", { name: /^analyze$/i })).toBeVisible(
       { timeout: 15_000 },
     )
 
-    await page.getByTestId("analyze-trait-select").click()
+    // Traits are listed for the scope picked; include the rest and search.
+    await page.getByText(/Also traits not measured here/).click()
+    await page.getByTestId("analyze-trait-search").fill(traitH)
     await page
-      .getByRole("option", { name: new RegExp(traitH) })
+      .getByTestId("analyze-trait-list")
+      .getByRole("button", { name: new RegExp(traitH) })
       .first()
       .click()
 

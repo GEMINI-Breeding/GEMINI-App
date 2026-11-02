@@ -247,11 +247,11 @@ export function useResolveScope() {
     })
   }
 
-  function resolveOrCreatePopulation(
+  async function resolveOrCreatePopulation(
     c: EntityChoice,
     parentExperiment: string,
   ) {
-    return resolveOrCreateEntity<PopulationOutput>(c, {
+    const resolved = await resolveOrCreateEntity<PopulationOutput>(c, {
       entityLabel: "population",
       search: async (name) =>
         (await PopulationsService.apiPopulationsGetPopulations({
@@ -269,6 +269,18 @@ export function useResolveScope() {
         })) as PopulationOutput,
       onResolved: invalidateAfter("populations"),
     })
+    // Populations are shared across experiments (names are unique): one
+    // picked from the list, or found by name, belongs to this experiment
+    // too. Creating it by name for the experiment links it (and makes
+    // nothing new); without this, its experiment listed no populations.
+    if (c.kind !== "none")
+      await PopulationsService.apiPopulationsCreatePopulation({
+        requestBody: {
+          population_name: resolved.name,
+          experiment_name: parentExperiment,
+        },
+      }).catch(() => undefined)
+    return resolved
   }
 
   function resolveOrCreateSeason(c: EntityChoice, parentExperiment: string) {

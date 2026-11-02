@@ -1,5 +1,6 @@
 import { type CSSProperties, useMemo, useState } from "react"
 
+import { traitLabel } from "@/lib/traitName"
 import type {
   HeritabilityResponse,
   HeritabilityPanel as HPanel,
@@ -55,7 +56,7 @@ function HeritabilityPanelBody({ response }: Props) {
       </p>
       {[...byTrait.entries()].map(([trait, panels]) => (
         <div key={trait} className="flex flex-col gap-3">
-          <h3 className="text-base font-semibold">{trait}</h3>
+          <h3 className="text-base font-semibold">{traitLabel(trait)}</h3>
           <div className="flex flex-wrap gap-3">
             {panels.map((panel, i) => (
               <Card key={`${trait}-${i}`} panel={panel} />

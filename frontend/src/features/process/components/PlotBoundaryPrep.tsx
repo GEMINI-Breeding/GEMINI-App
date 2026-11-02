@@ -100,7 +100,11 @@ import {
   rotateFeatures,
   translateFeaturesMeters,
 } from "@/features/process/lib/groupTransform"
-import { folderOrthos, nearestRegions } from "@/features/process/lib/multiOrtho"
+import {
+  currentOrthoJobIds,
+  folderOrthos,
+  nearestRegions,
+} from "@/features/process/lib/multiOrtho"
 import type { AerialScope } from "@/features/process/lib/paths"
 import {
   inFolder,
@@ -849,11 +853,8 @@ export function PlotBoundaryPrep({
             u.platform === scope.platform
           )
         })
-        // A run of several treatments has one current orthomosaic each.
-        .flatMap((r) => [
-          r.steps.orthomosaic?.jobIds?.at(-1),
-          ...(r.uploadScope?.treatments ?? []).map((t) => t.orthoJobId),
-        ])
+        // A run of several treatments: its treatments' orthomosaics.
+        .flatMap((r) => currentOrthoJobIds(r))
         .filter((j): j is string => Boolean(j)),
     )
     const kept = all.filter((o) => o.jobId && latest.has(o.jobId))

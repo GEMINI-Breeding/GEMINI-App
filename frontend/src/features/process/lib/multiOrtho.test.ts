@@ -76,3 +76,42 @@ describe("nearest regions", () => {
     ).toBe(0)
   })
 })
+
+describe("currentOrthoJobIds", () => {
+  it("uses a run's treatment orthomosaics, not its newer quick one", async () => {
+    const { currentOrthoJobIds } = await import("./multiOrtho")
+    const run = {
+      steps: { orthomosaic: { jobIds: ["full-ww", "full-dr", "quick-ww"] } },
+      uploadScope: {
+        treatments: [{ orthoJobId: "full-ww" }, { orthoJobId: "full-dr" }],
+      },
+    }
+    expect(currentOrthoJobIds(run)).toEqual(["full-ww", "full-dr"])
+    expect(
+      currentOrthoJobIds({ steps: { orthomosaic: { jobIds: ["a", "b"] } } }),
+    ).toEqual(["b"])
+    expect(currentOrthoJobIds({ steps: {} })).toEqual([])
+  })
+})
+
+describe("pickCovering", () => {
+  it("takes a plot the nearest flight's image doesn't reach from the one that covers it", async () => {
+    const { pickCovering } = await import("./multiOrtho")
+    // 8/17 Sorghum: two long N-S flights overlapping in the middle.
+    const ww = [-121.781795, 38.536577, -121.781484, 38.537794] as const
+    const dr = [-121.781602, 38.536594, -121.781344, 38.53781] as const
+    // A west-side plot near the north end: the drought centre is (barely)
+    // nearer, but its image stops east of the plot.
+    const plot = [
+      -121.78164055, 38.53765787, -121.78162384, 38.53768402,
+    ] as const
+    expect(pickCovering([...plot], [[...ww], [...dr]])).toBe(0)
+    // An east-side plot goes to drought.
+    expect(
+      pickCovering(
+        [-121.78143, 38.537704, -121.781412, 38.537748],
+        [[...ww], [...dr]],
+      ),
+    ).toBe(1)
+  })
+})

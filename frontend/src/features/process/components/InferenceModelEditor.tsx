@@ -6,7 +6,7 @@
  */
 import { Upload, X } from "lucide-react"
 import { useRef, useState } from "react"
-
+import { FilesService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -29,6 +29,7 @@ import {
   type TaskType,
   tasksFor,
   WEIGHTS_EXTENSIONS,
+  weightsFileProblem,
   weightsObjectPath,
 } from "@/features/process/lib/inferenceModels"
 import { uploadFileChunked } from "@/lib/chunkedUpload"
@@ -300,6 +301,12 @@ function LocalWeightsField({
       return
     }
     setError(null)
+    // A file cut short would only fail later, on the worker.
+    const problem = await weightsFileProblem(file)
+    if (problem) {
+      setError(problem)
+      return
+    }
     setProgress(0)
     const objectName = weightsObjectPath(file.name)
     try {
@@ -309,6 +316,16 @@ function LocalWeightsField({
         objectName,
         onProgress: (p) => setProgress(p.fraction),
       })
+      // What the worker will download must be the whole file.
+      const stored = await FilesService.apiFilesMetadataFilePathGetFileMetadata(
+        { filePath: `gemini/${objectName}` },
+      ).catch(() => null)
+      if (stored && stored.size != null && Number(stored.size) !== file.size) {
+        setError(
+          `The upload arrived incomplete (${Number(stored.size).toLocaleString()} of ${file.size.toLocaleString()} bytes). Upload it again.`,
+        )
+        return
+      }
       set({ weights_path: objectName, weights_name: file.name })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

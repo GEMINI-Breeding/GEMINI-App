@@ -210,17 +210,35 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         id: "analyze",
         title: "Analyze — View Results",
         description:
-          "This section covers exploring processed data. Pipeline Runs shows individual runs, Master Table merges all pipelines, Query lets you compare plots side-by-side, and Map shows spatial overlays.",
+          "Explore the measured traits: the Table of every plot by date, Query to compare plot images across the season, one trait at a time, several traits together, and the Map.",
         selector: '[data-onboarding="nav-analyze"]',
         route: "/analyze",
+      },
+      {
+        id: "analyze-table",
+        title: "Table",
+        description:
+          "Every plot's traits on each flight date, a row per plot per date. Filter, sort and download.",
+        selector: '[data-testid="analyze-tab-table"]',
+        route: "/analyze",
+      },
+      {
+        id: "analyze-query",
+        title: "Query",
+        description:
+          "Find plots by number or accession and see their images across the season, with each date's traits.",
+        selector: '[data-testid="analyze-tab-query"]',
+        route: "/analyze",
+        search: { view: "query" },
       },
       {
         id: "analyze-single",
         title: "Single Trait",
         description:
-          "Pick a trait to chart its values across dates, sites and genotypes.",
+          "Pick the scope, then a trait measured there, to see it through the season.",
         selector: '[data-testid="analyze-tab-single"]',
         route: "/analyze",
+        search: { view: "single" },
       },
       {
         id: "analyze-multi",
@@ -239,14 +257,6 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
         selector: '[data-testid="analyze-tab-map"]',
         route: "/analyze",
         search: { view: "map" },
-      },
-      {
-        id: "analyze-table",
-        title: "Table",
-        description: "Every trait record in one table, to filter and download.",
-        selector: '[data-testid="analyze-tab-table"]',
-        route: "/analyze",
-        search: { view: "table" },
       },
     ],
   },

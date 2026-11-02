@@ -24,6 +24,7 @@ import {
   useSubmitGwas,
 } from "@/features/genotyping/hooks/useGwas"
 import useCustomToast from "@/hooks/useCustomToast"
+import { traitLabel } from "@/lib/traitName"
 
 type Model = "lmm" | "mvlmm" | "bslmm"
 type LmmTest = "wald" | "lrt" | "score" | "all"
@@ -263,7 +264,7 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
                       checked={selectedTraits.has(id)}
                       onChange={() => toggleTrait(id)}
                     />
-                    <span>{t.trait_name}</span>
+                    <span>{traitLabel(t.trait_name)}</span>
                     {t.trait_units && (
                       <span className="text-muted-foreground text-xs">
                         ({t.trait_units})

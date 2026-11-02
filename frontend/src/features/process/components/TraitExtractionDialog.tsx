@@ -32,7 +32,11 @@ import {
 import type { PlotGeometryVersion } from "@/features/process/hooks/usePlotGeometry"
 import type { OrthoVersion } from "@/features/process/lib/orthoVersions"
 import type { RasterOption } from "@/features/process/lib/traitInputs"
-import { type PreviewPlot, TraitPreview } from "./TraitPreview"
+import {
+  type PreviewPlot,
+  type PreviewSource,
+  TraitPreview,
+} from "./TraitPreview"
 
 const NONE = "__none__"
 
@@ -61,7 +65,7 @@ export interface TraitDialogProps {
   demOptions?: RasterOption[]
   thermalOptions?: RasterOption[]
   /** For the live threshold preview: the chosen ortho and the plots. */
-  preview?: { s3Url: string; plots: PreviewPlot[] } | null
+  preview?: { sources: PreviewSource[]; plots: PreviewPlot[] } | null
   /** A date flown in parts: every treatment's orthomosaic is used, one job
    *  each, with the plots nearest it and its own elevation model. */
   treatmentOrthos?: { label: string; filename: string }[]
@@ -257,7 +261,7 @@ export function TraitExtractionDialog({
             </p>
             {preview && (
               <TraitPreview
-                s3Url={preview.s3Url}
+                sources={preview.sources}
                 plots={preview.plots}
                 threshold={state.exgThreshold}
               />

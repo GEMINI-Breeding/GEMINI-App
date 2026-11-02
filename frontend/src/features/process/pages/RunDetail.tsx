@@ -116,7 +116,7 @@ import {
 } from "@/features/process/lib/groundTrack"
 import { humanizeJobError } from "@/features/process/lib/jobErrors"
 import {
-  assignNearest,
+  assignCovering,
   type FolderOrtho,
   folderOrthos,
 } from "@/features/process/lib/multiOrtho"
@@ -262,7 +262,7 @@ const GROUND_STEPS: StepDef[] = [
   },
 ]
 
-const AERIAL_STEPS: StepDef[] = [
+export const AERIAL_STEPS: StepDef[] = [
   {
     key: "data_sync",
     label: "Data Sync",
@@ -366,6 +366,55 @@ function getStepStatus(
     return ss === "completed" || ss === "skipped"
   })
   return ready ? "ready" : "locked"
+}
+
+/** The steps `stepKey` needs: its `needs`, or every earlier non-optional
+ *  step. */
+function directNeeds(stepKey: string, steps: StepDef[]): string[] {
+  const idx = steps.findIndex((s) => s.key === stepKey)
+  const needs = steps[idx]?.needs
+  return needs
+    ? needs
+    : steps
+        .slice(0, Math.max(idx, 0))
+        .filter((s) => s.kind !== "optional")
+        .map((s) => s.key)
+}
+
+/**
+ * Whether another running step of the run holds `stepKey` back: one it
+ * needs (its input isn't ready) or one that needs it (re-running would
+ * change that step's input under it). Steps that don't touch each other —
+ * trait extraction from the orthomosaic and inference on the plot images —
+ * run side by side.
+ */
+export function blockedByRunning(
+  stepKey: string,
+  stepsState: Record<string, { status: string }>,
+  steps: StepDef[],
+): boolean {
+  const ancestors = new Set<string>()
+  const walk = (k: string) => {
+    for (const n of directNeeds(k, steps))
+      if (!ancestors.has(n)) {
+        ancestors.add(n)
+        walk(n)
+      }
+  }
+  walk(stepKey)
+  const related = (k: string) => {
+    if (ancestors.has(k)) return true
+    // k depends on stepKey (directly or through others)
+    const seen = new Set<string>()
+    const up = (x: string): boolean =>
+      directNeeds(x, steps).some(
+        (n) => n === stepKey || (!seen.has(n) && (seen.add(n), up(n))),
+      )
+    return up(k)
+  }
+  return Object.entries(stepsState).some(
+    ([k, v]) => k !== stepKey && v.status === "running" && related(k),
+  )
 }
 
 function getNextStep(
@@ -1353,7 +1402,7 @@ export function RunDetail() {
         | { features?: GeoJSON.Feature[] }
         | undefined
     )?.features
-    if (!traitOrtho || !feats?.length) return null
+    if (!feats?.length) return null
     const plots: PreviewPlot[] = []
     for (const [i, f] of feats.entries()) {
       const p = (f.properties ?? {}) as Record<string, unknown>
@@ -1363,7 +1412,9 @@ export function RunDetail() {
       const n = p.plot ?? p.plot_number
       plots.push({ label: n != null ? `Plot ${n}` : `Plot #${i + 1}`, bbox })
     }
-    return plots.length ? { s3Url: s3UrlForOrtho(traitOrtho), plots } : null
+    return plots.length
+      ? { plots, single: traitOrtho ? s3UrlForOrtho(traitOrtho) : null }
+      : null
   }, [previewBoundaries.data, traitOrtho])
 
   // The dialog picks the newest ortho and the active boundary version when
@@ -1804,10 +1855,6 @@ export function RunDetail() {
       <WorkerStartButton part={part} compute={computeQuery.data} />
     ) : null
   }
-
-  const isAnyExecuting = Object.values(stepsState).some(
-    (s) => s.status === "running",
-  )
 
   const runStepNow = useCallback(
     async (stepKey: string, opts: RunStepOptions = {}) => {
@@ -2409,11 +2456,10 @@ export function RunDetail() {
             const tj = (await res.json()) as {
               bounds: [number, number, number, number]
             }
-            const [w, so, e, n] = tj.bounds
-            return [(w + e) / 2, (so + n) / 2] as [number, number]
+            return tj.bounds
           }),
         )
-        const groups = assignNearest(fc.features as GeoJSON.Feature[], centres)
+        const groups = assignCovering(fc.features as GeoJSON.Feature[], centres)
         const inputs = []
         for (let i = 0; i < parts.length; i++) {
           const { t, o } = parts[i]
@@ -2682,7 +2728,11 @@ export function RunDetail() {
                       isLast
                       events={events}
                       lastProgress={lastProgress}
-                      isExecuting={isAnyExecuting}
+                      isExecuting={blockedByRunning(
+                        step.key,
+                        stepsState,
+                        steps,
+                      )}
                       isStarting={starting === step.key}
                       queuedNote={
                         status === "running" ? queuedNote(step.key) : null
@@ -2932,7 +2982,21 @@ export function RunDetail() {
           (o, i, a) => a.findIndex((x) => x.path === o.path) === i,
         )}
         thermalOptions={thermalOptions(flightFiles, traitOrtho?.path ?? null)}
-        preview={traitPreview}
+        preview={(() => {
+          if (!traitPreview) return null
+          // A date flown in parts: each plot from its treatment's
+          // orthomosaic, as extraction does it.
+          const sources =
+            treatmentParts.length > 1
+              ? treatmentParts.map(({ t, o }) => ({
+                  label: t.label,
+                  s3Url: `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`,
+                }))
+              : traitPreview.single
+                ? [{ label: null, s3Url: traitPreview.single }]
+                : []
+          return sources.length ? { sources, plots: traitPreview.plots } : null
+        })()}
       />
 
       <ThermalGpsBlockedDialog

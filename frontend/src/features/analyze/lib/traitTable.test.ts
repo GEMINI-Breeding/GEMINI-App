@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { MatrixRow } from "./multivariate"
-import { filterRows, sortRows, tableCsv } from "./traitTable"
+import { filterRows, rowsByDate, sortRows, tableCsv } from "./traitTable"
 
 const row = (
   plot: number,
@@ -82,5 +82,49 @@ describe("tableCsv", () => {
   it("escapes quotes and commas in accession names", () => {
     const csv = tableCsv([row(3, 1, 3, 'A, "b"', { t: 1 })], ["t"])
     expect(csv.split("\n")[1]).toContain('"A, ""b"""')
+  })
+})
+
+describe("by date", () => {
+  const perDate = [
+    {
+      date: "2022-07-20",
+      trait_names: ["h"],
+      rows: [{ plot_number: 1, values: { h: 2 } }],
+    },
+    {
+      date: "2022-06-30",
+      trait_names: ["h", "vf"],
+      rows: [
+        { plot_number: 1, values: { h: 1, vf: 0.5 } },
+        { plot_number: 2, values: { h: 1.5, vf: 0.4 } },
+      ],
+    },
+  ]
+  it("keeps one row per plot per date, earliest date first", () => {
+    const t = rowsByDate(perDate)
+    expect(t.trait_names).toEqual(["h", "vf"])
+    expect(t.rows.map((r) => [r.collection_date, r.plot_number])).toEqual([
+      ["2022-06-30", 1],
+      ["2022-06-30", 2],
+      ["2022-07-20", 1],
+    ])
+  })
+  it("sorting by plot keeps each plot's dates in order", () => {
+    const sorted = sortRows(rowsByDate(perDate).rows, "plot", "asc")
+    expect(sorted.map((r) => r.collection_date)).toEqual([
+      "2022-06-30",
+      "2022-07-20",
+      "2022-06-30",
+    ])
+  })
+  it("filters by date prefix and writes the date into the CSV", () => {
+    const rows = rowsByDate(perDate).rows
+    expect(filterRows(rows, "date:2022-07")).toHaveLength(1)
+    const csv = tableCsv(rows, ["h"])
+    expect(csv.split("\n")[0].startsWith("collection_date,plot_number")).toBe(
+      true,
+    )
+    expect(csv.split("\n")[1].startsWith("2022-06-30,1")).toBe(true)
   })
 })

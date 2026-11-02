@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from "react"
 interface MultiSelectFilterProps {
   label: string
   options: string[]
+  /** What to show for an option (the value stays the same). */
+  optionLabel?: (option: string) => string
   selected: Set<string>
   onChange: (next: Set<string>) => void
   width?: string
@@ -20,6 +22,7 @@ interface MultiSelectFilterProps {
 export function MultiSelectFilter({
   label,
   options,
+  optionLabel = (o) => o,
   selected,
   onChange,
   width = "w-44",
@@ -46,7 +49,7 @@ export function MultiSelectFilter({
   const summary = isAll
     ? `All (${options.length})`
     : selected.size === 1
-      ? [...selected][0]
+      ? optionLabel([...selected][0])
       : `${selected.size} selected`
 
   function toggle(value: string) {
@@ -96,7 +99,7 @@ export function MultiSelectFilter({
                   onChange={() => toggle(opt)}
                   className="accent-primary w-4 h-4"
                 />
-                <span className="truncate">{opt}</span>
+                <span className="truncate">{optionLabel(opt)}</span>
               </label>
             ))}
           </div>

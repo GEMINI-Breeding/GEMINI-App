@@ -546,6 +546,23 @@ export function BoundaryMap({
     const map = mapRef.current
     if (!map || !orthoLayers?.length) return
     const made: { layer: L.TileLayer; pane: HTMLElement }[] = []
+    // Each one in full underneath, so where the one nearest a spot has no
+    // image (a flight stopping short of the field's end) another shows.
+    const under =
+      map.getPane("orthoUnder") ??
+      map.createPane(
+        "orthoUnder",
+        (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+      )
+    under.style.zIndex = "245"
+    const base = orthoLayers.map((o) =>
+      L.tileLayer(o.url, {
+        opacity: orthoOpacity ?? 0.9,
+        pane: "orthoUnder",
+        maxNativeZoom: 22,
+        maxZoom: 24,
+      }).addTo(map),
+    )
     orthoLayers.forEach((o, i) => {
       const name = `orthoPane${i}`
       const pane =
@@ -584,6 +601,7 @@ export function BoundaryMap({
         map.removeLayer(layer)
         pane.style.clipPath = "none"
       }
+      for (const layer of base) map.removeLayer(layer)
     }
   }, [orthoLayers, orthoOpacity])
 

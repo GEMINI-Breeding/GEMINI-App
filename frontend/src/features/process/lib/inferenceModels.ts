@@ -220,6 +220,8 @@ const JOB_ONLY = new Set([
   "task_type",
   "model_source",
   "per_plot",
+  "recount",
+  "recount_of",
 ])
 
 /**
@@ -269,4 +271,44 @@ export function sameModel(a: InferenceModel, b: InferenceModel): boolean {
 export function weightsObjectPath(fileName: string, now = Date.now()): string {
   const safe = fileName.replace(/[^A-Za-z0-9._-]+/g, "_")
   return `Models/weights/${now}-${safe}`
+}
+
+/**
+ * Why a weights file can't be run, read from its bytes before uploading
+ * (null when it looks whole). A PyTorch .pt checkpoint is a zip archive,
+ * which ends with an end-of-archive record: a file cut short (an unfinished
+ * download or copy) lacks it and fails on the worker with "not a loadable
+ * checkpoint" — only after the upload and a queued run.
+ */
+async function bytesOf(blob: Blob): Promise<Uint8Array> {
+  if (typeof blob.arrayBuffer === "function")
+    return new Uint8Array(await blob.arrayBuffer())
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(new Uint8Array(r.result as ArrayBuffer))
+    r.onerror = () => reject(r.error)
+    r.readAsArrayBuffer(blob)
+  })
+}
+
+export async function weightsFileProblem(file: File): Promise<string | null> {
+  if (file.size === 0) return `${file.name} is empty.`
+  if (!file.name.toLowerCase().endsWith(".pt")) return null
+  const head = await bytesOf(file.slice(0, 4))
+  const isZip =
+    head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04
+  if (!isZip)
+    return `${file.name} isn't a PyTorch checkpoint (a .pt saved by Ultralytics / torch.save).`
+  // The end record sits in the last 22 bytes, plus a comment of up to 64 KB.
+  const tailSize = Math.min(file.size, 22 + 65_535)
+  const tail = await bytesOf(file.slice(file.size - tailSize))
+  for (let i = tail.length - 22; i >= 0; i--)
+    if (
+      tail[i] === 0x50 &&
+      tail[i + 1] === 0x4b &&
+      tail[i + 2] === 0x05 &&
+      tail[i + 3] === 0x06
+    )
+      return null
+  return `${file.name} is incomplete (cut short, ${(file.size / 1e6).toFixed(1)} MB): copy or download it again, then upload.`
 }

@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
-
 import {
   type ExperimentOutput,
   ExperimentsService,
@@ -27,6 +26,7 @@ import {
 } from "@/components/ui/table"
 import { idAsString } from "@/features/admin/lib/ids"
 import { fetchTraitRecords } from "@/features/analyze/lib/traitRecords"
+import { traitLabel } from "@/lib/traitName"
 
 const PAGE_SIZE = 50
 
@@ -273,7 +273,7 @@ export function TraitDataViewer() {
             <SelectContent>
               {traits.map((t) => (
                 <SelectItem key={idAsString(t.id)} value={idAsString(t.id)}>
-                  {t.trait_name}
+                  {traitLabel(t.trait_name)}
                   {t.trait_units ? ` (${t.trait_units})` : ""}
                 </SelectItem>
               ))}

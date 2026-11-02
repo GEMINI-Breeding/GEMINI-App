@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query"
 import { Pin } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-
 import {
   type ExperimentOutput,
   ExperimentsService,
@@ -19,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useTraitRecords } from "@/features/dashboard/hooks/useTraitData"
 import { pinWidget } from "@/features/dashboard/store"
 import { correlationSentence } from "@/features/dashboard/widgets/AnalysisWidget"
+import { traitLabel } from "@/lib/traitName"
 import { AggregationControl } from "../components/AggregationControl"
 import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
 import { ManovaTable } from "../components/ManovaTable"
@@ -346,6 +346,7 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
             <MultiSelectFilter
               label="Traits"
               options={traitOptions}
+              optionLabel={traitLabel}
               selected={corrTraits}
               onChange={setCorrTraits}
               width="w-72"
@@ -441,6 +442,7 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
             <MultiSelectFilter
               label="Traits"
               options={traitOptions}
+              optionLabel={traitLabel}
               selected={pcaTraits}
               onChange={setPcaTraits}
               width="w-72"
@@ -494,6 +496,7 @@ export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
             <MultiSelectFilter
               label="Traits"
               options={traitOptions}
+              optionLabel={traitLabel}
               selected={manovaTraits}
               onChange={setManovaTraits}
               width="w-72"

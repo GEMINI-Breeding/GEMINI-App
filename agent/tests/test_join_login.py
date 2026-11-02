@@ -51,7 +51,7 @@ def test_a_joined_session_is_recognised(tmp_path, monkeypatch):
     """A member's computer does not ask the cluster for the owner's login (it is refused)."""
     monkeypatch.setattr(H, "CLUSTERS", tmp_path)
     (tmp_path / "farmish").mkdir()
-    (tmp_path / "farmish" / "launch.conf").write_text("# Joined 2026-10-30 from the settings on a@b (gemi-hpc join)\nHPC_HOST=a@b\n")
+    (tmp_path / "farmish" / "launch.conf").write_text("# Joined 2026-10-30 from the settings on a@b (gemi-hpc join)\nHPC_HOST=c@b\n")
     (tmp_path / "own").mkdir()
     (tmp_path / "own" / "launch.conf").write_text("# Launch settings for own\nHPC_HOST=me@b\n")
     assert H.joined_session("farmish")

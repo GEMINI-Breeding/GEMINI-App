@@ -4,7 +4,7 @@ import { z } from "zod"
 import { AnalyzeDashboard } from "@/features/analyze/pages/AnalyzeDashboard"
 
 const analyzeSearchSchema = z.object({
-  view: z.enum(["single", "multi", "map", "table"]).optional(),
+  view: z.enum(["table", "query", "single", "multi", "map"]).optional(),
   /** Single trait opened from a link: the trait (by name), the chart and the scope.
    *  Coerced: the router reads "2026" in the address as a number. */
   trait: z.coerce.string().optional(),

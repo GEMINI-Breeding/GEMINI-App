@@ -73,12 +73,11 @@ const SECTIONS: Record<string, Section> = {
     title: "Analyze",
     docPath: "/app_guide/analyze/",
     bullets: [
-      "Pipeline Runs tab: browse individual runs, inspect plot images with detection overlays",
-      "Master Table: merged view across all pipelines and dates for a workspace",
-      "Query tab: search and pin plots for side-by-side comparison",
-      "Map tab: spatial overlay of orthomosaics, plot boundaries, and trait values",
-      "Use the Color By selector to visualise any trait or reference metric on the map",
-      "Click the refresh button (↺) to pick up newly completed pipeline runs",
+      "Table (opens first): every plot's traits on each flight date, one row per plot per date; switch Dates to one date, the latest reading or the mean; filter with plot:12, acc:CB27 or date:2022-07; download as CSV",
+      "Query: find plots by number or accession and see each one's image on every date side by side, with that date's traits under it; add several plots to compare them, click an image to page through the season",
+      "Single trait: pick the experiment, season, site and crop first, then one of the traits measured there; it opens through the season (switch to the season table, histogram, genotype range, field layout and more)",
+      "Multivariate: several traits at once (correlation, PCA, ANOVA, heritability, GGE)",
+      "Map: each date's orthomosaic with its plots coloured by a trait",
     ],
   },
 }

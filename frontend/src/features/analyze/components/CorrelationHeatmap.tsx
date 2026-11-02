@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react"
-
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { traitLabel } from "@/lib/traitName"
 
 import type {
   CorrelationMatrix,
@@ -137,8 +137,8 @@ export function CorrelationHeatmap({
                 transform={`rotate(-45, ${px}, ${py})`}
                 className="fill-foreground text-xs"
               >
-                <title>{name}</title>
-                {short(name, maxChars)}
+                <title>{traitLabel(name)}</title>
+                {short(traitLabel(name), maxChars)}
               </text>
             )
           })}
@@ -150,8 +150,8 @@ export function CorrelationHeatmap({
               textAnchor="end"
               className="fill-foreground text-xs"
             >
-              <title>{name}</title>
-              {short(name, maxChars)}
+              <title>{traitLabel(name)}</title>
+              {short(traitLabel(name), maxChars)}
             </text>
           ))}
           {m.matrix.flatMap((row, i) =>
