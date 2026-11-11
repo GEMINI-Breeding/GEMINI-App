@@ -5,14 +5,16 @@
  * The idea: show one example, let the models do the rest, confirm.
  *   1. Start from a model's detections (dashed: proposed) or a blank image.
  *   2. Draw a box (B) or click (P) on ONE object; F finds every similar
- *      object (YOLOE visual prompt) as proposals.
+ *      object (YOLOE visual prompt) as proposals. Or describe it in words
+ *      (D): SAM 3 proposes every match, with outlines (zero-shot).
  *   3. Enter keeps all proposals; clicking one keeps or drops it.
  *   4. M turns kept boxes into exact masks (SAM 2).
  *   5. → saves the image and moves on. Objects kept so far are examples for
  *      the next images: their similar objects are proposed on arrival.
  *
  * Prompts run as LOCATE_PLANTS jobs with `prompted` (worker prompted.py).
- * The set is saved as versions next to the plot images; COCO export.
+ * The set is saved as versions next to the plot images; COCO export, or
+ * Train → a YOLO model fine-tuned on it (TrainModelDialog, TRAIN_MODEL).
  */
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
@@ -20,14 +22,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  GraduationCap,
   Loader2,
   Maximize,
   MousePointer2,
   Plus,
+  Redo2,
   Save,
   Sparkles,
   SquareDashedMousePointer,
   Trash2,
+  Type,
+  Undo2,
   WandSparkles,
   ZoomIn,
   ZoomOut,
@@ -43,6 +49,8 @@ import {
   classColour,
   useAuthedBlobUrl,
 } from "@/features/process/components/predictionView"
+import { TrainModelDialog } from "@/features/process/components/TrainModelDialog"
+import type { InferenceModel } from "@/features/process/lib/inferenceModels"
 import {
   type Ann,
   fromPrediction,
@@ -52,6 +60,13 @@ import {
   newProposals,
   toCoco,
 } from "@/features/process/lib/labelSet"
+import { useAllPipelines } from "@/features/process/lib/runStore"
+import {
+  PROMPT_TIPS,
+  promptClasses,
+  ZERO_SHOT_PRESETS,
+} from "@/features/process/lib/zeroShot"
+import { useCredentials } from "@/lib/credentials"
 
 type Tool = "select" | "box" | "point"
 
@@ -122,6 +137,7 @@ export function LabelingWorkspace({
   initial,
   experimentId,
   onClose,
+  onUseTrained,
 }: {
   /** Object names of the images to label. */
   images: string[]
@@ -129,6 +145,8 @@ export function LabelingWorkspace({
   initial?: Record<string, Parameters<typeof fromPrediction>[0][]>
   experimentId?: string
   onClose: () => void
+  /** Add a model trained from these labels to the pipeline. */
+  onUseTrained?: (m: InferenceModel) => void
 }) {
   const directory = labelSetDirectory(images[0] ?? "")
   const saved = useQuery({
@@ -180,6 +198,17 @@ export function LabelingWorkspace({
 
   const img = set.images[image]
   const anns = img?.annotations ?? []
+  // Undo / redo, per image: each change to the boxes is one step.
+  const history = useRef(new Map<string, { undo: Ann[][]; redo: Ann[][] }>())
+  const [, setHistoryTick] = useState(0)
+  const stacks = useCallback((key: string) => {
+    let h = history.current.get(key)
+    if (!h) {
+      h = { undo: [], redo: [] }
+      history.current.set(key, h)
+    }
+    return h
+  }, [])
   const setAnns = useCallback(
     (fn: (a: Ann[]) => Ann[]) => {
       setSet((s) => {
@@ -189,18 +218,52 @@ export function LabelingWorkspace({
           annotations: [],
           done: false,
         }
+        const next = fn(cur.annotations)
+        if (JSON.stringify(next) === JSON.stringify(cur.annotations)) return s
+        const h = stacks(image)
+        // The same state twice (React may run this twice): one step.
+        if (h.undo.at(-1) !== cur.annotations) {
+          h.undo.push(cur.annotations)
+          if (h.undo.length > 200) h.undo.shift()
+          h.redo = []
+        }
         return {
           ...s,
           images: {
             ...s.images,
-            [image]: { ...cur, annotations: fn(cur.annotations) },
+            [image]: { ...cur, annotations: next },
           },
         }
       })
       setDirty(true)
+      setHistoryTick((t) => t + 1)
     },
-    [image],
+    [image, stacks],
   )
+  const stepHistory = useCallback(
+    (back: boolean) => {
+      const h = stacks(image)
+      const from = back ? h.undo : h.redo
+      const to = back ? h.redo : h.undo
+      const target = from.pop()
+      if (!target) return
+      setSet((s) => {
+        const cur = s.images[image]
+        if (!cur) return s
+        if (to.at(-1) !== cur.annotations) to.push(cur.annotations)
+        return {
+          ...s,
+          images: { ...s.images, [image]: { ...cur, annotations: target } },
+        }
+      })
+      setSelected(null)
+      setDirty(true)
+      setHistoryTick((t) => t + 1)
+    },
+    [image, stacks],
+  )
+  const canUndo = (history.current.get(image)?.undo.length ?? 0) > 0
+  const canRedo = (history.current.get(image)?.redo.length ?? 0) > 0
 
   // First visit: the model's detections, as proposals.
   useEffect(() => {
@@ -301,6 +364,73 @@ export function LabelingWorkspace({
     void findSimilar(true)
   }, [loaded, image, carriedExample, anns.length, findSimilar])
 
+  // Describe it (zero-shot): a written description → SAM 3 proposals with
+  // outlines. A Hugging Face token comes from any pipeline model that has one.
+  const pipelines = useAllPipelines()
+  const keys = useCredentials()
+  const hfToken = useMemo(() => {
+    if (keys.data?.hf_token) return keys.data.hf_token
+    for (const p of pipelines) {
+      const ms = p.params?.roboflow_models
+      if (Array.isArray(ms))
+        for (const m of ms as { hf_token?: string }[])
+          if (m?.hf_token?.trim()) return m.hf_token.trim()
+    }
+    return ""
+  }, [pipelines, keys.data])
+  const [describeOpen, setDescribeOpen] = useState(false)
+  const [describeModel, setDescribeModel] = useState("sam3")
+  const [describeText, setDescribeText] = useState("")
+  const [lastDescribe, setLastDescribe] = useState<string | null>(null)
+  const describe = useCallback(
+    async (text: string, auto = false) => {
+      if (!image || !text.trim()) return
+      setBusy("Finding by description…")
+      try {
+        const preds = await ask(image, {
+          mode: "describe",
+          prompt: text,
+          model: describeModel,
+          ...(hfToken ? { hf_token: hfToken } : {}),
+        })
+        const proposed = preds
+          .map((p) => fromPrediction(p, "proposed", "model"))
+          .filter((a): a is Ann => Boolean(a))
+        const names = promptClasses(text).map((c) => c.name)
+        setSet((st) => ({
+          ...st,
+          classes: [
+            ...st.classes,
+            ...names.filter((n) => !st.classes.includes(n)),
+          ],
+        }))
+        setAnns((a) => [...a, ...newProposals(a, proposed)])
+        setLastDescribe(text)
+        if (!auto)
+          toast.success(
+            `${proposed.length} proposed. Enter keeps them all; click any wrong one to drop it.`,
+          )
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "Finding by description failed",
+        )
+      } finally {
+        setBusy(null)
+      }
+    },
+    [image, ask, describeModel, hfToken, setAnns],
+  )
+  // Carry-over: the next untouched image gets the same description's proposals.
+  const described = useRef(new Set<string>())
+  useEffect(() => {
+    if (!loaded || !image || !lastDescribe || described.current.has(image))
+      return
+    if (anns.length || carriedExample) return
+    described.current.add(image)
+    void describe(lastDescribe, true)
+  }, [loaded, image, lastDescribe, anns.length, carriedExample, describe])
+  const [trainOpen, setTrainOpen] = useState(false)
+
   const segmentKept = useCallback(async () => {
     const need = anns.filter((a) => a.status === "kept" && !a.points)
     if (!need.length) {
@@ -388,12 +518,21 @@ export function LabelingWorkspace({
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return
-      if (busy) return
       const k = e.key.toLowerCase()
+      // ⌘Z / Ctrl+Z undo; ⇧⌘Z / Ctrl+Shift+Z / Ctrl+Y redo.
+      if ((e.metaKey || e.ctrlKey) && (k === "z" || k === "y")) {
+        e.preventDefault()
+        stepHistory(k === "z" && !e.shiftKey)
+        return
+      }
+      // Other shortcuts are plain keys: leave ⌘/Ctrl combinations to the browser.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (busy) return
       if (k === "b") setTool("box")
       else if (k === "p") setTool("point")
       else if (k === "v") setTool("select")
       else if (k === "f") void findSimilar()
+      else if (k === "d") setDescribeOpen((v) => !v)
       else if (k === "m") void segmentKept()
       else if (e.key === "Enter")
         setAnns((a) => a.map((x) => ({ ...x, status: "kept" as const })))
@@ -590,6 +729,19 @@ export function LabelingWorkspace({
           </Button>
           <Button
             size="sm"
+            className="h-7"
+            disabled={!doneCount}
+            onClick={() => {
+              if (dirty) save.mutate(set)
+              setTrainOpen(true)
+            }}
+            title="Fine-tune a detector on the saved images (runs on the ML worker)"
+            data-testid="labeling-train"
+          >
+            <GraduationCap className="mr-1 h-3.5 w-3.5" /> Train
+          </Button>
+          <Button
+            size="sm"
             variant="outline"
             className="h-7"
             disabled={save.isPending}
@@ -600,6 +752,59 @@ export function LabelingWorkspace({
           </Button>
         </span>
       </div>
+
+      {describeOpen && (
+        <form
+          className="bg-muted/40 flex flex-wrap items-start gap-2 rounded-md border p-2 text-xs"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void describe(describeText)
+          }}
+          data-testid="labeling-describe-row"
+        >
+          <select
+            className="bg-background h-7 rounded border px-1"
+            value={describeModel}
+            onChange={(e) => setDescribeModel(e.target.value)}
+            title="SAM 3 found the most cowpea pods and flowers in the lab's tests and draws outlines; OWLv2 draws boxes and needs no token"
+          >
+            {ZERO_SHOT_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <textarea
+            className="bg-background min-w-72 flex-1 rounded border px-2 py-1 font-mono"
+            rows={Math.min(3, Math.max(1, describeText.split("\n").length))}
+            value={describeText}
+            onChange={(e) => setDescribeText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                void describe(describeText)
+              }
+            }}
+            placeholder="pod: one mottled cowpea pod, not a leaf, not a stem"
+            title={PROMPT_TIPS.join("\n")}
+          />
+          <Button
+            size="sm"
+            className="h-7"
+            disabled={Boolean(busy)}
+            type="submit"
+          >
+            Find
+          </Button>
+          <span className="text-muted-foreground basis-full">
+            One object per line, as name: description; say what it is not (“…,
+            not a leaf”). Kept proposals carry to the next image.
+            {describeModel === "sam3" && !hfToken
+              ? " SAM 3 needs a Hugging Face token: save one in Settings → Keys & tokens (or upload sam3.pt to Models/weights)."
+              : ""}
+          </span>
+        </form>
+      )}
 
       <div className="flex flex-wrap items-center gap-1 text-xs">
         {(
@@ -654,6 +859,22 @@ export function LabelingWorkspace({
         </Button>
         <Button
           size="sm"
+          variant={describeOpen ? "default" : "outline"}
+          className="h-7 px-2"
+          onClick={() => {
+            setDescribeOpen((v) => !v)
+            if (!describeText)
+              setDescribeText(
+                `${activeClass}: one ${activeClass === "object" ? "plant" : activeClass}`,
+              )
+          }}
+          title="Describe the object in words: SAM 3 proposes every match, with outlines (D)"
+          data-testid="labeling-describe"
+        >
+          <Type className="mr-1 h-3.5 w-3.5" /> Describe
+        </Button>
+        <Button
+          size="sm"
           variant="outline"
           className="h-7 px-2"
           disabled={Boolean(busy) || !kept}
@@ -661,6 +882,30 @@ export function LabelingWorkspace({
           title="Exact outlines (SAM 2) for every kept box that has none yet (M)"
         >
           <WandSparkles className="mr-1 h-3.5 w-3.5" /> Masks
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0"
+          disabled={!canUndo}
+          onClick={() => stepHistory(true)}
+          title="Undo (⌘Z / Ctrl+Z)"
+          aria-label="Undo"
+          data-testid="label-undo"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0"
+          disabled={!canRedo}
+          onClick={() => stepHistory(false)}
+          title="Redo (⇧⌘Z / Ctrl+Y)"
+          aria-label="Redo"
+          data-testid="label-redo"
+        >
+          <Redo2 className="h-3.5 w-3.5" />
         </Button>
         <Button
           size="sm"
@@ -964,6 +1209,16 @@ export function LabelingWorkspace({
           Save &amp; next <ChevronRight className="ml-1 h-3.5 w-3.5" />
         </Button>
       </div>
+      {trainOpen && (
+        <TrainModelDialog
+          open={trainOpen}
+          onOpenChange={setTrainOpen}
+          set={set}
+          experimentId={experimentId}
+          defaultName={`${set.classes.join(" ") || "objects"} detector`}
+          onUse={onUseTrained}
+        />
+      )}
       <details
         className="text-muted-foreground rounded-md border px-3 py-2 text-xs"
         data-testid="labeling-help"
@@ -1007,10 +1262,24 @@ export function LabelingWorkspace({
             by itself: check them, fix, next.
           </li>
           <li>
-            <span className="text-foreground">COCO.</span> Exports the kept
-            objects of every saved image, for training.
+            <span className="text-foreground">Or describe it (D).</span> Write
+            what to find (“pod: one mottled cowpea pod, not a leaf”): SAM 3
+            proposes every match with outlines, here and on the next images.
+            Review as above. Good for a first pass; Find similar for what it
+            misses.
+          </li>
+          <li>
+            <span className="text-foreground">Train.</span> Fine-tunes a YOLO
+            model on the saved images, from a general or agricultural starting
+            model. With few labels choose “Few labels”. The result appears under
+            “Your weights” in every pipeline. COCO exports the same set for
+            training elsewhere.
           </li>
         </ol>
+        <p className="mt-2">
+          Made a mistake? ⌘Z / Ctrl+Z undoes the last change to this image's
+          boxes (drawn, deleted, kept or dropped); ⇧⌘Z / Ctrl+Y redoes it.
+        </p>
       </details>
     </div>
   )

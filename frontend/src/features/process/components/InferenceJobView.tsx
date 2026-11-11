@@ -31,11 +31,16 @@ import { LabelingWorkspace } from "@/features/process/components/LabelingWorkspa
 import {
   classColour,
   hasBox,
+  OverlayControls,
   type Prediction,
-  PredictionOverlay,
+  readOverlayLook,
   useAuthedBlobUrl,
 } from "@/features/process/components/predictionView"
 import { SaveThreshold } from "@/features/process/components/SaveThreshold"
+import {
+  useFillHeight,
+  ZoomableOverlay,
+} from "@/features/process/components/ZoomableOverlay"
 import {
   recountable,
   thresholdOf,
@@ -62,11 +67,18 @@ function accessionOf(objectName: string): string | null {
   return m ? m[1] : null
 }
 
-function byPlotNumber(a: string, b: string): number {
-  const na = Number(a)
-  const nb = Number(b)
-  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb
-  return a.localeCompare(b)
+/** Plot order: 2 before 10, KD2 before KD10, KD before KW. */
+export function byPlotNumber(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+}
+
+/**
+ * The plot as people name it. Older jobs keyed plots whose label is not a
+ * number (KD18) by the whole file name: "plot_KD18_accession_X.png" → "KD18".
+ */
+export function plotLabel(key: string): string {
+  const m = /^plot_(.+?)(?:_accession_.*)?\.[A-Za-z0-9]+$/.exec(key)
+  return m ? m[1] : key
 }
 
 /** The predictions file in either shape, as one row per image. */
@@ -111,7 +123,7 @@ export function plotResults(
         error,
       })
   }
-  return rows.sort((a, b) => byPlotNumber(a.plot, b.plot))
+  return rows.sort((a, b) => byPlotNumber(plotLabel(a.plot), plotLabel(b.plot)))
 }
 
 /** Best label of a classification result. */
@@ -172,12 +184,12 @@ export function InferenceJobView({
   const [selected, setSelected] = useState<string | null>(null)
   // Labelling these images by hand (for training), from this model's results.
   const [labeling, setLabeling] = useState(false)
-  // Ground plot images are long strips: show them at a readable height and
-  // scroll sideways, rather than squeezed to the panel's width.
+  // The image's own size (for detections that fall outside it).
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
-  const aspect = natural?.h ? natural.w / natural.h : null
-  const [zoom, setZoom] = useState<boolean | null>(null)
-  const zoomed = zoom ?? (aspect != null && aspect > 4)
+  // Boxes / names on or off and their opacity (remembered in this browser).
+  const [look, setLook] = useState(readOverlayLook)
+  // The plot list and viewer fill the window's height; the list scrolls.
+  const [fillRef, fillHeight] = useFillHeight<HTMLDivElement>(28)
 
   const counted = useMemo(
     () =>
@@ -240,7 +252,7 @@ export function InferenceJobView({
       : `plot,accession,detections_at_${threshold.toFixed(2)},error`
     const lines = counted.map((r) =>
       [
-        r.plot,
+        plotLabel(r.plot),
         r.accession ?? "",
         ...(classification
           ? [r.label?.class ?? "", r.label ? r.label.confidence.toFixed(3) : ""]
@@ -296,8 +308,7 @@ export function InferenceJobView({
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
         <div className="min-w-0">
-          <p className="text-sm font-medium">{modelName}</p>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-xs" title={modelName}>
             {Array.isArray(predsQuery.data)
               ? "One image"
               : `${rows.length} plots`}
@@ -321,6 +332,9 @@ export function InferenceJobView({
             </span>
           ))}
         </div>
+        {!classification && recountable(job) && (
+          <SaveThreshold job={job} threshold={threshold} inline />
+        )}
         <div className="ml-auto flex items-center gap-2">
           {!classification && (
             <div className="flex items-center gap-2 text-xs">
@@ -370,9 +384,6 @@ export function InferenceJobView({
           </Button>
         </div>
       </div>
-      {!classification && recountable(job) && (
-        <SaveThreshold job={job} threshold={threshold} />
-      )}
 
       {predsQuery.isLoading ? (
         <div className="text-muted-foreground flex items-center gap-2 p-6 text-sm">
@@ -388,8 +399,17 @@ export function InferenceJobView({
           The job finished without results for any image.
         </p>
       ) : (
-        <div className="grid gap-0 md:grid-cols-[15rem_1fr]">
-          <div className="border-b md:border-r md:border-b-0">
+        <div
+          ref={fillRef}
+          className="grid gap-0 md:grid-cols-[15rem_1fr]"
+          // Never taller than the window, even before it is measured.
+          style={
+            fillHeight
+              ? { height: fillHeight }
+              : { height: "calc(100svh - 12rem)" }
+          }
+        >
+          <div className="flex min-h-0 flex-col border-b md:border-r md:border-b-0">
             {!classification && rows.length > 1 && (
               <div className="flex items-center gap-1 border-b px-2 py-1 text-xs">
                 <span className="text-muted-foreground mr-auto">Sort</span>
@@ -412,7 +432,7 @@ export function InferenceJobView({
               </div>
             )}
             <ul
-              className="max-h-[26rem] overflow-auto py-1 text-xs"
+              className="min-h-0 flex-1 overflow-auto py-1 text-xs"
               data-testid="inference-job-plots"
             >
               {ordered.map((r) => (
@@ -424,7 +444,12 @@ export function InferenceJobView({
                       r.plot === current?.plot ? "bg-primary/10" : ""
                     }`}
                   >
-                    <span className="w-12 shrink-0 font-medium">{r.plot}</span>
+                    <span
+                      className="w-14 shrink-0 truncate font-medium"
+                      title={plotLabel(r.plot)}
+                    >
+                      {plotLabel(r.plot)}
+                    </span>
                     <span className="text-muted-foreground min-w-0 flex-1 truncate">
                       {r.error
                         ? "failed"
@@ -451,7 +476,7 @@ export function InferenceJobView({
             </ul>
           </div>
 
-          <div className="min-w-0 space-y-2 p-3">
+          <div className="flex min-h-0 min-w-0 flex-col gap-2 p-3">
             {current && (
               <>
                 <div className="flex items-center gap-2">
@@ -467,7 +492,9 @@ export function InferenceJobView({
                   </Button>
                   <p className="min-w-0 flex-1 truncate text-sm">
                     <span className="font-medium">
-                      {rows.length > 1 ? `Plot ${current.plot}` : current.plot}
+                      {rows.length > 1
+                        ? `Plot ${plotLabel(current.plot)}`
+                        : current.plot}
                     </span>
                     {current.accession && (
                       <span className="text-muted-foreground">
@@ -487,6 +514,9 @@ export function InferenceJobView({
                           : `${current.count} detection${current.count === 1 ? "" : "s"}`}
                     </span>
                   </p>
+                  {!classification && (
+                    <OverlayControls look={look} onChange={setLook} />
+                  )}
                   <span className="text-muted-foreground text-xs">
                     {idx + 1} / {ordered.length}
                   </span>
@@ -510,25 +540,22 @@ export function InferenceJobView({
                     No image recorded for this plot.
                   </p>
                 ) : imageUrl ? (
-                  <div className="overflow-x-auto rounded border bg-black">
-                    <PredictionOverlay
-                      src={imageUrl}
-                      alt={`Plot ${current.plot}`}
-                      imgClassName={
-                        zoomed
-                          ? "block h-72 w-auto max-w-none"
-                          : "block h-auto w-full"
-                      }
-                      onNaturalSize={(w, h) => setNatural({ w, h })}
-                      predictions={
-                        classification
-                          ? current.predictions
-                              .slice()
-                              .sort((a, b) => b.confidence - a.confidence)
-                          : current.kept
-                      }
-                    />
-                  </div>
+                  <ZoomableOverlay
+                    src={imageUrl}
+                    alt={`Plot ${plotLabel(current.plot)}`}
+                    className="min-h-0 flex-1 rounded border"
+                    onNaturalSize={(w, h) => setNatural({ w, h })}
+                    showBoxes={look.showBoxes}
+                    showLabels={look.showLabels}
+                    opacity={look.opacity}
+                    predictions={
+                      classification
+                        ? current.predictions
+                            .slice()
+                            .sort((a, b) => b.confidence - a.confidence)
+                        : current.kept
+                    }
+                  />
                 ) : (
                   <div className="flex h-48 items-center justify-center rounded border">
                     <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
@@ -555,17 +582,8 @@ export function InferenceJobView({
                     ) : null
                   })()}
                 <p className="text-muted-foreground text-[11px]">
-                  {aspect != null && aspect > 1.5 && (
-                    <button
-                      type="button"
-                      className="text-primary mr-2 underline underline-offset-2"
-                      onClick={() => setZoom(!zoomed)}
-                    >
-                      {zoomed ? "Fit to width" : "Zoom in"}
-                    </button>
-                  )}
-                  {zoomed && "Scroll sideways to see the whole plot. "}
-                  Arrow keys step through the plots.
+                  Wheel or the buttons zoom, drag moves around, double-click
+                  zooms on a spot. Arrow keys step through the plots.
                   {result.total_detections != null &&
                     !classification &&
                     ` The job saved ${result.total_detections} detections at its own threshold (${(params.confidence_threshold ?? 0).toFixed(2)}).`}

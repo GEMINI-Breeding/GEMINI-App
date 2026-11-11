@@ -134,6 +134,8 @@ export interface StitchingParams {
     lane?: number
     lanes?: number
     split?: "top_bottom" | "left_right"
+    /** The drone plot it was marked from: association takes it as is. */
+    boundary?: { label: string; properties: Record<string, unknown> }
   }[]
   /** Where this stitch version goes (`…/AgRowStitch_v{N}/`). */
   outputPrefix: string

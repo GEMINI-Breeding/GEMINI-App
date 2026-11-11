@@ -17,6 +17,17 @@ description: Mark the start and end frame of every plot on a ground-rover (Amiga
 5. Report to the person: repeat `tell_the_person` from the `mark_plots_auto` result word for word (plots marked, passes that need a look, stitching or not), then say what you did next.
 Do not read positions off pictures unless a pass is flagged; then correct that pass with `set_boundaries`.
 
+## With a drone flight of the same field
+
+If the field was flown with a drone and its plot boundaries are saved (same experiment, site and
+population; `boundaries_geojson` on the drone scope), tell the person they can mark the track from
+them in the app: Plot Marking → **Mark from drone plot boundaries**. Each plot is then the frames
+inside its drone boundary and keeps the drone plot's label, so association does not depend on the
+rover's GPS. The panel says when the rover's GPS sits off the drone beds (a map offset, or an
+antenna not over the camera, which flips sides with the direction of travel); **Snap to beds**
+shifts and straightens the passes onto the beds before marking. Not yet a tool: the person does it
+in the app, then saves. One plot per frame only.
+
 ## Where plots begin and end
 
 `mark_plots_auto` does not look for stakes: many fields have none, and stakes

@@ -44,15 +44,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { Textarea } from "@/components/ui/textarea"
 import { apiUrl } from "@/features/files/lib/download"
 import { InferenceResults } from "@/features/process/components/InferenceResults"
 import { LabelingWorkspace } from "@/features/process/components/LabelingWorkspace"
 import {
   classColour,
+  OverlayControls,
   type Prediction,
-  PredictionOverlay,
+  readOverlayLook,
   useAuthedBlobUrl,
 } from "@/features/process/components/predictionView"
+import { ZoomableOverlay } from "@/features/process/components/ZoomableOverlay"
 import { loadActiveBoundaries } from "@/features/process/lib/activeBoundaries"
 import {
   type InferenceModel,
@@ -225,7 +235,8 @@ export function InferenceTool({
   pipeline,
   run,
   scope,
-  onCancel,
+  // The page's back arrow leaves the tool; no "Done" at the bottom.
+  onCancel: _onCancel,
 }: InferenceToolProps) {
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
@@ -494,8 +505,11 @@ export function InferenceTool({
     })
     showSuccessToast(`Added ${modelDisplayName(m)} to this pipeline`)
   }
-  const results = (
-    <InferenceResults run={run} configured={models} onAddModel={addModel} />
+  // Running a model opens beside the results; on a run with no results yet
+  // it opens straight away.
+  const [look, setLook] = useState(readOverlayLook)
+  const [runPanel, setRunPanel] = useState(
+    () => !(run.steps.inference?.jobIds?.length ?? 0),
   )
 
   const openModelSetup = () =>
@@ -513,12 +527,64 @@ export function InferenceTool({
     ? images.map((f) => f.object_name ?? "").filter(Boolean)
     : []
 
+  // Running a model, labelling, model setup: on the results' title line.
+  const resultActions = (
+    <>
+      <button
+        type="button"
+        className="text-muted-foreground self-center text-xs underline underline-offset-2"
+        onClick={() => openModelSetup()}
+        title={`${models.length} model${models.length === 1 ? "" : "s"} on this pipeline`}
+      >
+        Set up models
+      </button>
+      <Button
+        size="sm"
+        className="h-7"
+        onClick={() => setRunPanel(true)}
+        data-testid="inference-run-open"
+      >
+        <Play className="mr-1.5 h-3.5 w-3.5" />
+        Run a model
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7"
+        disabled={plotImageNames.length === 0}
+        title="Label objects on the plot images (by hand, by example or by description) and train a model from them"
+        onClick={() => setLabeling(true)}
+      >
+        Label &amp; train
+      </Button>
+    </>
+  )
+  const results = (
+    <InferenceResults
+      run={run}
+      configured={models}
+      onAddModel={addModel}
+      actions={resultActions}
+    />
+  )
+
   if (labeling && plotImageNames.length > 0) {
     return (
       <LabelingWorkspace
         images={plotImageNames}
         experimentId={run.uploadScope?.experimentId}
         onClose={() => setLabeling(false)}
+        onUseTrained={(m) =>
+          updatePipeline(pipeline.id, {
+            params: {
+              ...pipeline.params,
+              roboflow_models: [
+                ...((pipeline.params.roboflow_models as unknown[]) ?? []),
+                m,
+              ],
+            },
+          })
+        }
       />
     )
   }
@@ -559,321 +625,327 @@ export function InferenceTool({
   }
 
   return (
-    <div className="space-y-4">
-      {/* What has been run comes first; running another model below. */}
+    <div className="space-y-3">
+      {(run.steps.inference?.jobIds?.length ?? 0) === 0 && (
+        <div className="flex flex-wrap justify-end gap-2">{resultActions}</div>
+      )}
       {results}
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <CardTitle className="text-base">Run a model</CardTitle>
-              <CardDescription>
-                Try a model on one plot image, or run it on all of them. To run
-                it on every date at once, use "Run across dates" on the
-                pipeline's run list.
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={plotImageNames.length === 0}
-              title="Draw or correct objects on the plot images to build a training set"
-              onClick={() => setLabeling(true)}
-            >
-              Label plot images
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="mb-1.5 text-xs" htmlFor="inference-model">
-                Model
-              </Label>
-              <Select
-                value={String(activeModelIdx)}
-                onValueChange={(v) => setActiveModelIdx(Number(v))}
-              >
-                <SelectTrigger
-                  id="inference-model"
-                  data-testid="inference-model"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((m, i) => (
-                    <SelectItem key={i} value={String(i)}>
-                      {modelDisplayName(m)} · {sourceLabel(m.source)},{" "}
-                      {TASK_LABELS[m.task_type].toLowerCase()}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="mb-1.5 text-xs" htmlFor="inference-source">
-                Image source
-              </Label>
-              <Select
-                value={String(sourceIdx)}
-                onValueChange={(v) => setSourceIdx(Number(v))}
-              >
-                <SelectTrigger
-                  id="inference-source"
-                  data-testid="inference-source"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {sources.map((s, i) => (
-                    <SelectItem key={i} value={String(i)}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="mb-1.5 text-xs" htmlFor="inference-mode">
-                Run on
-              </Label>
-              <Select
-                value={mode}
-                onValueChange={(v) => setMode(v as "single" | "all")}
-              >
-                <SelectTrigger id="inference-mode" data-testid="inference-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="single">
-                    The previewed image only
-                  </SelectItem>
-                  <SelectItem value="all">
-                    Every image at this source
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <code className="bg-muted block break-all rounded px-2 py-1 text-xs">
-            {activePrefix}
-          </code>
-          <p
-            className="text-muted-foreground text-xs"
-            data-testid="inference-endpoint"
-          >
-            {endpointDescription(activeModel, localServerUrl)}
-          </p>
-          {activeModel?.source === "huggingface" &&
-            activeModel.hf_zero_shot && (
-              <div className="space-y-1">
-                <Label className="text-xs" htmlFor="inference-prompt">
-                  Labels to look for (this run only)
-                </Label>
-                <Input
-                  id="inference-prompt"
-                  data-testid="inference-prompt"
-                  value={activePrompt}
-                  placeholder="weed, crop, soil"
-                  onChange={(e) =>
-                    setPromptOverrides((o) => ({
-                      ...o,
-                      [activeModelIdx]: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            )}
-          {mode === "all" && (
-            <p
-              className="text-muted-foreground text-xs"
-              data-testid="inference-mode-all-note"
-            >
-              {images.length} image{images.length === 1 ? "" : "s"} will be
-              inferred in a single job, with detections counted per plot.
-              {sourceIdx === 0
-                ? " Counts are saved as traits for this plot layout, so they appear in Analyze."
-                : sources[sourceIdx].plots
-                  ? " Counts from the raw frames are kept with the results but not saved as traits (traits come from the orthomosaic's plot images)."
-                  : " Raw frames have no plot identity, so counts aren't saved as traits."}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Image
-            {images.length > 0 && (
-              <span className="text-muted-foreground ml-2 text-sm font-normal">
-                {imageIdx + 1} of {images.length}
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {imagesQuery.isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
-            </div>
-          ) : images.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              No images at this prefix.
-            </p>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={imageIdx === 0}
-                  onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
-                  aria-label="Previous image"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-muted-foreground text-xs">
-                  {activeImageName}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={imageIdx >= images.length - 1}
-                  onClick={() =>
-                    setImageIdx((i) => Math.min(images.length - 1, i + 1))
-                  }
-                  aria-label="Next image"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-              <div
-                className="relative bg-muted rounded border overflow-hidden"
-                data-testid="inference-image-viewer"
-              >
-                {activeImageBlob ? (
-                  <PredictionOverlay
-                    src={activeImageBlob}
-                    alt={activeImageName}
-                    predictions={filteredPredictions}
-                  />
-                ) : (
-                  <div className="flex h-[40vh] items-center justify-center">
-                    <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          <div className="flex items-center justify-between gap-3">
-            <Button
-              data-testid="inference-submit"
-              onClick={() => submit.mutate()}
-              disabled={!activeImage || submit.isPending}
-            >
-              {submit.isPending ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              Run inference
-            </Button>
-            {submittedJobId && (
-              <span className="text-muted-foreground text-xs">
-                Job {submittedJobId.slice(0, 8)} ·{" "}
-                {jobQuery.data?.status ?? "submitting…"}
-              </span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {jobQuery.data?.status === "FAILED" && (
-        <p
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800 text-sm"
-          data-testid="inference-job-failed"
+      <Sheet open={runPanel} onOpenChange={setRunPanel}>
+        <SheetContent
+          side="right"
+          className="w-[min(94vw,60rem)] overflow-y-auto sm:max-w-none"
+          data-testid="inference-run-panel"
         >
-          Inference failed:{" "}
-          {String(
-            (jobQuery.data as { error_message?: string | null })
-              .error_message ?? "unknown error",
-          )}
-        </p>
-      )}
+          <SheetHeader className="pb-0">
+            <SheetTitle>Run a model</SheetTitle>
+            <SheetDescription>
+              Try a model on the image shown, or on every image of this date.
+              For every date at once, use "Run across dates" on the run list.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-3 px-4 pb-6">
+            {/* The choices on the left, the image they apply to on the right. */}
+            <Card className="border-0 py-0 shadow-none">
+              <CardContent className="grid gap-4 px-0 md:grid-cols-[minmax(15rem,20rem)_1fr]">
+                <div className="space-y-3">
+                  <div>
+                    <Label className="mb-1.5 text-xs" htmlFor="inference-model">
+                      Model
+                    </Label>
+                    <Select
+                      value={String(activeModelIdx)}
+                      onValueChange={(v) => setActiveModelIdx(Number(v))}
+                    >
+                      <SelectTrigger
+                        id="inference-model"
+                        data-testid="inference-model"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((m, i) => (
+                          <SelectItem key={i} value={String(i)}>
+                            {modelDisplayName(m)} · {sourceLabel(m.source)},{" "}
+                            {TASK_LABELS[m.task_type].toLowerCase()}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p
+                      className="text-muted-foreground mt-1 text-xs"
+                      data-testid="inference-endpoint"
+                    >
+                      {endpointDescription(activeModel, localServerUrl)}
+                    </p>
+                  </div>
+                  {activeModel?.source === "huggingface" &&
+                    activeModel.hf_zero_shot && (
+                      <div className="space-y-1">
+                        <Label className="text-xs" htmlFor="inference-prompt">
+                          What to find (this run only)
+                        </Label>
+                        <Textarea
+                          id="inference-prompt"
+                          data-testid="inference-prompt"
+                          rows={2}
+                          className="font-mono text-xs"
+                          value={activePrompt}
+                          placeholder="pod: one green cowpea pod, not a leaf"
+                          onChange={(e) =>
+                            setPromptOverrides((o) => ({
+                              ...o,
+                              [activeModelIdx]: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    )}
+                  <div>
+                    <Label
+                      className="mb-1.5 text-xs"
+                      htmlFor="inference-source"
+                    >
+                      Image source
+                    </Label>
+                    <Select
+                      value={String(sourceIdx)}
+                      onValueChange={(v) => setSourceIdx(Number(v))}
+                    >
+                      <SelectTrigger
+                        id="inference-source"
+                        data-testid="inference-source"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sources.map((s, i) => (
+                          <SelectItem key={i} value={String(i)}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <code
+                      className="text-muted-foreground mt-1 block truncate text-[11px]"
+                      title={activePrefix}
+                    >
+                      {activePrefix}
+                    </code>
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 text-xs" htmlFor="inference-mode">
+                      Run on
+                    </Label>
+                    <Select
+                      value={mode}
+                      onValueChange={(v) => setMode(v as "single" | "all")}
+                    >
+                      <SelectTrigger
+                        id="inference-mode"
+                        data-testid="inference-mode"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="single">The image shown</SelectItem>
+                        <SelectItem value="all">
+                          Every image at this source
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {mode === "all" && (
+                      <p
+                        className="text-muted-foreground mt-1 text-xs"
+                        data-testid="inference-mode-all-note"
+                      >
+                        {images.length} image{images.length === 1 ? "" : "s"} in
+                        one job, counted per plot.
+                        {sourceIdx === 0
+                          ? " Counts are saved as traits, so they appear in Analyze."
+                          : sources[sourceIdx].plots
+                            ? " Counts from the raw frames are kept with the results; traits come from the orthomosaic's plot images."
+                            : " Raw frames have no plot identity, so counts aren't saved as traits."}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <Button
+                      data-testid="inference-submit"
+                      onClick={() => submit.mutate()}
+                      disabled={!activeImage || submit.isPending}
+                    >
+                      {submit.isPending ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {mode === "all"
+                        ? "Run on every image"
+                        : "Run on this image"}
+                    </Button>
+                    {submittedJobId && (
+                      <span className="text-muted-foreground text-xs">
+                        Job {submittedJobId.slice(0, 8)} ·{" "}
+                        {jobQuery.data?.status ?? "submitting…"}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-      {jobQuery.data?.status === "COMPLETED" &&
-        isBatchInferenceResult(jobQuery.data.result) && (
-          <BatchInferenceSummary
-            result={jobQuery.data.result}
-            fileStem={`inference-${submittedJobId?.slice(0, 8) ?? "run"}`}
-            experiment={run.uploadScope?.experiment}
-          />
-        )}
+                <div className="min-w-0 space-y-2">
+                  {imagesQuery.isLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
+                    </div>
+                  ) : images.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      No images at this source.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={imageIdx === 0}
+                          onClick={() => setImageIdx((i) => Math.max(0, i - 1))}
+                          aria-label="Previous image"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <span className="text-muted-foreground truncate text-xs">
+                          {activeImageName} · {imageIdx + 1} of {images.length}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={imageIdx >= images.length - 1}
+                          onClick={() =>
+                            setImageIdx((i) =>
+                              Math.min(images.length - 1, i + 1),
+                            )
+                          }
+                          aria-label="Next image"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div
+                        className="bg-muted relative overflow-hidden rounded border"
+                        data-testid="inference-image-viewer"
+                      >
+                        {activeImageBlob ? (
+                          <ZoomableOverlay
+                            src={activeImageBlob}
+                            alt={activeImageName}
+                            predictions={filteredPredictions}
+                            className="h-[min(70svh,44rem)]"
+                            showBoxes={look.showBoxes}
+                            showLabels={look.showLabels}
+                            opacity={look.opacity}
+                          />
+                        ) : (
+                          <div className="flex h-[40vh] items-center justify-center">
+                            <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
+                          </div>
+                        )}
+                      </div>
+                      {filteredPredictions.length > 0 && (
+                        <OverlayControls look={look} onChange={setLook} />
+                      )}
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
-      {predictions && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Results</CardTitle>
-            <CardDescription>
-              {predictions.length} raw detection
-              {predictions.length === 1 ? "" : "s"}; showing{" "}
-              {filteredPredictions.length} above threshold.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm" htmlFor="inference-threshold">
-                  Confidence threshold
-                </Label>
-                <span className="text-muted-foreground font-mono text-sm">
-                  {confThreshold.toFixed(2)}
-                </span>
-              </div>
-              <Input
-                id="inference-threshold"
-                data-testid="inference-threshold"
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={confThreshold}
-                onChange={(e) => setConfThreshold(parseFloat(e.target.value))}
-              />
-            </div>
-            <div className="flex flex-wrap gap-2 text-xs">
-              {Object.entries(
-                filteredPredictions.reduce<Record<string, number>>((acc, p) => {
-                  acc[p.class] = (acc[p.class] ?? 0) + 1
-                  return acc
-                }, {}),
-              ).map(([cls, n]) => (
-                <span
-                  key={cls}
-                  className="inline-flex items-center gap-1 rounded border px-2 py-0.5"
-                  style={{ borderColor: classColour(cls) }}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: classColour(cls) }}
-                  />
-                  {cls}: {n}
-                </span>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            {jobQuery.data?.status === "FAILED" && (
+              <p
+                className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800 text-sm"
+                data-testid="inference-job-failed"
+              >
+                Inference failed:{" "}
+                {String(
+                  (jobQuery.data as { error_message?: string | null })
+                    .error_message ?? "unknown error",
+                )}
+              </p>
+            )}
 
-      {onCancel && (
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>
-            Done
-          </Button>
-        </div>
-      )}
+            {jobQuery.data?.status === "COMPLETED" &&
+              isBatchInferenceResult(jobQuery.data.result) && (
+                <BatchInferenceSummary
+                  result={jobQuery.data.result}
+                  fileStem={`inference-${submittedJobId?.slice(0, 8) ?? "run"}`}
+                  experiment={run.uploadScope?.experiment}
+                />
+              )}
+
+            {predictions && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Results</CardTitle>
+                  <CardDescription>
+                    {predictions.length} raw detection
+                    {predictions.length === 1 ? "" : "s"}; showing{" "}
+                    {filteredPredictions.length} above threshold.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm" htmlFor="inference-threshold">
+                        Confidence threshold
+                      </Label>
+                      <span className="text-muted-foreground font-mono text-sm">
+                        {confThreshold.toFixed(2)}
+                      </span>
+                    </div>
+                    <Input
+                      id="inference-threshold"
+                      data-testid="inference-threshold"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={confThreshold}
+                      onChange={(e) =>
+                        setConfThreshold(parseFloat(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {Object.entries(
+                      filteredPredictions.reduce<Record<string, number>>(
+                        (acc, p) => {
+                          acc[p.class] = (acc[p.class] ?? 0) + 1
+                          return acc
+                        },
+                        {},
+                      ),
+                    ).map(([cls, n]) => (
+                      <span
+                        key={cls}
+                        className="inline-flex items-center gap-1 rounded border px-2 py-0.5"
+                        style={{ borderColor: classColour(cls) }}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: classColour(cls) }}
+                        />
+                        {cls}: {n}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

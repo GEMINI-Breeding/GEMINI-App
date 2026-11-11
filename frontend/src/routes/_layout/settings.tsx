@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import ApplicationSettings from "@/components/UserSettings/ApplicationSettings"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
+import KeysSettings from "@/components/UserSettings/KeysSettings"
 import UserInformation from "@/components/UserSettings/UserInformation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PeopleSettings } from "@/features/people/PeopleSettings"
@@ -23,11 +24,11 @@ export const Route = createFileRoute("/_layout/settings")({
 function UserSettings() {
   const { section } = useSearch({ from: "/_layout/settings" })
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b">
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-muted-foreground text-sm">
-          Manage your application settings, profile and password
+          Manage your application settings, profile, password and keys
         </p>
       </div>
       <Tabs defaultValue="application" className="flex min-h-0 flex-1 flex-col">
@@ -43,6 +44,9 @@ function UserSettings() {
           <TabsTrigger value="account" data-testid="settings-tab-account">
             Account
           </TabsTrigger>
+          <TabsTrigger value="keys" data-testid="settings-tab-keys">
+            Keys &amp; tokens
+          </TabsTrigger>
           <TabsTrigger value="people" data-testid="settings-tab-people">
             People
           </TabsTrigger>
@@ -56,6 +60,9 @@ function UserSettings() {
         >
           <UserInformation />
           <ChangePassword />
+        </TabsContent>
+        <TabsContent value="keys" className="overflow-y-auto px-6 pb-6">
+          <KeysSettings />
         </TabsContent>
         <TabsContent value="people" className="overflow-y-auto px-6 pb-6 pt-3">
           <PeopleSettings />

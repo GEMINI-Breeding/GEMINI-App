@@ -29,9 +29,12 @@ const pathOf = (j: JobOutput) =>
 export function SaveThreshold({
   job,
   threshold,
+  inline = false,
 }: {
   job: JobOutput
   threshold: number
+  /** In a header line (no own row, border or padding). */
+  inline?: boolean
 }) {
   const queryClient = useQueryClient()
   const t = Math.round(threshold * 100) / 100
@@ -105,12 +108,19 @@ export function SaveThreshold({
 
   return (
     <div
-      className="space-y-1.5 border-b px-3 py-2 text-xs"
+      className={
+        inline ? "space-y-1 text-xs" : "space-y-1.5 border-b px-3 py-2 text-xs"
+      }
       data-testid="save-threshold"
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="text-muted-foreground">
-          Counts in Analyze use ≥ {ranAt.toFixed(2)}.
+        <span
+          className="text-muted-foreground"
+          title={`The counts in Analyze use confidence ≥ ${ranAt.toFixed(2)}`}
+        >
+          {inline
+            ? `Analyze: ≥ ${ranAt.toFixed(2)}`
+            : `Counts in Analyze use ≥ ${ranAt.toFixed(2)}.`}
         </span>
         <Button
           size="sm"
@@ -136,8 +146,9 @@ export function SaveThreshold({
               onChange={(e) => setAlsoOthers(e.target.checked)}
               data-testid="save-threshold-others"
             />
-            Also this model's other {others.length} date
-            {others.length === 1 ? "" : "s"} in the experiment
+            {inline
+              ? `+ ${others.length} other date${others.length === 1 ? "" : "s"}`
+              : `Also this model's other ${others.length} date${others.length === 1 ? "" : "s"} in the experiment`}
           </label>
         )}
       </div>

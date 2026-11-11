@@ -54,6 +54,7 @@ import { agentApi } from "@/features/agent/lib/agentApi"
 import { BoundaryImportPicker } from "@/features/process/components/BoundaryImportPicker"
 import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
 import { BoundaryMap } from "@/features/process/components/BoundaryMap"
+import { MarkedFromDroneNote } from "@/features/process/components/DroneMarkingPanel"
 import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
 import { FieldMapPanel } from "@/features/process/components/FieldMapPanel"
 import { QuickSave } from "@/features/process/components/QuickSave"
@@ -1473,15 +1474,20 @@ export function PlotBoundaryPrep({
       await activate.mutateAsync({ directory, version: v.version })
       // Flip the wizard step to completed and stash the version on the
       // step's outputs so the trait dialog can read it directly.
-      setStepState(run.id, "plot_boundary_prep", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-        outputs: {
-          ...(run.steps.plot_boundary_prep?.outputs ?? {}),
-          activeVersion: v.version,
-          activeVersionName: v.name ?? null,
+      setStepState(
+        run.id,
+        "plot_boundary_prep",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          outputs: {
+            ...(run.steps.plot_boundary_prep?.outputs ?? {}),
+            activeVersion: v.version,
+            activeVersionName: v.name ?? null,
+          },
         },
-      })
+        "person",
+      )
       // Saved + activated — clear the in-flight draft so the recovery
       // banner doesn't reappear on the next mount.
       draftApi.discardDraft()
@@ -2682,6 +2688,19 @@ export function PlotBoundaryPrep({
 
         {/* Kept mounted when hidden so the panel's settings survive. */}
         <div className={panelOpen ? "space-y-4" : "hidden"}>
+          {scope && placement.version && (
+            <MarkedFromDroneNote
+              scope={scope}
+              loaded={loadSource}
+              onUse={(src) => {
+                setImportedSnapshot(null)
+                setLoadSource(src)
+                showSuccessToast(
+                  "Loaded the drone plot boundaries. Save them here, then associate.",
+                )
+              }}
+            />
+          )}
           <StitchPlacementPanel state={placement} />
           <Card data-testid="boundary-versions-save">
             <CardHeader>

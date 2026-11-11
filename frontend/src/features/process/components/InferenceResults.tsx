@@ -10,7 +10,7 @@
  */
 import { useQueries } from "@tanstack/react-query"
 import { Bot, Eye, EyeOff, Plus } from "lucide-react"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
 import { Badge } from "@/components/ui/badge"
@@ -80,11 +80,14 @@ export function InferenceResults({
   run,
   configured,
   onAddModel,
+  actions,
 }: {
   run: Run
   /** The pipeline's models; others found in jobs get "Add to pipeline". */
   configured: InferenceModel[]
   onAddModel: (m: InferenceModel) => void
+  /** Controls on the card's title line (run a model, label & train). */
+  actions?: ReactNode
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const ids = run.steps.inference?.jobIds ?? []
@@ -121,16 +124,19 @@ export function InferenceResults({
   }
 
   return (
-    <Card data-testid="inference-results">
-      <CardHeader>
-        <CardTitle className="text-base">Results on this run</CardTitle>
-        <CardDescription>
-          {groups.length} model{groups.length === 1 ? "" : "s"} · {ids.length}{" "}
-          job{ids.length === 1 ? "" : "s"}, newest first. Per-plot counts are
-          also in Analyze, one trait per model.
-        </CardDescription>
+    <Card className="gap-2 py-3" data-testid="inference-results">
+      <CardHeader className="px-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <CardTitle className="text-base">Results on this run</CardTitle>
+          <CardDescription>
+            {groups.length} model{groups.length === 1 ? "" : "s"} · {ids.length}{" "}
+            job{ids.length === 1 ? "" : "s"}, newest first · per-plot counts are
+            in Analyze too
+          </CardDescription>
+          {actions && <div className="ml-auto flex gap-2">{actions}</div>}
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3 px-4">
         {loaded.length < ids.length && (
           <p className="text-muted-foreground text-xs">Loading jobs…</p>
         )}

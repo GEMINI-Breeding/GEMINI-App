@@ -32,7 +32,14 @@ import { useUpdateChecker } from "@/hooks/useUpdateChecker"
 import { onLogout } from "@/lib/auth"
 import { autoSignIn } from "@/lib/autoSignIn"
 import { checkBackend } from "@/lib/connection"
+import { useCredentials } from "@/lib/credentials"
 import { openUrl } from "@/lib/platform"
+
+/** Loads the person's saved keys once, so job submissions can use them. */
+function CredentialsLoader() {
+  useCredentials()
+  return null
+}
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -161,8 +168,10 @@ function Layout() {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset className="min-w-0">
-        <header className="bg-background sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      {/* The window never scrolls: the frame is the window's height and each
+          page scrolls (if at all) inside its own area. */}
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <header className="bg-background z-10 flex h-11 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1 text-muted-foreground" />
           <div className="ml-auto">
             <button
@@ -184,16 +193,17 @@ function Layout() {
           // All other pages: standard padded + centered layout. The extra
           // bottom padding lets a page's last controls scroll clear of the
           // fixed process panel / its pill in the bottom-right corner.
-          <main className="min-w-0 flex-1 p-6 pb-24 md:p-8 md:pb-24">
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6 pb-24 md:p-8 md:pb-24">
             <div className="mx-auto max-w-7xl min-w-0">
               <Outlet />
             </div>
+            <Footer />
           </main>
         )}
-        {!isFullHeight && <Footer />}
       </SidebarInset>
       <ProcessPanel />
       <BatchRunner />
+      <CredentialsLoader />
       <ConnectionNotice />
       <WorkersNotice />
 

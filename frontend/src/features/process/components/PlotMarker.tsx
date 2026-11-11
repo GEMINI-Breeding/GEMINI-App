@@ -36,7 +36,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { PlotGeometryService } from "@/client"
+import { FilesService, PlotGeometryService } from "@/client"
 import { authHeaders } from "@/components/Common/PlotImage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -58,12 +58,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { apiUrl } from "@/features/files/lib/download"
+import { apiUrl, DEFAULT_BUCKET } from "@/features/files/lib/download"
 import {
   openFullImage,
   thumbnailSrc,
 } from "@/features/genotyping/components/AuthImage"
 import { useGroundTrack } from "@/features/process/hooks/useGroundTrack"
+import {
+  correctedMsgsCsv,
+  correctedPoints,
+  isEmptyCorrection,
+  type TrackCorrection,
+  trackGeometry,
+} from "@/features/process/lib/droneMarking"
 import {
   type FrameLayout,
   isComplete,
@@ -81,6 +88,7 @@ import { type AerialScope, rawScopePrefix } from "@/features/process/lib/paths"
 import { type Run, setStepState } from "@/features/process/lib/runStore"
 import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/lib/auth"
+import { DroneMarkingPanel, type DroneSource } from "./DroneMarkingPanel"
 
 const DIRECTIONS = [
   { value: "down", label: "Down" },
@@ -94,6 +102,14 @@ const SATELLITE =
 
 function emptyPlot(plot_id: number, direction = ""): PlotSelection {
   return { plot_id, start_image: null, end_image: null, direction }
+}
+
+/** The stitch direction most plots have ("" when none is set). */
+function mostCommonDirection(plots: PlotSelection[]): string {
+  const n = new Map<string, number>()
+  for (const p of plots)
+    if (p.direction) n.set(p.direction, (n.get(p.direction) ?? 0) + 1)
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ""
 }
 
 const renumber = (plots: PlotSelection[]) =>
@@ -430,6 +446,20 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   const [layout, setLayout] = useState<FrameLayout>(SINGLE_LANE)
   const [activeVersion, setActiveVersion] = useState<number | null>(null)
   const [translatedBanner, setTranslatedBanner] = useState(false)
+  // The raw GPS moved onto the drone beds, and the drone plots marked from.
+  const [gpsCorrection, setGpsCorrection] = useState<TrackCorrection | null>(
+    null,
+  )
+  const [droneSource, setDroneSource] = useState<DroneSource | null>(null)
+  const [droneNote, setDroneNote] = useState<string | null>(null)
+  const geo = useMemo(() => trackGeometry(points), [points])
+  const shownPoints = useMemo(
+    () =>
+      geo && gpsCorrection
+        ? correctedPoints(points, geo, gpsCorrection)
+        : points,
+    [geo, points, gpsCorrection],
+  )
   const loadedRef = useRef(false)
   const dirtyRef = useRef(false)
   const edit = useCallback((fn: (prev: PlotSelection[]) => PlotSelection[]) => {
@@ -452,6 +482,9 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
         )
         setPlots(selections.length ? selections : [emptyPlot(1)])
         setLayout(res.state_snapshot?.layout ?? SINGLE_LANE)
+        setGpsCorrection(res.state_snapshot?.gps_correction ?? null)
+        setDroneSource(res.state_snapshot?.drone_boundaries ?? null)
+        setDroneNote(null)
         setActiveVersion(res.version)
         setTranslatedBanner(translated)
         dirtyRef.current = false
@@ -578,13 +611,43 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
   const save = useMutation({
     mutationFn: async (opts: { asNew: boolean; name?: string }) => {
       if (!track) throw new Error("No track")
+      // A corrected track: its msgs_synced.csv with the corrected positions,
+      // for the stitch to place plots by (the rover's own file is kept).
+      let correctedPath: string | null = null
+      const corrected = gpsCorrection && !isEmptyCorrection(gpsCorrection)
+      if (corrected && track.msgsSyncedPath) {
+        const res = await fetch(
+          apiUrl(
+            `/api/files/download/${DEFAULT_BUCKET}/${track.msgsSyncedPath}`,
+          ),
+          { headers: authHeaders() },
+        )
+        if (!res.ok) throw new Error(`msgs_synced.csv: HTTP ${res.status}`)
+        const byImage = new Map<string, { lat: number; lon: number }>()
+        for (const p of shownPoints)
+          if (p.lat != null && p.lon != null)
+            byImage.set(p.image, { lat: p.lat, lon: p.lon })
+        const text = correctedMsgsCsv(await res.text(), byImage)
+        correctedPath = `${directory}/CorrectedGps/${track.dataset}-${Date.now()}-msgs_synced.csv`
+        await FilesService.apiFilesUploadUploadFile({
+          formData: {
+            file: new Blob([text], { type: "text/csv" }),
+            bucket_name: DEFAULT_BUCKET,
+            object_name: correctedPath,
+          },
+        })
+      }
       const snapshot: PlotMarkingSnapshot = {
-        selections: withGps(plots, points),
+        // positions as corrected, so another date's track finds the plots
+        selections: withGps(plots, shownPoints),
         track: {
           imagesPrefix: track.imagesPrefix,
           msgsSyncedPath: track.msgsSyncedPath,
+          ...(correctedPath ? { correctedMsgsSyncedPath: correctedPath } : {}),
         },
         ...(layout.lanes > 1 ? { layout } : {}),
+        ...(corrected ? { gps_correction: gpsCorrection } : {}),
+        ...(droneSource ? { drone_boundaries: droneSource } : {}),
       }
       return (await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
         requestBody: {
@@ -601,11 +664,16 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
       setTranslatedBanner(false)
       setPlots((ps) => ps.map((p) => ({ ...p, translated: undefined })))
       queryClient.invalidateQueries({ queryKey: ["plot-markings", directory] })
-      setStepState(run.id, "plot_marking", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-        outputs: { directory, version: res.version, plots: plots.length },
-      })
+      setStepState(
+        run.id,
+        "plot_marking",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          outputs: { directory, version: res.version, plots: plots.length },
+        },
+        "person",
+      )
       showSuccessToast(
         opts.asNew
           ? `Saved plot markings as version ${res.version}`
@@ -837,6 +905,47 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
           }}
         />
 
+        {geo && (
+          <DroneMarkingPanel
+            scope={scope}
+            points={points}
+            lanes={layout.lanes}
+            defaultDirection={mostCommonDirection(plots)}
+            initialCorrection={gpsCorrection}
+            initialSource={droneSource}
+            hasPlots={plots.some(isComplete)}
+            onCorrection={(c) => {
+              dirtyRef.current = true
+              setGpsCorrection(c)
+            }}
+            onMarked={(selections, c, source) => {
+              edit(() => selections)
+              setGpsCorrection(c)
+              setDroneSource(source)
+              setTranslatedBanner(false)
+              setPlotPage(0)
+              const at = selections[0]?.start_image
+                ? images.indexOf(selections[0].start_image)
+                : -1
+              if (at >= 0) setCurrentIdx(at)
+              setDroneNote(
+                `${selections.length} plots marked from the drone boundaries${c ? " on the corrected GPS" : ""}. Step through a few starts and ends (the frames should show the alleys), then save.`,
+              )
+            }}
+          />
+        )}
+        {droneNote && (
+          <div
+            className="flex items-start gap-2 rounded border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
+            data-testid="dm-note"
+          >
+            <span className="flex-1">{droneNote}</span>
+            <button type="button" onClick={() => setDroneNote(null)}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {!track.msgsSyncedPath && (
           <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800 text-xs">
             This dataset has no msgs_synced.csv, so frames have no GPS: markings
@@ -869,7 +978,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
               style={{ minHeight: 420 }}
             >
               <GpsTrackMap
-                points={points}
+                points={shownPoints}
                 current={currentImage}
                 plots={plots}
               />

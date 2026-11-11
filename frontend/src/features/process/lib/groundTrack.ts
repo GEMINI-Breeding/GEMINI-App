@@ -151,6 +151,12 @@ export interface PlotSelection {
    * reviewed agent run is a record of what it got right.
    */
   review?: "ok" | "corrected"
+  /**
+   * The drone plot this stretch was marked from (lib/droneMarking): its
+   * label and properties. Association then takes the plot from here rather
+   * than from where the rover's GPS puts the stitched mosaic.
+   */
+  boundary?: { label: string; properties: Record<string, unknown> }
 }
 
 /**
@@ -170,9 +176,21 @@ export const SINGLE_LANE: FrameLayout = { lanes: 1, split: "top_bottom" }
 export interface PlotMarkingSnapshot {
   selections: PlotSelection[]
   /** The track the markings were made on. */
-  track: { imagesPrefix: string; msgsSyncedPath: string | null }
+  track: {
+    imagesPrefix: string
+    msgsSyncedPath: string | null
+    /**
+     * msgs_synced.csv with gps_correction applied (written at save), which
+     * stitching places the plots by. Absent: the rover's GPS as recorded.
+     */
+    correctedMsgsSyncedPath?: string | null
+  }
   /** Absent = one plot per frame. */
   layout?: FrameLayout
+  /** The correction of the raw GPS onto the drone beds (lib/droneMarking). */
+  gps_correction?: import("./droneMarking").TrackCorrection | null
+  /** The drone plot boundaries the plots were marked from. */
+  drone_boundaries?: { directory: string; version: number } | null
 }
 
 /** "top" / "bottom", "left" / "right", or "lane k" for three or more. */
@@ -208,6 +226,8 @@ export interface LanePlot {
   lane: number
   lanes: number
   split: FrameLayout["split"]
+  /** The drone plot it was marked from (one plot per frame only). */
+  boundary?: PlotSelection["boundary"]
 }
 
 /** Every plot to stitch: one per marked stretch per lane. */
@@ -229,6 +249,7 @@ export function lanePlots(
         lane: k,
         lanes,
         split: layout.split,
+        ...(lanes === 1 && s.boundary ? { boundary: s.boundary } : {}),
       })
   }
   return out

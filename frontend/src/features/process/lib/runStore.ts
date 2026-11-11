@@ -175,8 +175,12 @@ export interface Run {
    * should use `uploadScope`.
    */
   aerialFields?: AerialScopeFields
-  /** "agent" when the app's agent started this run (shown as a small mark on the run). */
+  /** "agent" when the app's agent started this run. */
   createdBy?: "agent"
+  /** Who last changed the run's work: the agent, or a person (starting a
+   *  step, saving boundaries, marks…). Background bookkeeping (a finished
+   *  job's status) changes nothing here. The agent mark shows for "agent". */
+  lastBy?: "agent" | "person"
   status: "draft" | "running" | "completed" | "failed"
   steps: Record<string, RunStepState>
   createdAt: IsoDate
@@ -614,6 +618,8 @@ export function setStepState(
   runId: Id,
   stepKey: string,
   patch: Partial<RunStepState>,
+  /** "person": a person did this (not bookkeeping): the run's lastBy. */
+  by?: "person",
 ): void {
   setState({
     ...current,
@@ -626,10 +632,19 @@ export function setStepState(
       return {
         ...r,
         steps: { ...r.steps, [stepKey]: { ...prev, ...patch } },
+        ...(by ? { lastBy: by } : {}),
         updatedAt: nowIso(),
       }
     }),
   })
+}
+
+/** Whether the agent made the run's latest change (its mark shows then).
+ *  Runs from before `lastBy`: the agent's when it started them. */
+export function agentLastChanged(
+  run: Pick<Run, "createdBy" | "lastBy">,
+): boolean {
+  return run.lastBy ? run.lastBy === "agent" : run.createdBy === "agent"
 }
 
 /** Start a step with several jobs at once; it completes when all have. */
@@ -644,14 +659,22 @@ export function startStepBatch(
     status: "pending",
     jobIds: [],
   }
-  setStepState(runId, stepKey, {
-    jobIds: [...prev.jobIds, ...jobIds.filter((j) => !prev.jobIds.includes(j))],
-    batch: jobIds,
-    status: "running",
-    startedAt: nowIso(),
-    completedAt: undefined,
-    error: undefined,
-  })
+  setStepState(
+    runId,
+    stepKey,
+    {
+      jobIds: [
+        ...prev.jobIds,
+        ...jobIds.filter((j) => !prev.jobIds.includes(j)),
+      ],
+      batch: jobIds,
+      status: "running",
+      startedAt: nowIso(),
+      completedAt: undefined,
+      error: undefined,
+    },
+    "person",
+  )
 }
 
 export function appendStepJobId(
@@ -672,14 +695,19 @@ export function appendStepJobId(
   // re-attaches (it only subscribes to running steps), and the step row stays
   // pinned to the previous failure's red icon and log.
   const isTerminal = prev.status !== "pending" && prev.status !== "running"
-  setStepState(runId, stepKey, {
-    jobIds: [...prev.jobIds, jobId],
-    batch: undefined,
-    status: "running",
-    startedAt: isTerminal ? nowIso() : (prev.startedAt ?? nowIso()),
-    completedAt: undefined,
-    error: undefined,
-  })
+  setStepState(
+    runId,
+    stepKey,
+    {
+      jobIds: [...prev.jobIds, jobId],
+      batch: undefined,
+      status: "running",
+      startedAt: isTerminal ? nowIso() : (prev.startedAt ?? nowIso()),
+      completedAt: undefined,
+      error: undefined,
+    },
+    "person",
+  )
 }
 
 /** File a run under another pipeline (and that pipeline's workspace). */

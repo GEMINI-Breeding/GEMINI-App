@@ -15,7 +15,7 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate, useParams } from "@tanstack/react-router"
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import {
   AlertCircle,
   ArrowLeft,
@@ -1795,9 +1795,12 @@ export function RunDetail() {
   )
   const nextKey = getNextStep(steps, stepsState)
   // The step on the card: the one picked, else the one to do next.
-  const [viewKey, setViewKey] = useState<string | null>(null)
+  const { step: stepFromLink } = useSearch({ strict: false }) as {
+    step?: string
+  }
+  const [viewKey, setViewKey] = useState<string | null>(stepFromLink ?? null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new run starts at its next step
-  useEffect(() => setViewKey(null), [runId])
+  useEffect(() => setViewKey(stepFromLink ?? null), [runId])
   const shownKey =
     (viewKey && steps.some((s) => s.key === viewKey) ? viewKey : null) ??
     nextKey ??
@@ -2067,7 +2070,10 @@ export function RunDetail() {
         const p = pipeline?.params ?? {}
         stitchingParams = {
           imagesPrefix: marking.track.imagesPrefix,
-          msgsSyncedPath: marking.track.msgsSyncedPath,
+          // Marked on GPS corrected onto drone beds: stitch by that.
+          msgsSyncedPath:
+            marking.track.correctedMsgsSyncedPath ??
+            marking.track.msgsSyncedPath,
           plots: plots.map((pl) => ({
             plot_id: pl.plot_id,
             start_image: pl.start_image,
@@ -2076,6 +2082,7 @@ export function RunDetail() {
             ...(pl.lanes > 1
               ? { lane: pl.lane, lanes: pl.lanes, split: pl.split }
               : {}),
+            ...(pl.boundary ? { boundary: pl.boundary } : {}),
           })),
           // Fresh listing: an unloaded one would reuse (overwrite) v1.
           outputPrefix: nextStitchPrefix(
@@ -2582,7 +2589,7 @@ export function RunDetail() {
 
   return (
     <div className="bg-background">
-      <div className="mx-auto max-w-5xl px-8 pt-4 pb-8">
+      <div className="mx-auto max-w-6xl px-6 pt-3 pb-3">
         <div className="mb-3 flex items-center gap-3">
           <Button
             variant="ghost"

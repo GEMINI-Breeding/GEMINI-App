@@ -55,7 +55,7 @@ describe("modelProblem", () => {
       hf_model_id: "google/owlvit-base-patch32",
       hf_zero_shot: true,
     }
-    expect(modelProblem(m)).toMatch(/labels/)
+    expect(modelProblem(m)).toMatch(/what to find/)
     expect(modelProblem({ ...m, hf_prompt: "weed, crop" })).toBeNull()
   })
 

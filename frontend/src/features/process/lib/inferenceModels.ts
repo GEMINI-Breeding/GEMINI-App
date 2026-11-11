@@ -19,6 +19,8 @@
  * (agent/gemi_agent/process_runs.py `model_entry`).
  */
 
+import { savedKey } from "@/lib/credentials"
+
 export type KnownSource = "roboflow" | "huggingface" | "local_weights"
 export type ModelSource = KnownSource | (string & {})
 export type TaskType = "detection" | "segmentation" | "classification"
@@ -37,7 +39,8 @@ export interface InferenceModel {
   hf_token: string
   hf_mode: "local" | "cloud"
   hf_zero_shot: boolean
-  /** Comma-separated candidate labels for zero-shot models. */
+  /** What a zero-shot model finds: one object per line, "name: description"
+   *  (a plain comma list is several short classes). */
   hf_prompt: string
   /** Provider settings with no field of their own (sent to the worker as is). */
   extra: Record<string, unknown>
@@ -61,11 +64,14 @@ export const TASK_LABELS: Record<TaskType, string> = {
 
 /** Task types each source supports (the worker rejects the rest). */
 export function tasksFor(
-  m: Pick<InferenceModel, "source" | "hf_zero_shot">,
+  m: Pick<InferenceModel, "source" | "hf_zero_shot"> & { hf_model_id?: string },
 ): TaskType[] {
   if (m.source === "roboflow") return ["detection", "segmentation"]
   if (m.source === "huggingface" && m.hf_zero_shot)
-    return ["detection", "classification"]
+    // SAM 3 draws outlines; other zero-shot detectors only boxes.
+    return /(^|\/)sam3$/i.test((m.hf_model_id ?? "").trim())
+      ? ["detection", "segmentation"]
+      : ["detection", "classification"]
   return ["detection", "segmentation", "classification"]
 }
 
@@ -142,13 +148,14 @@ export function modelKey(m: InferenceModel): string {
 export function modelProblem(m: InferenceModel): string | null {
   if (m.source === "roboflow") {
     if (!m.roboflow_model_id.trim()) return "Enter a Roboflow model ID."
-    if (!m.roboflow_api_key.trim()) return "Enter a Roboflow API key."
+    if (!m.roboflow_api_key.trim() && !savedKey("roboflow_api_key"))
+      return "Enter a Roboflow API key (here, or once in Settings → Keys & tokens)."
   } else if (m.source === "huggingface") {
     if (!m.hf_model_id.trim()) return "Enter a Hugging Face model ID."
-    if (m.hf_mode === "cloud" && !m.hf_token.trim())
-      return "Hugging Face cloud inference needs an access token."
+    if (m.hf_mode === "cloud" && !m.hf_token.trim() && !savedKey("hf_token"))
+      return "Hugging Face cloud inference needs an access token (here, or in Settings → Keys & tokens)."
     if (m.hf_zero_shot && !m.hf_prompt.trim())
-      return "Zero-shot models need labels to look for."
+      return "Describe what to find (one object per line)."
   } else if (m.source === "local_weights" && !m.weights_path.trim()) {
     return "Upload a .pt or .onnx weights file."
   } else if (!isKnownSource(m.source) && !modelKey(m)) {
@@ -184,11 +191,13 @@ export function modelJobParams(
   if (!isKnownSource(m.source)) return { ...m.extra, ...common }
   if (m.source === "huggingface") {
     const prompt = (opts.prompt ?? m.hf_prompt).trim()
+    // The model's own token, else the one saved in Settings → Keys & tokens.
+    const token = m.hf_token.trim() || savedKey("hf_token")
     return {
       ...common,
       hf_model_id: m.hf_model_id.trim(),
       hf_mode: m.hf_mode,
-      ...(m.hf_token.trim() ? { hf_token: m.hf_token.trim() } : {}),
+      ...(token ? { hf_token: token } : {}),
       ...(m.hf_zero_shot ? { hf_zero_shot: true, hf_prompt: prompt } : {}),
     }
   }
@@ -197,7 +206,7 @@ export function modelJobParams(
   }
   return {
     ...common,
-    api_key: m.roboflow_api_key.trim(),
+    api_key: m.roboflow_api_key.trim() || savedKey("roboflow_api_key"),
     model_id: m.roboflow_model_id.trim(),
     ...(opts.localServerUrl
       ? { api_url: opts.localServerUrl }
