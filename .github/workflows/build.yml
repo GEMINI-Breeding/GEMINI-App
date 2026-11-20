@@ -194,6 +194,18 @@ jobs:
         working-directory: frontend
         run: npx tauri build --ci --no-bundle
 
+      # Tauri's build script copies the agent (externalBin) next to gemi.exe,
+      # but not when a cached build skips that script; Inno Setup needs it there.
+      - name: Agent next to gemi.exe (Windows)
+        if: runner.os == 'Windows'
+        working-directory: frontend/src-tauri
+        shell: pwsh
+        run: |
+          $src = Get-ChildItem binaries\gemi-agent-*.exe | Select-Object -First 1
+          if (-not $src) { throw "binaries\gemi-agent-*.exe was not built" }
+          Copy-Item $src.FullName target\release\gemi-agent.exe -Force
+          Get-Item target\release\gemi-agent.exe | Format-List Name, Length
+
       - name: Sign gemi.exe (Windows)
         if: runner.os == 'Windows' && env.HAS_AZURE == 'true'
         uses: azure/trusted-signing-action@v2
