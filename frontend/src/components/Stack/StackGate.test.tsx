@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -47,11 +48,19 @@ type W = Window & {
   __GEMI_TITILER_URL__?: string
 }
 
+// main.tsx puts StackGate inside the app's QueryClientProvider; the Docker
+// screens' InstallHelper needs it.
 const app = () =>
   render(
-    <StackGate>
-      <div>the app</div>
-    </StackGate>,
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <StackGate>
+        <div>the app</div>
+      </StackGate>
+    </QueryClientProvider>,
   )
 
 describe("StackGate", () => {
