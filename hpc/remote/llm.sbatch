@@ -25,11 +25,14 @@ trap cleanup EXIT
 log "vLLM: $MODEL on $(hostname) ($(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | tr '\n' ';'))"
 # HF_HUB_OFFLINE: weights were fetched by pull-llm.sbatch; never download on a GPU allocation.
 # shellcheck disable=SC2086  # LLM_ARGS is a list of flags
+# The key reaches vLLM as VLLM_API_KEY (APPTAINERENV_: into the container), not as an argument
+# that other users of the node could read in its process list.
+export APPTAINERENV_VLLM_API_KEY=$KEY
 apptainer exec --nv --no-home --writable-tmpfs $(private_ipc "$TMP/shm") \
   -B "$DATA/llm/hf:/hf" -B "$DATA/llm/cache:/llmcache" \
   --env "HF_HOME=/hf,HF_HUB_OFFLINE=1,VLLM_NO_USAGE_STATS=1,XDG_CACHE_HOME=/llmcache,VLLM_CACHE_ROOT=/llmcache/vllm,TRITON_CACHE_DIR=/llmcache/triton,TORCHINDUCTOR_CACHE_DIR=/llmcache/inductor" \
   "$IMAGES/vllm.sif" \
-  vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" --api-key "$KEY" \
+  vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" \
     --served-model-name "$LLM_NAME" $LLM_ARGS &
 PID=$!
 trap 'log "stop signal"; kill -TERM $PID 2>/dev/null; wait $PID; cleanup; exit 0' TERM INT

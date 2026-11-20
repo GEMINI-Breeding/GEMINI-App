@@ -34,8 +34,9 @@ if is_owner && ! shared; then chmod 700 "$RUN" "$DATA" 2>/dev/null || true; fi  
 
 # share_perms: what the group needs to join the session, and nothing for anyone else.
 # The service settings (stack.env) are what workers sign in with: a member who runs workers
-# can use the session's database and storage like the owner can. Secrets the session itself
-# does not need to share (storage connections, the agent model's key) stay owner-only.
+# can use the session's database and storage, and signs in as the workers' account. The
+# owner's secrets (api.env, secrets.env: the JWT secret, the owner's sign-in, the storage's
+# root login; storage connections, the agent model's key) stay owner-only.
 share_perms() {
   is_owner || return 0
   if shared; then
@@ -48,7 +49,7 @@ share_perms() {
     chgrp -R "$grp" "$IMAGES" "$HPC" "$SRC" "$DATA/models" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
     chmod 750 "$RUN" "$DATA"
     chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
-    chmod 600 "$RUN/secrets.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
+    chmod 600 "$RUN/secrets.env" "$RUN/api.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
     chmod 2770 "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING"
     touch "$LOGS/gate.log"; chgrp "$grp" "$LOGS/gate.log" 2>/dev/null; chmod 660 "$LOGS/gate.log"
     chmod -R g+rwX "$DATA/models" 2>/dev/null
@@ -56,7 +57,7 @@ share_perms() {
     chmod o-rwx "$GEMI_HPC_ROOT"
   else
     chmod 700 "$RUN" "$DATA"
-    chmod 600 "$RUN/session.env" "$RUN/stack.env" 2>/dev/null
+    chmod 600 "$RUN/session.env" "$RUN/stack.env" "$RUN/api.env" 2>/dev/null
   fi
   true
 }
@@ -234,7 +235,9 @@ worker_idle_watch() {
   local pid=$1 minutes=$2; shift 2
   [ "${minutes:-0}" -gt 0 ] && [ -n "$*" ] || return 0
   command -v python3 >/dev/null 2>&1 || { log "idle watch off: no python3 on this node"; return 0; }
-  ( set -a; source "$RUN/secrets.env" 2>/dev/null; set +a
+  # stack.env (the workers' login), which a member of a shared session can read too: with
+  # secrets.env (owner-only) a member's worker could never ask, and so never stopped.
+  ( set -a; source "$RUN/stack.env" 2>/dev/null; set +a
     local quiet=0 n
     while kill -0 "$pid" 2>/dev/null; do
       sleep 60

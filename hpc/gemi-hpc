@@ -296,7 +296,8 @@ case "$cmd" in
     if [ -n "${TITILER_PORT:-}" ]; then
       tiler_port=$(free_local_port)
       tiles=(-L "127.0.0.1:$tiler_port:$CORE_IP:$TITILER_PORT")
-      export GEMI_TITILER_TARGET="http://127.0.0.1:$tiler_port"
+      # The session's TiTiler answers only under its token (titiler_guard.py); older sessions have none.
+      export GEMI_TITILER_TARGET="http://127.0.0.1:$tiler_port${TITILER_TOKEN:+/$TITILER_TOKEN}"
     else
       echo "  note: this session has no map tile server (started before it was added, or titiler.sif is"
       echo "        missing): orthomosaic previews and map imagery will be blank until the next session"

@@ -47,18 +47,24 @@ if [ "$W" = odm ]; then
   # (the compose stack's `geminibase-nodeodm` sidecar). Its task data goes to
   # node-local disk: large, temporary, and I/O heavy.
   ODM_PORT=$(free_port)
-  mkdir -p "$WTMP/odm/data" "$WTMP/odm/tmp"
+  mkdir -p "$WTMP/odm/data" "$WTMP/odm/tmp"; chmod 700 "$WTMP"
+  # NodeODM listens on the node's address with no sign-in: a token (in an owner-only config
+  # file, not on the command line where other users of the node could read it) limits it to
+  # this worker, which sends it with every request (GEMINI_NODEODM_TOKEN).
+  ODM_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+  (umask 077; printf '{"token": "%s"}\n' "$ODM_TOKEN" > "$WTMP/odm/config.json")
   # --ipc alone (a fresh tmpfs /dev/shm), not private_ipc: this image's glibc
   # refuses POSIX semaphores unless /dev/shm is a real tmpfs, and without
   # them OpenSfM silently runs single-process and dies an hour in with
   # queue.Full ("strange values in the reconstruction").
   apptainer exec --cleanenv --no-home --writable-tmpfs --pwd /var/www --ipc \
-    -B "$WTMP/odm/data:/var/www/data" -B "$WTMP/odm/tmp:/var/www/tmp" \
-    "$IMAGES/nodeodm.sif" /usr/bin/node /var/www/index.js --port "$ODM_PORT" \
+    -B "$WTMP/odm/data:/var/www/data" -B "$WTMP/odm/tmp:/var/www/tmp" -B "$WTMP/odm/config.json:/gemi-odm.json:ro" \
+    "$IMAGES/nodeodm.sif" /usr/bin/node /var/www/index.js --port "$ODM_PORT" --config /gemi-odm.json \
     >"$LOGS/nodeodm-$SLURM_JOB_ID.log" 2>&1 &
   ODM_PID=$!
   wait_for 180 "nodeodm" curl -sf "http://127.0.0.1:$ODM_PORT/info" || { tail -20 "$LOGS/nodeodm-$SLURM_JOB_ID.log"; exit 1; }
   ARGS+=(--env "GEMINI_NODEODM_URL=http://127.0.0.1:$ODM_PORT")
+  export APPTAINERENV_GEMINI_NODEODM_TOKEN=$ODM_TOKEN   # passed in despite --cleanenv; kept off the command line
   trap 'kill $ODM_PID 2>/dev/null; rm -rf "$WTMP"' EXIT
 fi
 

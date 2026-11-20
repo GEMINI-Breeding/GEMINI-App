@@ -76,6 +76,11 @@ def main(argv: list[str]) -> int:
         opts = {k: uploads.decode_setting(v) for k, v in (a.split("=", 1) for a in argv[3:] if "=" in a)}
         print(f"already in the app (not copied): {cloud.write_skip_filter(out, pats, opts)} files", flush=True)
         return 0
+    if argv[0] == "_tile_proxy":    # the cluster's map tiles, with the session's token added (hpc connect)
+        from .tile_proxy import main as tile_proxy
+
+        tile_proxy(argv[1:])
+        return 0
     if argv[0] == "_fetch":         # a copy from online storage, then its upload (cloud.fetch, local stack)
         from . import cloud
 

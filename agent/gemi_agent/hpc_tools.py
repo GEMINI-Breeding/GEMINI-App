@@ -17,6 +17,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -651,6 +652,29 @@ def _tunnel(conf: dict, local: int, remote_ip: str, remote_port: str) -> int:
     raise RuntimeError(f"could not open the tunnel on localhost:{local} (is the port in use?)")
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _tile_proxy(listen: int, upstream: int, token: str) -> int:
+    """The local forwarder that adds the session's tile token (gemi_agent.tile_proxy)."""
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0)) if os.name == "nt" else 0
+    me = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "gemi_agent"]
+    p = subprocess.Popen([*me, "_tile_proxy", str(listen), str(upstream), token],
+                         cwd=str(Path(__file__).resolve().parents[1]), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+                         start_new_session=os.name != "nt")
+    for _ in range(20):
+        if _port_open(listen):
+            return p.pid
+        if p.poll() is not None:
+            break
+        time.sleep(0.25)
+    raise RuntimeError(f"could not start the map tile forwarder on localhost:{listen}")
+
+
 def _kill(pid: int) -> None:
     try:
         if os.name == "nt":
@@ -776,7 +800,7 @@ def hpc(args: dict) -> dict:
         out = _gemi_hpc(["down"], cluster, timeout=900)
     elif action == "disconnect":
         st = _state()
-        for k in ("api_pid", "llm_pid", "tiles_pid"):
+        for k in ("api_pid", "llm_pid", "tiles_pid", "tiles_proxy_pid"):
             if st.get(k):
                 _kill(int(st[k]))
         STATE.unlink(missing_ok=True)
@@ -793,7 +817,7 @@ def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
     if "CORE_IP" not in session:
         raise RuntimeError("the core is not up yet: hpc action=up first")
     st = _state()
-    for k in ("api_pid", "llm_pid", "tiles_pid"):
+    for k in ("api_pid", "llm_pid", "tiles_pid", "tiles_proxy_pid"):
         if st.get(k):
             _kill(int(st[k]))
     if _port_open(API_PORT):
@@ -802,8 +826,15 @@ def _connect(cluster: str, conf: dict, use_model: bool) -> dict:
     st = {"cluster": cluster, "api_pid": _tunnel(conf, API_PORT, session["CORE_IP"], session["API_PORT"])}
     result: dict[str, Any] = {"app_api": f"http://127.0.0.1:{API_PORT}", "core_node": session.get("CORE_NODE")}
     if session.get("TITILER_PORT") and not _port_open(TILES_PORT):
-        # Map tiles (orthomosaic previews, rover mosaics) from the session's own TiTiler.
-        st["tiles_pid"] = _tunnel(conf, TILES_PORT, session["CORE_IP"], session["TITILER_PORT"])
+        # Map tiles (orthomosaic previews, rover mosaics) from the session's own TiTiler. It
+        # answers only under the session's token (hpc/remote/titiler_guard.py): the tunnel goes
+        # to a free port, and a local forwarder on the app's fixed port adds the token.
+        if session.get("TITILER_TOKEN"):
+            tport = _free_port()
+            st["tiles_pid"] = _tunnel(conf, tport, session["CORE_IP"], session["TITILER_PORT"])
+            st["tiles_proxy_pid"] = _tile_proxy(TILES_PORT, tport, session["TITILER_TOKEN"])
+        else:  # a session started before the token
+            st["tiles_pid"] = _tunnel(conf, TILES_PORT, session["CORE_IP"], session["TITILER_PORT"])
         result["map_tiles"] = f"http://127.0.0.1:{TILES_PORT}"
     elif not session.get("TITILER_PORT"):
         result["map_tiles"] = "none: this session has no tile server (it is started from the next session on)"

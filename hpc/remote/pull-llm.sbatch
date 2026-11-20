@@ -28,8 +28,10 @@ failed=0
 for model in ${MODELS:-$LLM_MODEL}; do
   log "downloading $model"
   mlog=$LOGS/pull-llm-$(basename "$model").log
-  # HF_TOKEN (if set in the login environment) is passed through for gated models.
-  if apptainer exec --no-home -B "$DATA/llm/hf:/hf" --env "HF_HOME=/hf,HF_TOKEN=${HF_TOKEN:-}" "$out" \
+  # HF_TOKEN (if set in the login environment) is passed through for gated models, as an
+  # APPTAINERENV_ variable rather than an argument other users of the node could read.
+  [ -n "${HF_TOKEN:-}" ] && export APPTAINERENV_HF_TOKEN=$HF_TOKEN
+  if apptainer exec --no-home -B "$DATA/llm/hf:/hf" --env "HF_HOME=/hf" "$out" \
        python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('$model'))" \
        >"$mlog" 2>&1; then
     log "ok $model ($(du -sh "$DATA/llm/hf/hub/models--${model//\//--}" 2>/dev/null | cut -f1))"
