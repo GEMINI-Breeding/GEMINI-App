@@ -126,7 +126,7 @@ jobs:
 
   e2e-playwright:
     name: Frontend E2E (Playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # Playwright 1.57 has no browsers for 26.04 (ubuntu-latest)
     needs: [compose-smoke]
     # Without this, a hung or endlessly-retrying run sits on the runner
     # until GitHub's 6-hour default kills it. The suite takes ~9 min
