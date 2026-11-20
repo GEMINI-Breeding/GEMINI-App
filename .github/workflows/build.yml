@@ -55,7 +55,7 @@ jobs:
           - os: ubuntu-22.04-arm
             name: linux-arm64
             artifacts: frontend/src-tauri/target/release/bundle/deb/*.deb
-          - os: macos-14
+          - os: macos-15
             name: macos-arm64
             artifacts: frontend/src-tauri/target/release/bundle/dmg/*.dmg
           - os: windows-2022
